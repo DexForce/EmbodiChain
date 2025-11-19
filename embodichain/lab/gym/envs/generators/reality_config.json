@@ -1,0 +1,551 @@
+{
+    "robot": {
+        "agent":{
+            "robot_type": "DexforceW1",
+            "agent_base_pose": [[1, 0, 0, 0.14], [0, 1, 0, 0], [0, 0, 1, 0.04], [0, 0, 0, 1]],
+            "agent_home_joint": [ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                    0.0, -0.57923, 0.0, -1.57003, -1.2,  0.4,
+                                    0.0, 0.0, 0.57923,  0.0,  1.57003,  1.2,
+                                    -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "drive_type": "force",
+            "controller_params": {
+                "left_arm": {
+                    "ik_nearst_weight": [5, 5, 1, 5, 1, 1, 1]
+                },
+                "right_arm": {
+                    "ik_nearst_weight": [5, 5, 1, 5, 1, 1, 1]
+                }
+            },
+            "left_arm_uid": "left_arm",
+            "right_arm_uid": "right_arm"
+        },
+        "robot_action": {
+            "max_random_shift": {
+                "bottle": [0,0,0,0],
+                "cup": [0,0,0,0]
+            },
+            "table_z_shift": 0.0,
+            "table_xy_scale": [0.8, 0.8],
+            "qpos_flip_ids": [3],
+            "qpos_flip_threshold": 3.455751918948773,
+            "qpos_flip_mode": "delta"
+        }
+    },
+    "objects": {
+        "1": {
+            "name": "cup",
+            "mesh_file": "PaperCup/paper_cup.ply",
+            "pose": [
+                [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.75
+                ],
+                [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.1
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.9
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "scale": [
+                0.75,
+                0.75,
+                1.0
+            ],
+            "grasp_pose_object": [
+                [
+                    0.32039,
+                    -0.03227,
+                    0.94673,
+                    0.0
+                ],
+                [
+                    0.00675,
+                    -0.99932,
+                    -0.03635,
+                    0.0
+                ],
+                [
+                    0.94726,
+                    0.01803,
+                    -0.31996,
+                    -0.0
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "grasp_offset": 0.025,
+            "pour_offset_xy": [
+                0,
+                0
+            ]
+        },
+        "2": {
+            "name": "bottle",
+            "mesh_file": "ScannedBottle/xingbake_processed.ply",
+            "pose": [
+                [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.75
+                ],
+                [
+                    0.0,
+                    1.0,
+                    0.0,
+                    -0.1
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.932
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "scale": [
+                1,
+                1,
+                1
+            ],
+            "grasp_offset": 0.025,
+            "grasp_pose_object": [
+                [
+                    0.31814,
+                    0.02723,
+                    0.94765,
+                    0.0
+                ],
+                [
+                    0.01318,
+                    -0.99962,
+                    0.0243,
+                    -0.0
+                ],
+                [
+                    0.94795,
+                    0.00476,
+                    -0.31838,
+                    -0.0
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ]
+        }
+    },
+    "scene": {
+        "static_objects": [
+            {
+                "mesh_path": "CircleTableSimple/circle_table_simple.ply",
+                "material": "DexsimMaterials/Wood003",
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "pose": [
+                    [
+                        0,
+                        0,
+                        1,
+                        0.7
+                    ],
+                    [
+                        0,
+                        1,
+                        0,
+                        0
+                    ],
+                    [
+                        -1,
+                        0,
+                        0,
+                        0.82
+                    ],
+                    [
+                        0,
+                        0,
+                        0,
+                        1
+                    ]
+                ],
+                "max_convex_hull_num": 1
+            }
+        ],
+        "direct_light": [
+            {
+                "name": "light1",
+                "light_type": "point",
+                "position": [
+                    2,
+                    0,
+                    2
+                ],
+                "intensity": 5000000
+            }
+        ]
+    },
+    "sensor": [
+        {
+            "sensor_type": "MonocularCam",
+            "sensor_name": "cam_left_wrist",
+            "resolution": [
+                640,
+                480
+            ],
+            "intrinsic": [
+                [
+                    487.39422607421875,
+                    0.0,
+                    320.3005676269531
+                ],
+                [
+                    0.0,
+                    487.39422607421875,
+                    210.7530517578125
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "attach_xpos": [
+                [
+                    0.0,
+                    -0.90631,
+                    -0.42262,
+                    -0.08
+                ],
+                [
+                    -1.0,
+                    0,
+                    0.0,
+                    0.0
+                ],
+                [
+                    0.0,
+                    0.42262,
+                    -0.90631,
+                    0.04
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "set_near": 0.005,
+            "set_far": 50
+        },
+        {
+            "sensor_type": "MonocularCam",
+            "sensor_name": "cam_right_wrist",
+            "resolution": [
+                640,
+                480
+            ],
+            "intrinsic": [
+                [
+                    488.1665344238281,
+                    0.0,
+                    322.7323303222656
+                ],
+                [
+                    0.0,
+                    488.1665344238281,
+                    213.17434692382812
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "attach_xpos": [
+                [
+                    0.0,
+                    -0.90631,
+                    -0.42262,
+                    -0.08
+                ],
+                [
+                    -1.0,
+                    0,
+                    0.0,
+                    0.0
+                ],
+                [
+                    0.0,
+                    0.42262,
+                    -0.90631,
+                    0.04
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "set_near": 0.005,
+            "set_far": 50
+        },
+        {
+            "sensor_type": "BinocularCam",
+            "sensor_name": "cam_high",
+            "resolution": [
+                960,
+                540
+            ],
+            "k1": [
+                [
+                    453.851402686215,
+                    0.0,
+                    469.827725021235
+                ],
+                [
+                    0.0,
+                    453.8347628855552,
+                    258.6656181845155
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "k2": [
+                [
+                    453.4536601653505,
+                    0.0,
+                    499.13697412367776
+                ],
+                [
+                    0.0,
+                    453.3306024582175,
+                    297.7176248477935
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            ],
+            "relativate_T": [
+                [
+                    0.99996440327,
+                    0.000856048544,
+                    0.008394008265,
+                    0.059684025824163614
+                ],
+                [
+                    -0.00085599875,
+                    0.999999633588,
+                    -9.524764e-06,
+                    1.064844737251626e-05
+                ],
+                [
+                    -0.008394013343,
+                    2.339165e-06,
+                    0.999964769647,
+                    0.0002219304982263564
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    1
+                ]
+            ],
+            "set_near": 0.005,
+            "set_far": 50,
+            "camera_position": [
+                0.35368482807598,
+                0.014695524383058989,
+                1.4517046071614774
+            ],
+            "camera_look_at": [
+                0.7186357573287919,
+                -0.054534732904795505,
+                0.5232553674540066
+            ],
+            "up_vector": [
+                0.9306678549330372,
+                -0.0005600064212467153,
+                0.3658647703553347
+            ]
+        }
+    ],
+    "task": {
+        "name": "pour_water",
+        "data": {
+            "0": {
+                "trajectory": {
+                    "path": "",
+                    "scope": {
+                        "right_arm": [7, 8, 9, 10, 11, 12, 13],
+                        "left_arm": [0,1,2,3,4,5,6],
+                        "left_eef": [
+                            14
+                        ],
+                        "right_eef": [
+                            15
+                        ]
+                    }
+                },
+                "node": {
+                    "right_arm": [
+                        {
+                            "0": {
+                                "affordance_name": "xs",
+                                "master": "",
+                                "slaver": "",
+                                "timestep": 10,
+                                "trajectory": {
+                                    "name": "plan_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "reach_grasp_qpos",
+                                "master": "0",
+                                "slaver": "bottle",
+                                "timestep": 15,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            }
+                        }
+                    ],
+                    "left_arm": [
+                        {
+                            "0": {
+                                "affordance_name": "leftpppt_qpos",
+                                "master": "",
+                                "slaver": "",
+                                "timestep": 48,
+                                "trajectory": {
+                                    "name": "plan_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "jkask",
+                                "master": "0",
+                                "slaver": "cup",
+                                "timestep": 50,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            }
+                        }
+                    ],
+                    "right_eef": [],
+                    "left_eef": []
+                }
+            },
+            "1": {
+                "trajectory": {
+                    "path": "",
+                    "scope": {"right_arm": [7, 8, 9, 10, 11, 12, 13],
+                        "left_arm": [0,1,2,3,4,5,6],
+                        "left_eef": [
+                            14
+                        ],
+                        "right_eef": [
+                            15
+                        ]
+                    }
+                },
+                "node": {
+                    "right_arm": [
+                        {
+                            "0": {
+                                "affordance_name": "xs",
+                                "master": "",
+                                "slaver": "",
+                                "timestep": 6,
+                                "trajectory": {
+                                    "name": "plan_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "reach_grasp_qpos",
+                                "master": "0",
+                                "slaver": "bottle",
+                                "timestep": 23,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            }
+                        }
+                    ],
+                    "left_arm": [
+                        {
+                            "0": {
+                                "affordance_name": "leftpppt_qpos",
+                                "master": "",
+                                "slaver": "",
+                                "timestep": 13,
+                                "trajectory": {
+                                    "name": "plan_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "jkask",
+                                "master": "0",
+                                "slaver": "cup",
+                                "timestep": 25,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            }
+                        }
+                    ],
+                    "right_eef": [],
+                    "left_eef": []
+                }
+            }
+        }
+    },
+    "dataset": {
+        "max_episodes": 10,
+        "num_trajectory": 1
+    }
+}
