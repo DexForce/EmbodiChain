@@ -43,9 +43,21 @@ class SceneData(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
 
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "SceneData.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/scene_assets/SceneData.zip",
             "fb46e4694cc88886fc785704e891a68a",
         )
         prefix = "SceneData"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(prefix, data_descriptor, path)
+
+
+class EmptyRoom(o3d.data.DownloadDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/scene_assets/empty_room.zip",
+            "3281ab5d803546835fc4ece01c22d8f7",
+        )
+        prefix = "EmptyRoom"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
         super().__init__(prefix, data_descriptor, path)

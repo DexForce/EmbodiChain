@@ -32,7 +32,7 @@ from dexsim.types import (
     SoftBodyMaterialModel,
 )
 from embodichain.utils import configclass, is_configclass
-from embodichain.data.dataset import EMBODICHAIN_DEFAULT_DATA_ROOT
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict

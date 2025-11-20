@@ -26,7 +26,7 @@ from embodichain.data.constants import (
 class ShopTableSimple(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "shop_table_simple.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/shop_table_simple.zip",
             "e3061ee024de7840f773b70140dcd43f",
         )
         prefix = "ShopTableSimple"
@@ -38,7 +38,7 @@ class ShopTableSimple(EmbodiChainDataset):
 class CircleTableSimple(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "circle_table_simple.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/circle_table_simple.zip",
             "42ad2be8cd0caddcf9bfbf106b7783f3",
         )
         prefix = "CircleTableSimple"
@@ -50,7 +50,7 @@ class CircleTableSimple(EmbodiChainDataset):
 class PlasticBin(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "plastic_bin.glb",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/plastic_bin.zip",
             "6ae6eb88ef9540e03e45e8f774a84689",
         )
         prefix = "PlasticBin"
@@ -59,22 +59,10 @@ class PlasticBin(o3d.data.DownloadDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
-class EmptyRoom(o3d.data.DownloadDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "empty_room.glb",
-            "3281ab5d803546835fc4ece01c22d8f7",
-        )
-        prefix = "EmptyRoom"
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
 class Chair(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "chair.glb",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/chair.zip",
             "a86285f6a2a520b0b61f34d1958e6757",
         )
         prefix = "Chair"
@@ -83,33 +71,10 @@ class Chair(o3d.data.DownloadDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
-class Shelf(o3d.data.DownloadDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "shelf.glb",
-            "1f659411082e6e7353cda62fc78e8c20",
-        )
-        prefix = "Shelf"
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class Sofa(o3d.data.DownloadDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "sofa.glb", "76fd7285a6f7335e9c7162c6eaf151eb"
-        )
-        prefix = "Sofa"
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
 class ContainerMetal(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "container_metal.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/container_metal.zip",
             "ceafb87f8177609f87aaa6779fcbb9a3",
         )
         prefix = "ContainerMetal"
@@ -121,7 +86,7 @@ class ContainerMetal(EmbodiChainDataset):
 class SimpleBoxDrawer(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "simple_box_drawer.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/simple_box_drawer.zip",
             "966b648bca16823ee91525847c183973",
         )
         prefix = "SimpleBoxDrawer"
@@ -130,22 +95,10 @@ class SimpleBoxDrawer(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
-class AmazonPrimeBox(o3d.data.DownloadDataset):
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "amazon_prime_shipping_box.glb",
-            "e3e75d131479b780ef8d7b68732cfcfa",
-        )
-        prefix = "AmazonPrimeBox"
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
 class AdrianoTable(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "adriano_table.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/adriano_table.zip",
             "8453583a9a1a9d04d50268f8a3da554f",
         )
         prefix = "AdrianoTable"
@@ -157,7 +110,7 @@ class AdrianoTable(EmbodiChainDataset):
 class CoffeeCup(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "CoffeeCup.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/CoffeeCup.zip",
             "f05fce385826414c15e19df3b75dc886",
         )
         prefix = "CoffeeCup"
@@ -169,7 +122,7 @@ class CoffeeCup(EmbodiChainDataset):
 class SlidingBoxDrawer(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            EMBODICHAIN_DOWNLOAD_PREFIX + "SlidingBoxDrawer.zip",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/SlidingBoxDrawer.zip",
             "b03d9006503d27b75ddeb06d31b2c7a5",
         )
         prefix = "SlidingBoxDrawer"
@@ -221,6 +174,30 @@ class PaperCup(EmbodiChainDataset):
             "359d13af8c5f31ad3226d8994a1a7198",
         )
         prefix = "PaperCup"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class ChainRainSec(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/lianguijie.zip",
+            "2387589040a4d3f2676b622362452242",
+        )
+        prefix = "ChainRainSec"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class TableWare(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/tableware.zip",
+            "403e340fc0e4996c002ee774f89cd236",
+        )
+        prefix = "TableWare"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)

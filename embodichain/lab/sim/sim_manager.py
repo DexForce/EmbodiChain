@@ -75,7 +75,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
-from embodichain.data import SimResources
+from embodichain.data.assets import SimResources
 from embodichain.utils import configclass, logger
 
 __all__ = [
