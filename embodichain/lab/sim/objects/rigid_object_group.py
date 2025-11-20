@@ -350,7 +350,7 @@ class RigidObjectGroup(BatchEntity):
 
             # we should keep `pose_` life cycle to the end of the function.
             pose = torch.cat((quat, xyz), dim=-1)
-            indices = self.body_data.gpu_indices[local_env_ids, local_obj_ids].flatten()
+            indices = self.body_data.gpu_indices[local_env_ids][:, local_obj_ids].flatten()
             self._ps.gpu_apply_rigid_body_data(
                 data=pose.clone(),
                 gpu_indices=indices,
