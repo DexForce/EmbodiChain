@@ -46,13 +46,19 @@ class CobotMagicCfg(RobotCfg):
                 # merge provided solver_cfg values into default solver config
                 provided_solver_cfg = init_dict.get("solver_cfg")
                 if provided_solver_cfg:
-                    try:
-                        merged = merge_solver_cfg(cfg.solver_cfg, provided_solver_cfg)
-                        cfg.solver_cfg = merged
-                    except Exception:
-                        logger.log_error(
-                            f"Failed to merge solver_cfg, using provided config outright."
-                        )
+                    for part, item in provided_solver_cfg.items():
+                        if "class_type" in provided_solver_cfg[part]:
+                            cfg.solver_cfg[part] = robot_cfg.solver_cfg[part]
+                        else:
+                            try:
+                                merged = merge_solver_cfg(
+                                    cfg.solver_cfg, provided_solver_cfg
+                                )
+                                cfg.solver_cfg = merged
+                            except Exception:
+                                logger.log_error(
+                                    f"Failed to merge solver_cfg, using provided config outright."
+                                )
             else:
                 setattr(cfg, key, getattr(robot_cfg, key))
 

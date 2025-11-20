@@ -385,15 +385,12 @@ class MotionGenerator:
         # Get current position if needed
         if is_use_current_qpos:
             joint_ids = self.robot.get_joint_ids(self.uid)
-            qpos_tensor = self.robot.get_proprioception()["qpos"]
+            qpos_tensor = self.robot.get_qpos()
             # qpos_tensor shape: (batch, dof), usually batch=1
             current_qpos = qpos_tensor[0, joint_ids]
 
-            current_qpos_tensor = torch.tensor(current_qpos, dtype=torch.float32)
             current_xpos = (
-                self.robot.compute_fk(
-                    qpos=current_qpos_tensor, name=self.uid, to_matrix=True
-                )
+                self.robot.compute_fk(qpos=current_qpos, name=self.uid, to_matrix=True)
                 .squeeze(0)
                 .cpu()
                 .numpy()

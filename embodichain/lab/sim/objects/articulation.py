@@ -136,7 +136,7 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch pose from CPU entities
             root_pose = torch.as_tensor(
-                [entity.get_local_pose() for entity in self.entities],
+                np.array([entity.get_local_pose() for entity in self.entities]),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -162,7 +162,9 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch linear velocity from CPU entities
             return torch.as_tensor(
-                [entity.get_root_link_velocity()[:3] for entity in self.entities],
+                np.array(
+                    [entity.get_root_link_velocity()[:3] for entity in self.entities]
+                ),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -184,7 +186,9 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch angular velocity from CPU entities
             return torch.as_tensor(
-                [entity.get_root_link_velocity()[3:] for entity in self.entities],
+                np.array(
+                    [entity.get_root_link_velocity()[3:] for entity in self.entities]
+                ),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -215,7 +219,9 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch qpos from CPU entities
             return torch.as_tensor(
-                [entity.get_current_qpos() for entity in self.entities],
+                np.array(
+                    [entity.get_current_qpos() for entity in self.entities],
+                ),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -237,7 +243,7 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch qvel from CPU entities
             return torch.as_tensor(
-                [entity.get_current_qvel() for entity in self.entities],
+                np.array([entity.get_current_qvel() for entity in self.entities]),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -259,7 +265,7 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch qacc from CPU entities
             return torch.as_tensor(
-                [entity.get_current_qacc() for entity in self.entities],
+                np.array([entity.get_current_qacc() for entity in self.entities]),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -281,7 +287,7 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch qf from CPU entities
             return torch.as_tensor(
-                [entity.get_current_qf() for entity in self.entities],
+                np.array([entity.get_current_qf() for entity in self.entities]),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -365,7 +371,7 @@ class ArticulationData:
             torch.Tensor: The joint stiffness of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            [entity.get_drive()[0] for entity in self.entities],
+            np.array([entity.get_drive()[0] for entity in self.entities]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -378,7 +384,7 @@ class ArticulationData:
             torch.Tensor: The joint damping of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            [entity.get_drive()[1] for entity in self.entities],
+            np.array([entity.get_drive()[1] for entity in self.entities]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -391,7 +397,7 @@ class ArticulationData:
             torch.Tensor: The joint friction of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            [entity.get_drive()[4] for entity in self.entities],
+            np.array([entity.get_drive()[4] for entity in self.entities]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -404,7 +410,7 @@ class ArticulationData:
             torch.Tensor: The joint position limits of the articulation with shape (N, dof, 2).
         """
         return torch.as_tensor(
-            [entity.get_joint_limits() for entity in self.entities],
+            np.array([entity.get_joint_limits() for entity in self.entities]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -418,7 +424,9 @@ class ArticulationData:
         """
         # TODO: get joint velocity limits always returns zero?
         return torch.as_tensor(
-            [entity.get_drive()[3] for entity in self.entities],
+            np.array(
+                [entity.get_drive()[3] for entity in self.entities],
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -431,7 +439,9 @@ class ArticulationData:
             torch.Tensor: The joint effort limits of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            [entity.get_drive()[2] for entity in self.entities],
+            np.array(
+                [entity.get_drive()[2] for entity in self.entities],
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -1065,7 +1075,9 @@ class Articulation(BatchEntity):
             torch.Tensor: The user ids of the articulation with shape (N, num_link).
         """
         return torch.as_tensor(
-            [entity.get_user_ids() for entity in self._entities],
+            np.array(
+                [entity.get_user_ids() for entity in self._entities],
+            ),
             dtype=torch.int32,
             device=self.device,
         )

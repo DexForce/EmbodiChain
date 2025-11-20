@@ -94,7 +94,7 @@ class ExampleCfg(EmbodiedEnvCfg):
     robot: RobotCfg = DexforceW1Cfg.from_dict(
         {
             "uid": "dexforce_w1",
-            "version": "v020",
+            "version": "v021",
             "arm_kind": "anthropomorphic",
             "init_pos": [0.0, 0, 0.0],
         }
@@ -129,7 +129,7 @@ class ExampleCfg(EmbodiedEnvCfg):
         ]
     )
 
-    rigid_object: List[RigidObjectCfg] = [
+    background: List[RigidObjectCfg] = [
         RigidObjectCfg(
             uid="table",
             shape=MeshCfg(
@@ -143,9 +143,12 @@ class ExampleCfg(EmbodiedEnvCfg):
                 restitution=0.01,
             ),
             body_type="kinematic",
-            init_pos=(0.80, 0, 0.54),
+            init_pos=(0.80, 0, 0.8),
             init_rot=(0, 90, 0),
         ),
+    ]
+
+    rigid_object: List[RigidObjectCfg] = [
         RigidObjectCfg(
             uid="fork",
             shape=MeshCfg(

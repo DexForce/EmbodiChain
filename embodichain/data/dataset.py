@@ -484,6 +484,17 @@ class ScannedBottle(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
+class MultiW1Data(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            EMBODICHAIN_DOWNLOAD_PREFIX + "multi_w1_demo.zip",
+            "984e8fa3aa05cb36a1fd973a475183ed",
+        )
+        prefix = "MultiW1Data"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(prefix, data_descriptor, path)
+
+
 class GraspGeneration(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(

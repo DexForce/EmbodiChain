@@ -3,30 +3,16 @@
 #
 # All rights reserved.
 # ----------------------------------------------------------------------------
-import os
+
 import time
 import numpy as np
 import torch
+
 from IPython import embed
 
-from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots.dexforce_w1.params import (
-    W1ArmKineParams,
-)
-from embodichain.lab.sim.robots.dexforce_w1.types import (
-    DexforceW1ArmSide,
-    DexforceW1ArmKind,
-    DexforceW1Version,
-)
-from embodichain.lab.sim.cfg import (
-    RobotCfg,
-    URDFCfg,
-    JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
-)
+from embodichain.lab.sim.robots import DexforceW1Cfg
 
 
 def main():
@@ -45,108 +31,7 @@ def main():
     sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
-    is_industrial = False
-
-    # Load robot URDF file
-    if is_industrial:
-        urdf = get_data_path("DexforceW1V020/DexforceW1_v02_2.urdf")
-    else:
-        urdf = get_data_path("DexforceW1V020/DexforceW1_v02_1.urdf")
-    assert os.path.isfile(urdf)
-
-    if is_industrial:
-        w1_left_arm_params = W1ArmKineParams(
-            arm_side=DexforceW1ArmSide.LEFT,
-            arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-            version=DexforceW1Version.V020,
-        )
-        w1_right_arm_params = W1ArmKineParams(
-            arm_side=DexforceW1ArmSide.RIGHT,
-            arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-            version=DexforceW1Version.V020,
-        )
-    else:
-        w1_left_arm_params = W1ArmKineParams(
-            arm_side=DexforceW1ArmSide.LEFT,
-            arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-            version=DexforceW1Version.V020,
-        )
-        w1_right_arm_params = W1ArmKineParams(
-            arm_side=DexforceW1ArmSide.RIGHT,
-            arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-            version=DexforceW1Version.V020,
-        )
-
-    # Robot configuration dictionary
-    cfg_dict = {
-        "fpath": urdf,
-        "control_parts": {
-            "left_arm": [f"LEFT_J{i+1}" for i in range(7)],
-            "right_arm": [f"RIGHT_J{i+1}" for i in range(7)],
-            "torso": ["ANKLE", "KNEE", "BUTTOCK", "WAIST"],
-            "head": [f"NECK{i+1}" for i in range(2)],
-        },
-        "drive_pros": {
-            "stiffness": {
-                "LEFT_J[1-7]": 1e4,
-                "RIGHT_J[1-7]": 1e4,
-                "ANKLE": 1e7,
-                "KNEE": 1e7,
-                "BUTTOCK": 1e7,
-                "WAIST": 1e7,
-            },
-            "damping": {
-                "LEFT_J[1-7]": 1e3,
-                "RIGHT_J[1-7]": 1e3,
-                "ANKLE": 1e4,
-                "KNEE": 1e4,
-                "BUTTOCK": 1e4,
-                "WAIST": 1e4,
-            },
-            "max_effort": {
-                "LEFT_J[1-7]": 1e5,
-                "RIGHT_J[1-7]": 1e5,
-                "ANKLE": 1e10,
-                "KNEE": 1e10,
-                "BUTTOCK": 1e10,
-                "WAIST": 1e10,
-            },
-        },
-        "attrs": {
-            "mass": 1e-1,
-            "static_friction": 0.95,
-            "dynamic_friction": 0.9,
-            "linear_damping": 0.7,
-            "angular_damping": 0.7,
-            "max_depenetration_velocity": 10.0,
-        },
-        "solver_cfg": {
-            "left_arm": {
-                "class_type": "SRSSolver",
-                "end_link_name": "left_ee",
-                "root_link_name": "left_arm_base",
-                "dh_params": w1_left_arm_params.dh_params,
-                "qpos_limits": w1_left_arm_params.qpos_limits,
-                "T_e_oe": w1_left_arm_params.T_e_oe,
-                "T_b_ob": w1_left_arm_params.T_b_ob,
-                "link_lengths": w1_left_arm_params.link_lengths,
-                "rotation_directions": w1_left_arm_params.rotation_directions,
-            },
-            "right_arm": {
-                "class_type": "SRSSolver",
-                "end_link_name": "right_ee",
-                "root_link_name": "right_arm_base",
-                "dh_params": w1_right_arm_params.dh_params,
-                "qpos_limits": w1_right_arm_params.qpos_limits,
-                "T_e_oe": w1_right_arm_params.T_e_oe,
-                "T_b_ob": w1_right_arm_params.T_b_ob,
-                "link_lengths": w1_right_arm_params.link_lengths,
-                "rotation_directions": w1_right_arm_params.rotation_directions,
-            },
-        },
-    }
-
-    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=DexforceW1Cfg.from_dict({"uid": "dexforce_w1"}))
     arm_name = "left_arm"
     # Set initial joint positions for left arm
     qpos_fk_list = [

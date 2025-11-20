@@ -49,7 +49,7 @@ class BaseRobotTest:
         cfg = DexforceW1Cfg.from_dict(
             {
                 "uid": "dexforce_w1",
-                "version": "v020",
+                "version": "v021",
                 "arm_kind": "anthropomorphic",
             }
         )

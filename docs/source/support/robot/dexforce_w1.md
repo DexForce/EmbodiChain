@@ -29,8 +29,8 @@ hand_types = {
     DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
 }
 hand_versions = {
-    DexforceW1ArmSide.LEFT: DexforceW1Version.V020,
-    DexforceW1ArmSide.RIGHT: DexforceW1Version.V020,
+    DexforceW1ArmSide.LEFT: DexforceW1Version.V021,
+    DexforceW1ArmSide.RIGHT: DexforceW1Version.V021,
 }
 
 cfg = build_dexforce_w1_cfg(
@@ -50,5 +50,5 @@ print("DexforceW1 robot added to the simulation.")
 |-------------------------|-------------------------------------------------------|------------------------------------|
 | `DexforceW1ArmKind`     | `ANTHROPOMORPHIC`, `INDUSTRIAL`                       | Arm type                           |
 | `DexforceW1HandBrand`   | `BRAINCO_HAND`, `DH_PGC_GRIPPER`, `DH_PGC_GRIPPER_M`  | Hand brand                         |
-| `DexforceW1Version`     | `V020`                                                | Release version                    |
+| `DexforceW1Version`     | `V021`                                                | Release version                    |
 | `DexforceW1ArmSide`     | `LEFT`, `RIGHT`                                       | Left/right hand identifier         |

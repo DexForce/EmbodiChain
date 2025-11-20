@@ -162,6 +162,7 @@ class SoftObject(BatchEntity):
         self._data = SoftBodyData(entities=entities, ps=self._ps, device=device)
 
         # TODO: soft body physical attribute is already set in soft body creation(embodichain/lab/sim/utility/sim_utils.py load_soft_object_from_cfg)
+        self._world.update(0.001)
 
         super().__init__(cfg=cfg, entities=entities, device=device)
 

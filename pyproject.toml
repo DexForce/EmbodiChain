@@ -47,6 +47,7 @@ dependencies = [
   "balanced-loss",
   "accelerate==1.2.1",
   "wandb==0.20.1",
+  "tensorboard",
   "pydantic==2.7.1",
   "deepspeed==0.16.2",
   "py_opw_kinematics==0.1.6",
@@ -62,6 +63,7 @@ dependencies = [
   "aenum",
   "h5py",
   "dacite==1.9.2",
+  "zmq",
 ]
 
 [tool.setuptools.packages.find]

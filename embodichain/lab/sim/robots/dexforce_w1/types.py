@@ -17,7 +17,7 @@ all = [
 class DexforceW1Version(enum.Enum):
     """Versioning for DexforceW1 components."""
 
-    V020 = "v020"
+    V021 = "v021"
 
 
 class DexforceW1ArmKind(enum.Enum):

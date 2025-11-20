@@ -291,8 +291,7 @@ class Gizmo:
                 return False
 
             # Get current joint positions as seed using proprioception
-            proprioception = self.target.get_proprioception()
-            current_qpos_full = proprioception["qpos"]  # Full joint positions
+            current_qpos_full = self.target.get_qpos()
 
             # Get joint IDs for this arm
             current_joint_ids = self.target.get_joint_ids(self._robot_arm_name)
@@ -319,6 +318,8 @@ class Gizmo:
                 # Ensure correct dimensions for setting qpos
                 if new_qpos.dim() == 1:
                     new_qpos = new_qpos.unsqueeze(0)
+                elif new_qpos.dim() == 3:
+                    new_qpos = new_qpos[:, 0, :]
 
                 # Update robot joint positions
                 self.target.set_qpos(qpos=new_qpos, joint_ids=current_joint_ids)

@@ -74,9 +74,7 @@ def main(args):
     t0 = time.time()
     camera.update()
     print(f"Camera update time: {time.time() - t0:.4f} seconds")
-    from IPython import embed
 
-    embed()
     data_frame = camera.get_data()
 
     t0 = time.time()

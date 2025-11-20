@@ -37,9 +37,8 @@ from embodichain.utils import configclass, logger
 class DexforceW1Cfg(RobotCfg):
     """DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters."""
 
-    version: DexforceW1Version = DexforceW1Version.V020
+    version: DexforceW1Version = DexforceW1Version.V021
     arm_kind: DexforceW1ArmKind = DexforceW1ArmKind.INDUSTRIAL
-    custom_param: typing.Optional[str] = None
 
     @classmethod
     def from_dict(
@@ -56,7 +55,7 @@ class DexforceW1Cfg(RobotCfg):
         from embodichain.lab.sim.solvers import merge_solver_cfg
 
         init_dict_m = init_dict.copy()
-        version = init_dict_m.get("version", "v020")
+        version = init_dict_m.get("version", "v021")
         arm_kind = init_dict_m.get("arm_kind", "anthropomorphic")
         init_dict_m.pop("version", None)
         init_dict_m.pop("arm_kind", None)
@@ -82,13 +81,19 @@ class DexforceW1Cfg(RobotCfg):
                 # merge provided solver_cfg values into default solver config
                 provided_solver_cfg = init_dict_m.get("solver_cfg")
                 if provided_solver_cfg:
-                    try:
-                        merged = merge_solver_cfg(cfg.solver_cfg, provided_solver_cfg)
-                        cfg.solver_cfg = merged
-                    except Exception:
-                        logger.log_error(
-                            f"Failed to merge solver_cfg, using provided config outright."
-                        )
+                    for part, item in provided_solver_cfg.items():
+                        if "class_type" in provided_solver_cfg[part]:
+                            cfg.solver_cfg[part] = robot_cfg.solver_cfg[part]
+                        else:
+                            try:
+                                merged = merge_solver_cfg(
+                                    cfg.solver_cfg, provided_solver_cfg
+                                )
+                                cfg.solver_cfg = merged
+                            except Exception:
+                                logger.log_error(
+                                    f"Failed to merge solver_cfg, using provided config outright."
+                                )
             else:
                 setattr(cfg, key, getattr(robot_cfg, key))
 
@@ -107,23 +112,23 @@ class DexforceW1Cfg(RobotCfg):
             w1_left_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.LEFT,
                 arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-                version=DexforceW1Version.V020,
+                version=DexforceW1Version.V021,
             )
             w1_right_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.RIGHT,
                 arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-                version=DexforceW1Version.V020,
+                version=DexforceW1Version.V021,
             )
         else:
             w1_left_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.LEFT,
                 arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-                version=DexforceW1Version.V020,
+                version=DexforceW1Version.V021,
             )
             w1_right_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.RIGHT,
                 arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-                version=DexforceW1Version.V020,
+                version=DexforceW1Version.V021,
             )
 
         return {
@@ -204,7 +209,7 @@ class DexforceW1Cfg(RobotCfg):
 
     @staticmethod
     def _build_default_cfg(
-        version: str = "v020", arm_kind: str = "anthropomorphic"
+        version: str = "v021", arm_kind: str = "anthropomorphic"
     ) -> DexforceW1Cfg:
         hand_types = {
             DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
@@ -275,9 +280,9 @@ class DexforceW1Cfg(RobotCfg):
         )
 
         if DexforceW1ArmKind.INDUSTRIAL == self.arm_kind:
-            urdf_path = get_data_path("DexforceW1V020/DexforceW1_v02_2.urdf")
+            urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_2.urdf")
         elif DexforceW1ArmKind.ANTHROPOMORPHIC == self.arm_kind:
-            urdf_path = get_data_path("DexforceW1V020/DexforceW1_v02_1.urdf")
+            urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
 
         chain = create_pk_chain(urdf_path, device)
 
@@ -312,7 +317,7 @@ if __name__ == "__main__":
     cfg = DexforceW1Cfg.from_dict(
         {
             "uid": "dexforce_w1",
-            "version": "v020",
+            "version": "v021",
             "arm_kind": "anthropomorphic",
         }
     )

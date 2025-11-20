@@ -222,6 +222,9 @@ class SimulationManager:
         # gizmo management
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
 
+        # marker management
+        self._markers: Dict[str, MeshObject] = dict()
+
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._soft_objects: Dict[str, SoftObject] = dict()
@@ -1333,7 +1336,7 @@ class SimulationManager:
         name = original_name
         count = 0
 
-        while name in self._fixed_actors:
+        while name in self._markers:
             count += 1
             name = f"{original_name}_{count}"
         if count > 0:
@@ -1379,7 +1382,7 @@ class SimulationManager:
         #     # Create point markers
         #     pass
 
-        self._fixed_actors[name] = (marker_handles, cfg.arena_index)
+        self._markers[name] = (marker_handles, cfg.arena_index)
         return marker_handles
 
     def remove_marker(self, name: str) -> bool:
@@ -1390,16 +1393,16 @@ class SimulationManager:
         Returns:
             bool: True if the marker was removed successfully, False otherwise.
         """
-        if name not in self._fixed_actors:
+        if name not in self._markers:
             logger.log_warning(f"Marker {name} not found.")
             return False
         try:
-            env = self.get_env(self._fixed_actors[name][1])
-            marker_handles, arena_index = self._fixed_actors[name]
+            env = self.get_env(self._markers[name][1])
+            marker_handles, arena_index = self._markers[name]
             for marker_handle in marker_handles:
                 if marker_handle is not None:
                     env.remove_actor(marker_handle.get_name())
-            self._fixed_actors.pop(name)
+            self._markers.pop(name)
             return True
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")

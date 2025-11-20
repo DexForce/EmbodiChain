@@ -72,10 +72,15 @@ class RigidBodyData:
         if self.device.type == "cpu":
             # Fetch pose from CPU entities
             xyzs = torch.as_tensor(
-                [entity.get_location() for entity in self.entities], device=self.device
+                np.array([entity.get_location() for entity in self.entities]),
+                dtype=torch.float32,
+                device=self.device,
             )
             quats = torch.as_tensor(
-                [entity.get_rotation_quat() for entity in self.entities],
+                np.array(
+                    [entity.get_rotation_quat() for entity in self.entities],
+                ),
+                dtype=torch.float32,
                 device=self.device,
             )
             quats = convert_quat(quats, to="wxyz")
@@ -95,7 +100,7 @@ class RigidBodyData:
         if self.device.type == "cpu":
             # Fetch linear velocity from CPU entities
             self._lin_vel = torch.as_tensor(
-                [entity.get_linear_velocity() for entity in self.entities],
+                np.array([entity.get_linear_velocity() for entity in self.entities]),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -112,7 +117,9 @@ class RigidBodyData:
         if self.device.type == "cpu":
             # Fetch angular velocity from CPU entities
             self._ang_vel = torch.as_tensor(
-                [entity.get_angular_velocity() for entity in self.entities],
+                np.array(
+                    [entity.get_angular_velocity() for entity in self.entities],
+                ),
                 dtype=torch.float32,
                 device=self.device,
             )

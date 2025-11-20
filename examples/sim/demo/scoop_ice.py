@@ -516,8 +516,7 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
     hand_ids = robot.get_joint_ids("hand")
     combine_ids = np.concatenate([arm_ids, hand_ids])
     for qpos in interp_trajectory:
-        qpos_tensor = torch.tensor(qpos[None, :], dtype=torch.float32)
-        robot.set_qpos(qpos_tensor, joint_ids=combine_ids)
+        robot.set_qpos(qpos.unsqueeze(0), joint_ids=combine_ids)
         sim.update(step=10)
 
 

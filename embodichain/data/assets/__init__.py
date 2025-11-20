@@ -4,14 +4,14 @@
 # All rights reserved.
 # ----------------------------------------------------------------------------
 
-from .cad_assets import *
+from .obj_assets import *
 from .w1_assets import *
 from .eef_assets import *
 from .robot_assets import *
 from .sensor_assets import *
 from .scene_assets import *
 
-del cad_assets
+del obj_assets
 del w1_assets
 del eef_assets
 del robot_assets

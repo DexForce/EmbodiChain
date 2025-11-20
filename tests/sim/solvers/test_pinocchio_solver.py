@@ -27,7 +27,7 @@ class BaseSolverTest:
         self.sim.set_manual_update(False)
 
         # Load robot URDF file
-        urdf = get_data_path("DexforceW1V020/DexforceW1_v02_1.urdf")
+        urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
         assert os.path.isfile(urdf)
 
         cfg_dict = {

@@ -42,11 +42,11 @@ from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
 arm_params = W1ArmKineParams(
     arm_side=DexforceW1ArmSide.RIGHT,
     arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-    version=DexforceW1Version.V020,
+    version=DexforceW1Version.V021,
 )
 
 cfg = SRSSolverCfg(
-    urdf_path=get_data_path("DexforceW1V020/DexforceW1_v02_1.urdf"),
+    urdf_path=get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf"),
     joint_names=[f"{'RIGHT'}_J{i+1}" for i in range(7)],
     end_link_name="left_ee",
     root_link_name="left_arm_base",

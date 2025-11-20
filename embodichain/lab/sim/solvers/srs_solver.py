@@ -110,7 +110,7 @@ class _BaseSRSSolverImpl:
     def _parse_params(self):
         # Compute the inverse transformation matrices for TCP, end-effector, and base.
         self.tcp_xpos = self.cfg.tcp
-        self.tcp_inv_np = np.linalg.inv(self.cfg.tcp)
+        self.tcp_inv_np = np.linalg.inv(self.tcp_xpos)
         self.T_e_oe_inv_np = np.linalg.inv(self.cfg.T_e_oe)
         self.T_b_ob_inv_np = np.linalg.inv(self.cfg.T_b_ob)
 
@@ -564,7 +564,9 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, 0, 7), dtype=qpos_seed.dtype, device=self.device
+                    (num_targets, num_targets, 7),
+                    dtype=qpos_seed.dtype,
+                    device=self.device,
                 ),
             )
         max_solutions = solution_counts.max()
@@ -584,7 +586,6 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
 
         valid_mask = ik_qpos_tensor.abs().sum(dim=2) > 0  # (num_targets, max_solutions)
         success_tensor = torch.from_numpy(has_solution).to(self.device)
-
         if return_all_solutions:
             return self._process_all_solutions(
                 ik_qpos_tensor, qpos_seed, valid_mask, success_tensor
@@ -1135,7 +1136,9 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, 0, 7), dtype=torch.float32, device=self.device
+                    (num_targets, num_targets, 7),
+                    dtype=torch.float32,
+                    device=self.device,
                 ),
             )
 

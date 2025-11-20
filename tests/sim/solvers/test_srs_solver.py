@@ -41,12 +41,12 @@ class BaseSolverTest:
             arm_params = W1ArmKineParams(
                 arm_side=arm_side,
                 arm_kind=arm_kind,
-                version=DexforceW1Version.V020,
+                version=DexforceW1Version.V021,
             )
             if arm_kind == DexforceW1ArmKind.ANTHROPOMORPHIC:
-                urdf = get_data_path("DexforceW1V020/DexforceW1_v02_1.urdf")
+                urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
             else:
-                urdf = get_data_path("DexforceW1V020/DexforceW1_v02_2.urdf")
+                urdf = get_data_path("DexforceW1V021/DexforceW1_v02_2.urdf")
 
             cfg = SRSSolverCfg()
             cfg.joint_names = [
@@ -126,18 +126,18 @@ class BaseRobotSolverTest:
         self.sim.set_manual_update(True)
 
         # Load robot URDF file
-        urdf = get_data_path("DexforceW1V020/DexforceW1_v02_1.urdf")
+        urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
         assert os.path.isfile(urdf)
 
         w1_left_arm_params = W1ArmKineParams(
             arm_side=DexforceW1ArmSide.LEFT,
             arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-            version=DexforceW1Version.V020,
+            version=DexforceW1Version.V021,
         )
         w1_right_arm_params = W1ArmKineParams(
             arm_side=DexforceW1ArmSide.RIGHT,
             arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-            version=DexforceW1Version.V020,
+            version=DexforceW1Version.V021,
         )
 
         # Robot configuration dictionary
@@ -259,6 +259,7 @@ class BaseRobotSolverTest:
         )
         dof = ik_qpos.shape[-1]
         assert res[0] == False
+        assert ik_qpos.shape == (1, dof)
 
     @classmethod
     def teardown_class(cls):

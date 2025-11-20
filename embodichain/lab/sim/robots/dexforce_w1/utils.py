@@ -34,13 +34,13 @@ all = [
 class ChassisManager:
     def __init__(self):
         self.urdf_paths = {
-            DexforceW1Version.V020: get_data_path("DexforceW1ChassisV020/chassis.urdf"),
+            DexforceW1Version.V021: get_data_path("DexforceW1ChassisV021/chassis.urdf"),
         }
 
-    def get_urdf(self, version=DexforceW1Version.V020):
+    def get_urdf(self, version=DexforceW1Version.V021):
         return self.urdf_paths[version]
 
-    def get_config(self, version=DexforceW1Version.V020):
+    def get_config(self, version=DexforceW1Version.V021):
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": [],
@@ -52,14 +52,14 @@ class ChassisManager:
 class TorsoManager:
     def __init__(self):
         self.urdf_paths = {
-            DexforceW1Version.V020: get_data_path("DexforceW1TorsoV020/torso.urdf"),
+            DexforceW1Version.V021: get_data_path("DexforceW1TorsoV021/torso.urdf"),
         }
         self.joint_names = ["ANKLE", "KNEE", "BUTTOCK", "WAIST"]
 
-    def get_urdf(self, version=DexforceW1Version.V020):
+    def get_urdf(self, version=DexforceW1Version.V021):
         return self.urdf_paths[version]
 
-    def get_config(self, version=DexforceW1Version.V020):
+    def get_config(self, version=DexforceW1Version.V021):
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": self.joint_names,
@@ -71,14 +71,14 @@ class TorsoManager:
 class HeadManager:
     def __init__(self):
         self.urdf_paths = {
-            DexforceW1Version.V020: get_data_path("DexforceW1HeadV020/head.urdf"),
+            DexforceW1Version.V021: get_data_path("DexforceW1HeadV021/head.urdf"),
         }
         self.joint_names = ["NECK1", "NECK2"]
 
-    def get_urdf(self, version=DexforceW1Version.V020):
+    def get_urdf(self, version=DexforceW1Version.V021):
         return self.urdf_paths[version]
 
-    def get_config(self, version=DexforceW1Version.V020):
+    def get_config(self, version=DexforceW1Version.V021):
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": self.joint_names,
@@ -90,13 +90,13 @@ class HeadManager:
 class EyesManager:
     def __init__(self):
         self.urdf_paths = {
-            DexforceW1Version.V020: get_data_path("DexforceW1EyesV020/eyes.urdf"),
+            DexforceW1Version.V021: get_data_path("DexforceW1EyesV021/eyes.urdf"),
         }
 
-    def get_urdf(self, version=DexforceW1Version.V020):
+    def get_urdf(self, version=DexforceW1Version.V021):
         return self.urdf_paths[version]
 
-    def get_config(self, version=DexforceW1Version.V020):
+    def get_config(self, version=DexforceW1Version.V021):
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": [],
@@ -111,29 +111,29 @@ class ArmManager:
             (
                 DexforceW1ArmKind.ANTHROPOMORPHIC,
                 DexforceW1ArmSide.LEFT,
-                DexforceW1Version.V020,
-            ): get_data_path("DexforceW1LeftArm1V020/left_arm.urdf"),
+                DexforceW1Version.V021,
+            ): get_data_path("DexforceW1LeftArm1V021/left_arm.urdf"),
             (
                 DexforceW1ArmKind.ANTHROPOMORPHIC,
                 DexforceW1ArmSide.RIGHT,
-                DexforceW1Version.V020,
-            ): get_data_path("DexforceW1RightArm1V020/right_arm.urdf"),
+                DexforceW1Version.V021,
+            ): get_data_path("DexforceW1RightArm1V021/right_arm.urdf"),
             (
                 DexforceW1ArmKind.INDUSTRIAL,
                 DexforceW1ArmSide.LEFT,
-                DexforceW1Version.V020,
-            ): get_data_path("DexforceW1LeftArm2V020/left_arm.urdf"),
+                DexforceW1Version.V021,
+            ): get_data_path("DexforceW1LeftArm2V021/left_arm.urdf"),
             (
                 DexforceW1ArmKind.INDUSTRIAL,
                 DexforceW1ArmSide.RIGHT,
-                DexforceW1Version.V020,
-            ): get_data_path("DexforceW1RightArm2V020/right_arm.urdf"),
+                DexforceW1Version.V021,
+            ): get_data_path("DexforceW1RightArm2V021/right_arm.urdf"),
         }
 
-    def get_urdf(self, kind, side, version=DexforceW1Version.V020):
+    def get_urdf(self, kind, side, version=DexforceW1Version.V021):
         return self.urdf_paths[(kind, side, version)]
 
-    def get_config(self, kind, side, version=DexforceW1Version.V020):
+    def get_config(self, kind, side, version=DexforceW1Version.V021):
         prefix = "LEFT" if side == DexforceW1ArmSide.LEFT else "RIGHT"
         return {
             "urdf_path": self.get_urdf(kind, side, version),
@@ -149,32 +149,32 @@ class HandManager:
             (
                 DexforceW1HandBrand.BRAINCO_HAND,
                 DexforceW1ArmSide.LEFT,
-                DexforceW1Version.V020,
+                DexforceW1Version.V021,
             ): get_data_path("BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"),
             (
                 DexforceW1HandBrand.BRAINCO_HAND,
                 DexforceW1ArmSide.RIGHT,
-                DexforceW1Version.V020,
+                DexforceW1Version.V021,
             ): get_data_path("BrainCoHandRevo1/BrainCoRightHand/BrainCoRightHand.urdf"),
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER,
                 DexforceW1ArmSide.LEFT,
-                DexforceW1Version.V020,
+                DexforceW1Version.V021,
             ): get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf"),
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER,
                 DexforceW1ArmSide.RIGHT,
-                DexforceW1Version.V020,
+                DexforceW1Version.V021,
             ): get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf"),
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER_M,
                 DexforceW1ArmSide.LEFT,
-                DexforceW1Version.V020,
+                DexforceW1Version.V021,
             ): get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf"),
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER_M,
                 DexforceW1ArmSide.RIGHT,
-                DexforceW1Version.V020,
+                DexforceW1Version.V021,
             ): get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf"),
         }
 
@@ -182,7 +182,7 @@ class HandManager:
         self,
         brand: DexforceW1HandBrand,
         side: DexforceW1ArmSide,
-        version: DexforceW1Version = DexforceW1Version.V020,
+        version: DexforceW1Version = DexforceW1Version.V021,
     ):
         prefix = "LEFT" if side == DexforceW1ArmSide.LEFT else "RIGHT"
         if brand == DexforceW1HandBrand.BRAINCO_HAND:
@@ -230,7 +230,7 @@ class HandManager:
         self,
         brand: DexforceW1HandBrand,
         side: DexforceW1ArmSide,
-        version: DexforceW1Version = DexforceW1Version.V020,
+        version: DexforceW1Version = DexforceW1Version.V021,
     ):
         return self.urdf_paths[(brand, side, version)]
 
@@ -286,7 +286,7 @@ def build_dexforce_w1_assembly_urdf_cfg(
         DexforceW1ArmSide.LEFT,
         DexforceW1ArmSide.RIGHT,
     ],
-    fname: Optional[str] = "DexforceW1V020",
+    fname: Optional[str] = "DexforceW1V021",
     hand_types: Optional[Dict[DexforceW1ArmSide, DexforceW1HandBrand]] = None,
     hand_versions: Optional[Dict[DexforceW1ArmSide, DexforceW1Version]] = None,
     hand_attach_xposes: Optional[Dict[DexforceW1ArmSide, np.ndarray]] = None,
@@ -304,7 +304,7 @@ def build_dexforce_w1_assembly_urdf_cfg(
     Args:
         arm_kind: Arm type (anthropomorphic or industrial).
         arm_sides: List of arm sides to include (left/right). Default both sides.
-        fname: Output configuration name. Default "DexforceW1V020".
+        fname: Output configuration name. Default "DexforceW1V021".
         hand_types: Dict specifying hand brand (DexforceW1HandBrand) for each arm side. Default None, which uses the default brand.
         hand_versions: Dict specifying hand version for each arm side. Default None, which uses the default version.
         hand_attach_xposes: Dict specifying hand attachment pose for each arm side. Default None, which uses the default attachment pose.
@@ -313,13 +313,13 @@ def build_dexforce_w1_assembly_urdf_cfg(
         include_head: Whether to include head. Default True.
         include_hand: Whether to include hand. Default True.
         include_wrist_cameras: Whether to include wrist cameras. Default True.
-        component_versions: Dict specifying version for each robot component. Default all V020.
+        component_versions: Dict specifying version for each robot component. Default all V021.
 
     Returns:
         URDFCfg: Assembled URDF configuration.
     """
 
-    def get_version(t, default=DexforceW1Version.V020):
+    def get_version(t, default=DexforceW1Version.V021):
         return (component_versions or {}).get(t, default)
 
     components = []
@@ -514,14 +514,14 @@ def build_dexforce_w1_solver_cfg(
     Args:
         arm_kind: Arm type.
         arm_sides: Included arm sides. Optional, default both sides.
-        component_versions: Component version dict. Optional, default all V020.
+        component_versions: Component version dict. Optional, default all V021.
         urdf_cfg: Optional, URDFCfg object from build_dexforce_w1_assembly_urdf_cfg.
 
     Returns:
         Dict[DexforceW1Type, SolverCfg]
     """
 
-    def get_version(t, default=DexforceW1Version.V020):
+    def get_version(t, default=DexforceW1Version.V021):
         return (component_versions or {}).get(t, default)
 
     solver_cfg = {}
@@ -555,7 +555,7 @@ def build_dexforce_w1_solver_cfg(
     full_body_urdf_path = (
         urdf_cfg.fname
         if urdf_cfg is not None
-        else get_data_path("DexforceW1FullBodyV020/full_body.urdf")
+        else get_data_path("DexforceW1FullBodyV021/full_body.urdf")
     )
 
     solver_cfg[DexforceW1Type.FULL_BODY] = SolverCfg.from_dict(
@@ -654,7 +654,7 @@ def build_dexforce_w1_cfg(
                 if arm_side == DexforceW1ArmSide.LEFT
                 else DexforceW1Type.RIGHT_ARM2
             )
-        arm_version = (component_versions or {}).get(arm_type, DexforceW1Version.V020)
+        arm_version = (component_versions or {}).get(arm_type, DexforceW1Version.V021)
         arm_cfg = arm_manager.get_config(arm_kind, arm_side, arm_version)
         if arm_side == DexforceW1ArmSide.LEFT:
             left_arm_joints = arm_cfg["joint_names"]
@@ -676,7 +676,7 @@ def build_dexforce_w1_cfg(
                 DexforceW1ArmSide.LEFT, DexforceW1HandBrand.BRAINCO_HAND
             )
             left_hand_version = (hand_versions or {}).get(
-                DexforceW1ArmSide.LEFT, DexforceW1Version.V020
+                DexforceW1ArmSide.LEFT, DexforceW1Version.V021
             )
             left_hand_cfg = hand_manager.get_config(
                 left_hand_brand, DexforceW1ArmSide.LEFT, left_hand_version
@@ -687,7 +687,7 @@ def build_dexforce_w1_cfg(
                 DexforceW1ArmSide.RIGHT, DexforceW1HandBrand.BRAINCO_HAND
             )
             right_hand_version = (hand_versions or {}).get(
-                DexforceW1ArmSide.RIGHT, DexforceW1Version.V020
+                DexforceW1ArmSide.RIGHT, DexforceW1Version.V021
             )
             right_hand_cfg = hand_manager.get_config(
                 right_hand_brand, DexforceW1ArmSide.RIGHT, right_hand_version

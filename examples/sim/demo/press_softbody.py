@@ -218,8 +218,7 @@ def press_cow(sim: SimulationManager, robot: Robot):
     )
     interp_trajectory = interp_trajectory[0]
     for qpos in interp_trajectory:
-        qpos_tensor = torch.tensor(qpos[None, :], dtype=torch.float32)
-        robot.set_qpos(qpos_tensor, joint_ids=arm_ids)
+        robot.set_qpos(qpos.unsqueeze(0), joint_ids=arm_ids)
         sim.update(step=5)
 
 

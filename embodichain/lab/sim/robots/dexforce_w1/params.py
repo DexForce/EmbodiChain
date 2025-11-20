@@ -27,7 +27,7 @@ class W1ArmKineParams:
 
     arm_side: "DexforceW1ArmSide"
     arm_kind: "DexforceW1ArmKind"
-    version: "DexforceW1Version" = field(default_factory=lambda: DexforceW1Version.V020)
+    version: "DexforceW1Version" = field(default_factory=lambda: DexforceW1Version.V021)
 
     # (initialized in __post_init__)
     # physical constants
@@ -44,7 +44,7 @@ class W1ArmKineParams:
     qpos_limits: np.ndarray = field(init=False)
 
     def __post_init__(self):
-        if self.version == DexforceW1Version.V020:
+        if self.version == DexforceW1Version.V021:
             self.d_list = np.array([0.0, 0.0, 0.260, 0.0, 0.166, 0.098, 0.0])
             self.link_lengths = np.array(
                 [
@@ -208,7 +208,7 @@ class W1ArmKineParams:
         version = (
             DexforceW1Version[data["version"]]
             if isinstance(data.get("version"), str)
-            else data.get("version", DexforceW1Version.V020)
+            else data.get("version", DexforceW1Version.V021)
         )
         inst = cls(arm_side=arm_side, arm_kind=arm_kind, version=version)
 

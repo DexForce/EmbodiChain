@@ -63,7 +63,7 @@ def main():
 
     # Get DexForce W1 URDF path
     urdf_path = get_data_path(
-        "DexforceW1V020_INDUSTRIAL_DH_PGC_GRIPPER_M/DexforceW1V020.urdf"
+        "DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M/DexforceW1V021.urdf"
     )
 
     # Create DexForce W1 robot

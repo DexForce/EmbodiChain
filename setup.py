@@ -84,67 +84,6 @@ def get_data_files_of_a_directory(source_dir, target_dir=None, ignore_py=False):
     return filelist
 
 
-def get_torchsdf_extensions():
-    try:
-        import torch
-        from torch.utils.cpp_extension import (
-            BuildExtension as _BuildExtension,
-            CppExtension as _CppExtension,
-            CUDAExtension as _CUDAExtension,
-        )
-    except Exception:
-        logger.warning(
-            "torch or torch.utils.cpp_extension not available; skipping torchsdf extensions"
-        )
-        return []
-
-    global BuildExtension, CppExtension, CUDAExtension
-    BuildExtension = _BuildExtension
-    CppExtension = _CppExtension
-    CUDAExtension = _CUDAExtension
-
-    extra_compile_args = {"cxx": ["-O3"]}
-    define_macros = []
-    include_dirs = []
-    sources = glob.glob(
-        "embodichain/toolkits/graspkit/dex_grasp/utils/torchsdf/csrc/**/*.cpp",
-        recursive=True,
-    )
-    if torch.cuda.is_available() or os.getenv("FORCE_CUDA", "0") == "1":
-        with_cuda = True
-        define_macros += [
-            ("WITH_CUDA", None),
-            ("THRUST_IGNORE_CUB_VERSION_CHECK", None),
-        ]
-        sources += glob.glob(
-            "embodichain/toolkits/graspkit/dex_grasp/utils/torchsdf/csrc/**/*.cu",
-            recursive=True,
-        )
-        extension = CUDAExtension
-        extra_compile_args.update(
-            {"nvcc": ["-O3", "-DWITH_CUDA", "-DTHRUST_IGNORE_CUB_VERSION_CHECK"]}
-        )
-        include_dirs = []
-    else:
-        extension = CppExtension
-        with_cuda = False
-    extensions = []
-    extensions.append(
-        extension(
-            name="embodichain.toolkits.graspkit.dex_grasp.utils.torchsdf._C",
-            sources=sources,
-            define_macros=define_macros,
-            extra_compile_args=extra_compile_args,
-            include_dirs=include_dirs,
-        )
-    )
-    for extension in extensions:
-        extension.libraries = [
-            "cudart_static" if x == "cudart" else x for x in extension.libraries
-        ]
-    return extensions
-
-
 # Extract version
 here = osp.abspath(osp.dirname(__file__))
 version = None
@@ -156,7 +95,6 @@ ignore_py = sys.argv[1] == "bdist_nuitka" if len(sys.argv) > 1 else False
 data_files = []
 data_files += get_data_files_of_a_directory("embodichain", ignore_py=ignore_py)
 
-ext_modules = get_torchsdf_extensions()
 cmdclass = {"clean": CleanCommand}
 if BuildExtension is not None:
     cmdclass["build_ext"] = BuildExtension.with_options(no_python_abi_suffix=True)
@@ -164,13 +102,12 @@ if BuildExtension is not None:
 setup(
     name="embodichain",
     version=version,
-    url="http://69.235.177.182:8081/Engine/embodichain",
+    url="https://github.com/DexForce/EmbodiChain",
     author="Dexforce",
     description="A modular platform for building generalized embodied intelligence.",
     packages=find_packages(exclude=["docs"]),
     data_files=data_files,
     entry_points={},
-    ext_modules=ext_modules,
     cmdclass=cmdclass,
     include_package_data=True,
 )
