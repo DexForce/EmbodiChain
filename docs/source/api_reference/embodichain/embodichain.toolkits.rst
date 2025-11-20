@@ -8,12 +8,8 @@
    .. autosummary::
 
       graspkit
-      hand
-      mimic
-      object_pose
-      processor
-      vision
-      vla
+      urdf_assembly
+
 
 GraspKit
 --------
@@ -24,62 +20,10 @@ GraspKit
    :show-inheritance:
 
 
-Mimicry Toolkits
-----------------
+URDF Assembly Tool
+-------------------
 
-.. automodule:: embodichain.toolkits.mimic
+.. automodule:: embodichain.toolkits.urdf_assembly
    :members:
    :undoc-members:
-   :show-inheritance:
-
-Object Pose
------------
-
-.. automodule:: embodichain.toolkits.object_pose
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Foundation Pose
-~~~~~~~~~~~~~~~
-
-.. automodule:: embodichain.toolkits.object_pose.foundation_pose
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Processor
----------
-
-.. automodule:: embodichain.toolkits.processor
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-
-Vision Language Action (VLA)
------------------------------
-
-.. automodule:: embodichain.toolkits.vla
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Utility Functions
------------------
-
-.. automodule:: embodichain.toolkits.utils
-   :members:
-   :show-inheritance:
-
-.. automodule:: embodichain.toolkits.obs_processor
-   :members:
-   :show-inheritance:
-
-.. automodule:: embodichain.toolkits.obs_comparison
-   :members:
-   :show-inheritance:
-
-.. automodule:: embodichain.toolkits.code_generation
-   :members:
    :show-inheritance:

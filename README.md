@@ -12,7 +12,7 @@ EmbodiChain is a unified, GPU-accelerated framework designed for pushing the bou
 - **Unified Robot Learning Environment**: Standardized interfaces for both Imitation Learning and Reinforcement Learning tasks.
 - **Data Scaling Pipeline**: Comprehensive tools for automated data collection, efficient processing, and scalable data generation.
 - **Modular Model Architectures**: Flexible and extensible model architectures for fast prototyping and experimentation.
-- **Efficient Training Infrastructure**: Imitation Learning with efficient online data streaming & Reinforcement Learning with parallel environment rollouts.
+- **Efficient Training Infrastructure**: Imitation Learning with efficient online data streaming & Reinforcement Learning with parallel environment rollout.
 
 
 ## Getting Started

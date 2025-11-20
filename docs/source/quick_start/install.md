@@ -25,46 +25,47 @@ Notes:
 
 ---
 
-### Recommended: Install with *Dexsim* Docker Setup
+### Recommended: Install with Docker 
 
 We strongly recommend using our pre-configured Docker environment, which contains all necessary dependencies.
 
-See: [*Dexsim* Docker setup](http://192.168.3.120/MixedAI/docs_dev/dexsim/markdown/docker.html)
+```bash
+docker pull dexforce/embodichain:ubuntu22.04-cuda12.8
+```
 
 ---
 
-### Manual Setup (If Not Using Docker)
-
-PyTorch and its related packages should be installed from the **official PyTorch website**:  
-👉 [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
-
----
 
 ### Install EmbodiChain
 
+> **We strongly recommend using a virtual environment to avoid dependency conflicts.**
+
+Install `DexSim` manually:
+```bash
+# If you are using Python 3.10
+pip install http://pyp.open3dv.site:2345/packages/dexsim_engine-0.3.6-cp310-cp310-manylinux_2_31_x86_64.whl
+```
+
+> We are working on uploading DexSim to PyPI for easier installation. Please stay tuned!
+
+
 Clone the EmbodiChain repository:
 ```bash
-git clone http://69.235.177.182:8081/Engine/embodichain.git
+git clone https://github.com/DexForce/EmbodiChain.git
 ```
 
 Install the project in development mode:
 
 ```bash
-pip install -e . --index-url http://192.168.3.43:8080/simple/ --trusted-host 192.168.3.43
-```
-
-Install the project in deploy mode:
-
-```bash
-pip install -e ".[deploy]" --index-url http://192.168.3.43:8080/simple/ --trusted-host 192.168.3.43
+pip install -e . 
 ```
 
 
 ### Verify Installation
-To verify that EmbodiChain is installed correctly, run:
+To verify that EmbodiChain is installed correctly, run a simple demo script to create a simulation scene:
 
 ```bash
-python -c "import embodichain; print(embodichain.__version__)"
+ python scripts/tutorials/sim/create_scene.py
 ```
 ---
 
