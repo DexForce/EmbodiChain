@@ -9,58 +9,37 @@ import numpy as np
 
 from typing import Union, Optional
 
-from embodichain.lab.sim.types import Array, Device
 
+def to_tensor(
+    arr: Union[torch.Tensor, np.ndarray, list],
+    dtype: torch.dtype = torch.float32,
+    device: Optional[torch.device] = None,
+) -> torch.Tensor:
+    """Convert input to torch.Tensor with specified dtype and device.
 
-def to_tensor(array: Array, device: Optional[Device] = None):
-    """
-    Maps any given sequence to a torch tensor on the CPU/GPU. If physx gpu is not enabled then we use CPU, otherwise GPU, unless specified
-    by the device argument
+    Supports torch.Tensor, np.ndarray, and list.
 
     Args:
-        array: The data to map to a tensor
-        device: The device to put the tensor on. By default this is None and to_tensor will put the device on the GPU if physx is enabled
-            and CPU otherwise
+        arr (Union[torch.Tensor, np.ndarray, list]): Input array.
+        dtype (torch.dtype, optional): Desired tensor dtype. Defaults to torch.float32.
+        device (torch.device, optional): Desired device. If None, uses current device.
 
+    Returns:
+        torch.Tensor: Converted tensor.
     """
-    if isinstance(array, (dict)):
-        return {k: to_tensor(v) for k, v in array.items()}
-    if torch.cuda.is_available():
-        if isinstance(array, np.ndarray):
-            if array.dtype == np.uint16:
-                array = array.astype(np.int32)
-            ret = torch.from_numpy(array)
-            if ret.dtype == torch.float64:
-                ret = ret.float()
-        elif isinstance(array, torch.Tensor):
-            ret = array
-        else:
-            ret = torch.tensor(array)
-        if device is None:
-            if ret.device.type == "cpu":
-                return ret.cuda()
-            # keep same device if already on GPU
-            return ret
-        else:
-            return ret.to(device)
+    if isinstance(arr, torch.Tensor):
+        return arr.to(dtype=dtype, device=device) if device else arr.to(dtype=dtype)
+    elif isinstance(arr, np.ndarray):
+        return (
+            torch.from_numpy(arr).to(dtype=dtype, device=device)
+            if device
+            else torch.from_numpy(arr).to(dtype=dtype)
+        )
+    elif isinstance(arr, list):
+        return (
+            torch.tensor(arr, dtype=dtype, device=device)
+            if device
+            else torch.tensor(arr, dtype=dtype)
+        )
     else:
-        if isinstance(array, np.ndarray):
-            if array.dtype == np.uint16:
-                array = array.astype(np.int32)
-            if array.dtype == np.uint32:
-                array = array.astype(np.int64)
-            ret = torch.from_numpy(array)
-            if ret.dtype == torch.float64:
-                ret = ret.float()
-        elif isinstance(array, list) and isinstance(array[0], np.ndarray):
-            ret = torch.from_numpy(np.array(array))
-            if ret.dtype == torch.float64:
-                ret = ret.float()
-        elif np.iterable(array):
-            ret = torch.Tensor(array)
-        else:
-            ret = torch.Tensor(array)
-        if device is None:
-            return ret
-        else:
-            return ret.to(device)
+        raise TypeError("Input must be a torch.Tensor, np.ndarray, or list.")

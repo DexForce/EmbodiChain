@@ -139,9 +139,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
                 return {name: self.dummy_function for name in names}
 
         funcs = FakeFunctions()
-        conf = load_json(
-            os.path.join(os.path.dirname(inspect.getfile(ActionBank)), "conf.json")
-        )
+        conf = load_json(os.path.join("configs", "gym", "action_bank", "conf.json"))
         action_bank = ActionBank(conf)
         action_bank.parse_network(
             funcs.get_functions(
@@ -165,9 +163,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
         )
 
     def test_hook_and_gantt(self):
-        conf = load_json(
-            os.path.join(os.path.dirname(inspect.getfile(ActionBank)), "conf.json")
-        )
+        conf = load_json(os.path.join("configs", "gym", "action_bank", "conf.json"))
         action_bank = FakePourwaterActionBank(conf)
         print(get_func_tag("node").functions[action_bank.__class__.__name__])
         _, jobs_data, jobkey2index = action_bank.parse_network(
@@ -180,9 +176,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
 
     def test_create_action_list(self):
         np.random.seed(0)
-        conf = load_json(
-            os.path.join(os.path.dirname(inspect.getfile(ActionBank)), "conf.json")
-        )
+        conf = load_json(os.path.join("configs", "gym", "action_bank", "conf.json"))
         action_bank = FakePourwaterActionBank(conf)
         graph_compose, jobs_data, jobkey2index = action_bank.parse_network(
             get_func_tag("node").functions[action_bank.__class__.__name__],
@@ -202,9 +196,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
 
     def test_bad_conf(self):
         np.random.seed(0)
-        conf = load_json(
-            os.path.join(os.path.dirname(inspect.getfile(ActionBank)), "conf.json")
-        )
+        conf = load_json(os.path.join("configs", "gym", "action_bank", "conf.json"))
         conf["node"]["right_arm"] = [
             {
                 "init_to_pre1": {

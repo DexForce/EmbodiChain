@@ -236,7 +236,7 @@ class DifferentialSolver(BaseSolver):
 
         # Transform target_xpos by TCP
         tcp_xpos = torch.as_tensor(
-            deepcopy(self.tcp_xpos), device=self.device, dtype=torch.float
+            deepcopy(self.tcp_xpos), device=self.device, dtype=torch.float32
         )
         current_xpos = current_xpos @ torch.inverse(tcp_xpos)
         compute_xpos = target_xpos @ torch.inverse(tcp_xpos)

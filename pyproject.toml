@@ -57,6 +57,7 @@ dependencies = [
   "ortools",
   "prettytable",
   "transforms3d==0.4.2",
+  "hdfdict@git+http://69.235.177.182:8081/externalrepo/hdfdict",
   "OmegaConf",
   "dill",
   "black==22.3",

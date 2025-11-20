@@ -22,25 +22,17 @@ import numpy as np
 
 from functools import cached_property
 from typing import Dict, Any, List, Union, Optional
-from embodichain.lab.gym.envs import BaseEnv
 from embodichain.data.enum import (
     Modality,
     PrivilegeType,
     JointType,
-    ActionMode,
-    EefType,
-    EndEffector,
-    ControlParts,
-    ArmName,
 )
-from embodichain.data.global_mapping import GlobalMapping
-from embodichain.lab.sim.sensors import StereoCamera
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.sensors import StereoCamera
 from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnv
 from embodichain.lab.gym.utils.gym_utils import map_qpos_to_eef_pose
 from embodichain.utils.utility import get_right_name
-from embodichain.lab.gym.robots.interface import LearnableRobot
-from embodichain.lab.gym.utils.misc import is_binocularcam, _data_key_to_control_part
+from embodichain.lab.gym.utils.misc import _data_key_to_control_part
 from embodichain.utils import logger
 from embodichain.data.data_engine.unified_state import (
     StateUnifier,
@@ -729,21 +721,13 @@ class DataDictExtractor:
         ret = {}
         robot_meta_config = self.env.metadata["dataset"]["robot_meta"]
 
-        if isinstance(self.env, BaseEnv):
-            for i, (obs, action) in enumerate(zip(obs_list, action_list)):
-                self._extract_vision_obs(obs, data_dict)
-                self._extract_proprioception(obs, data_dict)
-                self._extract_action(action, data_dict)
-            action = self._collate_action(data_dict)
-            proprio = self._collate_proprio(data_dict)
-        else:
-            for i, (obs, action) in enumerate(zip(obs_list, action_list)):
-                self._extract_vision_obs_v2(obs, data_dict)
-                self._extract_proprioception_v2(obs, data_dict)
-                self._extract_action_v2(action, data_dict)
-            action = self._collate_action(data_dict)
-            proprio = self._collate_proprio(data_dict)
+        for i, (obs, action) in enumerate(zip(obs_list, action_list)):
+            self._extract_vision_obs(obs, data_dict)
+            self._extract_proprioception(obs, data_dict)
+            self._extract_action(action, data_dict)
 
+        action = self._collate_action(data_dict)
+        proprio = self._collate_proprio(data_dict)
         robot_meta = self._collate_metainfo()
 
         extra_vision_config = robot_meta_config["observation"]["vision"]
@@ -810,7 +794,7 @@ class DataDictExtractor:
             data_dict[Modality.ACTIONS.value][action_name] = []
 
         for camera_name, extra_vision_list in extra_vision_config.items():
-            is_stereo = is_binocularcam(self.env.get_sensor(camera_name))
+            is_stereo = isinstance(self.env.get_sensor(camera_name), StereoCamera)
 
             data_dict["observations"][Modality.IMAGES.value][camera_name] = []
             if is_stereo:
@@ -836,77 +820,7 @@ class DataDictExtractor:
 
         for camera_name, extra_vision_list in extra_vision_config.items():
             if camera_name in obs["sensor"]:
-                is_stereo = is_binocularcam(self.env.get_sensor(camera_name))
-
-                data_dict["observations"][Modality.IMAGES.value][camera_name].append(
-                    obs["sensor"][camera_name]["rgb"]
-                )
-                if is_stereo:
-                    # save rgb right
-                    data_dict["observations"][Modality.IMAGES.value][
-                        get_right_name(camera_name)
-                    ].append(obs["sensor"][camera_name]["rgb_right"])
-
-                for extra_vision_name in extra_vision_list:
-                    if extra_vision_name in SUPPORTED_EXTRA_VISION_TYPES:
-                        if extra_vision_name == PrivilegeType.EXTEROCEPTION.value:
-                            if is_stereo:
-                                data_dict["observations"][extra_vision_name][
-                                    camera_name
-                                ].append(obs[extra_vision_name][camera_name]["l"])
-                                data_dict["observations"][extra_vision_name][
-                                    get_right_name(camera_name)
-                                ].append(obs[extra_vision_name][camera_name]["r"])
-                            elif camera_name in obs.get(extra_vision_name, {}):
-                                data_dict["observations"][extra_vision_name][
-                                    camera_name
-                                ].append(obs[extra_vision_name][camera_name])
-                        elif extra_vision_name == PrivilegeType.MASK.value:
-                            # save semantic mask for monocular cameras
-                            data_dict["observations"][extra_vision_name][
-                                camera_name
-                            ].append(
-                                obs["sensor"][camera_name]["semantic_mask_l"].astype(
-                                    np.uint8
-                                )
-                            )
-                            if is_stereo:
-                                data_dict["observations"][extra_vision_name][
-                                    get_right_name(camera_name)
-                                ].append(
-                                    obs["sensor"][camera_name][
-                                        "semantic_mask_r"
-                                    ].astype(np.uint8),
-                                )
-                        elif extra_vision_name == Modality.GEOMAP.value:
-                            if not is_stereo:
-                                log_error(
-                                    f"Camera {camera_name} is not stereo, while '{extra_vision_name}' is in gym_config.dataset.robot_meta.vision, please check again."
-                                )
-                            if "depth" in obs["sensor"][camera_name]:
-                                data_dict["observations"][extra_vision_name][
-                                    camera_name
-                                ].append(obs["sensor"][camera_name]["depth"])
-                            else:
-                                log_error(
-                                    f"obs['sensor'][{camera_name}] has no key named 'depth' while it's required in gym_config.dataset.robot_meta.vision, please check again."
-                                )
-                    else:
-                        log_error(
-                            f"Extra vision observation name {extra_vision_name} is not in SUPPORTED_EXTRA_VISION_TYPES {SUPPORTED_EXTRA_VISION_TYPES}, please check again."
-                        )
-            else:
-                logger.log_error(
-                    f"Camera {camera_name} not found in observations, please check your sensor configuration in gym_config.json"
-                )
-
-    def _extract_vision_obs_v2(self, obs: Dict[str, Any], data_dict: Dict):
-        robot_meta_config = self.env.metadata["dataset"]["robot_meta"]
-        extra_vision_config = robot_meta_config["observation"]["vision"]
-
-        for camera_name, extra_vision_list in extra_vision_config.items():
-            if camera_name in obs["sensor"]:
-                is_stereo = is_binocularcam(self.env.get_sensor(camera_name))
+                is_stereo = isinstance(self.env.get_sensor(camera_name), StereoCamera)
 
                 data_dict["observations"][Modality.IMAGES.value][camera_name].append(
                     obs["sensor"][camera_name]["color"]
@@ -996,27 +910,6 @@ class DataDictExtractor:
 
     def _extract_action(
         self,
-        action: Dict[str, Any],
-        data_dict: Dict,
-    ):
-
-        agent: LearnableRobot = self.env.get_agent()
-        # extract qpos.
-        for key in data_dict[Modality.ACTIONS.value].keys():
-            indices = agent.get_data_index(key, warning=False)
-            if len(indices) > 0:
-                data_dict[Modality.ACTIONS.value][key].append(
-                    action[JointType.QPOS.value][indices]
-                )
-        qpos = action[JointType.QPOS.value]
-        action_eef_pose_dict = agent.map_env_qpos_to_eef_pose(
-            np.array([qpos]), to_dict=True
-        )
-        for key, val in action_eef_pose_dict.items():
-            data_dict[Modality.ACTIONS.value][key].append(val[0])
-
-    def _extract_action_v2(
-        self,
         action: torch.Tensor,
         data_dict: Dict,
     ):
@@ -1050,27 +943,6 @@ class DataDictExtractor:
             )
 
     def _extract_proprioception(
-        self,
-        obs: Dict[str, Any],
-        data_dict: Dict,
-    ):
-        agent: LearnableRobot = self.env.get_agent()
-        # extract qpos.
-        qpos = obs["agent"][agent.uid][JointType.QPOS.value]
-        for key in data_dict["observations"][Modality.STATES.value].keys():
-            indices = agent.get_data_index(key, warning=False)
-            if len(indices) > 0:
-                data_dict["observations"][Modality.STATES.value][key].append(
-                    qpos[indices]
-                )
-
-        eef_pose_dict: Dict = agent.map_env_qpos_to_eef_pose(
-            np.array([qpos]), to_dict=True
-        )
-        for key, val in eef_pose_dict.items():
-            data_dict["observations"][Modality.STATES.value][key].append(val[0])
-
-    def _extract_proprioception_v2(
         self,
         obs: Dict[str, Any],
         data_dict: Dict,
@@ -1216,17 +1088,10 @@ def fetch_imitation_dataset(
 
     # Check robot dof validity
     try:
-        if isinstance(env, BaseEnv):
-            agent: LearnableRobot = env.get_agent()
-            max_dofs = len(agent.get_data_index(agent.uid))
-            assert (
-                env.metadata["dataset"]["robot_meta"]["arm_dofs"] <= max_dofs
-            ), f"Control dof {env.metadata['dataset']['robot_meta']['arm_dofs']} must be less than {max_dofs}."
-        else:
-            robot: Robot = env.robot
-            assert (
-                env.metadata["dataset"]["robot_meta"]["arm_dofs"] <= robot.dof
-            ), f"Control dof {env.metadata['dataset']['robot_meta']['arm_dofs']} must be less than {robot.dof}."
+        robot: Robot = env.robot
+        assert (
+            env.metadata["dataset"]["robot_meta"]["arm_dofs"] <= robot.dof
+        ), f"Control dof {env.metadata['dataset']['robot_meta']['arm_dofs']} must be less than {robot.dof}."
     except Exception as e:
         logger.log_error(f"Robot DOF check failed: {e}")
         return None

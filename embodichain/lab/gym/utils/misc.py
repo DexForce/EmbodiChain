@@ -759,19 +759,6 @@ def project_3d_to_2d(
     return keypoints
 
 
-def is_binocularcam(sensor):
-    from dexsim.sensor import BinocularCam
-    from embodichain.lab.sim.sensors import StereoCamera
-
-    return isinstance(sensor, BinocularCam) or isinstance(sensor, StereoCamera)
-
-
-def is_monocularcam(sensor):
-    from dexsim.sensor import MonocularCam
-
-    return isinstance(sensor, MonocularCam)
-
-
 def camel_to_snake(name):
     # Insert underscores before each uppercase letter and convert to lowercase
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)

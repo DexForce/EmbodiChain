@@ -532,7 +532,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         # Validate and normalize qpos_seed
         if qpos_seed is None:
             qpos_seed = torch.zeros(
-                (target_xpos.shape[0], 7), dtype=torch.float, device=self.device
+                (target_xpos.shape[0], 7), dtype=torch.float32, device=self.device
             )
 
         # Prepare to collect results

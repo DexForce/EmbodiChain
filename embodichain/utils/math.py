@@ -1557,7 +1557,7 @@ def default_orientation(num: int, device: str) -> torch.Tensor:
     Returns:
         Identity quaternion in (w, x, y, z). Shape is (num, 4).
     """
-    quat = torch.zeros((num, 4), dtype=torch.float, device=device)
+    quat = torch.zeros((num, 4), dtype=torch.float32, device=device)
     quat[..., 0] = 1.0
 
     return quat
@@ -1578,7 +1578,7 @@ def random_orientation(num: int, device: str) -> torch.Tensor:
         https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.random.html
     """
     # sample random orientation from normal distribution
-    quat = torch.randn((num, 4), dtype=torch.float, device=device)
+    quat = torch.randn((num, 4), dtype=torch.float32, device=device)
     # normalize the quaternion
     return torch.nn.functional.normalize(quat, p=2.0, dim=-1, eps=1e-12)
 
@@ -1594,9 +1594,9 @@ def random_yaw_orientation(num: int, device: str) -> torch.Tensor:
     Returns:
         Sampled quaternion in (w, x, y, z). Shape is (num, 4).
     """
-    roll = torch.zeros(num, dtype=torch.float, device=device)
-    pitch = torch.zeros(num, dtype=torch.float, device=device)
-    yaw = 2 * torch.pi * torch.rand(num, dtype=torch.float, device=device)
+    roll = torch.zeros(num, dtype=torch.float32, device=device)
+    pitch = torch.zeros(num, dtype=torch.float32, device=device)
+    yaw = 2 * torch.pi * torch.rand(num, dtype=torch.float32, device=device)
 
     return quat_from_euler_xyz(roll, pitch, yaw)
 
@@ -1678,9 +1678,9 @@ def sample_log_uniform(
     """
     # cast to tensor if not already
     if not isinstance(lower, torch.Tensor):
-        lower = torch.tensor(lower, dtype=torch.float, device=device)
+        lower = torch.tensor(lower, dtype=torch.float32, device=device)
     if not isinstance(upper, torch.Tensor):
-        upper = torch.tensor(upper, dtype=torch.float, device=device)
+        upper = torch.tensor(upper, dtype=torch.float32, device=device)
     # sample in log-space and exponentiate
     return torch.exp(sample_uniform(torch.log(lower), torch.log(upper), size, device))
 

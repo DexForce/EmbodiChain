@@ -561,7 +561,9 @@ class RigidObject(BatchEntity):
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
-            [self._entities[id].get_vertices() for id in ids],
+            np.array(
+                [self._entities[id].get_vertices() for id in ids],
+            ),
             dtype=torch.float32,
             device=self.device,
         )

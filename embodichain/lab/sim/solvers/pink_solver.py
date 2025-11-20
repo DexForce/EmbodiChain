@@ -352,7 +352,7 @@ class PinkSolver(BaseSolver):
         qpos = torch.tensor(
             self.pink_cfg.q[self.pink_to_dexsim_ordering],
             device=self.device,
-            dtype=torch.float,
+            dtype=torch.float32,
         )
 
         if return_all_solutions:

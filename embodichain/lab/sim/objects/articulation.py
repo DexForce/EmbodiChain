@@ -1381,7 +1381,7 @@ class Articulation(BatchEntity):
             qpos = torch.zeros(self.dof, device=self.device)
 
         # Ensure qpos is a tensor on the correct device
-        qpos = torch.as_tensor(qpos, dtype=torch.float, device=self.device)
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
 
         # Default root and end link names if not provided
         frame_names = self.pk_chain.get_frame_names()

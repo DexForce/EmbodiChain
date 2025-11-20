@@ -311,8 +311,10 @@ class BaseSolver(metaclass=ABCMeta):
             torch.Tensor: The homogeneous transformation matrix of the end link with TCP applied.
                         Shape is (4, 4) for single input, or (batch_size, 4, 4) for batch input.
         """
-        tcp_xpos = torch.as_tensor(self.tcp_xpos, device=self.device, dtype=torch.float)
-        qpos = torch.as_tensor(qpos, dtype=torch.float, device=self.device)
+        tcp_xpos = torch.as_tensor(
+            self.tcp_xpos, device=self.device, dtype=torch.float32
+        )
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
 
         # Compute forward kinematics
         result = self.pk_serial_chain.forward_kinematics(
@@ -368,12 +370,12 @@ class BaseSolver(metaclass=ABCMeta):
             qpos = torch.zeros(self.dof, device=self.device)
 
         # Ensure qpos is a tensor
-        qpos = torch.as_tensor(qpos, dtype=torch.float, device=self.device)
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
 
         # Ensure locations is a tensor if provided
         if locations is not None:
             locations = torch.as_tensor(
-                locations, dtype=torch.float, device=self.device
+                locations, dtype=torch.float32, device=self.device
             )
 
         # Compute the Jacobian using the kinematics chain

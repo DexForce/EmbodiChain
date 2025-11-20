@@ -70,8 +70,7 @@ run_pytest() {
 main() {
     echo "Starting scripts..."
 
-    # run_python_script "real2sim v3 env test" "tests/datasets/run_real2sim_offline_v3.py" || exit 1
-    run_python_script "pourwater_v3_offline_test" "tests/datasets/run_pourwater_env_offline.py" || exit 1
+    run_python_script "pourwater_offline_test" "tests/datasets/run_pourwater_env_offline.py" || exit 1
 
     echo "Starting pytest unit tests..."
 

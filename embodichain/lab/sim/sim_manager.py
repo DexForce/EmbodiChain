@@ -1383,6 +1383,10 @@ class SimulationManager:
         #     pass
 
         self._markers[name] = (marker_handles, cfg.arena_index)
+
+        if self.is_physics_manually_update:
+            self.update(step=1)
+
         return marker_handles
 
     def remove_marker(self, name: str) -> bool:

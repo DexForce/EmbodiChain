@@ -6,18 +6,15 @@
 
 import torch
 import numpy as np
+import open3d as o3d
 
 from typing import Union
 
-import open3d as o3d
 from dexsim.models import MeshObject
 from embodichain.utils import logger
 from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.gym.structs.object import Object
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
-from embodichain.lab.sim.end_effector.utility import inv_transform
-
-"""Length"""
+from embodichain.utils.utility import inv_transform
 
 
 def get_pc_svd_frame(pc: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
@@ -54,7 +51,6 @@ def apply_svd_transfer_pc(
         np.ndarray,
         torch.Tensor,
         o3d.cuda.pybind.geometry.TriangleMesh,
-        Object,
         MeshObject,
         RigidObject,
     ],
@@ -73,15 +69,13 @@ def apply_svd_transfer_pc(
     """
     if isinstance(geometry, (RigidObject, MeshObject)):
         verts = torch.as_tensor(geometry.get_vertices())
-    elif isinstance(geometry, Object):
-        verts = torch.as_tensor(geometry.mesh.vertices)
     elif isinstance(geometry, (np.ndarray, torch.Tensor)):
         verts = torch.as_tensor(geometry)
     elif isinstance(geometry, o3d.cuda.pybind.geometry.TriangleMesh):
         verts = torch.as_tensor(geometry.vertices)
     else:
         logger.log_error(
-            f"Unsupported geometry type: {type(geometry)}. Expected np.ndarray, torch.Tensor, Object, MeshObject, or RigidObject."
+            f"Unsupported geometry type: {type(geometry)}. Expected np.ndarray, torch.Tensor, MeshObject, or RigidObject."
         )
 
     if verts.ndim < 3:

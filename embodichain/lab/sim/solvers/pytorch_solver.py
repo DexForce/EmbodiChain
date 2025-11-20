@@ -98,7 +98,7 @@ def ensure_pose_shape(func):
 
     def wrapper(self, target_xpos, *args, **kwargs):
         target_xpos = torch.as_tensor(
-            target_xpos, device=self.device, dtype=torch.float
+            target_xpos, device=self.device, dtype=torch.float32
         )
         if target_xpos.dim() == 2:
             if target_xpos.shape != (4, 4):
@@ -428,7 +428,7 @@ class PytorchSolver(BaseSolver):
         """
         # Convert target_pose to tensor and ensure correct device and dtype
         target_xpos = torch.as_tensor(
-            target_xpos, device=self.device, dtype=torch.float
+            target_xpos, device=self.device, dtype=torch.float32
         )
         if num_samples is not None:
             self._num_samples = num_samples
@@ -454,7 +454,7 @@ class PytorchSolver(BaseSolver):
 
         # Transform target_xpos by TCP
         tcp_xpos = torch.as_tensor(
-            deepcopy(self.tcp_xpos), device=self.device, dtype=torch.float
+            deepcopy(self.tcp_xpos), device=self.device, dtype=torch.float32
         )
         target_xpos = target_xpos @ torch.inverse(tcp_xpos)
 
