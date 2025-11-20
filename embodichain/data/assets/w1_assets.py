@@ -92,23 +92,23 @@ class DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
-class DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND(EmbodiChainDataset):
-    """Dataset class for the anthropomorphic Dexforce W1 V021 with BrainCo_hand.
+class DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1(EmbodiChainDataset):
+    """Dataset class for the anthropomorphic Dexforce W1 V021 with BrainCo_hand_revo_1.
 
     Directory structure:
-        DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND/DexforceW1V021.urdf
+        DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1/DexforceW1V021.urdf
 
     Example usage:
         >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND/DexforceW1V021.urdf"))
+        >>> print(get_data_path("DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1/DexforceW1V021.urdf"))
     """
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/dexforce_w1/DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND.zip",
-            "8e398fb5a04ed0ceeb6a09a327bfa595",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/dexforce_w1/DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1.zip",
+            "b98a95f89c08098504cb5889268a0138",
         )
-        prefix = "DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND"
+        prefix = "DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)

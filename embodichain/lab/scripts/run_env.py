@@ -244,12 +244,6 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
-        "--render_backend",
-        help="The rendering backend to use for the simulation.",
-        default="egl",
-        type=str,
-    )
-    parser.add_argument(
         "--gpu_id",
         help="The GPU ID to use for the simulation.",
         default=0,

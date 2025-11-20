@@ -162,8 +162,8 @@ class BrainCoHandRevo1(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/eef_assets/BrainCoHandRevo1.zip",
-            "a703fc303baca79b099355ef1db725fc",
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/eef_assets/BrainCoHandRevo01.zip",
+            "0bd8f70ee6009b5e961484fa8c072afe",
         )
         prefix = "BrainCoHandRevo1"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

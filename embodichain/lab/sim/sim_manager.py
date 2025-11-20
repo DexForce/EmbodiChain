@@ -101,11 +101,6 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run the simulation in headless mode (no Window)."""
 
-    # TODO: We will add a more efficient hybrid rendering backend in the near future.
-    # Then the rendering cofnig should be refactored.
-    rendering_backend: Backend = Backend.VULKAN
-    """The rendering backend to use (to be deprecated) """
-
     enable_rt: bool = False
     """Whether to enable ray tracing rendering."""
 
@@ -267,7 +262,7 @@ class SimulationManager:
         world_config.win_config = win_config
         world_config.open_windows = not sim_config.headless
         self.is_window_opened = not sim_config.headless
-        world_config.backend = sim_config.rendering_backend
+        world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
         world_config.length_tolerance = sim_config.physics_config.length_tolerance

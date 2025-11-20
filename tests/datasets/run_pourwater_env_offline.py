@@ -66,7 +66,6 @@ class TestPourWaterv3OfflineRunEnv(unittest.TestCase, metaclass=UnittestMetaclas
                 "device": "cpu",  # TODO: test both cpu and cuda device
                 "headless": True,
                 "enable_rt": False,
-                "render_backend": "egl",
                 "gpu_id": 0,
                 "save_video": False,
                 "save_path": temp_dir,

@@ -200,23 +200,23 @@ class HandManager:
                 base_link_name = f"{prefix.lower()}_hand_base"
                 root_link_name = f"{prefix.lower()}_thumb_dist"
                 joint_names = [
-                    f"{prefix}_THUMB_MCP1",
-                    f"{prefix}_THUMB_MCP2",
-                    f"{prefix}_LITTLE_MCP",
-                    f"{prefix}_MIDDLE_MCP",
-                    f"{prefix}_RING_MCP",
-                    f"{prefix}_INDEX_MCP",
+                    f"{prefix}_HAND_THUMB1",  # Left thumb flexion
+                    f"{prefix}_HAND_THUMB2",  # Left thumb abduction/adduction
+                    f"{prefix}_HAND_INDEX",  # Left index finger flexion
+                    f"{prefix}_HAND_MIDDLE",  # Left middle finger flexion
+                    f"{prefix}_HAND_RING",  # Left ring finger flexion
+                    f"{prefix}_HAND_PINKY",  # Left pinky finger flexion
                 ]
             else:
                 base_link_name = f"{prefix.lower()}_hand_base"
                 root_link_name = f"{prefix.lower()}_thumb_dist"
                 joint_names = [
-                    f"{prefix}_THUMB_MCP1",
-                    f"{prefix}_THUMB_MCP2",
-                    f"{prefix}_LITTLE_MCP",
-                    f"{prefix}_MIDDLE_MCP",
-                    f"{prefix}_RING_MCP",
-                    f"{prefix}_INDEX_MCP",
+                    f"{prefix}_HAND_THUMB1",  # Right thumb flexion
+                    f"{prefix}_HAND_THUMB2",  # Right thumb abduction/adduction
+                    f"{prefix}_HAND_INDEX",  # Right index finger flexion
+                    f"{prefix}_HAND_MIDDLE",  # Right middle finger flexion
+                    f"{prefix}_HAND_RING",  # Right ring finger flexion
+                    f"{prefix}_HAND_PINKY",  # Right pinky finger flexion
                 ]
         elif brand == DexforceW1HandBrand.DH_PGC_GRIPPER:
             base_link_name = f"{prefix.lower()}_base_link_1"

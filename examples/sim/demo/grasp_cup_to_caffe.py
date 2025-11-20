@@ -266,12 +266,12 @@ def create_trajectory(
     """
     right_arm_ids = robot.get_joint_ids("right_arm")
     hand_open_qpos = torch.tensor(
-        [1.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 1.5, 0.0, 0.0, 0.0, 0.0],
         dtype=torch.float32,
         device=sim.device,
     )
     hand_close_qpos = torch.tensor(
-        [1.5, 0.1, 0.2, 0.3, 0.3, 0.3],
+        [0.1, 1.5, 0.3, 0.2, 0.3, 0.3],
         dtype=torch.float32,
         device=sim.device,
     )

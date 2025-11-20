@@ -55,7 +55,7 @@ class EmptyRoom(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/scene_assets/empty_room.zip",
-            "3281ab5d803546835fc4ece01c22d8f7",
+            "0862ce220869bd1cbd490beafc424aab",
         )
         prefix = "EmptyRoom"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

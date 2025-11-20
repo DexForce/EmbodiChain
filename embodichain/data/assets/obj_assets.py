@@ -51,7 +51,7 @@ class PlasticBin(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/plastic_bin.zip",
-            "6ae6eb88ef9540e03e45e8f774a84689",
+            "21e00083689a4a3c4e4ae3fd89c61e55",
         )
         prefix = "PlasticBin"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
@@ -63,7 +63,7 @@ class Chair(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/chair.zip",
-            "a86285f6a2a520b0b61f34d1958e6757",
+            "df3d7d1a05731d45fb2c678a40a39cd4",
         )
         prefix = "Chair"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

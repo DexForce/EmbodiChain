@@ -159,10 +159,10 @@ class ScoopIce(EmbodiedEnv):
         all_qpos_t = torch.tensor(all_qpos, dtype=torch.float32, device=self.device)
 
         # to initial qpos
-        left_open_qpos = np.array([1.5, 0.06, 0.2, 0.2, 0.2, 0.2])
-        left_close_qpos = np.array([1.5, 0.13, 0.5, 0.5, 0.5, 0.5])
-        right_open_qpos = np.array([1.5, 0.3, 0.3, 0.3, 0.3, 0.3])
-        right_close_qpos = np.array([1.5, 0.6, 0.5, 0.6, 0.7, 0.7])
+        left_open_qpos = np.array([0.06, 1.5, 0.2, 0.2, 0.2, 0.2])
+        left_close_qpos = np.array([0.13, 1.5, 0.5, 0.5, 0.5, 0.5])
+        right_open_qpos = np.array([0.3, 1.5, 0.3, 0.3, 0.3, 0.3])
+        right_close_qpos = np.array([0.6, 1.5, 0.7, 0.5, 0.7, 0.6])
 
         all_qpos_t[:, :, 14:20] = torch.tensor(
             left_close_qpos, dtype=torch.float32, device=self.device
