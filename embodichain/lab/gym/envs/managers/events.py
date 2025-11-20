@@ -475,9 +475,9 @@ def resolve_uids(env: EmbodiedEnv, entity_uids: Union[List[str], str]) -> List[s
                 + env.sim.get_articulation_uid_list()
             )
         elif entity_uids == "all_robots":
-            entity_uids = env.sim.get_robot_v2_uid_list()
+            entity_uids = env.sim.get_robot_uid_list()
         elif entity_uids == "all_sensors":
-            entity_uids = env.sim.get_sensor_v2_uid_list()
+            entity_uids = env.sim.get_sensor_uid_list()
         else:
             # logger.log_warning(f"Entity uids {entity_uids} not supported in ['all_objects', 'all_robots', 'all_sensors'], wrapping it as a list..")
             entity_uids = [entity_uids]

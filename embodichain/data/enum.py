@@ -6,12 +6,14 @@
 
 import torch
 import numpy as np
+
 from typing import List, Tuple, Union, Dict
 from enum import Enum, IntEnum
 from itertools import product
-from embodichain.utils.utility import get_right_name
 from aenum import Enum as AEnum
 from aenum import NoAlias
+
+from embodichain.utils.utility import get_right_name
 
 
 class ModalInput:

@@ -152,7 +152,7 @@ def create_robot(sim: SimulationManager):
             0.0,
         ],
     )
-    return sim.add_robot_v2(cfg=cfg)
+    return sim.add_robot(cfg=cfg)
 
 
 def create_soft_cow(sim: SimulationManager) -> SoftObject:

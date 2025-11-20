@@ -39,7 +39,7 @@ cfg = build_dexforce_w1_cfg(
     hand_versions=hand_versions,
 )
 
-robot = sim.add_robot_v2(cfg=cfg)
+robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
 ```
 

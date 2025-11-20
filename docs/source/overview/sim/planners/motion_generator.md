@@ -65,7 +65,7 @@ robot_cfg = RobotCfg(
         damping={"Joint[1-6]": 1e3},
     ),
 )
-robot = sim.add_robot_v2(cfg=robot_cfg)
+robot = sim.add_robot(cfg=robot_cfg)
 
 motion_gen = MotionGenerator(
     robot=robot,

@@ -70,7 +70,7 @@ class BaseTestMotionGenerator(object):
             },
         }
 
-        cls.robot: Robot = cls.robot_sim.add_robot_v2(
+        cls.robot: Robot = cls.robot_sim.add_robot(
             cfg=CobotMagicCfg.from_dict(cfg_dict)
         )
 

@@ -100,7 +100,7 @@ def main():
     )
 
     # Add camera to simulation
-    camera = sim.add_sensor_v2(sensor_cfg=camera_cfg)
+    camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
     # Wait for initialization
     time.sleep(0.2)

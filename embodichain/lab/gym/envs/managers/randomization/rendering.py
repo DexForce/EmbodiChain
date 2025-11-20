@@ -158,7 +158,7 @@ def randomize_camera_intrinsics(
         cy_range (Optional[tuple[float, float]]): The range for the principal point y randomization.
     """
 
-    camera: Union[Camera, StereoCamera] = env.sim.get_sensor_v2(entity_cfg.uid)
+    camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     num_instance = len(env_ids)
 
     # Get current intrinsics as baseline

@@ -87,7 +87,7 @@ def main():
             damping={"Joint[1-6]": 1e3},
         ),
     )
-    robot = sim.add_robot_v2(cfg=robot_cfg)
+    robot = sim.add_robot(cfg=robot_cfg)
 
     # Set initial joint positions
     initial_qpos = torch.tensor(

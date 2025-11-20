@@ -58,7 +58,7 @@ class RandomReachEnv(BaseEnv):
     def _setup_robot(self, **kwargs):
         file_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
 
-        robot: Robot = self.sim.add_robot_v2(
+        robot: Robot = self.sim.add_robot(
             cfg=RobotCfg(
                 uid="UR10",
                 fpath=file_path,

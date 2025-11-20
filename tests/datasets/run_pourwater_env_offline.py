@@ -38,7 +38,7 @@ class TestPourWaterv3OfflineRunEnvv2(unittest.TestCase, metaclass=UnittestMetacl
         pass
 
     def test_offline_run_env(self):
-        # TODO: notice that run_env_v2 didn't decompose
+        # TODO: notice that run_env didn't decompose
         from embodichain.lab.scripts.run_env import main
         import os
 
@@ -57,7 +57,7 @@ class TestPourWaterv3OfflineRunEnvv2(unittest.TestCase, metaclass=UnittestMetacl
             )
             input_dict = {
                 # "task_type": "pour_water_5e-2range",
-                # "robot_name": "CobotMagic", # NOTE: currently commented in run_env_v2.py
+                # "robot_name": "CobotMagic", # NOTE: currently commented in run_env.py
                 "num_envs": 1,  # TODO: change it to >1 as v3 supports it. but now CobotMagic use cpu-OPWSolver. Wait @Chenjian for gpu version.
                 "device": "cpu",  # TODO: test both cpu and cuda device
                 "headless": True,

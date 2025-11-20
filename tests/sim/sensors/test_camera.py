@@ -38,7 +38,7 @@ class CameraTest:
             "enable_position": True,
         }
         cfg = SensorCfg.from_dict(cfg_dict)
-        self.camera: Camera = self.sim.add_sensor_v2(cfg)
+        self.camera: Camera = self.sim.add_sensor(cfg)
 
     def test_get_data(self):
 
@@ -103,7 +103,7 @@ class CameraTest:
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
-        self.camera: Camera = self.sim.add_sensor_v2(
+        self.camera: Camera = self.sim.add_sensor(
             sensor_cfg=CameraCfg(
                 uid="test", extrinsics=CameraCfg.ExtrinsicsCfg(parent="handle_xpos")
             )

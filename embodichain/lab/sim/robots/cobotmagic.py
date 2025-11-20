@@ -201,7 +201,7 @@ if __name__ == "__main__":
     }
 
     cfg = CobotMagicCfg.from_dict(config)
-    robot = sim.add_robot_v2(cfg=cfg)
+    robot = sim.add_robot(cfg=cfg)
 
     sim.init_gpu_physics()
     print("CobotMagic added to the simulation.")

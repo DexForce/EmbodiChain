@@ -603,17 +603,12 @@ class ActionBank:
         def initialize_with_current_qpos(
             action_list, executor, executor_init_info, env
         ):
-            if hasattr(env, "agent"):  # v2 TODO: delete
-                current_qpos = env.agent.get_current_qpos(executor)
-            elif hasattr(env, "robot"):  # v3
-                # TODO: Hard to get current qpos for multi-agent env
-                current_qpos = env.robot.get_qpos()
-                joint_ids = env.robot.get_joint_ids(
-                    name=get_control_part(env, executor)
-                )
-                if current_qpos.ndim == 2 and current_qpos.shape[0] == 1:
-                    current_qpos = current_qpos[0]
-                current_qpos = current_qpos[joint_ids].cpu()
+            # TODO: Hard to get current qpos for multi-agent env
+            current_qpos = env.robot.get_qpos()
+            joint_ids = env.robot.get_joint_ids(name=get_control_part(env, executor))
+            if current_qpos.ndim == 2 and current_qpos.shape[0] == 1:
+                current_qpos = current_qpos[0]
+            current_qpos = current_qpos[joint_ids].cpu()
 
             executor_qpos_dim = action_list[executor].shape[0]
 
@@ -985,11 +980,16 @@ def get_xpos_name(affordance_name: str) -> str:
 
 
 def get_control_part(env, agent_uid):
-    return _data_key_to_control_part(
-        robot=env.robot,
-        control_parts=env.metadata["dataset"]["robot_meta"].get("control_parts", []),
-        data_key=agent_uid,
-    )
+    control_parts = env.metadata["dataset"]["robot_meta"].get("control_parts", [])
+
+    if agent_uid in control_parts:
+        return agent_uid
+    else:
+        return _data_key_to_control_part(
+            robot=env.robot,
+            control_parts=control_parts,
+            data_key=agent_uid,
+        )
 
 
 def generate_trajectory_qpos(
@@ -1007,114 +1007,62 @@ def generate_trajectory_qpos(
     vis: bool = False,
 ) -> bool:
     affordance_xpos_name = get_xpos_name(affordance_name)
-    if hasattr(env, "robot"):
-        current_qpos = torch.as_tensor(trajectory[trajectory_id])[trajectory_index][
-            None, gather_index
-        ]  # TODO: only for 1 env
-        affordance_xpos = env.robot.compute_fk(
-            torch.as_tensor(current_qpos),
+
+    current_qpos = torch.as_tensor(trajectory[trajectory_id])[trajectory_index][
+        None, gather_index
+    ]  # TODO: only for 1 env
+    affordance_xpos = env.robot.compute_fk(
+        torch.as_tensor(current_qpos),
+        get_control_part(env, agent_uid),
+        to_matrix=True,
+    )
+    if slaver != "":
+        assert canonical_trajectory is not None
+        assert canonical_trajectory_index is not None
+        assert (
+            len(canonical_pose) == 4
+        ), f"canonical_pose should be a 4x4 matrix, but got {len(canonical_pose)} elements."
+        canonical_pose = torch.as_tensor(
+            canonical_pose,
+            device=affordance_xpos.device,
+            dtype=affordance_xpos.dtype,
+        ).reshape(1, 4, 4)
+        can_affordance_xpos = env.robot.compute_fk(
+            torch.as_tensor(canonical_trajectory)[canonical_trajectory_index][
+                gather_index
+            ],
             get_control_part(env, agent_uid),
             to_matrix=True,
         )
-        if slaver != "":
-            assert canonical_trajectory is not None
-            assert canonical_trajectory_index is not None
-            assert (
-                len(canonical_pose) == 4
-            ), f"canonical_pose should be a 4x4 matrix, but got {len(canonical_pose)} elements."
-            canonical_pose = torch.as_tensor(
-                canonical_pose,
-                device=affordance_xpos.device,
-                dtype=affordance_xpos.dtype,
-            ).reshape(1, 4, 4)
-            can_affordance_xpos = env.robot.compute_fk(
-                torch.as_tensor(canonical_trajectory)[canonical_trajectory_index][
-                    gather_index
-                ],
-                get_control_part(env, agent_uid),
-                to_matrix=True,
-            )
-            can_obj_xpos = canonical_pose
-            obj_xpos = env.sim.get_asset(slaver).get_local_pose(to_matrix=True)
-            affordance_xpos = torch.bmm(
-                obj_xpos, torch.bmm(pose_inv(can_obj_xpos), can_affordance_xpos)
-            )
-            control_part = get_control_part(env, agent_uid)
-            qpos_seed = env.robot.get_qpos()[
-                :, env.robot.get_joint_ids(name=control_part)
-            ]
-            ret, current_qpos = env.robot.compute_ik(
-                affordance_xpos, qpos_seed, control_part
-            )
-            ret = ret.all().item()
-            if not ret:
-                log_warning(
-                    f"IK failed for slaver {slaver} with xpos {affordance_xpos}. Using the previous qpos instead."
-                )
-                return False
-
-        if vis:
-            env.sim.draw_marker(
-                cfg=MarkerCfg(
-                    marker_type="axis",
-                    axis_xpos=affordance_xpos,
-                    axis_size=0.002,
-                    axis_len=0.005,
-                )
-            )
-        # TODO: only support 1 env numpy now
-        current_qpos = current_qpos.squeeze(0).cpu().numpy()
-        affordance_xpos = affordance_xpos.squeeze(0).cpu().numpy()
-    else:
-        # FIXME: v2, to be removed
-        current_qpos = np.array(trajectory[trajectory_id])[trajectory_index][
-            gather_index
-        ]
-        affordance_xpos = env.get_arm_fk(
-            current_qpos,
-            agent_uid,
-            is_world_coordinates=True,
+        can_obj_xpos = canonical_pose
+        obj_xpos = env.sim.get_asset(slaver).get_local_pose(to_matrix=True)
+        affordance_xpos = torch.bmm(
+            obj_xpos, torch.bmm(pose_inv(can_obj_xpos), can_affordance_xpos)
         )
-        if slaver != "":
-            assert canonical_trajectory is not None
-            assert canonical_trajectory_index is not None
-            assert (
-                len(canonical_pose) == 4
-            ), f"canonical_pose should be a 4x4 matrix, but got {len(canonical_pose)} elements."
-            canonical_pose = np.array(canonical_pose).reshape(4, 4)
-            can_affordance_xpos = env.get_arm_fk(
-                np.array(canonical_trajectory)[canonical_trajectory_index][
-                    gather_index
-                ],
-                agent_uid,
-                is_world_coordinates=True,
+        control_part = get_control_part(env, agent_uid)
+        qpos_seed = env.robot.get_qpos()[:, env.robot.get_joint_ids(name=control_part)]
+        ret, current_qpos = env.robot.compute_ik(
+            affordance_xpos, qpos_seed, control_part
+        )
+        ret = ret.all().item()
+        if not ret:
+            log_warning(
+                f"IK failed for slaver {slaver} with xpos {affordance_xpos}. Using the previous qpos instead."
             )
-            can_obj_xpos = canonical_pose
-            obj_xpos = env.dynamic_object_dict[slaver].get_world_pose()
-            affordance_xpos = (
-                obj_xpos @ np.linalg.inv(can_obj_xpos) @ can_affordance_xpos
-            )
-            ret, current_qpos = env.agent.get_ik(
-                affordance_xpos,
-                env.agent.get_current_qpos(name=agent_uid),
-                uid=agent_uid,
-                is_world_coordinates=True,
-            )
-            if not ret:
-                log_warning(
-                    f"IK failed for slaver {slaver} with xpos {affordance_xpos}. Using the previous qpos instead."
-                )
-                return False
+            return False
 
-        if vis:
-            env.scene.draw_marker(
-                cfg=MarkerCfg(
-                    marker_type="axis",
-                    axis_xpos=affordance_xpos,
-                    axis_size=0.002,
-                    axis_len=0.005,
-                )
+    if vis:
+        env.sim.draw_marker(
+            cfg=MarkerCfg(
+                marker_type="axis",
+                axis_xpos=affordance_xpos,
+                axis_size=0.002,
+                axis_len=0.005,
             )
+        )
+    # TODO: only support 1 env numpy now
+    current_qpos = current_qpos.squeeze(0).cpu().numpy()
+    affordance_xpos = affordance_xpos.squeeze(0).cpu().numpy()
 
     env.affordance_datas[affordance_name] = current_qpos
     env.affordance_datas[affordance_xpos_name] = affordance_xpos
@@ -1303,135 +1251,76 @@ class GeneralActionBank(ActionBank):
 
         # Retrieve the start and end positions
         start_qpos = env.affordance_datas[keypose_names[0]]
-        if hasattr(env, "robot"):
-            control_part = get_control_part(env, agent_uid)
-            start_qpos = torch.as_tensor(env.affordance_datas[keypose_names[0]])[None]
-            start_xpos = torch.bmm(
-                env.robot.get_control_part_base_pose(control_part, to_matrix=True),
-                env.robot.compute_fk(start_qpos, control_part, to_matrix=True),
+
+        control_part = get_control_part(env, agent_uid)
+        start_qpos = torch.as_tensor(env.affordance_datas[keypose_names[0]])[None]
+        start_xpos = torch.bmm(
+            env.robot.get_control_part_base_pose(control_part, to_matrix=True),
+            env.robot.compute_fk(start_qpos, control_part, to_matrix=True),
+        )
+
+        end_qpos = torch.as_tensor(env.affordance_datas[keypose_names[-1]])
+        end_xpos = torch.bmm(
+            env.robot.get_control_part_base_pose(control_part, to_matrix=True),
+            env.robot.compute_fk(end_qpos, control_part, to_matrix=True),
+        )
+
+        # TODO: only 1 env
+        start_qpos = start_qpos.squeeze(0).cpu().numpy()
+        start_xpos = start_xpos.squeeze(0).cpu().numpy()
+        end_qpos = end_qpos.squeeze(0).cpu().numpy()
+        end_xpos = end_xpos.squeeze(0).cpu().numpy()
+
+        if vis:
+            env.sim.draw_marker(
+                cfg=MarkerCfg(
+                    marker_type="axis",
+                    axis_xpos=start_xpos,
+                    axis_size=0.002,
+                    axis_len=0.005,
+                )
             )
 
-            end_qpos = torch.as_tensor(env.affordance_datas[keypose_names[-1]])
-            end_xpos = torch.bmm(
-                env.robot.get_control_part_base_pose(control_part, to_matrix=True),
-                env.robot.compute_fk(end_qpos, control_part, to_matrix=True),
+            env.sim.draw_marker(
+                cfg=MarkerCfg(
+                    marker_type="axis",
+                    axis_xpos=end_xpos,
+                    axis_size=0.002,
+                    axis_len=0.005,
+                )
             )
 
-            # TODO: only 1 env
-            start_qpos = start_qpos.squeeze(0).cpu().numpy()
-            start_xpos = start_xpos.squeeze(0).cpu().numpy()
-            end_qpos = end_qpos.squeeze(0).cpu().numpy()
-            end_xpos = end_xpos.squeeze(0).cpu().numpy()
+        filtered_keyposes = [start_qpos, end_qpos]
+        if "eef" in agent_uid:
+            filtered_keyposes = [start_qpos]
 
-            if vis:
-                env.sim.draw_marker(
-                    cfg=MarkerCfg(
-                        marker_type="axis",
-                        axis_xpos=start_xpos,
-                        axis_size=0.002,
-                        axis_len=0.005,
-                    )
-                )
-
-                env.sim.draw_marker(
-                    cfg=MarkerCfg(
-                        marker_type="axis",
-                        axis_xpos=end_xpos,
-                        axis_size=0.002,
-                        axis_len=0.005,
-                    )
-                )
-
-            filtered_keyposes = [start_qpos, end_qpos]
-            if "eef" in agent_uid:
-                filtered_keyposes = [start_qpos]
-
-            if len(filtered_keyposes) == 1 and len(ref_poses) == 0:
-                # 只有一个点，返回静止轨迹
-                ret = np.array([filtered_keyposes[0]] * duration)
-            else:
-                # 生成轨迹
-                if len(ref_poses) == 0:
-                    ret, _ = ArmAction.create_discrete_trajectory(
-                        agent=env.robot,
-                        uid=get_control_part(env, agent_uid),
-                        qpos_list=filtered_keyposes,
-                        sample_num=duration,
-                        qpos_seed=filtered_keyposes[0],
-                        is_use_current_qpos=False,
-                        **getattr(env, "planning_config", {}),
-                    )
-                else:
-                    ret, _ = ArmAction.create_discrete_trajectory(
-                        agent=env.robot,
-                        uid=get_control_part(env, agent_uid),
-                        xpos_list=[start_xpos] + ref_poses + [end_xpos],
-                        sample_num=duration,
-                        is_use_current_qpos=False,
-                        **getattr(env, "planning_config", {}),
-                    )
-            if isinstance(ret, list):
-                print(ret)
-            return ret.T
+        if len(filtered_keyposes) == 1 and len(ref_poses) == 0:
+            # 只有一个点，返回静止轨迹
+            ret = np.array([filtered_keyposes[0]] * duration)
         else:
-            # FIXME: v2, to be removed
-            start_xpos = env.agent.get_base_xpos(agent_uid) @ env.agent.get_fk(
-                start_qpos, uid=agent_uid
-            )
-            end_qpos = env.affordance_datas[keypose_names[-1]]
-            end_xpos = env.agent.get_base_xpos(agent_uid) @ env.agent.get_fk(
-                end_qpos, uid=agent_uid
-            )
-            if vis:
-                env.scene.draw_marker(
-                    cfg=MarkerCfg(
-                        marker_type="axis",
-                        axis_xpos=start_xpos,
-                        axis_size=0.002,
-                        axis_len=0.005,
-                    )
+            # 生成轨迹
+            if len(ref_poses) == 0:
+                ret, _ = ArmAction.create_discrete_trajectory(
+                    agent=env.robot,
+                    uid=get_control_part(env, agent_uid),
+                    qpos_list=filtered_keyposes,
+                    sample_num=duration,
+                    qpos_seed=filtered_keyposes[0],
+                    is_use_current_qpos=False,
+                    **getattr(env, "planning_config", {}),
                 )
-
-                env.scene.draw_marker(
-                    cfg=MarkerCfg(
-                        marker_type="axis",
-                        axis_xpos=end_xpos,
-                        axis_size=0.002,
-                        axis_len=0.005,
-                    )
-                )
-
-            filtered_keyposes = [start_qpos, end_qpos]
-            if "eef" in agent_uid:
-                filtered_keyposes = [start_qpos]
-
-            if len(filtered_keyposes) == 1 and len(ref_poses) == 0:
-                # 只有一个点，返回静止轨迹
-                ret = np.array([filtered_keyposes[0]] * duration)
             else:
-                # 生成轨迹
-                if len(ref_poses) == 0:
-                    ret, _ = ArmAction.create_discrete_trajectory(
-                        agent=env.agent,
-                        uid=agent_uid,
-                        qpos_list=filtered_keyposes,
-                        sample_num=duration,
-                        qpos_seed=filtered_keyposes[0],
-                        is_use_current_qpos=False,
-                        **getattr(env, "planning_config", {}),
-                    )
-                else:
-                    ret, _ = ArmAction.create_discrete_trajectory(
-                        agent=env.agent,
-                        uid=agent_uid,
-                        xpos_list=[start_xpos] + ref_poses + [end_xpos],
-                        sample_num=duration,
-                        is_use_current_qpos=False,
-                        **getattr(env, "planning_config", {}),
-                    )
-            if isinstance(ret, list):
-                print(ret)
-            return ret.T
+                ret, _ = ArmAction.create_discrete_trajectory(
+                    agent=env.robot,
+                    uid=get_control_part(env, agent_uid),
+                    xpos_list=[start_xpos] + ref_poses + [end_xpos],
+                    sample_num=duration,
+                    is_use_current_qpos=False,
+                    **getattr(env, "planning_config", {}),
+                )
+        if isinstance(ret, list):
+            print(ret)
+        return ret.T
 
     @staticmethod
     @tag_edge

@@ -101,7 +101,7 @@ def compute_semantic_mask(
         A tensor of shape (num_envs, height, width) representing the semantic mask.
     """
 
-    sensor: Union[Camera, StereoCamera] = env.sim.get_sensor_v2(entity_cfg.uid)
+    sensor: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     if sensor.cfg.enable_mask is False:
         logger.log_error(
             f"Sensor '{entity_cfg.uid}' does not have mask enabled. Please enable the mask in the sensor configuration."
@@ -521,9 +521,7 @@ class compute_exteroception(Functor):
         exteroception = {}
         descriptor = resolve_dict(self._env, descriptor)
         for sensor_uid, sources in descriptor.items():
-            sensor: Union[Camera, StereoCamera] = self._env.sim.get_sensor_v2(
-                sensor_uid
-            )
+            sensor: Union[Camera, StereoCamera] = self._env.sim.get_sensor(sensor_uid)
             if sensor is None:
                 logger.log_error(
                     f"Sensor with UID '{sensor_uid}' not found in the simulation."

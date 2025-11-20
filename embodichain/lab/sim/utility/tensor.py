@@ -6,7 +6,10 @@
 
 import torch
 import numpy as np
+
 from typing import Union, Optional
+
+from embodichain.lab.sim.types import Array, Device
 
 
 def to_tensor(array: Array, device: Optional[Device] = None):

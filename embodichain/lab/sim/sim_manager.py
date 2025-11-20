@@ -9,7 +9,6 @@ import sys
 import dexsim
 import torch
 import numpy as np
-import open3d as o3d
 import warp as wp
 
 from tqdm import tqdm
@@ -38,20 +37,16 @@ from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType
 from dexsim.render import GizmoController
-from dexsim.sensor import Sensor, MonocularCam, BinocularCam
+
 from embodichain.lab.sim.objects import (
     RigidObject,
     RigidObjectGroup,
     SoftObject,
     Articulation,
+    Robot,
     Light,
 )
-
-# TODO: temporarily named `RobotV2` to avoid conflict with the old `Robot` class.
-from embodichain.lab.sim.objects.robot import Robot as RobotV2
 from embodichain.lab.sim.objects.gizmo import Gizmo
-from embodichain.lab.sim.robots import Robot, Manipulator
-from embodichain.lab.sim.end_effector import EndEffector, Suctor, Gripper
 from embodichain.lab.sim.sensors import (
     SensorCfg,
     BaseSensor,
@@ -71,8 +66,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.data import SimResources
-from embodichain.utils import configclass
-from embodichain.utils import logger
+from embodichain.utils import configclass, logger
 
 __all__ = [
     "SimulationManager",
@@ -138,10 +132,6 @@ class SimulationManagerCfg:
     gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
     """The GPU memory configuration parameters."""
 
-    # TODO: To be removed after refactoring.
-    # default time step is for robot.
-    time_step: float = 0.05
-
 
 class SimulationManager:
     r"""Global Embodied AI simulation manager.
@@ -168,23 +158,7 @@ class SimulationManager:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
     """
 
-    # TODO: remove specific robot type like InspireHand, UnitreeH1, etc.
-    supported_robot_types = {
-        "Manipulator": Manipulator,
-    }
-
-    # TODO: deprecate sensor types.
-    supported_sensor_types = {
-        "MonocularCam": MonocularCam,
-        "BinocularCam": BinocularCam,
-    }
-
     SUPPORTED_SENSOR_TYPES = {"Camera": Camera, "StereoCamera": StereoCamera}
-
-    supported_end_effector_types = {
-        "Suctor": Suctor,
-        "Gripper": Gripper,
-    }
 
     def __init__(
         self, sim_config: SimulationManagerCfg = SimulationManagerCfg()
@@ -233,7 +207,6 @@ class SimulationManager:
         self.enable_physics(True)
 
         self._env = self._world.get_env()
-        self._env.clean()
 
         self._default_resources = SimResources()
 
@@ -246,28 +219,19 @@ class SimulationManager:
         # arena is used as a standalone space for robots to simulate in.
         self._arenas: List[dexsim.environment.Arena] = []
 
-        # manager critical simulated assets in the world
-        self._robots: Dict[str, Robot] = dict()
-        self._end_effectors: Dict[str, EndEffector] = dict()
         # gizmo management
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
-        self._sensors: Dict[str, Sensor] = dict()
-
-        # TODO: fixed and dynamic actor will be deprecated.
-        self._fixed_actors: Dict[str, Tuple[MeshObject, int]] = dict()
-        self._dynamic_actors: Dict[str, Tuple[MeshObject, int]] = dict()
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._soft_objects: Dict[str, SoftObject] = dict()
         self._articulations: Dict[str, Articulation] = dict()
-        self._robots_v2: Dict[str, RobotV2] = dict()
+        self._robots: Dict[str, Robot] = dict()
 
-        self._sensors_v2: Dict[str, BaseSensor] = dict()
+        self._sensors: Dict[str, BaseSensor] = dict()
         self._lights: Dict[str, _Light] = dict()
 
         # material placeholder.
-        self._materials: Dict[str, Material] = dict()
         self._visual_materials: Dict[str, VisualMaterial] = dict()
 
         # Global texture cache for material creation or randomization.
@@ -276,8 +240,6 @@ class SimulationManager:
 
         # TODO: maybe need to add some interface to interact with background and layouts.
         # background and layouts are 3d assets that can has only render body for visualization.
-
-        # TODO: add lighting setter. (point light, etc.)
 
         self._create_default_plane()
         self.set_default_background()
@@ -368,8 +330,8 @@ class SimulationManager:
         """
         uid_list = ["default_plane"]
         uid_list.extend(list(self._lights.keys()))
-        uid_list.extend(list(self._sensors_v2.keys()))
-        uid_list.extend(list(self._robots_v2.keys()))
+        uid_list.extend(list(self._sensors.keys()))
+        uid_list.extend(list(self._robots.keys()))
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._articulations.keys()))
@@ -418,7 +380,7 @@ class SimulationManager:
         # init articulation.
         articulation_num = (
             0
-            if len(self._articulations) == 0 and len(self._robots_v2) == 0
+            if len(self._articulations) == 0 and len(self._robots) == 0
             else len(self._ps.gpu_articulation_indices)
         )
         max_link_count = self._ps.gpu_get_articulation_max_link_count()
@@ -429,7 +391,7 @@ class SimulationManager:
         )
         for art in self._articulations.values():
             art.reallocate_body_data()
-        for robot in self._robots_v2.values():
+        for robot in self._robots.values():
             robot.reallocate_body_data()
 
         # We do not perform reallocate body data for robot.
@@ -484,7 +446,7 @@ class SimulationManager:
             )
             return
 
-        if self.is_window_opened or self._sensors_v2:
+        if self.is_window_opened or self._sensors:
             if len(self._rigid_body_pose) > 0:
                 self._ps.gpu_fetch_rigid_body_data(
                     data=CudaArray(self._rigid_body_pose),
@@ -667,7 +629,7 @@ class SimulationManager:
 
     def get_asset(
         self, uid: str
-    ) -> Optional[Union[Light, BaseSensor, RobotV2, RigidObject, Articulation]]:
+    ) -> Optional[Union[Light, BaseSensor, Robot, RigidObject, Articulation]]:
         """Get an asset by its UID.
 
         The asset can be a light, sensor, robot, rigid object or articulation.
@@ -676,14 +638,14 @@ class SimulationManager:
             uid (str): The UID of the asset.
 
         Returns:
-            Light | BaseSensor | RobotV2 | RigidObject | Articulation | None: The asset instance if found, otherwise None.
+            Light | BaseSensor | Robot | RigidObject | Articulation | None: The asset instance if found, otherwise None.
         """
         if uid in self._lights:
             return self._lights[uid]
-        if uid in self._sensors_v2:
-            return self._sensors_v2[uid]
-        if uid in self._robots_v2:
-            return self._robots_v2[uid]
+        if uid in self._sensors:
+            return self._sensors[uid]
+        if uid in self._robots:
+            return self._robots[uid]
         if uid in self._rigid_objects:
             return self._rigid_objects[uid]
         if uid in self._rigid_object_groups:
@@ -961,14 +923,14 @@ class SimulationManager:
         """
         return list(self._articulations.keys())
 
-    def add_robot_v2(self, cfg: RobotCfg) -> Optional[RobotV2]:
+    def add_robot(self, cfg: RobotCfg) -> Optional[Robot]:
         """Add a Robot to the scene.
 
         Args:
             cfg (RobotCfg): Configuration for the robot.
 
         Returns:
-            Optional[RobotV2]: The added robot instance handle, or None if failed.
+            Optional[Robot]: The added robot instance handle, or None if failed.
         """
 
         uid = cfg.uid
@@ -984,9 +946,9 @@ class SimulationManager:
         if uid is None:
             uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
             cfg.uid = uid
-        if uid in self._robots_v2:
+        if uid in self._robots:
             logger.log_error(f"Robot {uid} already exists.")
-            return self._robots_v2[uid]
+            return self._robots[uid]
 
         env_list = [self._env] if len(self._arenas) == 0 else self._arenas
         obj_list = []
@@ -995,90 +957,34 @@ class SimulationManager:
             art = env.load_urdf(cfg.fpath)
             obj_list.append(art)
 
-        robot = RobotV2(cfg=cfg, entities=obj_list, device=self.device)
+        robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
 
-        self._robots_v2[uid] = robot
+        self._robots[uid] = robot
 
         return robot
 
-    def get_robot_v2(self, uid: str) -> Optional[RobotV2]:
+    def get_robot(self, uid: str) -> Optional[Robot]:
         """Get a Robot by its unique ID.
 
         Args:
             uid (str): The unique ID of the robot.
 
         Returns:
-            Optional[RobotV2]: The robot instance if found, otherwise None.
+            Optional[Robot]: The robot instance if found, otherwise None.
         """
-        if uid not in self._robots_v2:
+        if uid not in self._robots:
             logger.log_warning(f"Robot {uid} not found.")
             return None
-        return self._robots_v2[uid]
+        return self._robots[uid]
 
-    def get_robot_v2_uid_list(self) -> List[str]:
+    def get_robot_uid_list(self) -> List[str]:
         """
         Retrieves a list of unique identifiers (UIDs) for all robots in the V2 system.
 
         Returns:
             list: A list containing the UIDs of the robots.
         """
-        return list(self._robots_v2.keys())
-
-    def add_robot(self, robot_type: str, robot_uid: str = None, **kwargs) -> Robot:
-        """General interface to add a robot to the scene and returns a handle.
-
-        Args:
-            robot_type (str): type of robot
-            robot_uid (str, optional): unique id of robot, if None, use default id. Defaults to None.
-            **kwargs: other parameters for robot creation.
-                - arena_index: the index of arena to place the robot.
-
-        Returns:
-            Robot: The robot instance handle.
-        """
-        if robot_type not in self.supported_robot_types:
-            logger.log_warning(f"Unsupported robot type: {robot_type}")
-            return None
-
-        if robot_uid is None:
-            robot_uid = robot_type
-
-        if robot_uid in self._robots:
-            logger.log_warning(f"Robot {robot_uid} already exists.")
-            return None
-
-        arena_index = kwargs.get("arena_index", -1)
-        if arena_index >= 0:
-            robot_uid = f"{robot_uid}_{arena_index}"
-
-        # time_step from sim_config as default, can be overrided by kwargs.
-        init_params = {
-            "robot_uid": robot_uid,
-            "env": self.get_env(arena_index),
-            "time_step": self.sim_config.time_step,
-        }
-        init_params.update(kwargs)
-        robot = self.supported_robot_types[robot_type](**init_params)
-        robot.uid = robot_uid
-
-        self._robots[robot_uid] = robot
-        return robot
-
-    def get_robot(self, robot_name: str, arena_index: int = -1) -> Robot:
-        """Get robot by name.
-
-        Args:
-            robot_name (str): robot name.
-            arena_index (int, optional): the index of arena to get, -1 for global env. Defaults to -1.
-        """
-        if arena_index >= 0:
-            robot_name = f"{robot_name}_{arena_index}"
-
-        if robot_name not in self._robots:
-            logger.log_warning(f"Robot {robot_name} not found.")
-            return None
-
-        return self._robots[robot_name]
+        return list(self._robots.keys())
 
     def enable_gizmo(
         self, uid: str, control_part: Optional[str] = None, gizmo_cfg: object = None
@@ -1086,7 +992,7 @@ class SimulationManager:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
-            uid (str): UID of the object to attach gizmo to (searches in robots_v2, rigid_objects, sensors_v2, etc.)
+            uid (str): UID of the object to attach gizmo to (searches in robots, rigid_objects, sensors, etc.)
             control_part (Optional[str], optional): Control part name for robots. Defaults to "arm".
             gizmo_cfg (object, optional): Gizmo configuration object. Defaults to None.
         """
@@ -1104,19 +1010,19 @@ class SimulationManager:
         target = None
         object_type = None
 
-        if uid in self._robots_v2:
-            target = self._robots_v2[uid]
+        if uid in self._robots:
+            target = self._robots[uid]
             object_type = "robot"
         elif uid in self._rigid_objects:
             target = self._rigid_objects[uid]
             object_type = "rigid_object"
-        elif uid in self._sensors_v2:
-            target = self._sensors_v2[uid]
+        elif uid in self._sensors:
+            target = self._sensors[uid]
             object_type = "sensor"
 
         else:
             logger.log_error(
-                f"Object with uid '{uid}' not found in any collection (robots_v2, rigid_objects, sensors_v2, articulations)."
+                f"Object with uid '{uid}' not found in any collection (robots, rigid_objects, sensors, articulations)."
             )
             return
 
@@ -1253,154 +1159,7 @@ class SimulationManager:
         if gizmo is not None:
             gizmo.set_visibility(visible)
 
-    def remove_robot(self, robot_name: str) -> bool:
-        """Remove a robot from the scene.
-
-        Args:
-            robot_name (str): robot name
-        """
-        if robot_name not in self._robots:
-            logger.log_warning(f"Robot {robot_name} not found.")
-            return False
-
-        self._robots[robot_name].destroy()
-        self._robots.pop(robot_name)
-        return True
-
-    def get_robot_uid_list(self) -> List[str]:
-        """Get current robot uid list
-
-        Returns:
-            List[str]: list of robot uid.
-        """
-        return list(self._robots.keys())
-
-    def add_end_effector(
-        self, ef_type: str, ef_uid: str = None, **kwargs
-    ) -> EndEffector:
-        """General interface to add an end effector to the scene and returns a handle.
-
-        Args:
-            ef_type (str): type of end effector.
-            ef_uid (str, optional): unique id of end effector. Defaults to None.
-            **kwargs: other parameters for end effector creation.
-                - arena_index: the index of arena to place the end effector.
-
-        Returns:
-            EndEffector: The added end effector instance handle.
-        """
-        if ef_type not in self.supported_end_effector_types:
-            logger.log_warning(f"Unsupported end effector type: {ef_type}")
-            return None
-
-        if ef_uid is None:
-            ef_uid = ef_type
-
-        if ef_uid in self._end_effectors:
-            logger.log_warning(f"End effector {ef_uid} already exists.")
-            return None
-
-        arena_index = kwargs.get("arena_index", -1)
-        if arena_index >= 0:
-            ef_uid = f"{ef_uid}_{arena_index}"
-
-        init_params = {"env": self.get_env(arena_index), "uid": ef_uid}
-        init_params.update(kwargs)
-        end_effector = self.supported_end_effector_types[ef_type](**init_params)
-
-        self._end_effectors[ef_uid] = end_effector
-        return end_effector
-
-    def get_end_effector(self, ef_name: str, arena_index: int = -1) -> EndEffector:
-        """Get end effector by name.
-
-        Args:
-            ef_name (str): end effector name.
-            arena_index (int, optional): the index of arena to get, -1 for global env. Defaults to -1.
-        """
-        _ = self.get_end_effector_uid_list()
-
-        if arena_index >= 0:
-            ef_name = f"{ef_name}_{arena_index}"
-
-        if ef_name not in self._end_effectors:
-            logger.log_warning(f"End effector {ef_name} not found.")
-            return None
-
-        return self._end_effectors[ef_name]
-
-    def remove_end_effector(self, ef_name: str) -> bool:
-        """Remove an end effector from the scene.
-
-        Args:
-            ef_name (str): end effector name
-        """
-        if ef_name not in self._end_effectors:
-            logger.log_warning(f"End effector {ef_name} not found.")
-            return False
-        # robot
-        ee = self._end_effectors[ef_name]
-        attach_robot_uid = ee.attach_robot_uid
-        if attach_robot_uid in self._robots:
-            robot = self._robots[attach_robot_uid]
-            robot.detach_end_effector(ef_name)
-        env = self._end_effectors[ef_name].get_env()
-        # TODO: remove articulation might be result in crash when
-        # the program exit. We should forbid the articulation destructor
-        # to be called by python code.
-        env.remove_articulation(self._end_effectors[ef_name].get_articulation())
-        self._end_effectors.pop(ef_name)
-        return True
-
-    def get_end_effector_uid_list(self) -> List[str]:
-        """Get current end effector uid list
-
-        Returns:
-            List[str]: list of end effector uid.
-        """
-        for key, robot in self._robots.items():
-            if hasattr(robot, "get_end_effector"):
-                end_effector_dict = robot.get_end_effector()
-                if isinstance(end_effector_dict, Dict):
-                    self._end_effectors.update(end_effector_dict)
-
-        return list(self._end_effectors.keys())
-
-    def add_sensor(self, sensor_type: str, sensor_uid: str = None, **kwargs) -> Sensor:
-        """General interface to add a sensor to the scene and returns a handle.
-
-        Args:
-            sensor_type (str): type of sensor.
-            sensor_uid (str): unique id of sensor.
-            **kwargs: other parameters for sensor creation.
-                - arena_index: the index of arena to place the sensor.
-
-        Returns:
-            Sensor: The added sensor instance handle.
-        """
-        if sensor_type not in self.supported_sensor_types:
-            logger.log_warning(f"Unsupported sensor type: {sensor_type}")
-            return None
-
-        if sensor_uid is None:
-            sensor_uid = sensor_type
-
-        if sensor_uid in self._sensors:
-            logger.log_warning(f"Sensor {sensor_uid} already exists.")
-            return None
-
-        arena_index = kwargs.get("arena_index", -1)
-        if arena_index >= 0:
-            sensor_uid = f"{sensor_uid}_{arena_index}"
-
-        init_params = {"env": self.get_env(arena_index), "name": sensor_uid}
-        init_params.update(kwargs)
-        sensor = self.supported_sensor_types[sensor_type](**init_params)
-
-        self._sensors[sensor_uid] = sensor
-        return sensor
-
-    def add_sensor_v2(self, sensor_cfg: SensorCfg) -> BaseSensor:
+    def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
         """General interface to add a sensor to the scene and returns a handle.
 
         Args:
@@ -1416,22 +1175,22 @@ class SimulationManager:
 
         sensor_uid = sensor_cfg.uid
         if sensor_uid is None:
-            sensor_uid = f"{sensor_type.lower()}_{len(self._sensors_v2)}"
+            sensor_uid = f"{sensor_type.lower()}_{len(self._sensors)}"
             sensor_cfg.uid = sensor_uid
 
-        if sensor_uid in self._sensors_v2:
+        if sensor_uid in self._sensors:
             logger.log_warning(f"Sensor {sensor_uid} already exists.")
             return None
 
         sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
 
-        self._sensors_v2[sensor_uid] = sensor
+        self._sensors[sensor_uid] = sensor
 
         # Check if the sensor needs to change the parent frame.
 
         return sensor
 
-    def get_sensor_v2(self, uid: str) -> Optional[BaseSensor]:
+    def get_sensor(self, uid: str) -> Optional[BaseSensor]:
         """Get a sensor by its UID.
 
         Args:
@@ -1440,46 +1199,10 @@ class SimulationManager:
         Returns:
             BaseSensor | None: The sensor instance if found, otherwise None.
         """
-        if uid not in self._sensors_v2:
+        if uid not in self._sensors:
             logger.log_warning(f"Sensor {uid} not found.")
             return None
-        return self._sensors_v2[uid]
-
-    def get_sensor(self, sensor_name: str, arena_index: int = -1) -> Sensor:
-        """Get sensor by name.
-
-        Args:
-            sensor_name (str): sensor name
-        """
-        if arena_index >= 0:
-            sensor_name = f"{sensor_name}_{arena_index}"
-
-        if sensor_name not in self._sensors:
-            logger.log_warning(f"Sensor {sensor_name} not found.")
-            return None
-
-        return self._sensors[sensor_name]
-
-    def get_sensor_v2_uid_list(self) -> List[str]:
-        """Get current sensor uid list
-
-        Returns:
-            List[str]: list of sensor uid.
-        """
-        return list(self._sensors_v2.keys())
-
-    def remove_sensor(self, sensor_name: str) -> bool:
-        """Remove a sensor from the scene.
-
-        Args:
-            sensor_name (str): sensor name
-        """
-        if sensor_name not in self._sensors:
-            logger.log_warning(f"Sensor {sensor_name} not found.")
-            return False
-
-        self._sensors.pop(sensor_name)
-        return True
+        return self._sensors[uid]
 
     def get_sensor_uid_list(self) -> List[str]:
         """Get current sensor uid list
@@ -1488,364 +1211,6 @@ class SimulationManager:
             List[str]: list of sensor uid.
         """
         return list(self._sensors.keys())
-
-    def add_fixed_actor(
-        self,
-        fpath: str,
-        init_pose: np.ndarray,
-        scale: Union[List, np.ndarray] = [1.0, 1.0, 1.0],
-        material: Material = None,
-        texture_path: str = None,
-        is_convex_decomposition: bool = False,
-        damping_coeff: float = 0.5,
-        friction_coeff: float = 0.7,
-        **kwargs,
-    ) -> MeshObject:
-        """Add a fixed rigid object.
-
-        The fixed object will have a static physical body and will not move during the simulation.
-
-        Note:
-            1. Currently, only base color texture is supported to add to the object.
-
-        Args:
-            fpath (str): path to mesh file.
-            init_pose (np.ndarray): object pose in world frame.
-            scale (Union[List, np.ndarray], optional): scale of object. Defaults to [1.0, 1.0, 1.0].
-            material (Material, optional): path to material file. Defaults to None.
-            texture_path (str, optional): path to texture file. Defaults to None.
-            convex_decomposition_path (str, optional): path to decomposite convex file. Defaults to None.
-            is_convex_decomposition (bool, optional): whether to use convex decomposition
-            damping_coeff (float, optional): damage coefficient. Defaults to 0.5.
-            friction_coeff (float, optional): friction coefficient. Defaults to 0.7.
-            **kwargs: other parameters for fixed object creation.
-                - arena_index (int): the index of arena to place the fixed object.
-                - max_convex_hull_num (int): maximum convex hull number. Defaults to 32.
-                - contact_offset (float): contact offset. Defaults to 0.015.
-                - rest_offset (float): rest offset. Defaults to 0.000.
-                - density (float): density of object. Defaults to 1.
-                - restitution (float): restitution coefficient. Defaults to 0.05.
-                - min_position_iters (int): minimum position iterations. Defaults to 10.
-                - min_velocity_iters (int): minimum velocity iterations. Defaults to 10.
-                - projection_direction (np.ndarray): projection direction. Defaults to np.array([1.0, 1.0, 1.0]).
-                - compute_uv (bool): whether to compute uv mapping. Defaults to False.
-
-        Returns:
-            MeshObject: The added fixed object instance handle.
-        """
-        self._world.enable_physics(False)
-
-        arena_index = kwargs.get("arena_index", -1)
-        env = self.get_env(arena_index)
-
-        duplicate = False if arena_index <= 0 else True
-
-        if is_convex_decomposition:
-            max_convex_hull_num = kwargs.get("max_convex_hull_num", 32)
-            fixed_actor = env.load_actor_with_coacd(
-                fpath,
-                duplicate=duplicate,
-                attach_scene=False,
-                cache_path=os.path.join(self._sim_cache_dir, "convex_decomposition"),
-                actor_type=ActorType.STATIC,
-                max_convex_hull_num=max_convex_hull_num,
-            )
-        else:
-            fixed_actor = env.load_actor(fpath, duplicate, False)
-            fixed_actor.add_rigidbody(ActorType.STATIC, RigidBodyShape.CONVEX)
-
-        fixed_actor.set_body_scale(scale[0], scale[1], scale[2])
-
-        compute_uv = kwargs.get("compute_uv", False)
-        if material is not None:
-            compute_uv = True
-        if compute_uv and fixed_actor.has_uv_mapping() is False:
-            from dexsim.kit.meshproc import get_mesh_auto_uv
-
-            vertices = fixed_actor.get_vertices()
-            triangles = fixed_actor.get_triangles()
-
-            o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
-            projection_direction = kwargs.get(
-                "projection_direction", np.array([1.0, 1.0, 1.0])
-            )
-            _, uvs = get_mesh_auto_uv(o3d_mesh, projection_direction)
-            fixed_actor.set_uv_mapping(uvs)
-
-        if material is not None:
-            fixed_actor.set_material(material)
-
-            if texture_path is not None:
-                material.set_base_color_map(texture_path)
-
-        fixed_actor.set_local_pose(init_pose)
-
-        attr = PhysicalAttr()
-        attr.mass = kwargs.get("mass", 0.01)
-        # attr.density = density    # TODO: using default mass
-        attr.contact_offset = kwargs.get("contact_offset", 0.006)
-        attr.rest_offset = kwargs.get("rest_offset", 0.001)
-        attr.dynamic_friction = damping_coeff
-        attr.static_friction = damping_coeff
-        attr.angular_damping = friction_coeff
-        attr.linear_damping = friction_coeff
-        attr.restitution = kwargs.get("restitution", 0.05)
-        attr.min_position_iters = kwargs.get("min_position_iters", 4)
-        attr.min_velocity_iters = kwargs.get("min_velocity_iters", 1)
-        attr.max_depenetration_velocity = kwargs.get("max_depenetration_velocity", 10.0)
-        fixed_actor.set_physical_attr(attr)
-
-        body_name = fixed_actor.get_name()
-        if arena_index >= 0:
-            body_name = f"{body_name}_{arena_index}"
-
-        self._fixed_actors[body_name] = (fixed_actor, arena_index)
-
-        fixed_actor.node.attach_node(env.get_root_node())
-        self._world.enable_physics(True)
-
-        return fixed_actor
-
-    def get_fixed_actor(self, actor_name: str, arena_index: int = -1) -> MeshObject:
-        """Get fixed actor by name.
-
-        Args:
-            actor_name (str): name of fixed actor.
-            arena_index (int, optional): the index of arena to get, -1 for global env. Defaults to -1.
-        """
-        if arena_index >= 0:
-            actor_name = f"{actor_name}_{arena_index}"
-
-        if actor_name not in self._fixed_actors:
-            logger.log_warning(f"Fixed actor {actor_name} not found.")
-            return None
-
-        return self._fixed_actors[actor_name][0]
-
-    def remove_fixed_actor(self, actor_name: str):
-        """Remove fixed body with its name
-
-        Args:
-            body_name (str): key, md5 of mesh
-        """
-        if actor_name not in self._fixed_actors:
-            logger.log_warning(f"Fixed actor {actor_name} not found.")
-            return
-
-        env = self.get_env(self._fixed_actors[actor_name][1])
-        env.remove_actor(actor_name)
-        self._fixed_actors.pop(actor_name)
-
-    def get_fixed_actor_uid_list(self) -> List[str]:
-        """Get current fixed body key list
-
-        Returns:
-            List[str]: list of fixed body key
-        """
-        return list(self._fixed_actors.keys())
-
-    def add_dynamic_actor(
-        self,
-        fpath: str,
-        init_pose: np.ndarray,
-        scale: Union[List, np.ndarray] = [1.0, 1.0, 1.0],
-        density: float = 1,
-        damping_coeff: float = 0.7,
-        friction_coeff: float = 0.9,
-        max_depenetration_velocity: float = 10.0,
-        material: Material = None,
-        texture_path: str = None,
-        is_convex_decomposition: bool = False,
-        max_convex_hull_num: int = 32,
-        **kwargs,
-    ) -> MeshObject:
-        """Add a dynamic rigid object.
-
-        The dynamic object will have a dynamic physical body and will move during the simulation.
-
-        Args:
-            fpath (str): path to mesh file.
-            init_pose (np.ndarray): object pose in world frame.
-            scale (Union[List, np.ndarray], optional): scale of object. Defaults to [1.0, 1.0, 1.0].
-            density (float, optional): density of object. Defaults to 1.
-            damping_coeff (float, optional): damage coefficient. Defaults to 0.7.
-            friction_coeff (float, optional): friction coefficient. Defaults to 0.9.
-            max_depenetration_velocity (float, optional): maximum depenetration velocity. Defaults to 10.0.
-            material (Material, optional): the material of object. Defaults to None.
-            texture_path (str, optional): path to texture file. Defaults to None.
-            is_convex_decomposition (bool, optional): whether to use convex decomposition. Defaults to False.
-            max_convex_hull_num (int, optional): maximum convex hull number. Defaults to 32.
-            **kwargs: other parameters for dynamic object creation.
-                - arena_index (int): the index of arena to place the fixed object.
-                - contact_offset (float): contact offset. Defaults to 0.015.
-                - rest_offset (float): rest offset. Defaults to 0.000.
-                - restitution (float): restitution coefficient. Defaults to 0.05.
-                - min_position_iters (int): minimum position iterations. Defaults to 10.
-                - min_velocity_iters (int): minimum velocity iterations. Defaults to 10.
-                - projection_direction (np.ndarray): projection direction. Defaults to np.array([1.0, 1.0, 1.0]).
-                - compute_uv (bool): whether to compute uv mapping. Defaults to False.
-
-        Returns:
-            MeshObject: The added dynamic object instance handle.
-        """
-
-        self._world.enable_physics(False)
-
-        arena_index = kwargs.get("arena_index", -1)
-        env = self.get_env(arena_index)
-
-        duplicate = False if arena_index <= 0 else True
-
-        if is_convex_decomposition:
-            dynamic_actor = env.load_actor_with_coacd(
-                fpath,
-                duplicate=duplicate,
-                attach_scene=False,
-                cache_path=os.path.join(self._sim_cache_dir, "convex_decomposition"),
-                actor_type=ActorType.DYNAMIC,
-                max_convex_hull_num=max_convex_hull_num,
-            )
-        else:
-            dynamic_actor = env.load_actor(fpath, duplicate, False)
-            dynamic_actor.add_rigidbody(ActorType.DYNAMIC, RigidBodyShape.CONVEX)
-
-        dynamic_actor.set_body_scale(scale[0], scale[1], scale[2])
-        dynamic_actor.node.attach_node(env.get_root_node())
-        compute_uv = kwargs.get("compute_uv", False)
-        if material is not None:
-            compute_uv = True
-        if compute_uv and dynamic_actor.has_uv_mapping() is False:
-            from dexsim.kit.meshproc import get_mesh_auto_uv
-
-            vertices = dynamic_actor.get_vertices()
-            triangles = dynamic_actor.get_triangles()
-
-            o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
-            projection_direction = kwargs.get(
-                "projection_direction", np.array([1.0, 1.0, 1.0])
-            )
-            _, uvs = get_mesh_auto_uv(o3d_mesh, projection_direction)
-            dynamic_actor.set_uv_mapping(uvs)
-
-        if material is not None:
-            dynamic_actor.set_material(material)
-
-            if texture_path is not None:
-                material.set_base_color_map(texture_path)
-
-        dynamic_actor.set_local_pose(init_pose)
-
-        attr = PhysicalAttr()
-        attr.mass = kwargs.get("mass", 0.01)
-        # attr.density = density    # TODO: using default mass
-        attr.contact_offset = kwargs.get("contact_offset", 0.006)
-        attr.rest_offset = kwargs.get("rest_offset", 0.001)
-        attr.dynamic_friction = friction_coeff
-        attr.static_friction = friction_coeff
-        attr.angular_damping = damping_coeff
-        attr.linear_damping = damping_coeff
-        attr.restitution = kwargs.get("restitution", 0.05)
-        attr.min_position_iters = kwargs.get("min_position_iters", 4)
-        attr.min_velocity_iters = kwargs.get("min_velocity_iters", 1)
-        attr.max_depenetration_velocity = max_depenetration_velocity
-
-        dynamic_actor.set_physical_attr(attr)
-
-        body_name = dynamic_actor.get_name()
-        if arena_index >= 0:
-            body_name = f"{body_name}_{arena_index}"
-
-        self._dynamic_actors[body_name] = (dynamic_actor, arena_index)
-
-        self._world.enable_physics(True)
-        return dynamic_actor
-
-    def get_dynamic_actor(self, actor_name: str, arena_index: int = -1) -> MeshObject:
-        """Get dynamic actor by name.
-
-        Args:
-            actor_name (str): name of dynamic actor.
-            arena_index (int, optional): the index of arena to get, -1 for global env. Defaults to -1.
-        """
-        if arena_index >= 0:
-            actor_name = f"{actor_name}_{arena_index}"
-
-        if actor_name not in self._dynamic_actors:
-            logger.log_warning(f"Dynamic actor {actor_name} not found.")
-            return None
-
-        return self._dynamic_actors[actor_name][0]
-
-    def remove_dynamic_actor(self, actor_name: str):
-        """Remove dynamic body with its name.
-
-        Args:
-            actor_name (str): name of dynamic actor.
-        """
-        if actor_name not in self._dynamic_actors:
-            logger.log_warning(f"Dynamic actor {actor_name} not found.")
-            return
-
-        env = self.get_env(self._dynamic_actors[actor_name][1])
-        env.remove_actor(actor_name)
-        self._dynamic_actors.pop(actor_name)
-        # pop attach actor
-        for robot_uid, robot in self._robots.items():
-            if actor_name in robot.attached_actors:
-                robot.attached_actors.pop(actor_name)
-        for ef_uid, ef in self._end_effectors.items():
-            if actor_name in ef._attached_nodes:
-                ef._attached_nodes.pop(actor_name)
-
-    def get_dynamic_actor_uid_list(self) -> List[str]:
-        """Get current fixed body key list
-
-        Returns:
-            List[str]: list of fixed body key
-        """
-        return list(self._dynamic_actors.keys())
-
-    def create_cube(
-        self,
-        name: str,
-        length: float,
-        width: float,
-        height: float,
-        actor_type: Optional[ActorType] = None,
-        **kwargs,
-    ) -> MeshObject:
-        """Create a cube with given dimensions and actor type.
-
-        Args:
-            name (str): name of cube.
-            length (float): length of cube.
-            width (float): width of cube.
-            height (float): height of cube.
-            actor_type (Optional[ActorType], optional): actor type of cube. Defaults to None.
-            **kwargs: other parameters for cube creation.
-                - arena_index: the index of arena to place the cube.
-
-        Returns:
-            MeshObject: The created cube instance handle.
-        """
-        arena_index = kwargs.get("arena_index", -1)
-        if arena_index >= 0:
-            name = f"{name}_{arena_index}"
-
-        env = self.get_env(arena_index)
-        cube = env.create_cube(length, width, height)
-        cube.set_name(name)
-
-        if actor_type is not None:
-            attr = PhysicalAttr()
-            cube.add_rigidbody(actor_type, RigidBodyShape.CONVEX, attr)
-
-        if actor_type == ActorType.DYNAMIC or actor_type == ActorType.KINEMATIC:
-            self._dynamic_actors[name] = (cube, arena_index)
-        else:
-            self._fixed_actors[name] = (cube, arena_index)
-
-        return cube
 
     def remove_asset(self, uid: str) -> bool:
         """Remove an asset by its UID.
@@ -1880,8 +1245,8 @@ class SimulationManager:
             art.destroy()
             return True
 
-        if uid in self._robots_v2:
-            robot = self._robots_v2.pop(uid)
+        if uid in self._robots:
+            robot = self._robots.pop(uid)
             robot.destroy()
             return True
 
@@ -1889,7 +1254,7 @@ class SimulationManager:
 
     def get_asset(
         self, uid: str
-    ) -> Optional[Union[RigidObject, Articulation, RobotV2, Light, BaseSensor]]:
+    ) -> Optional[Union[RigidObject, Articulation, Robot, Light, BaseSensor]]:
         """Get an asset by its UID.
 
         The asset can be a rigid object, articulation or robot.
@@ -1903,14 +1268,14 @@ class SimulationManager:
         if uid in self._articulations:
             return self._articulations[uid]
 
-        if uid in self._robots_v2:
-            return self._robots_v2[uid]
+        if uid in self._robots:
+            return self._robots[uid]
 
         if uid in self._lights:
             return self._lights[uid]
 
-        if uid in self._sensors_v2:
-            return self._sensors_v2[uid]
+        if uid in self._sensors:
+            return self._sensors[uid]
 
         logger.log_warning(f"Asset {uid} not found.")
         return None
@@ -2040,118 +1405,6 @@ class SimulationManager:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
 
-    def create_material(
-        self, name: str, type: str = "color", num_inst: int = 1, **kwargs
-    ) -> Material:
-        """Create a material with given type and parameters.
-
-        Material is dexsim.models.Material, which can have multiple instances with shared pbr attributes.
-        For each instance, the properties can be set individually.
-
-        Note:
-            The `name` is just the key of :attr:`_materials` dictionary.
-            If num_inst == 1, the material instance will have the same name.
-            If num_inst > 1, the material instance will have the name with suffix "_i" where i is the index of instance.
-
-        Args:
-            name (str): name of material.
-            type (str, optional): material type. Defaults to "color".
-            num_inst (int, optional): number of instances of material. Defaults to 1.
-            **kwargs: other parameters for material creation.
-                - rgba: the rgba of color material.
-                - rgb: the rgb of color material.
-                - has_alpha: whether the pbr material has alpha channel.
-
-        Returns:
-            Material: the created material instance handle.
-        """
-
-        if name in self._materials:
-            logger.log_warning(f"Material {name} already exists. Returning it.")
-            return self._materials[name]
-
-        if type == "color":
-            color = kwargs.get("rgb", None)
-            if color is None:
-                color = kwargs.get("rgba", None)
-            if color is None:
-                color = [0.5, 0.5, 0.5]
-
-            has_alpha = len(color) == 4
-            if num_inst == 1:
-                mat = self._env.create_color_material(color, name, has_alpha)
-            else:
-                inst_name = f"{name}_0"
-                mat = self._env.create_color_material(color, inst_name, has_alpha)
-                for i in range(1, num_inst):
-                    inst_name = f"{name}_{i}"
-                    mat.get_inst(inst_name)
-                    mat.set_inst_color(color, inst_name)
-
-        elif type == "pbr":
-            has_alpha = kwargs.get("has_alpha", False)
-            if num_inst == 1:
-                mat = self._env.create_pbr_material(name, has_alpha)
-            else:
-                inst_name = f"{name}_0"
-                mat = self._env.create_pbr_material(inst_name, has_alpha)
-                for i in range(1, num_inst):
-                    inst_name = f"{name}_{i}"
-                    mat.get_inst(inst_name)
-
-        else:
-            logger.log_error(f"Unsupported material type {type}.")
-
-        self._materials[name] = mat
-        return mat
-
-    def load_material(self, path: str, name: str, num_inst: int = 1) -> Material:
-        """Load a PBR material from file.
-
-        Args:
-            path (str): path to material.
-            name (str): name of material.
-            num_inst (int, optional): number of instances of material. Defaults to 1.
-
-        Returns:
-            Material: the loaded material instance handle.
-        """
-        if name in self._materials:
-            logger.log_warning(f"Material {name} already exists. Returning it.")
-            return self._materials[name]
-
-        if num_inst == 1:
-            mat = self._env.load_material(path, name)
-        else:
-            inst_name = f"{name}_0"
-            mat = self._env.load_material(path, inst_name)
-            for i in range(1, num_inst):
-                inst_name = f"{name}_{i}"
-                mat.get_inst(inst_name)
-
-        mat.set_roughness(0.5)
-
-        self._materials[name] = mat
-        return mat
-
-    def get_material(self, name: str) -> Material:
-        """Get material by name.
-
-        Args:
-            name (str): name of material.
-        """
-
-        # TODO: Temporary workaround for plane material
-        # Will be removed in the future
-        if name == "plane_mat":
-            return self.get_visual_material("plane_mat").get_instance("plane_mat").mat
-
-        if name not in self._materials:
-            logger.log_warning(f"Material {name} not found.")
-            return None
-
-        return self._materials[name]
-
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.
 
@@ -2187,7 +1440,6 @@ class SimulationManager:
         return self._visual_materials[uid]
 
     def clean_materials(self):
-        self._materials = {}
         self._visual_materials = {}
         self._env.clean_materials()
 
@@ -2197,7 +1449,7 @@ class SimulationManager:
         Args:
             env_ids: The environment IDs to reset. If None, reset all environments.
         """
-        for robot in self._robots_v2.values():
+        for robot in self._robots.values():
             robot.reset(env_ids)
         for articulation in self._articulations.values():
             articulation.reset(env_ids)
@@ -2207,7 +1459,7 @@ class SimulationManager:
             rigid_obj_group.reset(env_ids)
         for light in self._lights.values():
             light.reset(env_ids)
-        for sensor in self._sensors_v2.values():
+        for sensor in self._sensors.values():
             sensor.reset(env_ids)
 
     def destroy(self) -> None:

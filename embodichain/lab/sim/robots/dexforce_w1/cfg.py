@@ -317,7 +317,7 @@ if __name__ == "__main__":
         }
     )
 
-    robot = sim.add_robot_v2(cfg=cfg)
+    robot = sim.add_robot(cfg=cfg)
     sim.update(step=1)
     print("DexforceW1 robot added to the simulation.")
 

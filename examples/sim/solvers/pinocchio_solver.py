@@ -53,7 +53,7 @@ def main():
         },
     }
 
-    robot: Robot = sim.add_robot_v2(cfg=RobotCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
     arm_name = "left_arm"
     # Set initial joint positions for left arm
     qpos_seed = torch.tensor(

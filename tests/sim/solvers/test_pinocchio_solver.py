@@ -50,7 +50,7 @@ class BaseSolverTest:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot_v2(cfg=RobotCfg.from_dict(cfg_dict))
+        self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str):

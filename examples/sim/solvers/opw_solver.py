@@ -66,7 +66,7 @@ def main():
     }
 
     # Add robot to simulation
-    robot: Robot = sim.add_robot_v2(cfg=CobotMagicCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
 
     # Left arm control
     arm_name = "left_arm"

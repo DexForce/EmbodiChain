@@ -54,7 +54,7 @@ def main():
     }
 
     # Add robot to simulation
-    robot: Robot = sim.add_robot_v2(cfg=RobotCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
 
     # Prepare initial joint positions for all environments
     arm_name = "left_arm"

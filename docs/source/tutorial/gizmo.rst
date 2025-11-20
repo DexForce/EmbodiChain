@@ -62,7 +62,7 @@ First, we configure a UR10 robot with an IK solver for end-effector control:
 .. literalinclude:: ../../../scripts/tutorials/sim/gizmo_robot.py
    :language: python
    :start-at: # Create UR10 robot configuration
-   :end-at: robot = sim.add_robot_v2(cfg=robot_cfg)
+   :end-at: robot = sim.add_robot(cfg=robot_cfg)
 
 Key components of the robot configuration:
 

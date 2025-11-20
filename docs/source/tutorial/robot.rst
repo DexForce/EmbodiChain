@@ -35,7 +35,7 @@ For a simple two-component robot (arm + hand):
 .. literalinclude:: ../../../scripts/tutorials/sim/create_robot.py
    :language: python
    :start-at: sr5_urdf_path = get_data_path("Rokae/SR5/SR5.urdf")
-   :end-at: robot: Robot = sim.add_robot_v2(cfg=cfg)
+   :end-at: robot: Robot = sim.add_robot(cfg=cfg)
 
 
 The :class:`cfg.URDFCfg` allows you to compose multiple URDF files with specific transformations, enabling complex robot assemblies.

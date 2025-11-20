@@ -50,6 +50,7 @@ dependencies = [
   "pydantic==2.7.1",
   "deepspeed==0.16.2",
   "py_opw_kinematics==0.1.6",
+  "pytorch_kinematics==0.7.5",
   "polars==1.31.0",
   "cvxpy==1.4.0",
   "ortools",
@@ -59,6 +60,7 @@ dependencies = [
   "dill",
   "black==22.3",
   "aenum",
+  "h5py",
   "dacite==1.9.2",
 ]
 

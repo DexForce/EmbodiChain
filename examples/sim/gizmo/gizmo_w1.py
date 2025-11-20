@@ -98,7 +98,7 @@ def main():
             damping={"LEFT_J[1-7]": 1e3, "RIGHT_J[1-7]": 1e3},
         ),
     )
-    robot = sim.add_robot_v2(cfg=robot_cfg)
+    robot = sim.add_robot(cfg=robot_cfg)
 
     # Set initial joint positions for both arms
     # Left arm: 8 joints (WAIST + 7 LEFT_J), Right arm: 8 joints (WAIST + 7 RIGHT_J)

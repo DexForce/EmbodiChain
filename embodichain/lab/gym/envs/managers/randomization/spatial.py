@@ -188,7 +188,7 @@ def randomize_robot_eef_pose(
         new_qpos[ret == False] = current_qpos[ret == False]
         robot.set_qpos(new_qpos, env_ids=env_ids, joint_ids=joint_ids)
 
-    robot = env.sim.get_robot_v2(entity_cfg.uid)
+    robot = env.sim.get_robot(entity_cfg.uid)
 
     control_parts = entity_cfg.control_parts
     if control_parts is None:
@@ -226,7 +226,7 @@ def randomize_robot_qpos(
 
     num_instance = len(env_ids)
 
-    robot = env.sim.get_robot_v2(entity_cfg.uid)
+    robot = env.sim.get_robot(entity_cfg.uid)
 
     if joint_ids is None:
         if len(qpos_range[0]) != robot.dof:

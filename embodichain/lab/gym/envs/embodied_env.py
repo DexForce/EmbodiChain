@@ -323,7 +323,7 @@ class EmbodiedEnv(BaseEnv):
             logger.error("Robot configuration is not provided.")
 
         # Initialize the robot based on the configuration.
-        robot: Robot = self.sim.add_robot_v2(self.cfg.robot)
+        robot: Robot = self.sim.add_robot(self.cfg.robot)
 
         robot.build_pk_serial_chain()
 
@@ -347,7 +347,7 @@ class EmbodiedEnv(BaseEnv):
 
         sensors = {}
         for cfg in self.cfg.sensor:
-            sensor = self.sim.add_sensor_v2(cfg)
+            sensor = self.sim.add_sensor(cfg)
             sensors[cfg.uid] = sensor
         return sensors
 

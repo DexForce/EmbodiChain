@@ -170,7 +170,7 @@ def create_robot(sim):
         ],
     )
 
-    return sim.add_robot_v2(cfg=cfg)
+    return sim.add_robot(cfg=cfg)
 
 
 def create_scoop(sim: SimulationManager):

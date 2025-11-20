@@ -106,7 +106,7 @@ def main():
             damping={"LEFT_J[1-7]": 1e3, "RIGHT_J[1-7]": 1e3},
         ),
     )
-    robot = sim.add_robot_v2(cfg=robot_cfg)
+    robot = sim.add_robot(cfg=robot_cfg)
 
     # Set initial joint positions for both arms
     left_arm_qpos = torch.tensor(
@@ -160,7 +160,7 @@ def main():
             up=(0.0, 0.0, 1.0),
         ),
     )
-    camera = sim.add_sensor_v2(sensor_cfg=camera_cfg)
+    camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
     # Enable gizmo for all assets after all are created and initialized
     sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
@@ -199,7 +199,7 @@ def main():
 def run_simulation(sim: SimulationManager):
     step_count = 0
     # Get the camera instance by uid
-    camera = sim.get_sensor_v2("scene_camera")
+    camera = sim.get_sensor("scene_camera")
     try:
         last_time = time.time()
         last_step = 0

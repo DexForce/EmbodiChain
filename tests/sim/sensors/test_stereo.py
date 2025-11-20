@@ -34,7 +34,7 @@ class StereoCameraTest:
             "left_to_right_pos": (0.1, 0.0, 0.0),
         }
         cfg = SensorCfg.from_dict(cfg_dict)
-        self.camera: StereoCamera = self.sim.add_sensor_v2(cfg)
+        self.camera: StereoCamera = self.sim.add_sensor(cfg)
 
     def test_get_data(self):
 

@@ -53,7 +53,7 @@ def main():
         },
     }
 
-    robot: Robot = sim.add_robot_v2(cfg=RobotCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
 
     # Define a sample target pose as a 1x4x4 homogeneous matrix
     rad = torch.deg2rad(torch.tensor(45.0))

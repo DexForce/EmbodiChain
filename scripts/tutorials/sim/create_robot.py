@@ -134,7 +134,7 @@ def create_robot(sim):
     )
 
     # Add robot to simulation
-    robot: Robot = sim.add_robot_v2(cfg=cfg)
+    robot: Robot = sim.add_robot(cfg=cfg)
 
     print(f"Robot created successfully with {robot.dof} joints")
 

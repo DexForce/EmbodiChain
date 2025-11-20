@@ -51,7 +51,7 @@ class BaseSolverTest:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot_v2(cfg=RobotCfg.from_dict(cfg_dict))
+        self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
 
         # Wait for robot to stabilize.
         self.sim.update(step=100)

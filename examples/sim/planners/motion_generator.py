@@ -102,7 +102,7 @@ def main(interactive=False):
             },
         },
     }
-    robot: Robot = sim.add_robot_v2(cfg=CobotMagicCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
     arm_name = "left_arm"
 
     # Generate trajectory points

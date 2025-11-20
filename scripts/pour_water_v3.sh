@@ -21,7 +21,7 @@ echo "Run $demo."
 # echo "- Robot Type: $robot_name"  
 echo "- Headless Mode: $headless_msg"
 
-python3 -m embodichain.lab.scripts.run_env_v2 \
+python3 -m embodichain.lab.scripts.run_env \
     --gym_config ${projectdir}/embodichain/lab/configs/${demo}/gym_config.json  \
     --action_config ${projectdir}/embodichain/lab/configs/${demo}/action_config.json  \
     ${headless_cfg}

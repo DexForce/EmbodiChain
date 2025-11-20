@@ -59,7 +59,7 @@ class record_camera_data(Functor):
             "intrinsics", (600, 600, int(resolution[0] / 2), int(resolution[1] / 2))
         )
 
-        self.camera = env.sim.add_sensor_v2(
+        self.camera = env.sim.add_sensor(
             sensor_cfg=CameraCfg(
                 uid=self._name,
                 width=resolution[0],

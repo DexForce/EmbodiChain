@@ -156,7 +156,7 @@ def main():
         if args.scene == "factory":
             from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 
-            w1_robot: Robot = sim.add_robot_v2(
+            w1_robot: Robot = sim.add_robot(
                 cfg=DexforceW1Cfg.from_dict(
                     {
                         "uid": "dexforce_w1",

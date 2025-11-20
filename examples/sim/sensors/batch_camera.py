@@ -52,7 +52,7 @@ def main(args):
     eye = (0.0, 0, 2.0)
     target = (0.0, 0.0, 0.0)
     if args.sensor_type == "stereo":
-        camera: StereoCamera = sim.add_sensor_v2(
+        camera: StereoCamera = sim.add_sensor(
             sensor_cfg=StereoCameraCfg(
                 width=640,
                 height=480,
@@ -60,7 +60,7 @@ def main(args):
             )
         )
     else:
-        camera: Camera = sim.add_sensor_v2(
+        camera: Camera = sim.add_sensor(
             sensor_cfg=CameraCfg(
                 width=640,
                 height=480,

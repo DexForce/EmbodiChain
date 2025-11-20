@@ -149,7 +149,7 @@ def create_sensor(sim: SimulationManager, args):
         quat = [quat[3], quat[0], quat[1], quat[2]]  # Convert to (w, x, y, z)
 
     # create camera sensor and attach to robot end-effector
-    camera: Camera = sim.add_sensor_v2(
+    camera: Camera = sim.add_sensor(
         sensor_cfg=CameraCfg(
             width=width,
             height=height,
@@ -220,7 +220,7 @@ def create_robot(sim):
     )
 
     # Add robot to simulation
-    robot: Robot = sim.add_robot_v2(cfg=cfg)
+    robot: Robot = sim.add_robot(cfg=cfg)
 
     print(f"Robot created successfully with {robot.dof} joints")
 

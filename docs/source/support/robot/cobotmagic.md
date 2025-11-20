@@ -39,7 +39,7 @@ sim = SimulationManager(config)
 sim.build_multiple_arenas(2)  # Supports parallel simulation in multiple arenas
 sim.set_manual_update(False)
 
-robot = sim.add_robot_v2(cfg=CobotMagicCfg().from_dict({}))
+robot = sim.add_robot(cfg=CobotMagicCfg().from_dict({}))
 ```
 
 ---
@@ -65,7 +65,7 @@ custom_cfg = {
     # Add more custom parameters as needed
 }
 cfg = CobotMagicCfg.from_dict(custom_cfg)
-robot = sim.add_robot_v2(cfg=cfg)
+robot = sim.add_robot(cfg=cfg)
 ```
 
 ### 3. Control Group Example

@@ -23,5 +23,3 @@ if not os.path.exists(database_train_dir):
 
 from . import assets
 from .dataset import *
-
-del dataset

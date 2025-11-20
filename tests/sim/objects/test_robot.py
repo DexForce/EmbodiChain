@@ -54,7 +54,7 @@ class BaseRobotTest:
             }
         )
 
-        self.robot: Robot = self.sim.add_robot_v2(cfg=cfg)
+        self.robot: Robot = self.sim.add_robot(cfg=cfg)
 
         # Initialize GPU physics if needed
         if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):

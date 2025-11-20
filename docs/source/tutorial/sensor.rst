@@ -36,7 +36,7 @@ The camera sensor is created using :class:`CameraCfg` and can be attached to the
 
 - The camera's intrinsics (focal lengths and principal point) and resolution are set.
 - The ``extrinsics`` specify the camera's pose relative to its parent (e.g., the robot's ``ee_link`` or the world).
-- The camera is added to the simulation with :meth:`sim.add_sensor_v2`.
+- The camera is added to the simulation with :meth:`sim.add_sensor`.
 
 2. **Visualizing Sensor Output**
 --------------------------------

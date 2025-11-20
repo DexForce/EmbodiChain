@@ -10,7 +10,7 @@ from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import logger
 
-from embodichain.lab.gym.envs.tasks.tableware.pour_water_task.action_bank import (
+from embodichain.lab.gym.envs.tasks.tableware.pour_water.action_bank import (
     PourWaterActionBank,
 )
 
