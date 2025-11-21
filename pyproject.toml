@@ -1,0 +1,74 @@
+[build-system]
+# Use the legacy setuptools backend so the existing `setup.py` (which dynamically
+# detects torch and builds C/CUDA extensions via torch.utils.cpp_extension)
+# is still executed during build. This is a minimal, non-opinionated pyproject
+# that modernizes the package while preserving the custom extension build steps.
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+
+# Note:
+# - Building the torch extensions requires a working PyTorch installation
+#   available at build time (or FORCE_CUDA=1 for cross-compilation). We keep
+#   the extension-building logic in `setup.py` because it needs to import
+#   `torch` at build time to select CUDA/Cpp extension classes.
+# - If you prefer a pure PEP 517 build without a legacy setup.py, we can
+#   refactor the extension-building logic into a custom build backend plugin.
+
+[project]
+name = "embodichain"
+version = "0.0.1"
+description = "A modular platform for building generalized embodied intelligence."
+readme = "README.md"
+authors = [ { name = "Dexforce" } ]
+requires-python = ">=3.9"
+
+
+# Core install dependencies (kept from requirements.txt). Some VCS links are
+# specified using PEP 508 direct references where present.
+dependencies = [
+  "setuptools==69.5.1",
+  "gymnasium==0.29.1",
+  "langchain==0.2.14",
+  "langchain-openai==0.1.22",
+  "pillow==9.5.0",
+  "ffmpeg-python==0.2.0",
+  "pytransform3d",
+  "uvicorn",
+  "fastapi",
+  "casadi==3.7.1",
+  "pin==2.7.0",
+  "toppra==0.6.3",
+  "qpsolvers==4.8.1",
+  "pin-pink==3.4.0",
+  "PyYAML>=6.0",
+  "transformers==4.48.0",
+  "diffusers==0.32.1",
+  "balanced-loss",
+  "accelerate==1.2.1",
+  "wandb==0.20.1",
+  "tensorboard",
+  "pydantic==2.7.1",
+  "deepspeed==0.16.2",
+  "py_opw_kinematics==0.1.6",
+  "pytorch_kinematics==0.7.5",
+  "polars==1.31.0",
+  "cvxpy==1.4.0",
+  "ortools",
+  "prettytable",
+  "transforms3d==0.4.2",
+  "hdfdict@git+http://69.235.177.182:8081/externalrepo/hdfdict",
+  "OmegaConf",
+  "dill",
+  "black==22.3",
+  "aenum",
+  "h5py",
+  "dacite==1.9.2",
+  "zmq",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["docs"]
+
+[tool.black]

@@ -1,0 +1,129 @@
+{
+  "id": "PushCubeRL",
+  "max_episodes": 5,
+  "env": {
+    "num_envs": 128,
+    "sim_steps_per_control": 4,
+    "events": {
+      "randomize_cube": {
+        "func": "randomize_rigid_object_pose",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {"uid": "cube"},
+          "position_range": [[-0.2, -0.2, 0.0], [0.2, 0.2, 0.0]],
+          "relative_position": true
+        }
+      }
+    },
+    "observations": {},
+    "extensions": {
+      "obs_mode": "state",
+      "episode_length": 100,
+      "joint_limits": 0.5,
+      "action_scale": 0.1,
+      "success_threshold": 0.1,
+      "reaching_reward_weight": 0.1,
+      "place_reward_weight": 2.0,
+      "place_penalty_weight": 0.5,
+      "action_penalty_weight": 0.01,
+      "success_bonus_weight": 10.0
+    }
+  },
+  "robot": {
+    "uid": "Manipulator",
+    "urdf_cfg": {
+      "components": [
+        {
+          "component_type": "arm",
+          "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+          "transform": [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+          ]
+        },
+        {
+          "component_type": "hand",
+          "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf",
+          "transform": [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+          ]
+        }
+      ]
+    },
+    "init_pos": [0.0, 0.0, 0.0],
+    "init_rot": [0.0, 0.0, 0.0],
+    "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.04, 0.04],
+    "drive_pros": {
+      "drive_type": "force",
+      "stiffness": 100000.0,
+      "damping": 1000.0,
+      "max_velocity": 2.0,
+      "max_effort": 500.0
+    },
+    "solver_cfg": {
+      "arm": {
+        "class_type": "PytorchSolver",
+        "end_link_name": "ee_link",
+        "root_link_name": "base_link",
+        "tcp": [
+          [1.0, 0.0, 0.0, 0.0],
+          [0.0, 1.0, 0.0, 0.0],
+          [0.0, 0.0, 1.0, 0.16],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      }
+    },
+    "control_parts": {
+      "arm": ["JOINT[1-6]"]
+    }
+  },
+  "sensor": [],
+  "light": {
+  },
+  "background": [
+    {
+      "uid": "goal_sphere",
+      "shape": {
+        "shape_type": "Sphere",
+        "radius": 0.02
+      },
+      "body_type": "kinematic",
+      "init_pos": [-0.9, -0.6, 0.05],
+      "attrs": {
+        "enable_collision": false,
+        "mass": 0.0
+      }
+    }
+  ],
+  "rigid_object": [
+    {
+      "uid": "cube",
+      "shape": {
+        "shape_type": "Cube",
+        "size": [0.1, 0.1, 0.1]
+      },
+      "body_type": "dynamic",
+      "init_pos": [-0.6, -0.4, 0.05],
+      "attrs": {
+        "mass": 10.0,
+        "static_friction": 3.0,
+        "dynamic_friction": 2.0,
+        "linear_damping": 2.0,
+        "angular_damping": 2.0,
+        "contact_offset": 0.003,
+        "rest_offset": 0.001,
+        "restitution": 0.1,
+        "max_depenetration_velocity": 10.0,
+        "max_linear_velocity": 1.0,
+        "max_angular_velocity": 1.0
+      }
+    }
+  ],
+  "rigid_object_group": [],
+  "articulation": []
+}

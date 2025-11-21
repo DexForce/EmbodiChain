@@ -1,0 +1,254 @@
+{   
+    "id": "ScoopIce-v1",
+    "max_episodes": 5,
+    "env": {
+        "events": {
+            "drop_ice":{
+                "func": "drop_rigid_object_group_sequentially",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "ice_cubes"},
+                    "drop_position": [0.5, -0.05, 1.0],
+                    "position_range": [[-0.12, -0.12, 0], [0.12, 0.12, 0]],
+                    "physics_step": 10
+                } 
+            },
+            "init_scoop_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "scoop"},
+                    "position_range": [[0.45, -0.27, 1.05], [0.45, -0.27, 1.05]],
+                    "rotation_range": [[30, -25, 180], [30, -25, 180]],
+                    "relative_position": false,
+                    "relative_rotation": false
+                }
+            },
+            "init_cup_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "paper_cup"},
+                    "position_range": [[0.455, 0.112, 1.05], [0.455, 0.112, 1.05]],
+                    "rotation_range": [[0, 0, 0], [0, 0, 0]],
+                    "relative_position": false,
+                    "relative_rotation": false
+                }
+            },
+            "record_camera": {
+                "func": "record_camera_data",
+                "mode": "interval",
+                "interval_step": 1,
+                "params": {
+                    "name": "cam1",
+                    "resolution": [320, 240],
+                    "eye": [0, -1, 2],
+                    "target": [0.5, 0, 1]
+                }
+            }
+        },
+        "dataset": {
+            "instruction": {
+                "lang": "Scoop ice."
+            },
+            "robot_meta": {
+                "arm_dofs": 14,
+                "control_freq": 25,
+                "qpos_to_control": [6, 8, 10, 12, 14, 16, 18, 24, 7, 9, 11, 13, 15, 17, 19, 29],
+                "observation": {
+                    "vision": {
+                        "cam_high": [], 
+                        "cam_right_wrist": [], 
+                        "cam_left_wrist": []
+                    },
+                    "states": ["qpos"]
+                },
+                "min_len_steps": 10
+            }
+        }
+    },
+    "robot": {
+        "robot_type": "DexforceW1",
+        "init_pos": [0.0, 0.0, 0],
+        "init_qpos":[
+            0.42241, -1.11061,  0.55116,  0.01815,  0.00002, -0.43273,
+            -0.30339,  0.2412 , -1.20074,  0.72621,  0.40264, -0.41044,
+            -1.34341,  1.27664, -0.42869, -0.30873, -0.23608,  0.54272,
+            -0.12095, -0.16959,  0.00011,  0.00002,  0.00009,  0.00003,
+            1.50006,  0.30045,  0.30028,  0.30051,  0.30037,  0.90003,
+            0.23262,  0.24298,  0.22003,  0.19901, -0      ,  0.59305,
+            0.6033 ,  0.58056,  0.55942,  0.29999
+        ],
+        "solver_cfg": {
+            "left_arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "left_ee",
+                "root_link_name": "left_arm_base",
+                "tcp": 
+                    [
+                        [-1.0, 0.0, 0.0, 0.012],
+                        [0.0, 0.0, 1.0, 0.0675],
+                        [0.0, 1.0, 0.0, 0.127],
+                        [0.0, 0.0, 0.0, 1.0]
+                    ]
+            },
+            "right_arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "right_ee",
+                "root_link_name": "right_arm_base",
+                "tcp": 
+                    [
+                        [1.0, 0.0, 0.0, 0.012],
+                        [0.0, 0.0, -1.0, -0.0675],
+                        [0.0, 1.0, 0.0, 0.127],
+                        [0.0, 0.0, 0.0, 1.0]
+                    ]
+            }
+        }
+    },
+    "sensor": [
+        {
+            "sensor_type": "StereoCamera",
+            "uid": "cam_high",
+            "width": 960,
+            "height": 540,
+            "enable_mask": true,
+            "enable_depth": true,
+            "left_to_right_pos": [0.059684025824163614, 0, 0],
+            "intrinsics": [453.851402686215, 453.8347628855552, 469.827725021235, 258.6656181845155],
+            "intrinsics_right": [453.4536601653505, 453.3306024582175, 499.13697412367776, 297.7176248477935],
+            "extrinsics": {
+                "parent": "eyes"
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_right_wrist",
+            "width": 640,
+            "height": 360,
+            "enable_mask": true,
+            "intrinsics": [337.0, 325.0, 320.0, 180.0],
+            "extrinsics": {
+                "parent": "right_ee",
+                "pos": [0.09, 0.05, 0.04],
+                "quat": [0.36497168, -0.11507513,  0.88111957,  0.27781593]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_left_wrist",
+            "width": 640,
+            "height": 360,
+            "enable_mask": true,
+            "intrinsics": [337.0, 325.0, 320.0, 180.0],
+            "extrinsics": {
+                "parent": "left_ee",
+                "pos": [0.09, -0.05, 0.04],
+                "quat": [0.27781593, 0.88111957, -0.11507513, 0.36497168]
+            }
+        }
+    ],
+    "light": {
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "CircleTableSimple/circle_table_simple.ply"
+            },
+            "attrs" : {
+                "mass": 1.0,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.05
+            },
+            "body_type": "kinematic",
+            "init_pos": [0.80, 0, 0.54],
+            "init_rot": [0, 90, 0]
+        }
+    ],
+    "rigid_object": [
+        {
+            "uid": "scoop",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "ScoopIceNewEnv/scoop.ply"
+            },
+            "attrs" : {
+                "mass": 0.5,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "max_convex_hull_num": 8,
+            "init_pos": [0, 10, 10]
+        },
+        {
+            "uid": "paper_cup",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "PaperCup/paper_cup.ply"
+            },
+            "attrs" : {
+                "mass": 0.5,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "max_convex_hull_num": 16,
+            "init_pos": [0, 10, 10]
+        }
+    ],
+    "rigid_object_group": [
+        {
+            "uid": "ice_cubes",
+            "max_num": 300,
+            "folder_path": "ScoopIceNewEnv/ice_mesh_small",
+            "ext": ".obj",
+            "rigid_objects": {
+                "obj": {
+                    "attrs" : {
+                        "mass": 0.004,
+                        "contact_offset": 0.001,
+                        "rest_offset": 0,
+                        "dynamic_friction": 0.05,
+                        "static_friction": 0.1,
+                        "restitution": 0.00,
+                        "min_position_iters": 32,
+                        "min_velocity_iters": 8,
+                        "max_depenetration_velocity": 1.0
+                    },
+                    "shape": {
+                        "shape_type": "Mesh"
+                    },
+                    "init_pos": [0, 0, 2],
+                    "body_scale": [1.0, 1.0, 1.0]
+                }
+            }
+        }
+    ],
+    "articulation": [
+        {
+            "uid": "container",
+            "fpath": "ScoopIceNewEnv/IceContainer/ice_container.urdf",
+            "init_pos": [0.635, -0.04, 0.94],
+            "init_rot": [0, 0, -80],
+            "attrs": {
+                "mass": 1.0,
+                "dynamic_friction": 0.05,
+                "static_friction": 0.1,
+                "max_depenetration_velocity": 1.0
+            },
+            "drive_pros": {
+                "stiffness": 1.0,
+                "damping": 0.1,
+                "max_effort": 100.0
+            }
+        }
+    ]
+}
