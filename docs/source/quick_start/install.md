@@ -40,15 +40,6 @@ docker pull dexforce/embodichain:ubuntu22.04-cuda12.8
 
 > **We strongly recommend using a virtual environment to avoid dependency conflicts.**
 
-Install `DexSim` manually:
-```bash
-# If you are using Python 3.10
-pip install http://pyp.open3dv.site:2345/packages/dexsim_engine-0.3.6-cp310-cp310-manylinux_2_31_x86_64.whl
-```
-
-> We are working on uploading DexSim to PyPI for easier installation. Please stay tuned!
-
-
 Clone the EmbodiChain repository:
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
@@ -60,12 +51,14 @@ Install the project in development mode:
 pip install -e . 
 ```
 
-
 ### Verify Installation
 To verify that EmbodiChain is installed correctly, run a simple demo script to create a simulation scene:
 
 ```bash
- python scripts/tutorials/sim/create_scene.py
+python scripts/tutorials/sim/create_scene.py
+
+# Or run in headless mode.
+python scripts/tutorials/sim/create_scene.py --headless
 ```
 ---
 
