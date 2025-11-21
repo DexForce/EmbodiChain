@@ -10,7 +10,6 @@
       warp
       configclass
       file
-      heat_map
       logger
       math
       module_utils
@@ -39,14 +38,6 @@ File Operations
 ---------------
 
 .. automodule:: embodichain.utils.file
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Heat Map Utilities
-------------------
-
-.. automodule:: embodichain.utils.heat_map
    :members:
    :undoc-members:
    :show-inheritance:

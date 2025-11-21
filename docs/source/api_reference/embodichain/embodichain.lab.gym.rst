@@ -123,26 +123,12 @@ Registration System
 
     Gymnasium wrapper that adds episode time limits to environments.
 
-Action Conversion Utilities
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: embodichain.lab.gym.utils.action_conversion
-
-    Utilities for converting between different action representations in robotic environments.
-
 Gymnasium Utilities
 ~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain.lab.gym.utils.gym_utils
 
     Helper functions and utilities for Gymnasium environment integration.
-
-Image Utilities
-~~~~~~~~~~~~~~~
-
-.. automodule:: embodichain.lab.gym.utils.img_utils
-
-    Image processing utilities for visual observations and rendering.
 
 Miscellaneous Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~

@@ -53,13 +53,6 @@ autodoc_default_options = {
 # If using MyST and writing .md API stubs:
 myst_enable_extensions = ["colon_fence", "deflist", "html_admonition"]
 
-# Add any modules here that cannot be installed in the ReadTheDocs build environment
-autodoc_mock_imports = [
-    "torch",
-    "open3d",
-    "numba",
-    "dexsim",
-]
 
 templates_path = ["_templates"]
 exclude_patterns = []

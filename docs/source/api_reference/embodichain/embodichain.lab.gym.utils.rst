@@ -25,20 +25,12 @@ Registration System
 Utility Modules
 ---------------
 
-Action Conversion
-~~~~~~~~~~~~~~~~~
-
-.. automodule:: embodichain.lab.gym.utils.action_conversion
 
 Gymnasium Utilities
 ~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain.lab.gym.utils.gym_utils
 
-Image Utilities
-~~~~~~~~~~~~~~~
-
-.. automodule:: embodichain.lab.gym.utils.img_utils
 
 Miscellaneous
 ~~~~~~~~~~~~~
