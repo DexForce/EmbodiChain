@@ -495,7 +495,7 @@ def resolve_uids(env: EmbodiedEnv, entity_uids: Union[List[str], str]) -> List[s
         entity_uids = list(entity_uids)
     else:
         logger.log_error(
-            f"Entity uids {entity_uids} with trype {type(entity_uids)} not supported in [List[str], str], please check again."
+            f"Entity uids {entity_uids} with type {type(entity_uids)} not supported in [List[str], str], please check again."
         )
     return entity_uids
 
@@ -529,7 +529,7 @@ def get_pose(
             entity_cfg.control_parts, list(entity.control_parts.keys())
         )
         if len(control_parts) != 1:
-            logger.log_waring(
+            logger.log_warning(
                 "Only 1 control part can be assigned for computing the robot pose, please check again. Skipping"
             )
             return None

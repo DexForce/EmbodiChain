@@ -105,7 +105,7 @@ class EmbodiedEnvCfg(EnvCfg):
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
-    """Embodied AI emvironment that is used to simulate the Embodied AI tasks.
+    """Embodied AI environment that is used to simulate the Embodied AI tasks.
 
     Core simulation components for Embodied AI environments.
     - sensor: The sensors used to perceive the environment, which could be attached to the agent or the environment.

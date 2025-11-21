@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 from .base_env import *
-from .base_env import *
 from .embodied_env import *
 from .tasks import *
 from .wrapper import *
