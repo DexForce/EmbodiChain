@@ -11,14 +11,11 @@
       configclass
       file
       heat_map
-      interpolation
       logger
       math
       module_utils
-      se3_utils
       string
       utility
-      utility_3d
       visualizer
 
 
@@ -54,14 +51,6 @@ Heat Map Utilities
    :undoc-members:
    :show-inheritance:
 
-Interpolation
--------------
-
-.. automodule:: embodichain.utils.interpolation
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Logging
 -------
 
@@ -86,14 +75,6 @@ Module Utilities
    :undoc-members:
    :show-inheritance:
 
-SE(3) Utilities
----------------
-
-.. automodule:: embodichain.utils.se3_utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 String Operations
 -----------------
 
@@ -106,14 +87,6 @@ General Utilities
 -----------------
 
 .. automodule:: embodichain.utils.utility
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-3D Utilities
-------------
-
-.. automodule:: embodichain.utils.utility_3d
    :members:
    :undoc-members:
    :show-inheritance:

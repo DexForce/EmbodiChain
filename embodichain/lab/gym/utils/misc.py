@@ -34,7 +34,6 @@ import numpy as np
 
 from embodichain.lab.sim.objects import Robot
 from embodichain.utils.utility import inv_transform
-from embodichain.utils.utility_3d import pose_shift
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 
@@ -675,6 +674,14 @@ def get_changed_qpos(
         else:
             log_error(f"The {change_mode} change mode haven't realized yet!")
     return qpos_to_change
+
+
+def pose_shift(pose_in_cam: np.ndarray, axis: int, shift: float) -> np.ndarray:
+    shift_pose = np.copy(pose_in_cam)
+    shift_pose = np.linalg.inv(shift_pose)
+    shift_pose[axis, -1] += shift
+    shift_pose = np.linalg.inv(shift_pose)
+    return shift_pose
 
 
 def expand_pose(

@@ -14,20 +14,22 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import numpy as np
+
 import cv2
 import pickle
 import argparse
 import time
 import torch
+import functools
+import open3d as o3d
+import numpy as np
+
 from tqdm import tqdm
 from PIL import Image
 from functools import wraps
 from typing import Dict, List, Tuple, Optional, Callable, Any
 
 from embodichain.utils.string import callable_to_string
-
-import functools
 
 
 @functools.lru_cache(maxsize=None)  # memoization
@@ -629,3 +631,20 @@ def class_to_dict(obj: object) -> dict[str, Any]:
         else:
             data[key] = value
     return data
+
+
+def get_mesh_md5(mesh: o3d.t.geometry.TriangleMesh) -> str:
+    """get mesh md5 unique key
+
+    Args:
+        mesh (o3d.geometry.TriangleMesh): mesh
+
+    Returns:
+        str: mesh md5 value.
+    """
+    import hashlib
+
+    vert = np.array(mesh.vertex.positions.numpy(), dtype=float)
+    face = np.array(mesh.triangle.indices.numpy(), dtype=float)
+    mix = np.vstack([vert, face])
+    return hashlib.md5(np.array2string(mix).encode()).hexdigest()

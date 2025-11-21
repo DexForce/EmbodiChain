@@ -98,7 +98,7 @@ def visualize_data_dict(f: Dict, output_path: str):
         )
 
     if Modality.GEOMAP.value in observations.keys():
-        from embodichain.utils.utility_3d import gen_disp_colormap
+        from embodichain.utils.img_utils import gen_disp_colormap
 
         VideoCreator.monocular_save(
             observations,

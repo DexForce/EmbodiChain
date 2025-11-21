@@ -17,30 +17,17 @@
 import open3d as o3d
 import numpy as np
 import time
-from copy import deepcopy
-from typing import List
-from embodichain.utils import logger
-import hashlib
-from .cone_sampler import ConeSampler
 import pathlib
 import pickle
 import os
+
 from enum import Enum
+from copy import deepcopy
+from typing import List
 
-
-def get_mesh_md5(mesh: o3d.t.geometry.TriangleMesh) -> str:
-    """get mesh md5 unique key
-
-    Args:
-        mesh (o3d.geometry.TriangleMesh): mesh
-
-    Returns:
-        str: mesh md5值
-    """
-    vert = np.array(mesh.vertex.positions.numpy(), dtype=float)
-    face = np.array(mesh.triangle.indices.numpy(), dtype=float)
-    mix = np.vstack([vert, face])
-    return hashlib.md5(np.array2string(mix).encode()).hexdigest()
+from .cone_sampler import ConeSampler
+from embodichain.utils.utility import get_mesh_md5
+from embodichain.utils import logger
 
 
 class GraspSelectMethod(Enum):

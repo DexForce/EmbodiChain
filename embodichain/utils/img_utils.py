@@ -67,3 +67,88 @@ def batched_mask_to_box(masks: torch.Tensor) -> torch.Tensor:
         out = out[0]
 
     return out
+
+
+def gen_disp_colormap(inputs, normalize=True, torch_transpose=True):
+    """
+    Generate an RGB visualization using the "plasma" colormap for 2D/3D/4D scalar image inputs.
+
+    This utility maps scalar image(s) to an RGB colormap suitable for display or further processing.
+    It accepts either a NumPy array or a torch.Tensor (torch tensors are detached, moved to CPU and
+    converted to NumPy). The matplotlib "plasma" colormap with 256 entries is used.
+
+    Parameters
+    - inputs (numpy.ndarray or torch.Tensor):
+        Scalar image data with one of the following dimensionalities:
+          * 2D: (H, W)               -> a single image
+          * 3D: (N, H, W)            -> a batch of N single-channel images
+          * 4D: (N, C, H, W)         -> a batch with channel dimension; expected C==1 (first channel used)
+        The function will convert torch.Tensor input to numpy internally.
+    - normalize (bool, default True):
+        If True, input values are linearly scaled to [0, 1] using (x - min) / (max - min).
+        If the input is constant (min == max), a small divisor (1e5) is used to avoid division
+        by zero, which effectively maps values near 0. If False, values are assumed to already be
+        in the [0, 1] range (no scaling is performed).
+    - torch_transpose (bool, default True):
+        Controls the output channel ordering to match common PyTorch conventions:
+          * If True: outputs are transposed to channel-first form:
+              - 2D input  -> (3, H, W)
+              - 3D input  -> (N, 3, H, W)
+              - 4D input  -> (N, 3, H, W)  (uses the first channel)
+          * If False: outputs keep channel-last ordering:
+              - 2D input  -> (H, W, 3)
+              - 3D input  -> (N, H, W, 3)
+              - 4D input  -> (N, H, W, 3)
+
+    Returns
+    - numpy.ndarray:
+        RGB image(s) with float values in [0, 1]. The exact output shape depends on the input
+        dimensionality and the value of torch_transpose (see above). The alpha channel produced by
+        the colormap is discarded; only the RGB channels are returned.
+
+    Notes and behavior
+    - The function uses matplotlib.pyplot.get_cmap("plasma", 256).
+    - For 4D inputs the code selects the first channel (index 0) before applying the colormap.
+    - Inputs with dimensionality other than 2, 3, or 4 are not supported and will likely raise
+      an error or produce unintended results.
+    - This function is non-destructive: it returns a new NumPy array and does not modify the input.
+    - Typical use cases: visualizing depth maps, single-channel activation maps, or other scalar
+      images as colored RGB images for inspection or logging.
+
+    Examples
+    - 2D array (H, W) -> returns (3, H, W) if torch_transpose=True
+    - 3D array (N, H, W) -> returns (N, 3, H, W) if torch_transpose=True
+    - 4D array (N, 1, H, W) -> returns (N, 3, H, W) if torch_transpose=True
+    """
+    import matplotlib.pyplot as plt
+    import torch
+
+    _DEPTH_COLORMAP = plt.get_cmap("plasma", 256)  # for plotting
+    if isinstance(inputs, torch.Tensor):
+        inputs = inputs.detach().cpu().numpy()
+
+    vis = inputs
+    if normalize:
+        ma = float(vis.max())
+        mi = float(vis.min())
+        d = ma - mi if ma != mi else 1e5
+        vis = (vis - mi) / d
+
+    if vis.ndim == 4:
+        vis = vis.transpose([0, 2, 3, 1])
+        vis = _DEPTH_COLORMAP(vis)
+        vis = vis[:, :, :, 0, :3]
+        if torch_transpose:
+            vis = vis.transpose(0, 3, 1, 2)
+    elif vis.ndim == 3:
+        vis = _DEPTH_COLORMAP(vis)
+        vis = vis[:, :, :3]
+        if torch_transpose:
+            vis = vis.transpose(0, 3, 1, 2)
+    elif vis.ndim == 2:
+        vis = _DEPTH_COLORMAP(vis)
+        vis = vis[..., :3]
+        if torch_transpose:
+            vis = vis.transpose(2, 0, 1)
+
+    return vis

@@ -142,7 +142,7 @@ class CfgNode(_CfgNode):
     # TODO: overload __setattr__ to use `new_allowed` to avoid user manually add key by `cfg["key"]=value`.
     # Or is it necessary to do that? Because neither yacs and detectron2 make this feature.
 
-    # TODO: 新增键值时counter没有对应新增键
+    # TODO: When adding a new key, COUNTER does not contain an entry for the newly added key
 
     @classmethod
     def _open_cfg(cls, filename):
