@@ -201,3 +201,15 @@ class TableWare(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class ScannedBottle(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/obj_assets/ScannedBottle.zip",
+            "d2b2d4deb7b463a734af099f7624b4af",
+        )
+        prefix = "ScannedBottle"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)

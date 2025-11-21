@@ -28,6 +28,7 @@ from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
+    LightCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
@@ -88,6 +89,17 @@ def initialize_simulation(args) -> SimulationManager:
     sim.build_multiple_arenas(args.num_envs, space=2.5)
     # Set manual physics update for precise control
     sim.set_manual_update(True)
+
+    if args.enable_rt:
+        light = sim.add_light(
+            cfg=LightCfg(
+                uid="main_light",
+                color=(0.6, 0.6, 0.6),
+                intensity=30.0,
+                init_pos=(1.0, 0, 3.0),
+            )
+        )
+
     return sim
 
 

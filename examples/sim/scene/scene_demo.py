@@ -126,6 +126,9 @@ def main():
     sim = SimulationManager(sim_cfg)
     sim.set_manual_update(True)
 
+    if args.num_envs > 1:
+        sim.build_multiple_arenas(args.num_envs, space=10.0)
+
     num_lights = 8
     radius = 5
     height = 8
@@ -140,9 +143,6 @@ def main():
         uid = f"l{i+1}"
         cfg = LightCfg(uid=uid, intensity=intensity, radius=600, init_pos=[x, y, z])
         lights.append(sim.add_light(cfg))
-
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     physics_attrs = RigidBodyAttributesCfg(
         mass=10,

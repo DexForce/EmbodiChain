@@ -106,7 +106,7 @@ class DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/dexforce_w1/DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1.zip",
-            "b98a95f89c08098504cb5889268a0138",
+            "ef19d247799e79233863b558c47b32cd",
         )
         prefix = "DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

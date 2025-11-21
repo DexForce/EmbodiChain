@@ -19,7 +19,6 @@ import gymnasium
 import argparse
 import numpy as np
 
-from embodichain.lab.gym.envs.wrapper.record import RecordWrapper
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import (
