@@ -1,0 +1,938 @@
+{
+    "scope": {
+        "right_arm": {
+            "type": "DiGraph",
+            "dim": [
+                6
+            ],
+            "init": {
+                "method": "current_qpos",
+                "init_node_name": "right_arm_init_qpos"
+            },
+            "dtype": "float32"
+        },
+        "left_arm": {
+            "type": "DiGraph",
+            "dim": [
+                6
+            ],
+            "init": {
+                "method": "current_qpos",
+                "init_node_name": "left_arm_init_qpos"
+            },
+            "dtype": "float32"
+        },
+        "left_eef": {
+            "type": "DiGraph",
+            "dim": [
+                1
+            ],
+            "init": {
+                "method": "given_qpos",
+                "kwargs": {
+                    "given_qpos": [
+                        1
+                    ]
+                },
+                "init_node_name": ""
+            },
+            "dtype": "float32"
+        },
+        "right_eef": {
+            "type": "DiGraph",
+            "dim": [
+                1
+            ],
+            "init": {
+                "method": "given_qpos",
+                "kwargs": {
+                    "given_qpos": [
+                        1
+                    ]
+                },
+                "init_node_name": ""
+            },
+            "dtype": "float32"
+        }
+    },
+    "node": {
+        "right_arm": [
+            {
+                "right_arm_init_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "right_arm_init_qpos",
+                                "dst_key": "right_arm_init_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation", 
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_fk_xpos",
+                                                "kwargs": {
+                                                    "control_part": "right_arm", 
+                                                    "fk_func": "env.robot.compute_fk"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                        
+                    }
+                }
+            },
+            {
+                "right_arm_aim_qpos": {
+                    "name": "generate_right_arm_aim_qpos",
+                    "kwargs": {}
+                }
+            },
+            {
+                "bottle_grasp": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_pose",
+                                "dst_key": "bottle_grasp_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_rotation_replaced_pose",
+                                                "kwargs": {
+                                                    "rotation_value": "env.affordance_datas['right_arm_aim_qpos'][0]",
+                                                    "rot_axis": "z",
+                                                    "mode": "intrinsic"
+                                                }
+                                            },
+                                            {
+                                                "name": "get_frame_changed_pose",
+                                                "kwargs": {
+                                                    "frame_change_matrix": "env.affordance_datas['bottle_pose']",
+                                                    "mode": "intrinsic",
+                                                    "inverse": true
+                                                }
+                                            },
+                                            {
+                                                "name": "get_frame_changed_pose",
+                                                "kwargs": {
+                                                    "frame_change_matrix": "env.affordance_datas['bottle_grasp_pose']",
+                                                    "mode": "intrinsic"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "src_key": "bottle_grasp_pose",
+                                "dst_key": "bottle_pre1_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_offset_pose", 
+                                                "kwargs": {
+                                                    "offset_value": -0.05,
+                                                    "direction": "z",
+                                                    "mode": "intrinsic"
+                                                }
+                                            }                                  
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "src_key": "bottle_pre1_pose",
+                                "dst_key": "bottle_pre2_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_offset_pose", 
+                                                "kwargs": {
+                                                    "offset_value": -0.05,
+                                                    "direction": "z",
+                                                    "mode": "intrinsic"
+                                                }
+                                            }                                  
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "bottle_pre1_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_pre1_pose",
+                                "dst_key": "bottle_pre1_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "get_ik_ret",
+                                        "kwargs": {
+                                            "ik_func": "env.robot.compute_ik", 
+                                            "qpos_seed": "env.affordance_datas['right_arm_init_qpos']", 
+                                            "control_part": "right_arm"
+                                        },
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_ik_qpos", 
+                                                "kwargs": {
+                                                    "ik_func": "env.robot.compute_ik", 
+                                                    "qpos_seed": "env.affordance_datas['right_arm_init_qpos']", 
+                                                    "control_part": "right_arm"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "bottle_grasp_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_grasp_pose",
+                                "dst_key": "bottle_grasp_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "get_ik_ret",
+                                        "kwargs": {
+                                            "ik_func": "env.robot.compute_ik", 
+                                            "qpos_seed": "env.affordance_datas['bottle_pre1_qpos']", 
+                                            "control_part": "right_arm"
+                                        },
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_ik_qpos", 
+                                                "kwargs": {
+                                                    "ik_func": "env.robot.compute_ik", 
+                                                    "qpos_seed": "env.affordance_datas['bottle_pre1_qpos']", 
+                                                    "control_part": "right_arm"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                        
+                    }
+                }
+            },
+            {
+                "bottle_up_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_grasp_qpos",
+                                "dst_key": "bottle_up_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_offset_qpos", 
+                                                "kwargs": {
+                                                    "offset_value": -0.05,
+                                                    "joint_list_offset": [1]
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_exceed_new",
+                                        "kwargs": {
+                                            "robot": "env.robot",
+                                            "control_part": "right_arm"
+                                        }
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "pour_water_start_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_grasp_pose",
+                                "dst_key": "pour_water_start_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name":"no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_replaced_pose", 
+                                                "kwargs": {
+                                                    "pose_replace_value": "env.affordance_datas['cup_pose'][:2,3]",
+                                                    "axis_str_replace": "xy"
+                                                }
+                                            },
+                                            {
+                                                "name": "get_offset_pose", 
+                                                "kwargs": {
+                                                    "offset_value": 0.05,
+                                                    "direction": "x",
+                                                    "mode": "extrinsic"
+                                                }
+                                            },
+                                            {
+                                                "name": "get_offset_pose", 
+                                                "kwargs": {
+                                                    "offset_value": -0.10,
+                                                    "direction": "y",
+                                                    "mode": "extrinsic"
+                                                }
+                                            },
+                                            {
+                                                "name": "get_offset_pose", 
+                                                "kwargs": {
+                                                    "offset_value": 0.125,
+                                                    "direction": "z",
+                                                    "mode": "extrinsic"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "src_key": "pour_water_start_pose",
+                                "dst_key": "pour_water_start_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "get_ik_ret",
+                                        "kwargs": {
+                                            "ik_func": "env.robot.compute_ik", 
+                                            "qpos_seed": "env.affordance_datas['bottle_up_qpos']", 
+                                            "control_part": "right_arm"
+                                        },
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_ik_qpos", 
+                                                "kwargs": {
+                                                    "ik_func": "env.robot.compute_ik", 
+                                                    "qpos_seed": "env.affordance_datas['bottle_up_qpos']", 
+                                                    "control_part": "right_arm"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "pour_water_stop_pose": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "pour_water_start_qpos",
+                                "dst_key": "bottle_rotation_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_offset_qpos", 
+                                                "kwargs": {
+                                                    "offset_value": -75,
+                                                    "joint_list_offset": [5],
+                                                    "degrees": true
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_exceed_new",
+                                        "kwargs": {
+                                            "robot": "env.robot",
+                                            "control_part": "right_arm"
+                                        }
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "src_key": "bottle_rotation_qpos",
+                                "dst_key": "pour_water_stop_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation", 
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_fk_xpos",
+                                                "kwargs": {
+                                                    "control_part": "right_arm", 
+                                                    "fk_func": "env.robot.compute_fk"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "bottle_place_pose": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_grasp_pose",
+                                "dst_key": "bottle_place_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name":"no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_replaced_pose", 
+                                                "kwargs": {
+                                                    "pose_replace_value": [0.7, -0.1],
+                                                    "axis_str_replace": "xy"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "src_key": "bottle_place_pose",
+                                "dst_key": "bottle_place_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "get_ik_ret",
+                                        "kwargs": {
+                                            "ik_func": "env.robot.compute_ik", 
+                                            "qpos_seed": "env.affordance_datas['pour_water_start_qpos']", 
+                                            "control_part": "right_arm"
+                                        },
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_ik_qpos", 
+                                                "kwargs": {
+                                                    "ik_func": "env.robot.compute_ik", 
+                                                    "qpos_seed": "env.affordance_datas['pour_water_start_qpos']", 
+                                                    "control_part": "right_arm"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "bottle_pre_place_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "bottle_place_qpos",
+                                "dst_key": "bottle_pre_place_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_offset_qpos", 
+                                                "kwargs":{
+                                                    "offset_value": -0.05,
+                                                    "joint_list_offset": [1]
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "is_qpos_exceed_new",
+                                        "kwargs": {
+                                            "robot": "env.robot",
+                                            "control_part": "right_arm"
+                                        }
+                                    },
+                                    {
+                                        "name": "is_qpos_flip",
+                                        "kwargs": {
+                                            "qpos_ref": "env.affordance_datas['right_arm_init_qpos']",
+                                            "qpos_ids": [3, 4], 
+                                            "threshold": 3.455751918948773, 
+                                            "mode": "delta",
+                                            "return_inverse": true
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "compute_unoffset_for_exp":{
+                    "name": "compute_unoffset_for_exp",
+                    "kwargs": {
+                        "pose_input_output_names_changes": {
+                            "bottle_grasp_pose": {
+                                "output_pose_name":"bottle_grasp_pose_object_unoffset",
+                                "pose_changes": [
+                                    ["framechange_extrinsic_inverse", "env.affordance_datas['bottle_pose']"], 
+                                    ["rotation_z_intrinsic_degrees", 90],
+                                    ["offset_-z_intrinsic", 0.025],
+                                    ["rotation_z_intrinsic_degrees", -90]
+                                ]
+                            },
+                            "bottle_place_pose": {
+                                "output_pose_name":"bottle_place_pose_unoffset",
+                                "pose_changes": [
+                                    ["rotation_z_intrinsic_degrees", 90],
+                                    ["offset_-z_intrinsic", 0.025],
+                                    ["rotation_z_intrinsic_degrees", -90]
+                                ]
+                            },
+                            "pour_water_start_pose": {
+                                "output_pose_name":"pour_water_start_pose_unoffset",
+                                "pose_changes": [
+                                    ["rotation_z_intrinsic_degrees", 90],
+                                    ["offset_-z_intrinsic", 0.025],
+                                    ["rotation_z_intrinsic_degrees", -90]
+                                ]
+                            },
+                            "pour_water_stop_pose": {
+                                "output_pose_name":"pour_water_stop_pose_unoffset",
+                                "pose_changes": [
+                                    ["rotation_z_intrinsic_degrees", 90],
+                                    ["offset_-z_intrinsic", 0.025],
+                                    ["rotation_z_intrinsic_degrees", -90]
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ],
+        "left_arm": [
+            {
+                "left_arm_init_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "left_arm_init_qpos",
+                                "dst_key": "left_arm_init_pose",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation", 
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_fk_xpos",
+                                                "kwargs": {
+                                                    "control_part": "left_arm", 
+                                                    "fk_func": "env.robot.compute_fk"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                        
+                    }
+                }
+            },
+            {
+                "left_monitor_qpos": {
+                    "name": "generate_affordances_from_src",
+                    "kwargs": {
+                        "affordance_infos": [
+                            {
+                                "src_key": "left_arm_init_qpos",
+                                "dst_key": "left_arm_monitor_qpos",
+                                "valid_funcs_name_kwargs_proc": [
+                                    {
+                                        "name": "no_validation",
+                                        "kwargs": {},
+                                        "pass_processes": [
+                                            {
+                                                "name": "get_replaced_qpos",
+                                                "kwargs": {
+                                                    "replace_value": [-0.6, 1.0, -1.2, 0.0, 0.58, 0.0],
+                                                    "joint_list_replace": [0, 1, 2, 3, 4, 5]
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        ],
+        "left_eef": [
+            {
+                "open": {
+                    "name": "execute_open",
+                    "kwargs": {}
+                }
+            },
+            {
+                "close": {
+                    "name": "execute_close",
+                    "kwargs": {}
+                }
+            }
+        ],
+        "right_eef": [
+            {
+                "ropen": {
+                    "name": "execute_open",
+                    "kwargs": {}
+                }
+            },
+            {
+                "rclose": {
+                    "name": "execute_close",
+                    "kwargs": {}
+                }
+            }
+        ]
+    },
+    "edge": {
+        "right_arm": [
+            {
+                "init_to_aim": {
+                    "src": "right_arm_init_qpos",
+                    "sink": "right_arm_aim_qpos",
+                    "duration": 10,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "right_arm_init_qpos",
+                            "right_arm_aim_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "aim_to_pre1": {
+                    "src": "right_arm_aim_qpos",
+                    "sink": "bottle_pre1_qpos",
+                    "duration": 24,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "right_arm_aim_qpos",
+                            "bottle_pre1_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "pre1_to_grasp": {
+                    "src": "bottle_pre1_qpos",
+                    "sink": "bottle_grasp_qpos",
+                    "duration": 24,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "bottle_pre1_qpos",
+                            "bottle_grasp_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "grasp_to_up": {
+                    "src": "bottle_grasp_qpos",
+                    "sink": "bottle_up_qpos",
+                    "duration": 4,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "bottle_grasp_qpos",
+                            "bottle_up_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "up_to_move": {
+                    "src": "bottle_up_qpos",
+                    "sink": "pour_water_start_qpos",
+                    "duration": 20,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "bottle_up_qpos",
+                            "pour_water_start_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "move_to_rotation": {
+                    "src": "pour_water_start_qpos",
+                    "sink": "bottle_rotation_qpos",
+                    "duration": 24,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "pour_water_start_qpos",
+                            "bottle_rotation_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "rotation_back_to_move": {
+                    "src": "bottle_rotation_qpos",
+                    "sink": "pour_water_start_qpos",
+                    "duration": 24,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "bottle_rotation_qpos",
+                            "pour_water_start_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "move_back_to_pre_place": {
+                    "src": "pour_water_start_qpos",
+                    "sink": "bottle_pre_place_qpos",
+                    "duration": 20,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "pour_water_start_qpos",
+                            "bottle_pre_place_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "pre_place_back_to_place": {
+                    "src": "bottle_pre_place_qpos",
+                    "sink": "bottle_place_qpos",
+                    "duration": 4,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "bottle_pre_place_qpos",
+                            "bottle_place_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "place_back_to_init": {
+                    "src": "bottle_place_qpos",
+                    "sink": "right_arm_init_qpos",
+                    "duration": 24,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "right_arm",
+                        "keypose_names": [
+                            "bottle_place_qpos",
+                            "right_arm_init_qpos"
+                        ]
+                    }
+                }
+            }
+        ],
+        "left_arm": [
+            {
+                "left_init_to_monitor": {
+                    "src": "left_arm_init_qpos",
+                    "sink": "left_monitor_qpos",
+                    "duration": 15,
+                    "name": "plan_trajectory",
+                    "kwargs": {
+                        "agent_uid": "left_arm",
+                        "keypose_names": [
+                            "left_arm_init_qpos",
+                            "left_arm_monitor_qpos"
+                        ]
+                    }
+                }
+            },
+            {
+                "left_arm_go_back": {
+                    "src": "left_monitor_qpos",
+                    "sink": "left_arm_init_qpos",
+                    "duration": 15,
+                    "kwargs": {}
+                }
+            }
+        ],
+        "left_eef": [],
+        "right_eef": [
+            {
+                "rclose0": {
+                    "src": "ropen",
+                    "sink": "rclose",
+                    "duration": 11,
+                    "name": "execute_close",
+                    "kwargs": {
+                        "return_action": true,
+                        "expand": true
+                    }
+                }
+            },
+            {
+                "ropen0": {
+                    "src": "rclose",
+                    "sink": "ropen",
+                    "duration": 11,
+                    "name": "execute_open",
+                    "kwargs": {
+                        "return_action": true,
+                        "expand": true
+                    }
+                }
+            }
+        ]
+    },
+    "sync": {
+        "rclose0": {
+            "depend_tasks": [
+                "pre1_to_grasp"
+            ]
+        },
+        "grasp_to_up": {
+            "depend_tasks": [
+                "rclose0"
+            ]
+        },
+        "ropen0": {
+            "depend_tasks": [
+                "pre_place_back_to_place"
+            ]
+        },
+        "place_back_to_init": {
+            "depend_tasks": [
+                "ropen0"
+            ]
+        },
+        "left_arm_go_back": {
+            "depend_tasks": [
+                "ropen0"
+            ]
+        }
+    },
+    "misc": {
+        "vis_graph": false,
+        "vis_gantt": false,
+        "warpping": true
+    }
+}

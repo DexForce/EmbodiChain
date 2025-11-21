@@ -1,0 +1,109 @@
+{   
+    "id": "EmbodiedEnv-v1",
+    "max_episodes": 10,
+    "env": {
+        "events": {
+            "random_light": {
+                "func": "randomize_light",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "light_1"},
+                    "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
+                    "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
+                    "intensity_range": [50.0, 100.0]
+                }
+            },
+            "random_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 2,
+                "params": {
+                    "entity_cfg": {"uid": "table"},
+                    "random_texture_prob": 0.5,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
+                }
+            },
+            "record_camera": {
+                "func": "record_camera_data",
+                "mode": "interval",
+                "interval_step": 1,
+                "params": {
+                    "name": "cam1",
+                    "resolution": [320, 240],
+                    "eye": [2, 0, 2],
+                    "target": [0.5, 0, 1]
+                }
+            },
+            "replace_fork": {
+                "func": "replace_assets_from_group",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "fork"},
+                    "folder_path": "TableWare/tableware/fork/"
+                }
+            }
+        }
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "width": 640,
+            "height": 480,
+            "enable_mask": true,
+            "enable_depth": true,
+            "extrinsics": {
+                "eye": [0.0, 0.0, 1.0],
+                "target": [0.0, 0.0, 0.0]
+            }
+        }
+    ],
+    "robot": {
+        "robot_type": "DexforceW1",
+        "init_pos": [0.0, 1.0, 0]
+    },
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [0, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "ShopTableSimple/shop_table_simple.ply"
+            },
+            "attrs" : {
+                "mass": 10.0
+            },
+            "body_scale": [2, 1.6, 1],
+            "body_type": "kinematic"
+        }
+    ],
+    "rigid_object": [
+        {
+            "uid": "fork",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "TableWare/tableware/fork/standard_fork_scale.ply"
+            },
+            "body_scale": [0.75, 0.75, 1.0],
+            "init_pos": [0.0, 0.0, 1.0]
+        }
+    ],
+    "articulation": [
+        {
+            "fpath": "SlidingBoxDrawer/SlidingBoxDrawer.urdf",
+            "init_pos": [0.5, 0.0, 0.85]
+        }
+    ]
+}

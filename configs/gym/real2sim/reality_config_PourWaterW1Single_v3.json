@@ -1,0 +1,582 @@
+{
+    "id": "pour_water_single_real2sim",
+    "max_episodes": 10,
+    "env": {
+        "observations": {
+            "norm_robot_eef_joint": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [7, 15]
+                }
+            },
+            "bottle_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bottle_pose",
+                "params": {
+                    "entity_cfg": {"uid": "bottle"}
+                }
+            },
+            "cup_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "cup_pose",
+                "params": {
+                    "entity_cfg": {"uid": "cup"}
+                }
+            },
+            "cam_high_semantic_mask_l": {
+                "func": "compute_semantic_mask",
+                "mode": "add",
+                "name": "sensor/cam_high/semantic_mask_l",
+                "params": {
+                    "entity_cfg": {"uid": "cam_high"},
+                    "foreground_uids": ["bottle", "cup"]
+                }
+            },
+            "cam_high_semantic_mask_r": {
+                "func": "compute_semantic_mask",
+                "mode": "add",
+                "name": "sensor/cam_high/semantic_mask_r",
+                "params": {
+                    "entity_cfg": {"uid": "cam_high"},
+                    "foreground_uids": ["bottle", "cup"],
+                    "is_right": true
+                }
+            },
+            "cam_left_semantic_mask": {
+                "func": "compute_semantic_mask",
+                "mode": "add",
+                "name": "sensor/cam_left_wrist/semantic_mask_l",
+                "params": {
+                    "entity_cfg": {"uid": "cam_left_wrist"},
+                    "foreground_uids": ["bottle", "cup"]
+                }
+            },
+            "cam_right_semantic_mask": {
+                "func": "compute_semantic_mask",
+                "mode": "add",
+                "name": "sensor/cam_right_wrist/semantic_mask_l",
+                "params": {
+                    "entity_cfg": {"uid": "cam_right_wrist"},
+                    "foreground_uids": ["bottle", "cup"]
+                }
+            },
+            "exteroception": {
+                "func": "compute_exteroception",
+                "mode": "add",
+                "name": "exteroception",
+                "params": {
+                    "descriptor": {
+                        "cam_high": [
+                            {
+                                "type": "robot",
+                                "control_part": "left_arm"
+                            },
+                            {
+                                "type": "robot",
+                                "control_part": "right_arm"
+                            }
+                        ]
+                    },
+                    "x_interval": 0.02,
+                    "y_interval": 0.05,
+                    "kpnts_number": 2,
+                    "groups": 2
+                }
+            }
+        },
+        "dataset": {
+            "dir_path": "",
+            "instruction": {
+                "lang": "Pour water from the bottle into the cup."
+            },
+            "robot_meta": {
+                "arm_dofs": 14,
+                "control_freq": 25,
+                "qpos_to_control": [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14],
+                "observation": {
+                    "vision": {
+                        "cam_high": ["mask"], 
+                        "cam_right_wrist": ["mask"], 
+                        "cam_left_wrist": ["mask"]
+                    },
+                    "proprioception": ["qpos"],
+                    "exteroception": ["cam_high", "cam_right_wrist", "cam_left_wrist"]
+                },
+                "action": "qpos_with_eef_pose",
+                "min_len_steps": 30
+            }
+        },
+        "success_params": {
+            "strict": false
+        }
+    },
+    "robot": {
+        "uid": "dexforce_w1",
+        "init_pos": [0.14, 0.0, 0.04],
+        "init_qpos": [0.0,0.0,0.0,0.0,0.0,0.0,0.0,-0.57923,0.0,-1.57003,-1.2,0.4,0.0,0.0,0.57923,0.0,1.57003,1.2,-0.4,0.0,2.5,0.0,0.0,0.0,0.0,0.0,2.5,0.0,0.0,0.0,0.0,0.0],
+        "solver_cfg": {
+            "left_arm": {
+                "ik_nearest_weight": [5, 5, 1, 5, 1, 1, 1]
+            },
+            "right_arm": {
+                "ik_nearest_weight": [5, 5, 1, 5, 1, 1, 1],
+                "tcp": [[ 1.0  ,  0.0  ,  0.0  ,  0.0  ],
+                        [ 0.0  ,  0.0  , -1.0  , -0.04],
+                        [ 0.0  ,  1.0  ,  0.0  ,  0.14],
+                        [ 0.0  ,  0.0  ,  0.0  ,  1.0  ]]
+            }
+        }
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_left_wrist",
+            "sensor_name": "cam_left_wrist",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [487.39422607421875, 487.39422607421875, 320.3005676269531, 210.7530517578125],
+            "enable_mask": true,
+            "attach_link": "left_ee",
+            "attach_xpos": [
+                [ 0.70711, -0.40558,  0.57923,  0.09   ],
+                [-0.0     , -0.81915, -0.57358, -0.05   ],
+                [ 0.70711,  0.40558, -0.57923,  0.04   ],
+                [ 0.0     ,  0.0     ,  0.0     ,  1.0     ]
+            ],
+            "set_near": 0.005,
+            "set_far": 50
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_right_wrist",
+            "sensor_name": "cam_right_wrist",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "enable_mask": true,
+            "attach_link": "right_ee",
+            "attach_xpos": [
+                [-0.70711, -0.40558,  0.57923,  0.09   ],
+                [-0.0     ,  0.81915,  0.57358,  0.05   ],
+                [-0.70711,  0.40558, -0.57923,  0.04   ],
+                [ 0.0     ,  0.0     ,  0.0     ,  1.0     ]
+            ],
+            "set_near": 0.005,
+            "set_far": 50
+        },
+        {
+            "sensor_type": "StereoCamera",
+            "uid": "cam_high",
+            "sensor_name": "cam_high",
+            "width": 960,
+            "height": 540,
+            "intrinsics": [453.851402686215, 453.8347628855552, 469.827725021235, 258.6656181845155],
+            "intrinsics_right": [453.4536601653505, 453.3306024582175, 499.13697412367776, 297.7176248477935],
+            "enable_mask": true,
+            "enable_depth": true,
+            "relativate_T": [
+                [
+                    0.99996440327,
+                    0.000856048544,
+                    0.008394008265,
+                    0.059684025824163614
+                ],
+                [
+                    -0.00085599875,
+                    0.999999633588,
+                    -9.524764e-06,
+                    1.064844737251626e-05
+                ],
+                [
+                    -0.008394013343,
+                    2.339165e-06,
+                    0.999964769647,
+                    0.0002219304982263564
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    1
+                ]
+            ],
+            "set_near": 0.005,
+            "set_far": 50,
+            "camera_position": [
+                0.35368482807598,
+                0.014695524383058989,
+                1.4517046071614774
+            ],
+            "camera_look_at": [
+                0.7186357573287919,
+                -0.054534732904795505,
+                0.5232553674540066
+            ],
+            "up_vector": [
+                0.9306678549330372,
+                -0.0005600064212467153,
+                0.3658647703553347
+            ]
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 100,
+                "init_pos": [0, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": { "shape_type": "Mesh", "fpath": "static_scenes/static_scene_3/circle_table_simple.ply", "compute_uv": false },
+            "body_scale": [1.0, 0.8, 0.8],
+            "init_local_pose": [
+                [2.220446049250313e-16, 0.0, 1.0, 0.7],
+                [0.0, 1.0, 0.0, 0.0],
+                [-1.0, 0.0, 2.220446049250313e-16, 0.92],
+                [0.0, 0.0, 0.0, 1.0]
+            ],
+            "body_type": "kinematic",
+            "max_convex_hull_num": 1
+        }
+    ],
+    "rigid_object": [
+        {
+            "uid": "bottle",
+            "shape": { "shape_type": "Mesh", "fpath": "objects/object_6/xingbake_processed.ply" },
+            "attrs": {
+                "mass": 0.005,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 1e1
+            },
+            "body_scale": [1, 1, 1],
+            "init_local_pose": [
+                [1.0, 0.0, 0.0, 0.59013],
+                [0.0, 1.0, 0.0, -0.02475],
+                [0.0, 0.0, 1.0, 1.06664],
+                [0.0, 0.0, 0.0, 1.0]
+            ],
+            "max_convex_hull_num": 8
+        },
+        {
+            "uid": "cup",
+            "shape": { "shape_type": "Mesh", "fpath": "objects/object_7/paper_cup.ply" },
+            "attrs": {
+                "mass": 0.005,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 1e1
+            },
+            "body_scale": [0.75, 0.75, 1.0],
+            "init_local_pose": [
+                [0.9986, -0.00476, 0.05268, 0.66128],
+                [0.01116, 0.99248, -0.12189, 0.1],
+                [-0.0517, 0.12231, 0.99114, 1.0],
+                [0.0, 0.0, 0.0, 1.0]
+            ],
+            "max_convex_hull_num": 8
+        }
+    ],
+    "task": {
+        "name": "pour_water_single",
+        "data": {
+            "0": {
+                "trajectory": {
+                    "path": "demo1",
+                    "sample_ratio": 0.1,
+                    "scope": {
+                        "right_arm": [
+                            8,
+                            9,
+                            10,
+                            11,
+                            12,
+                            13,
+                            14
+                        ],
+                        "left_arm": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4,
+                            5,
+                            6
+                        ],
+                        "left_eef": [
+                            7
+                        ],
+                        "right_eef": [
+                            15
+                        ]
+                    }
+                },
+                "node": {
+                    "right_arm": [
+                        {
+                            "0": {
+                                "affordance_name": "grasp_qpos",
+                                "master": "",
+                                "slaver": "bottle",
+                                "timestep": 122,
+                                "mimicable": true,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "after_pour_qpos",
+                                "master": "bottle",
+                                "slaver": "",
+                                "timestep": 436,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "3": {
+                                "affordance_name": "place_qpos",
+                                "master": "bottle",
+                                "slaver": "",
+                                "timestep": 502,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "4": {
+                                "affordance_name": "pour_qpos",
+                                "master": "bottle",
+                                "slaver": "cup",
+                                "timestep": 327,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "5": {
+                                "affordance_name": "before_pour_qpos",
+                                "master": "bottle",
+                                "slaver": "",
+                                "timestep": 207,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            }
+                        }
+                    ],
+                    "left_arm": [],
+                    "right_eef": [
+                        {   
+                            "0": {
+                                "affordance_name": "right_close",
+                                "master": "",
+                                "slaver": "bottle",
+                                "timestep": 123,
+                                "mimicable": false,
+                                "duration": 20,
+                                "trajectory": {
+                                    "name": "execute_close",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "right_open",
+                                "master": "",
+                                "slaver": "bottle",
+                                "timestep": 502,
+                                "mimicable": false,
+                                "duration": 20,
+                                "trajectory": {
+                                    "name": "execute_open",
+                                    "kwargs": {}
+                                }
+                            }
+
+                        }
+                    ],
+                    "left_eef": []
+                },
+                "sync": {
+                    "right_eefhand_init_qpos": {
+                        "depend_tasks": [
+                            "grasp_qpos"
+                        ]
+                    },
+                    "grasp_qpos": {
+                        "depend_tasks": [
+                            "right_close"
+                        ]
+                    },
+                    "right_close": {
+                        "depend_tasks": [
+                            "place_qpos"
+                        ]
+                    },
+                    "place_qpos": {
+                        "depend_tasks": [
+                            "right_open"
+                        ]
+                    }
+                }
+            },
+            "1": {
+                "trajectory": {
+                    "path": "demo2",
+                    "sample_ratio": 0.1,
+                    "scope": {
+                        "right_arm": [
+                            8,
+                            9,
+                            10,
+                            11,
+                            12,
+                            13,
+                            14
+                        ],
+                        "left_arm": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4,
+                            5,
+                            6
+                        ],
+                        "left_eef": [
+                            7
+                        ],
+                        "right_eef": [
+                            15
+                        ]
+                    }
+                },
+                "node": {
+                    "right_arm": [
+                        {
+                            "0": {
+                                "affordance_name": "grasp_qpos",
+                                "master": "",
+                                "slaver": "bottle",
+                                "timestep": 163,
+                                "mimicable": true,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "pour_qpos",
+                                "master": "bottle",
+                                "slaver": "cup",
+                                "timestep": 400,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "3": {
+                                "affordance_name": "place_qpos",
+                                "master": "bottle",
+                                "slaver": "",
+                                "timestep": 692,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "4": {
+                                "affordance_name": "after_pour_qpos",
+                                "master": "bottle",
+                                "slaver": "",
+                                "timestep": 532,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            },
+                            "5": {
+                                "affordance_name": "before_pour_qpos",
+                                "master": "bottle",
+                                "slaver": "",
+                                "timestep": 232,
+                                "trajectory": {
+                                    "name": "load_trajectory",
+                                    "kwargs": {}
+                                }
+                            }
+                        }
+                    ],
+                    "left_arm": [],
+                    "right_eef": [
+                        {   
+                            "0": {
+                                "affordance_name": "right_close",
+                                "master": "",
+                                "slaver": "bottle",
+                                "timestep": 210,
+                                "mimicable": false,
+                                "duration": 20,
+                                "trajectory": {
+                                    "name": "execute_close",
+                                    "kwargs": {}
+                                }
+                            },
+                            "1": {
+                                "affordance_name": "right_open",
+                                "master": "",
+                                "slaver": "bottle",
+                                "timestep": 692,
+                                "mimicable": false,
+                                "duration": 20,
+                                "trajectory": {
+                                    "name": "execute_open",
+                                    "kwargs": {}
+                                }
+                            }
+
+                        }
+                    ],
+                    "left_eef": []
+                },
+                "sync": {
+                    "right_eefhand_init_qpos": {
+                        "depend_tasks": [
+                            "grasp_qpos"
+                        ]
+                    },
+                    "grasp_qpos": {
+                        "depend_tasks": [
+                            "right_close"
+                        ]
+                    },
+                    "right_close": {
+                        "depend_tasks": [
+                            "place_qpos"
+                        ]
+                    },
+                    "place_qpos": {
+                        "depend_tasks": [
+                            "right_open"
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
