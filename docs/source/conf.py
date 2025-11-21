@@ -10,9 +10,7 @@ import os
 import sys
 
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-package_root = os.path.join(project_root, "embodichain")
-sys.path.insert(0, package_root)
+sys.path.insert(0, os.path.abspath("../.."))
 
 
 project = "EmbodiChain"
@@ -30,6 +28,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION")) as f:
 
 
 extensions = [
+    "autodocsumm",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
@@ -42,6 +41,8 @@ extensions = [
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 
+autodoc_typehints = "signature"
+autodoc_class_signature = "separated"
 # generate autosummary even if no references
 autosummary_generate = True
 autosummary_generate_overwrite = False
