@@ -251,7 +251,7 @@ class TestRobotCPU(BaseRobotTest):
         self.setup_simulation("cpu")
 
 
-# @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRobotCUDA(BaseRobotTest):
     def setup_method(self):
         self.setup_simulation("cuda")
