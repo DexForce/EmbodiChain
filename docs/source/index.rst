@@ -11,7 +11,7 @@ Table of Contents
    :caption: Introduction
    :glob:
 
-   introduction.md
+   introduction
 
 .. toctree::
    :maxdepth: 1

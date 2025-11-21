@@ -1,0 +1,58 @@
+.. EmbodiChain documentation master file, created by
+   sphinx-quickstart on Tue Nov 19 11:00:25 2024.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
+
+EmbodiChain
+======================================
+
+.. image:: ../../assets/imgs/teaser.jpg
+   :alt: teaser
+
+📘 `Documentation <http://192.168.3.120/MixedAI/docs_dev/embodichain/index.html>`_
+
+---
+
+EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, real-to-sim data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
+
+.. NOTE::
+   EmbodiChain is in Alpha and under active development:
+
+   * More features will be continually added in the coming months.
+   * Since this is an early release, we welcome feedback (bug reports, feature requests, etc.) via GitHub Issues.
+
+
+Key Features
+------------
+
+* **High-Fidelity, GPU-Accelerated Simulation**: Combines realistic physics for both rigid and deformable objects with advanced ray-traced sensor modeling, all accelerated on the GPU for high-throughput batched simulations.
+* **Unified Robot Learning Environment**: Offers standardized interfaces for a wide range of robot learning tasks, including Imitation Learning and Reinforcement Learning.
+* **Scalable Data Pipeline**: Features a comprehensive toolkit for automated data collection, efficient processing, and large-scale data generation to fuel your models.
+* **Efficient Training & Evaluation**: Supports modern training paradigms like online data streaming for Imitation Learning and massively parallel environment rollouts for Reinforcement Learning.
+* **Modular and Extensible**: Designed with modularity in mind to easily integrate new robot platforms, environments, and learning algorithms.
+
+
+Getting Started
+---------------
+
+To get started with EmbodiChain, follow these steps:
+
+* `Installation Guide <http://192.168.3.120/MixedAI/docs_dev/embodichain/quick_start/install.html>`_
+* `Quick Start Tutorial <http://192.168.3.120/MixedAI/docs_dev/embodichain/tutorial/index.html>`_
+* `API Reference <http://192.168.3.120/MixedAI/docs_dev/embodichain/api_reference/index.html>`_
+
+
+Citation
+--------
+
+If you use EmbodiChain in your research, please cite our work:
+
+.. code-block:: bibtex
+
+   @misc{EmbodiChain,
+     author = {EmbodiChain Developers},
+     title = {EmbodiChain: An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.},
+     month = {November},
+     year = {2025},
+     url = {https://github.com/DexForce/EmbodiChain}
+   }
