@@ -18,9 +18,9 @@ build-backend = "setuptools.build_meta:__legacy__"
 [project]
 name = "embodichain"
 version = "0.0.1"
-description = "A modular platform for building generalized embodied intelligence."
+description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
-authors = [ { name = "Dexforce" } ]
+authors = [ { name = "EmbodiChain Developers" } ]
 requires-python = ">=3.9"
 
 
