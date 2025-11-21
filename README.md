@@ -1,18 +1,24 @@
 # EmbodiChain
 
+![teaser](assets/imgs/teaser.jpg)
 **📘 [Documentation](http://192.168.3.120/MixedAI/docs_dev/embodichain/index.html)**  
 ---
 
-EmbodiChain is a unified, GPU-accelerated framework designed for pushing the boundaries of embodied AI research and development. It integrates high-performance simulation, data collection via real-to-sim techniques, data scaling pipeline, modular model architectures, and efficient training & evaluation tools. All of these components work seamlessly together to facilitate rapid experimentation and deployment of embodied intelligence and perform Sim2Real transfer into real-world robotic systems.
+EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, real-to-sim data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
+
+> [!NOTE]
+> EmbodiChain is in Alpha and under active development:
+> * More features will be continually added in the coming months.
+> * Since this is an early release, we welcome feedback (bug reports, feature requests, etc.) via GitHub Issues.
+
 
 ## Key Features
 
-- **High-Fidelity Simulation**: Realistic physics and sensor modeling with advanced ray-tracing for accurate perception and interaction.
-- **GPU-Accelerated Simulation**: Leverage GPU to run batched simulations with high throughput.
-- **Unified Robot Learning Environment**: Standardized interfaces for both Imitation Learning and Reinforcement Learning tasks.
-- **Data Scaling Pipeline**: Comprehensive tools for automated data collection, efficient processing, and scalable data generation.
-- **Modular Model Architectures**: Flexible and extensible model architectures for fast prototyping and experimentation.
-- **Efficient Training Infrastructure**: Imitation Learning with efficient online data streaming & Reinforcement Learning with parallel environment rollout.
+- **High-Fidelity, GPU-Accelerated Simulation**: Combines realistic physics for both rigid and deformable objects with advanced ray-traced sensor modeling, all accelerated on the GPU for high-throughput batched simulations.
+- **Unified Robot Learning Environment**: Offers standardized interfaces for a wide range of robot learning tasks, including Imitation Learning and Reinforcement Learning.
+- **Scalable Data Pipeline**: Features a comprehensive toolkit for automated data collection, efficient processing, and large-scale data generation to fuel your models.
+- **Efficient Training & Evaluation**: Supports modern training paradigms like online data streaming for Imitation Learning and massively parallel environment rollouts for Reinforcement Learning.
+- **Modular and Extensible**: Designed with modularity in mind to easily integrate new robot platforms, environments, and learning algorithms.
 
 
 ## Getting Started
