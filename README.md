@@ -28,3 +28,18 @@ To get started with EmbodiChain, follow these steps:
 - [Installation Guide](http://192.168.3.120/MixedAI/docs_dev/embodichain/quick_start/install.html)
 - [Quick Start Tutorial](http://192.168.3.120/MixedAI/docs_dev/embodichain/tutorial/index.html)
 - [API Reference](http://192.168.3.120/MixedAI/docs_dev/embodichain/api_reference/index.html)
+
+
+## Citation
+
+If you use EmbodiChain in your research, please cite our work:
+
+```bibtex
+@misc{EmbodiChain,
+  author = {EmbodiChain Developers},
+  title = {EmbodiChain: An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.},
+  month = {November},
+  year = {2025},
+  url = {https://github.com/DexForce/EmbodiChain}
+}
+```

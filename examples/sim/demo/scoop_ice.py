@@ -139,12 +139,12 @@ def create_robot(sim):
         control_parts={
             "arm": ["JOINT[0-9]"],
             "hand": [
-                "LEFT_THUMB_MCP1",
-                "LEFT_THUMB_MCP2",
-                "LEFT_INDEX_MCP",
-                "LEFT_MIDDLE_MCP",
-                "LEFT_RING_MCP",
-                "LEFT_LITTLE_MCP",
+                "LEFT_HAND_THUMB1",
+                "LEFT_HAND_THUMB2",
+                "LEFT_HAND_INDEX",
+                "LEFT_HAND_MIDDLE",
+                "LEFT_HAND_RING",
+                "LEFT_HAND_PINKY",
             ],
         },
         drive_pros=JointDrivePropertiesCfg(
@@ -339,8 +339,8 @@ def scoop_grasp(
     rest_qpos = robot.get_qpos()
     arm_ids = robot.get_joint_ids("arm")
     hand_ids = robot.get_joint_ids("hand")
-    hand_open_qpos = torch.tensor([1.5, 0, 0.4, 0.4, 0.4, 0.4])
-    hand_close_qpos = torch.tensor([1.5, 0.4, 1.0, 1.1, 1.1, 0.9])
+    hand_open_qpos = torch.tensor([0.0, 1.5, 0.4, 0.4, 0.4, 0.4])
+    hand_close_qpos = torch.tensor([0.4, 1.5, 1.0, 1.1, 1.1, 0.9])
     arm_rest_qpos = rest_qpos[:, arm_ids]
 
     # Calculate and set the drop pose for the scoop object
@@ -437,8 +437,8 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
     start_qpos = robot.get_qpos()
     arm_ids = robot.get_joint_ids("arm")
     hand_ids = robot.get_joint_ids("hand")
-    hand_open_qpos = torch.tensor([1.5, 0, 0.4, 0.4, 0.4, 0.4])
-    hand_close_qpos = torch.tensor([1.5, 0.4, 1.0, 1.1, 1.1, 0.9])
+    hand_open_qpos = torch.tensor([0.0, 1.5, 0.4, 0.4, 0.4, 0.4])
+    hand_close_qpos = torch.tensor([0.4, 1.5, 1.0, 1.1, 1.1, 0.9])
     arm_start_qpos = start_qpos[:, arm_ids]
 
     # lift

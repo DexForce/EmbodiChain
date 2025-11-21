@@ -1,5 +1,5 @@
-Learning Environments
+Embodied Environments       
 ==================
 
-Overview of the Learning Environments:
+Overview of the Embodied Environments:
 

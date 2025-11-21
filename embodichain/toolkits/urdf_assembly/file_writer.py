@@ -145,10 +145,10 @@ class URDFFileWriter:
         header_lines = [
             '<?xml version="1.0"?>',
             separator_line,
-            center_comment("机器人URDF模型生成报告"),
-            center_comment(f"生成时间: {now}"),
-            center_comment("工具版本: DexForce URDF Composer V1.0"),
-            center_comment(f"包含模块: {' + '.join(module_names)}"),
+            center_comment("Robot URDF Model Generation Report"),
+            center_comment(f"Generation Time: {now}"),
+            center_comment("Tool Version: DexForce URDF Composer V1.0"),
+            center_comment(f"Included Modules: {' + '.join(module_names)}"),
         ]
 
         # Add assembly signature if provided

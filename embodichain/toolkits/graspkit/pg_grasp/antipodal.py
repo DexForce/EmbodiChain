@@ -523,7 +523,6 @@ class AntipodalGenerator:
         select_method: GraspSelectMethod = GraspSelectMethod.NORMAL_SCORE,
     ) -> List[AntipodalGrasp]:
         """Select grasps. Masked by max_angle and sort by grasp score
-            (优先选择分数最高的grasp)
 
         Args:
             approach_direction (np.ndarray): gripper approach direction

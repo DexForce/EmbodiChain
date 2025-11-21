@@ -34,11 +34,12 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Supported Robot & Tasks
+   :caption: Resources
    :glob:
 
-   support/robot/index*
-   support/task/index*
+   resources/robot/index*
+   resources/task/index*
+   resources/roadmap.md
 
 .. toctree::
    :maxdepth: 2
