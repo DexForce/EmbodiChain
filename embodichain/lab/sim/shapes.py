@@ -106,10 +106,7 @@ class MeshCfg(ShapeCfg):
     """File path to the shape mesh file."""
 
     load_option: LoadOption = LoadOption()
-    """Options for loading and processing the shape.
-    
-    Please refer to dexsim.types.LoadOption for more details: http://192.168.3.120/MixedAI/docs_dev/dexsim/tutorial/basics/physics/actor.html
-    """
+    """Options for loading and processing the shape."""
 
     compute_uv: bool = False
     """Whether to compute UV coordinates for the shape. Defaults to False.

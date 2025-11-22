@@ -9,7 +9,7 @@ EmbodiChain
 .. image:: ../../assets/imgs/teaser.jpg
    :alt: teaser
 
-📘 `Documentation <http://192.168.3.120/MixedAI/docs_dev/embodichain/index.html>`_
+📘 `Documentation <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/introduction>`_
 
 ---
 
@@ -37,9 +37,9 @@ Getting Started
 
 To get started with EmbodiChain, follow these steps:
 
-* `Installation Guide <http://192.168.3.120/MixedAI/docs_dev/embodichain/quick_start/install.html>`_
-* `Quick Start Tutorial <http://192.168.3.120/MixedAI/docs_dev/embodichain/tutorial/index.html>`_
-* `API Reference <http://192.168.3.120/MixedAI/docs_dev/embodichain/api_reference/index.html>`_
+* `Installation Guide <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/quick_start/install>`_
+* `Quick Start Tutorial <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/tutorial/>`_
+* `API Reference <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/api_reference/>`_
 
 
 Citation
