@@ -28,7 +28,6 @@ import time
 
 class TestDataDictExtractor(unittest.TestCase, metaclass=UnittestMetaclass):
     datacenter_backup = Path("/tmp/datacenter_test")
-    base_url = "http://192.168.3.120/MixedAI/"
 
     def setUp(self) -> None:
         pass
