@@ -1,5 +1,6 @@
 Embodied Environments       
 ==================
 
-Overview of the Embodied Environments:
+*To be completed by adding a detailed description of the Embodied Environments.*
+
 
