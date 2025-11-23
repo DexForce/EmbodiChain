@@ -163,6 +163,12 @@ if __name__ == "__main__":
         "--save_path", help="path", default="./outputs/thirdviewvideo", type=str
     )
     parser.add_argument(
+        "--save_video",
+        help="Whether to save the video of the episode.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--debug_mode",
         help="Enable debug mode.",
         default=False,

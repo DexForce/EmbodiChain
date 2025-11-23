@@ -256,6 +256,14 @@
                     "foreground_uids": ["bottle", "cup"]
                 }
             }
+        },
+        "dataset": {
+            "robot_meta": {
+                "arm_dofs": 12,
+                "control_freq": 25,
+                "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
+                "min_len_steps": 5
+            }
         }
     },
     "robot": {
