@@ -1,7 +1,11 @@
 Supported Tasks
 ======================
 
+*To be completed by adding more tasks and task descriptions.*
+
 .. toctree::
    :maxdepth: 1
 
-    Pour Water <pour_water.md>
+    Push Cube
+    Pour Water
+
