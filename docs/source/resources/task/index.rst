@@ -1,12 +1,11 @@
 Supported Tasks
 ======================
 
-*To be completed by adding task discriptions.*
+*To be completed by adding more tasks and task descriptions.*
 
 .. toctree::
    :maxdepth: 1
 
-    Ramdom Reach
     Push Cube
     Pour Water
 

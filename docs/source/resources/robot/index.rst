@@ -1,7 +1,7 @@
 Supported Robots
 ======================
 
-*To be completed by adding more basic robot like UR5, UR10, etc.*
+*To be completed by adding more well-defined robot like LeRobot, Unitree H1/G1, etc.*
 
 .. toctree::
    :maxdepth: 1
