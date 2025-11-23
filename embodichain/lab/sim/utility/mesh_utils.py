@@ -1,95 +1,29 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
 import os
 import dexsim.engine
 import numpy as np
 import open3d as o3d
 import trimesh
+import dexsim
+
 from typing import Tuple, List, Dict, Any, Optional, Union
 
-import dexsim
 from embodichain.utils import logger
-from embodichain.data import get_data_path
-
-
-def process_meshes(
-    mesh_config: Union[List[Dict], Dict], processor_config: Dict = None
-) -> List[str]:
-    r"""Process a list of mesh files using the specified processor configuration.
-
-    Args:
-        mesh_config (list): A list of dictionaries containing mesh file paths.
-        processor_config (dict): A dictionary containing the processor configuration.
-
-    Returns:
-        list: A list of processed mesh file paths.
-    """
-    from embodichain.toolkits.processor.function.mesh_processor import (
-        build_mesh_processors,
-    )
-    from embodichain.toolkits.processor.component import TriangleComponent
-    from embodichain.toolkits.processor.entity import MeshEntity
-
-    processors, replace = None, False
-    if processor_config is not None:
-        if "replace" in processor_config:
-            replace = processor_config.pop("replace")
-        processors = build_mesh_processors(processor_config)
-
-    if isinstance(mesh_config, dict):
-        mesh_config_list = list(mesh_config.values())
-    else:
-        mesh_config_list = mesh_config
-    batch_meshes, batch_index = [], []
-    for idx, config in enumerate(mesh_config_list):
-        if "mesh_file" not in config and "mesh_path" not in config:
-            logger.log_error("Config must contain 'mesh_file' and 'mesh_path' keys.")
-        key = "mesh_file" if "mesh_file" in config else "mesh_path"
-        mesh_fpath = config[key]
-        mesh_fpath = get_data_path(mesh_fpath)
-        if not os.path.exists(mesh_fpath):
-            logger.log_error(f"Mesh file not found at path: {mesh_fpath}")
-        config[key] = mesh_fpath
-        save_fpath = (
-            os.path.dirname(config[key])
-            + "/mesh_processed_"
-            + os.path.basename(config[key])
-        )
-
-        if processors is None and "mesh_processor" not in config:
-            # No processors specified, so just return
-            continue
-        elif os.path.exists(save_fpath) and not replace:
-            config[key] = save_fpath
-            continue
-        elif "mesh_processor" in config:
-            # Process the mesh file with the specified processor
-            mesh_processor = build_mesh_processors(config["mesh_processor"])
-            tri_component = TriangleComponent.from_fpath(mesh_fpath)
-            mesh_entity = MeshEntity("mesh", tri_component)
-            mesh = mesh_processor.apply([mesh_entity])[0]
-            mesh.save_mesh(save_fpath)
-            # Update the mesh file path in the config
-            config[key] = save_fpath
-        else:
-            tri_component = TriangleComponent.from_fpath(mesh_fpath)
-            mesh_entity = MeshEntity("mesh", tri_component)
-            batch_meshes.append(mesh_entity)
-            batch_index.append(idx)
-
-    # Process the batch of meshes with the default processors
-    if batch_meshes and processors is not None:
-        meshes = processors.apply(batch_meshes)
-        for idx, config in enumerate(mesh_config_list):
-            if idx in batch_index:
-                save_fpath = (
-                    os.path.dirname(config[key])
-                    + "/mesh_processed_"
-                    + os.path.basename(config[key])
-                )
-                meshes[batch_index.index(idx)].save_mesh(save_fpath)
-                config[key] = save_fpath
-    if isinstance(mesh_config, dict):
-        mesh_config = {k: v for k, v in zip(mesh_config.keys(), mesh_config_list)}
-    return mesh_config
 
 
 def export_articulation_mesh(

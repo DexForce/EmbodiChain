@@ -286,7 +286,7 @@
                                         ]
                                     },
                                     {
-                                        "name": "is_qpos_exceed_new",
+                                        "name": "is_qpos_exceed",
                                         "kwargs": {
                                             "robot": "env.robot",
                                             "control_part": "right_arm"
@@ -418,7 +418,7 @@
                                         ]
                                     },
                                     {
-                                        "name": "is_qpos_exceed_new",
+                                        "name": "is_qpos_exceed",
                                         "kwargs": {
                                             "robot": "env.robot",
                                             "control_part": "right_arm"
@@ -544,7 +544,7 @@
                                         ]
                                     },
                                     {
-                                        "name": "is_qpos_exceed_new",
+                                        "name": "is_qpos_exceed",
                                         "kwargs": {
                                             "robot": "env.robot",
                                             "control_part": "right_arm"

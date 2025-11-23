@@ -62,12 +62,6 @@ if __name__ == "__main__":
         default=0,
         type=int,
     )
-    parser.add_argument(
-        "--enable_sensors_in_step",
-        help="Whether to enable sensors in each step of the simulation.",
-        default=False,
-        action="store_true",
-    )
     parser.add_argument("--gym_config", type=str, help="gym_config", default="")
     parser.add_argument(
         "--action_config",
@@ -109,9 +103,6 @@ if __name__ == "__main__":
     )
 
     env = gymnasium.make(id=gym_config["id"], cfg=cfg, **action_config)
-
-    if args.enable_sensors_in_step is False:
-        pass
 
     obs, info = env.reset()
 

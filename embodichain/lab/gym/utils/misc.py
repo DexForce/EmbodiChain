@@ -41,31 +41,6 @@ def no_validation(*args, **kwargs):
     return True
 
 
-def add_xy_random_offset(
-    pose: np.ndarray, max_offset: Union[float, List[float]]
-) -> np.ndarray:
-    """
-    Add a random offset to the x and y translation of a pose.
-
-    Args:
-        pose (np.ndarray): 4x4 pose matrix.
-        max_offset (float or List[float]): If float, uniform in [-max_offset, max_offset] for both axes.
-                                           If list, [x_min, x_max, y_min, y_max].
-
-    Returns:
-        np.ndarray: Pose with random xy offset.
-    """
-    shift_pose = deepcopy(pose)
-    if isinstance(max_offset, float):
-        xy_shift = np.random.uniform(-max_offset, max_offset, size=2)
-    else:
-        x_shift = np.random.uniform(max_offset[0], max_offset[1])
-        y_shift = np.random.uniform(max_offset[2], max_offset[3])
-        xy_shift = np.array([x_shift, y_shift])
-    shift_pose[:2, 3] += xy_shift
-    return shift_pose
-
-
 def mul_linear_expand(
     arr: np.ndarray, expand_times: Union[int, List[int]], is_interp: bool = True
 ) -> np.ndarray:
@@ -175,14 +150,7 @@ def is_pose_flip(
     return valid_ret
 
 
-def is_qpos_exceed(qpos: np.ndarray, agent, uid: str):
-    return not (
-        any(qpos < agent.get_joint_limits(uid)[:, 0])
-        or any(qpos > agent.get_joint_limits(uid)[:, 1])
-    )
-
-
-def is_qpos_exceed_new(
+def is_qpos_exceed(
     qpos: Union[np.ndarray, torch.Tensor], robot: Robot, control_part: str
 ) -> bool:
     """
@@ -674,106 +642,6 @@ def get_changed_qpos(
         else:
             log_error(f"The {change_mode} change mode haven't realized yet!")
     return qpos_to_change
-
-
-def pose_shift(pose_in_cam: np.ndarray, axis: int, shift: float) -> np.ndarray:
-    shift_pose = np.copy(pose_in_cam)
-    shift_pose = np.linalg.inv(shift_pose)
-    shift_pose[axis, -1] += shift
-    shift_pose = np.linalg.inv(shift_pose)
-    return shift_pose
-
-
-def expand_pose(
-    pose: np.ndarray,
-    x_interval: float,
-    y_interval: float,
-    kpnts_number: int,
-    grab_ratios: List = None,
-    ref_pose: np.ndarray = np.eye(4),
-):
-    ret = [ref_pose @ pose]
-
-    xoffset = np.linspace(-x_interval, x_interval, kpnts_number)
-
-    if grab_ratios is None:
-        yoffset = np.linspace(-y_interval, y_interval, kpnts_number)
-    else:
-        yoffset = np.linspace(
-            -y_interval * grab_ratios[0],
-            y_interval * grab_ratios[1],
-            kpnts_number,
-        )
-
-    x_expand = [ref_pose @ pose_shift(pose, 0, x) for x in list(xoffset)]
-    y_expand = [ref_pose @ pose_shift(pose, 1, y) for y in list(yoffset)]
-    return ret + x_expand + y_expand
-
-
-def parse_mask_by_uuids(
-    mask: np.ndarray, uuids: Dict[str, int]
-) -> Dict[str, np.ndarray]:
-    from embodichain.data.enum import SemanticMask
-
-    if len(uuids.keys()) == 0:
-        return {}
-
-    robot_mask = np.zeros_like(mask, dtype=np.bool_)
-    robot_uuids = uuids["robot"]
-    for uuid in robot_uuids:
-        robot_mask[mask == uuid] = True
-
-    object_uuids = uuids.get("object", [])
-    foreground_mask = np.zeros_like(mask, dtype=np.bool_)
-    for uuid in object_uuids:
-        foreground_mask[mask == uuid] = True
-
-    background_mask = np.logical_not(np.logical_or(robot_mask, foreground_mask))
-
-    ret_masks = np.tile(
-        np.expand_dims(np.zeros_like(robot_mask), -1), [1, 1, len(SemanticMask)]
-    )
-    ret_masks[:, :, SemanticMask.ROBOT.value] = robot_mask
-    ret_masks[:, :, SemanticMask.BACKGROUND.value] = background_mask
-    ret_masks[:, :, SemanticMask.FOREGROUND.value] = foreground_mask
-
-    return ret_masks
-
-
-def project_3d_to_2d(
-    cam, poses: List[np.ndarray], normalize: bool = True
-) -> np.ndarray:
-    import dexsim.utility as dexutils
-
-    cam_pose = cam._camera.get_world_pose()
-    cam_pose = dexutils.change_coordinate_stystem(cam_pose, ["X", "-Y", "-Z"])
-
-    intrinsic = cam._camera.get_intrinsic()
-    height = cam._camera.get_height()
-    width = cam._camera.get_width()
-    keypoints = []
-    for pose in poses:
-        pose_ = np.matmul(np.linalg.inv(cam_pose), pose)
-        rvec, tvec = cv2.Rodrigues(np.eye(3))[0], np.zeros((3, 1))
-        image_points, _ = cv2.projectPoints(
-            pose_[:3, -1],
-            rvec,
-            tvec,
-            np.array(intrinsic).reshape(3, 3),
-            np.zeros(
-                5,
-            ),
-        )
-        keypoints.append(image_points.reshape(1, 2))
-
-    keypoints = np.concatenate(keypoints, 0)
-    keypoints[:, 0] = np.clip(keypoints[:, 0], 0, width - 1)
-    keypoints[:, 1] = np.clip(keypoints[:, 1], 0, height - 1)
-
-    if normalize:
-        keypoints[:, 0] = keypoints[:, 0] / width
-        keypoints[:, 1] = keypoints[:, 1] / height
-    return keypoints
 
 
 def camel_to_snake(name):
@@ -1463,7 +1331,7 @@ def get_fk_xpos(
 
 
 # FIXME: remove
-def _data_key_to_control_part(robot, control_parts, data_key: str) -> Optional[str]:
+def data_key_to_control_part(robot, control_parts, data_key: str) -> Optional[str]:
     # TODO: Temporary workaround, should be removed after refactoring data dict extractor.
     # @lru_cache(max_size=None) # NOTE: no way to pass a hashable parameter
     def is_eef_hand(robot, control_parts) -> bool:
@@ -1492,73 +1360,3 @@ def _data_key_to_control_part(robot, control_parts, data_key: str) -> Optional[s
         if "gripper" in data_key and is_eef_hand(robot, control_parts) is False:
             return "right_eef"
         return None
-
-
-# FIXME: only for v3 W1
-def map_ee_state_to_env_actions(
-    robot, ee_state: np.ndarray, env_actions: np.ndarray
-) -> np.ndarray:
-    """
-    Map end-effector (gripper) state to environment joint actions.
-
-    Args:
-        ee_state (np.ndarray): Normalized gripper state, shape (batch, 2).
-        env_actions (np.ndarray): Environment joint actions to be updated.
-
-    Returns:
-        np.ndarray: Updated environment joint actions with gripper positions.
-    """
-    from embodichain.data.enum import ControlParts, JointType, EndEffector
-
-    left_eef_limits = (
-        robot.body_data.qpos_limits.squeeze(0)
-        .cpu()
-        .numpy()[robot.get_joint_ids(name=ControlParts.LEFT_EEF.value)]
-    )
-    right_eef_limits = (
-        robot.body_data.qpos_limits.squeeze(0)
-        .cpu()
-        .numpy()[robot.get_joint_ids(name=ControlParts.RIGHT_EEF.value)]
-    )
-
-    def w1_gripper_mapping(normalized_state, eef_limits):
-        # Define normalized open/close positions for the gripper (range 0-1)
-        open_state_normalized = np.array([90.0, 0.0, 0.0, 0.0, 0.0, 0.0]) / 100.0
-        close_state_normalized = np.array([90.0, 55.0, 30.0, 30.0, 30.0, 30.0]) / 100.0
-
-        # Convert normalized values to actual joint angles
-        open_state_actual = eef_limits[:, 0] + open_state_normalized * (
-            eef_limits[:, 1] - eef_limits[:, 0]
-        )
-        close_state_actual = eef_limits[:, 0] + close_state_normalized * (
-            eef_limits[:, 1] - eef_limits[:, 0]
-        )
-
-        # Interpolate between open and close joint angles
-        if isinstance(normalized_state, np.ndarray) and normalized_state.ndim > 0:
-            return (
-                open_state_actual * (1 - normalized_state[:, None])
-                + close_state_actual * normalized_state[:, None]
-            )
-        else:
-            return (
-                open_state_actual * (1 - normalized_state)
-                + close_state_actual * normalized_state
-            )
-
-    if ee_state.ndim == 1:
-        ee_state = ee_state.reshape(1, -1)
-    if env_actions.ndim == 1:
-        env_actions = env_actions.reshape(1, -1)
-
-    # Map normalized gripper state to actual joint positions
-    left_hand_qpos = w1_gripper_mapping(ee_state[:, 0], left_eef_limits)
-    right_hand_qpos = w1_gripper_mapping(ee_state[:, 1], right_eef_limits)
-
-    # Get indices for left and right end-effector joints
-    left_eef_ids = robot.get_joint_ids(name=ControlParts.LEFT_EEF.value)
-    right_eef_ids = robot.get_joint_ids(name=ControlParts.RIGHT_EEF.value)
-
-    env_actions[:, left_eef_ids] = left_hand_qpos
-    env_actions[:, right_eef_ids] = right_hand_qpos
-    return env_actions

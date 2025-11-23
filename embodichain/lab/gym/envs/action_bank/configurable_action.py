@@ -14,22 +14,23 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import torch
 import numpy as np
+import functools
 import networkx as nx
+import matplotlib.pyplot as plt
+
 from copy import deepcopy
 from typing import Dict, Tuple, Union, List, Callable, Any, Optional
 from tqdm import tqdm
-
-import torch
-import matplotlib.pyplot as plt
 from functools import partial
+
 from embodichain.utils.math import pose_inv
 from embodichain.utils.logger import log_info, log_warning, log_error
 from embodichain.lab.sim.cfg import MarkerCfg
-from embodichain.lab.gym.utils.misc import resolve_env_params, _data_key_to_control_part
+from embodichain.lab.gym.utils.misc import resolve_env_params, data_key_to_control_part
 from embodichain.data.enum import Hints, EefExecute
 from .utils import generate_affordance_from_src, get_init_affordance
-import functools
 
 
 # https://stackoverflow.com/questions/41834530/how-to-make-python-decorators-work-like-a-tag-to-make-function-calls-by-tag
@@ -995,7 +996,7 @@ def get_control_part(env, agent_uid):
     if agent_uid in control_parts:
         return agent_uid
     else:
-        return _data_key_to_control_part(
+        return data_key_to_control_part(
             robot=env.robot,
             control_parts=control_parts,
             data_key=agent_uid,

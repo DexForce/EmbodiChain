@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import os
 import open3d as o3d
 
 from pathlib import Path
@@ -30,7 +31,9 @@ from embodichain.data.constants import (
 class SimResources(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/materials/embodisim_resources.zip",
+            os.path.join(
+                EMBODICHAIN_DOWNLOAD_PREFIX, "materials/embodisim_resources.zip"
+            ),
             "53c054b3ae0857416dc52632eb562c12",
         )
         prefix = "SimResources"
@@ -98,7 +101,7 @@ class SimResources(EmbodiChainDataset):
 class CocoBackground(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/materials/CocoBackground.zip",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "materials/CocoBackground.zip"),
             "fda82404a317281263bd5849e9eb31a1",
         )
         prefix = "CocoBackground"
