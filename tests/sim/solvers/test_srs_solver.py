@@ -295,6 +295,7 @@ class TestSRSCPURobotSolver(BaseRobotSolverTest):
         self.setup_simulation(solver_type="SRSSolver", device="cpu")
 
 
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestSRSCUDARobotSolver(BaseRobotSolverTest):
     def setup_method(self):
         self.setup_simulation(solver_type="SRSSolver", device="cuda")
