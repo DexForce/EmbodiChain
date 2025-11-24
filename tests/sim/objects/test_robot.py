@@ -54,7 +54,6 @@ class BaseRobotTest:
         config = SimulationManagerCfg(headless=True, sim_device=sim_device)
         self.sim = SimulationManager(config)
         self.sim.build_multiple_arenas(10)  # NUM_ARENAS = 10
-        self.sim.set_manual_update(True)
 
         cfg = DexforceW1Cfg.from_dict(
             {

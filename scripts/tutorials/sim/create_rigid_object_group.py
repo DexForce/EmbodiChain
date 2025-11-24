@@ -71,9 +71,6 @@ def main():
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
 
-    # Enable manual physics update for precise control
-    sim.set_manual_update(True)
-
     # Build multiple arenas if requested
     if args.num_envs > 1:
         sim.build_multiple_arenas(args.num_envs, space=3.0)

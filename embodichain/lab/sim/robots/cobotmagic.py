@@ -210,7 +210,6 @@ if __name__ == "__main__":
     config = SimulationManagerCfg(headless=False, sim_device="cuda")
     sim = SimulationManager(config)
     sim.build_multiple_arenas(2)
-    sim.set_manual_update(True)
 
     config = {
         "init_pos": [0.0, 0.0, 1.0],

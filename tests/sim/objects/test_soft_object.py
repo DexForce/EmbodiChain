@@ -48,7 +48,6 @@ class BaseSoftObjectTest:
         assert os.path.isfile(COW_PATH)
 
         # Enable manual physics update for precise control
-        self.sim.set_manual_update(True)
         self.n_envs = 4
         # Build multiple arenas if requested
         self.sim.build_multiple_arenas(self.n_envs, space=3.0)

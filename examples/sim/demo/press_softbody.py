@@ -15,49 +15,32 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates the creation and simulation of a robot with dexterous hands,
-and performs a scoop ice task in a simulated environment.
+This script demonstrates the creation and simulation of a robot with a soft object,
+and performs a pressing task in a simulated environment.
 """
 
 import argparse
 import numpy as np
 import time
 import torch
-from tqdm import tqdm
-from scipy.spatial.transform import Rotation as R
+
+from dexsim.utility.path import get_resources_data_path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot, RigidObject, RigidObjectGroup
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    RobotCfg,
-    URDFCfg,
-    RigidObjectCfg,
-    RigidBodyAttributesCfg,
-    ArticulationCfg,
-    RigidObjectGroupCfg,
-    LightCfg,
-)
-from embodichain.lab.sim.material import VisualMaterialCfg
+from embodichain.lab.sim.objects import Robot, SoftObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance_warp
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
+from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from dexsim.utility.path import get_resources_data_path
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
+    RobotCfg,
+    LightCfg,
+    SoftObjectCfg,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.objects import (
-    RigidObject,
-    RigidObjectCfg,
-    SoftObject,
-    SoftObjectCfg,
-)
+from embodichain.lab.sim.shapes import MeshCfg
 
 
 def parse_arguments():
@@ -98,8 +81,6 @@ def initialize_simulation(args):
         cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
     )
 
-    # Set manual physics update for precise control
-    sim.set_manual_update(True)
     return sim
 
 
@@ -115,44 +96,16 @@ def create_robot(sim: SimulationManager):
     """
     # Retrieve URDF paths for the robot arm and hand
     ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
-    hand_urdf_path = get_data_path(
-        "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
-    )
-
-    # Define transformation for attaching the hand to the arm
-    hand_attach_xpos = np.eye(4)
-    hand_attach_xpos[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
 
     # Configure the robot with its components and control properties
     cfg = RobotCfg(
-        uid="ur10_with_brainco",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur10_urdf_path},
-            ]
+        uid="UR10",
+        fpath=ur10_urdf_path,
+        solver_cfg=PytorchSolverCfg(
+            end_link_name="ee_link",
+            root_link_name="base_link",
+            tcp=np.eye(4),
         ),
-        control_parts={
-            "arm": ["Joint[0-9]"],
-        },
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={
-                "Joint[0-9]": 1e4,
-            },
-            damping={
-                "Joint[0-9]": 1e3,
-            },
-            max_effort={
-                "Joint[0-9]": 1e5,
-            },
-            drive_type="force",
-        ),
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=np.eye(4),
-            )
-        },
         init_qpos=[
             0.0,
             -np.pi / 2,
@@ -190,7 +143,6 @@ def create_soft_cow(sim: SimulationManager) -> SoftObject:
                 poissons=0.45,
                 density=100,
                 dynamic_friction=0.1,
-                min_position_iters=30,
             ),
         ),
     )

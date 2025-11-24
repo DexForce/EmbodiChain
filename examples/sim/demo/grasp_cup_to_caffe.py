@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates the creation and simulation of a robot with dexterous hands,
-and performs a scoop ice task in a simulated environment.
+This script demonstrates the creation and simulation of dexforce w1 robot,
+and performs a grasp cup to coffee machine task in a simulated environment.
 """
 
 import argparse
@@ -87,8 +87,6 @@ def initialize_simulation(args) -> SimulationManager:
     sim = SimulationManager(config)
 
     sim.build_multiple_arenas(args.num_envs, space=2.5)
-    # Set manual physics update for precise control
-    sim.set_manual_update(True)
 
     if args.enable_rt:
         light = sim.add_light(

@@ -1022,11 +1022,16 @@ def generate_trajectory_qpos(
     current_qpos = torch.as_tensor(trajectory[trajectory_id])[trajectory_index][
         None, gather_index
     ]  # TODO: only for 1 env
-    affordance_xpos = env.robot.compute_fk(
-        torch.as_tensor(current_qpos),
-        get_control_part(env, agent_uid),
-        to_matrix=True,
-    )
+    control_part = get_control_part(env, agent_uid)
+    try:
+        affordance_xpos = env.robot.compute_fk(
+            torch.as_tensor(current_qpos),
+            control_part,
+            to_matrix=True,
+        )
+    except RuntimeError as e:
+        log_warning(f"control part {control_part} has no solver.")
+        affordance_xpos = torch.zeros((1, 4, 4), device=current_qpos.device)
     if slaver != "":
         assert canonical_trajectory is not None
         assert canonical_trajectory_index is not None

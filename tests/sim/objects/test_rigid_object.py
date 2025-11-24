@@ -43,7 +43,6 @@ class BaseRigidObjectTest:
         config = SimulationManagerCfg(headless=True, sim_device=sim_device)
         self.sim = SimulationManager(config)
         self.sim.build_multiple_arenas(NUM_ARENAS)
-        self.sim.set_manual_update(True)
 
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)

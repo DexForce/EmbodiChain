@@ -192,7 +192,7 @@ class DexforceW1Cfg(RobotCfg):
                     "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e7,
                 },
                 damping={
-                    "(RIGHT|LEFT)_J[0-2]": 1e3,
+                    "(RIGHT|LEFT)_J[0-9]": 1e3,
                     "(RIGHT|LEFT)_[A-Z|_]+": 1e1,
                     "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e4,
                 },
@@ -322,7 +322,6 @@ if __name__ == "__main__":
     config = SimulationManagerCfg(headless=True, sim_device="cpu")
     sim = SimulationManager(config)
     sim.build_multiple_arenas(1)
-    sim.set_manual_update(True)
 
     cfg = DexforceW1Cfg.from_dict(
         {

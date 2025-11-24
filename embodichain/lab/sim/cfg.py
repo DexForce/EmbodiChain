@@ -340,7 +340,7 @@ class JointDrivePropertiesCfg:
     If the drive type is "acceleration", then the joint is driven by an acceleration and the force is computed based on the acceleration applied.
     """
 
-    stiffness: Union[Dict[str, float], float] = 1e3
+    stiffness: Union[Dict[str, float], float] = 1e4
     """Stiffness of the joint drive.
 
     The unit depends on the joint model:
@@ -349,7 +349,7 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s^2/rad (N-m/rad).
     """
 
-    damping: Union[Dict[str, float], float] = 1e2
+    damping: Union[Dict[str, float], float] = 1e3
     """Damping of the joint drive.
 
     The unit depends on the joint model:

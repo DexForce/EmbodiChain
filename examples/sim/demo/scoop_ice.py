@@ -68,8 +68,6 @@ def initialize_simulation():
         cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
     )
 
-    # Set manual physics update for precise control
-    sim.set_manual_update(True)
     return sim
 
 

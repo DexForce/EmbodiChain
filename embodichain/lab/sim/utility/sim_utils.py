@@ -95,8 +95,8 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
 
     if drive_type == "force":
         drive_type = DriveType.FORCE
-    elif drive_type == "target":
-        drive_type == DriveType.FORCE
+    elif drive_type == "acceleration":
+        drive_type = DriveType.ACCELERATION
     else:
         logger.log_error(f"Unknow drive type {drive_type}")
 

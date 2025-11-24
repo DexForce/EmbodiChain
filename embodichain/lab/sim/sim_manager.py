@@ -252,6 +252,9 @@ class SimulationManager:
         self._create_default_plane()
         self.set_default_background()
 
+        # Set physics to manual update mode by default.
+        self.set_manual_update(True)
+
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:

@@ -204,7 +204,6 @@ class BaseEnv(gym.Env):
         self.sim_cfg.headless = True
         self.sim = SimulationManager(self.sim_cfg)
         self.sim_cfg.headless = headless
-        self.sim.set_manual_update(True)
 
         logger.log_info(
             f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."

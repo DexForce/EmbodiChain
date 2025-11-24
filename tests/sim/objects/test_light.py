@@ -26,7 +26,7 @@ class TestLight:
         config = SimulationManagerCfg(headless=True, sim_device="cpu")
         self.sim = SimulationManager(config)
         self.sim.build_multiple_arenas(10)
-        # sim.set_manual_update(True)
+
         # Create batch of lights
         cfg_dict = {
             "light_type": "point",

@@ -22,7 +22,6 @@ from embodichain.lab.sim.robots.dexforce_w1.utils import build_dexforce_w1_cfg
 config = SimulationManagerCfg(headless=False, sim_device="cpu")
 sim = SimulationManager(config)
 sim.build_multiple_arenas(4)
-sim.set_manual_update(True)
 
 hand_types = {
     DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,

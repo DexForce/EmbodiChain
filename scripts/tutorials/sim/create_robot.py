@@ -76,9 +76,6 @@ def main():
     if args.num_envs > 1:
         sim.build_multiple_arenas(args.num_envs)
 
-    # Set manual physics update for precise control
-    sim.set_manual_update(True)
-
     # Create robot configuration
     robot = create_robot(sim)
 

@@ -34,7 +34,6 @@ class BaseSolverTest:
         config = SimulationManagerCfg(headless=True, sim_device="cpu")
         self.sim = SimulationManager(config)
         self.sim.build_multiple_arenas(1)
-        self.sim.set_manual_update(True)
 
         # Load robot URDF file
         urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")

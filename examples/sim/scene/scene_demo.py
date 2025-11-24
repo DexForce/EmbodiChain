@@ -124,7 +124,6 @@ def main():
         enable_rt=not args.disable_rt,
     )
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(True)
 
     if args.num_envs > 1:
         sim.build_multiple_arenas(args.num_envs, space=10.0)
