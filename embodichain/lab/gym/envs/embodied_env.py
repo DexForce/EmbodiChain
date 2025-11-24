@@ -452,45 +452,19 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def to_dataset(
-        self, id: str, save_path: str = None, folder_name: str = None
-    ) -> Optional[str]:
-        """
-        Convert the recorded episode data to a dataset format and save to disk.
+    def to_dataset(self, id: str, save_path: str = None) -> Optional[str]:
+        """Convert the recorded episode data to a dataset format.
 
         Args:
             id (str): Unique identifier for the dataset.
             save_path (str, optional): Path to save the dataset. If None, use config or default.
-            folder_name (str, optional): Folder name for saving. If None, auto-generate.
 
         Returns:
             Optional[str]: The path to the saved dataset, or None if failed.
         """
-        # TODO: To be refactor data pipeline into more modularized and extendable way.
-        from embodichain.data.data_engine.data_dict_extractor import (
-            fetch_imitation_dataset,
+        raise NotImplementedError(
+            "The method 'to_dataset' will be implemented in the near future."
         )
-        from embodichain.lab.gym.utils.misc import camel_to_snake
-
-        save_path = self.cfg.dataset.get("save_path", None)
-        if save_path is None:
-            from embodichain.data import database_demo_dir
-
-            save_path = database_demo_dir
-
-        if self.curr_episode == 0:
-            self.folder_name = f"{camel_to_snake(self.__class__.__name__)}_{camel_to_snake(self.robot.cfg.uid)}"
-            if os.path.exists(os.path.join(save_path, self.folder_name)):
-                self.folder_name = f"{self.folder_name}_{np.random.randint(0, 1000)}"
-
-        dataset_path = fetch_imitation_dataset(
-            self,
-            self.episode_obs_list[:-1],
-            self.episode_action_list,
-            id,
-            self.folder_name,
-        )
-        return dataset_path
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         """Determine if the task is successfully completed. This is mainly used in the data generation process

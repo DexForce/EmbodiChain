@@ -241,7 +241,7 @@ class prepare_extra_attr(Functor):
 
                 is_global_func = True
                 ASSET_MODULES = [
-                    "embodichain.lab.gym.envs.object",
+                    "embodichain.lab.gym.envs.managers.object",
                     "embodichain.lab.gym.utils.misc",
                 ]
                 global_func = find_function_from_modules(

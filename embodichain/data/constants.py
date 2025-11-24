@@ -17,5 +17,7 @@
 
 from pathlib import Path
 
-EMBODICHAIN_DOWNLOAD_PREFIX = "http://192.168.3.120/CoreEngine/Data/embodychain_data/"
+EMBODICHAIN_DOWNLOAD_PREFIX = (
+    "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/"
+)
 EMBODICHAIN_DEFAULT_DATA_ROOT = str(Path.home() / ".cache" / "embodichain_data")
