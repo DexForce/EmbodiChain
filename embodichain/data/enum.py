@@ -14,22 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import List, Tuple, Union, Dict
-from enum import Enum, IntEnum
-from aenum import Enum as AEnum
-
-
-class JointType(Enum):
-    QPOS = "qpos"
-
-
-class EefType(Enum):
-    POSE = "eef_pose"
-
-
-class ActionMode(Enum):
-    ABSOLUTE = ""
-    RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
+from enum import Enum
 
 
 class EndEffector(Enum):
@@ -59,20 +44,3 @@ class Hints(Enum):
         EndEffector.DEXTROUSHAND.value,
     )
     ARM = (ControlParts.LEFT_ARM.value, ControlParts.RIGHT_ARM.value)
-
-
-class ArmEnum(IntEnum):
-    LEFT_ARM_ONLY = 1
-    RIGHT_ARM_ONLY = 2
-    DUAL_ARM = 3
-
-
-class ArmName(Enum):
-    LEFT_ARM_ONLY = "left_arm"
-    RIGHT_ARM_ONLY = "right_arm"
-
-
-class SemanticMask(IntEnum):
-    BACKGROUND = 0
-    FOREGROUND = 1
-    ROBOT = 2

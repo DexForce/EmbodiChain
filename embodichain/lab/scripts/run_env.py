@@ -19,6 +19,7 @@ import numpy as np
 import argparse
 import os
 import torch
+import tqdm
 
 from threading import Thread
 
@@ -39,7 +40,9 @@ def generate_and_execute_action_list(env, idx, debug_mode):
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
-    for action in action_list:
+    for action in tqdm.tqdm(
+        action_list, desc=f"Executing action list #{idx}", unit="step"
+    ):
         # Step the environment with the current action
         obs, reward, terminated, truncated, info = env.step(action)
 

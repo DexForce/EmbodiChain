@@ -541,7 +541,6 @@ def map_qpos_to_eef_pose(
     Returns:
         Dict[str, torch.Tensor]: A dictionary containing the end-effector poses for each control part.
     """
-    from embodichain.data.enum import EefType
 
     eef_pose_dict = {}
     for i, name in enumerate(control_parts):
@@ -562,7 +561,7 @@ def map_qpos_to_eef_pose(
         eef_pose[:, 3:6] = part_eef_pose[:, :3, 0]
         eef_pose[:, 6:9] = part_eef_pose[:, :3, 1]
 
-        eef_pose_dict[name + EefType.POSE.value] = eef_pose
+        eef_pose_dict[name] = eef_pose
 
     return eef_pose_dict
 
