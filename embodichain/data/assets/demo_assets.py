@@ -15,7 +15,8 @@
 # ----------------------------------------------------------------------------
 
 import open3d as o3d
-from pathlib import Path
+import os
+
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
     EMBODICHAIN_DOWNLOAD_PREFIX,
@@ -26,7 +27,7 @@ from embodichain.data.constants import (
 class ScoopIceNewEnv(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/demo/ScoopIceNewEnv.zip",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "demo/ScoopIceNewEnv.zip"),
             "e92734a9de0f64be33a11fbda0fbd3b6",
         )
         prefix = "ScoopIceNewEnv"
@@ -38,7 +39,7 @@ class ScoopIceNewEnv(EmbodiChainDataset):
 class MultiW1Data(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/demo/multi_w1_demo.zip",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "demo/multi_w1_demo.zip"),
             "984e8fa3aa05cb36a1fd973a475183ed",
         )
         prefix = "MultiW1Data"
