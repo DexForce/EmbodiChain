@@ -37,7 +37,7 @@ If you use EmbodiChain in your research, please cite our work:
 ```bibtex
 @misc{EmbodiChain,
   author = {EmbodiChain Developers},
-  title = {EmbodiChain: An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.},
+  title = {EmbodiChain: An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence},
   month = {November},
   year = {2025},
   url = {https://github.com/DexForce/EmbodiChain}
