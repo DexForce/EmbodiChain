@@ -1052,8 +1052,6 @@ class SimulationManager:
                     else None
                 )
                 self._gizmo_controller = GizmoController(windows)
-                print("GizmoController attributes and methods:")
-                print(dir(self._gizmo_controller))
 
         except Exception as e:
             logger.log_error(
