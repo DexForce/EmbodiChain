@@ -73,7 +73,7 @@ class DexforceW1Cfg(RobotCfg):
             version=version, arm_kind=arm_kind
         )
 
-        default_physics_cfgs = cls()._build_default_physics_cfgs()
+        default_physics_cfgs = cls()._build_default_physics_cfgs(arm_kind=arm_kind)
         for key, value in default_physics_cfgs.items():
             setattr(cfg, key, value)
 
@@ -181,27 +181,51 @@ class DexforceW1Cfg(RobotCfg):
         }
 
     @staticmethod
-    def _build_default_physics_cfgs() -> typing.Dict[str, any]:
+    def _build_default_physics_cfgs(arm_kind: str) -> typing.Dict[str, typing.Any]:
+        """Build default physics configurations for DexforceW1.
+
+        Args:
+            arm_kind: Type of arm, either "industrial" or "anthropomorphic"
+
+        Returns:
+            Dictionary containing physics configuration parameters
+        """
+        # Define common joint patterns
+        arm_joints = "(RIGHT|LEFT)_J[0-9]"
+        body_joints = "(ANKLE|KNEE|BUTTOCK|WAIST)"
+
+        # Hand/gripper pattern differs by arm type
+        hand_pattern = (
+            "(LEFT|RIGHT)_FINGER[1-2]"
+            if arm_kind == "industrial"
+            else "(RIGHT|LEFT)_[A-Z|_]+"
+        )
+
+        # Define physics parameters for different joint types
+        joint_params = {
+            "stiffness": {
+                arm_joints: 1e4,
+                hand_pattern: 1e2,
+                body_joints: 1e7,
+            },
+            "damping": {
+                arm_joints: 1e3,
+                hand_pattern: 1e1,
+                body_joints: 1e4,
+            },
+            "max_effort": {
+                arm_joints: 1e5,
+                hand_pattern: 1e3,
+                body_joints: 1e10,
+            },
+        }
+
+        drive_pros = JointDrivePropertiesCfg(**joint_params)
+
         return {
             "min_position_iters": 32,
             "min_velocity_iters": 8,
-            "drive_pros": JointDrivePropertiesCfg(
-                stiffness={
-                    "(RIGHT|LEFT)_J[0-9]": 1e4,
-                    "(RIGHT|LEFT)_[A-Z|_]+": 1e2,
-                    "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e7,
-                },
-                damping={
-                    "(RIGHT|LEFT)_J[0-9]": 1e3,
-                    "(RIGHT|LEFT)_[A-Z|_]+": 1e1,
-                    "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e4,
-                },
-                max_effort={
-                    "(RIGHT|LEFT)_J[0-9]": 1e5,
-                    "(RIGHT|LEFT)_[A-Z|_]+": 1e3,
-                    "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e10,
-                },
-            ),
+            "drive_pros": drive_pros,
             # TODO: we may use the some properties from URDF as default values
             # eg. mass, friction, damping, etc.
             "attrs": RigidBodyAttributesCfg(
@@ -221,10 +245,18 @@ class DexforceW1Cfg(RobotCfg):
     def _build_default_cfg(
         version: str = "v021", arm_kind: str = "anthropomorphic"
     ) -> DexforceW1Cfg:
-        hand_types = {
-            DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
-            DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
-        }
+
+        if arm_kind == "industrial":
+            hand_types = {
+                DexforceW1ArmSide.LEFT: DexforceW1HandBrand.DH_PGC_GRIPPER_M,
+                DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.DH_PGC_GRIPPER_M,
+            }
+        else:
+            hand_types = {
+                DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
+                DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
+            }
+
         hand_versions = {
             DexforceW1ArmSide.LEFT: DexforceW1Version(version),
             DexforceW1ArmSide.RIGHT: DexforceW1Version(version),

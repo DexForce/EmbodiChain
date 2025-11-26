@@ -2,6 +2,12 @@
 
 CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robotics. It is widely used in simulation, education, industry, and service scenarios. All examples in this document are based on the latest PourWater task environment.
 
+<div style="text-align: center;">
+  <img src="../../_static/robots/cobotmagic.jpg" alt="CobotMagic" style="height: 400px; width: auto;"/>
+  <p><b>CobotMagic</b></p>
+</div>
+
+
 ## Key Features
 
 - **Dual-arm parallel structure** supporting multiple layouts (standard, face-to-face, custom)
@@ -24,7 +30,6 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 | Mobile base support   | **Not supported** in the current version (fixed base only)        |
 
 > **Note:** The current version of CobotMagic does **not** support a mobile base. All examples and environments assume a fixed base configuration.
-
 
 ---
 
@@ -95,9 +100,9 @@ control_parts = {
 
 - [AgileX CobotMagic Product Page](https://global.agilex.ai/products/cobot-magic)
 - Related URDF file path: `CobotMagicArm/`
-    - CobotMagicWithGripperV70.urdf
-    - CobotMagicWithGripperV100.urdf
-    - CobotMagicNoGripper.urdf
+  - CobotMagicWithGripperV70.urdf
+  - CobotMagicWithGripperV100.urdf
+  - CobotMagicNoGripper.urdf
 - [embodichain Simulation Platform Documentation](https://github.com/dexforce/embodichain)
 
 ---
@@ -106,7 +111,7 @@ control_parts = {
 
 - [AgileX CobotMagic Product Page](https://global.agilex.ai/products/cobot-magic)
 - Related URDF file paths (located in `CobotMagicArm/`):
-    - `CobotMagicWithGripperV70.urdf`
-    - `CobotMagicWithGripperV100.urdf`
-    - `CobotMagicNoGripper.urdf`
+  - `CobotMagicWithGripperV70.urdf`
+  - `CobotMagicWithGripperV100.urdf`
+  - `CobotMagicNoGripper.urdf`
 - [embodichain Simulation Platform Documentation](https://github.com/dexforce/embodichain)
