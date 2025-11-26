@@ -3,18 +3,16 @@
 
 Dexforce W1 is a versatile robot developed by DexForce Technology Co., Ltd., supporting both industrial and anthropomorphic arm types. It is suitable for various simulation and real-world application scenarios.
 
-```{list-table}
-:widths: 50 50
-:class: borderless
-:align: center
-
-* - ![Anthropomorphic Version](../../../../assets/imgs/dexforcew1_anthropomorphic.jpg)
-    
-    <p style="text-align: center;"><b>Anthropomorphic Version</b></p>
-  - ![Industrial Version](../../../../assets/imgs/dexforcew1_industrial.jpg)
-    
-    <p style="text-align: center;"><b>Industrial Version</b></p>
-```
+<div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/dexforcew1_anthropomorphic.jpg" alt="Anthropomorphic Version" style="height: 400px; width: auto;"/>
+    <figcaption><b>Anthropomorphic Version</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/dexforcew1_industrial.jpg" alt="Industrial Version" style="height: 400px; width: auto;"/>
+    <figcaption><b>Industrial Version</b></figcaption>
+  </figure>
+</div>
 
 ## Key Features
 
@@ -62,7 +60,7 @@ cfg = build_dexforce_w1_cfg(
     hand_types=hand_types,
     hand_versions=hand_versions,
 )
-robot = sim.add_robot_v2(cfg=cfg)
+robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
 """
 
@@ -81,7 +79,7 @@ from embodichain.lab.sim.robots import DexforceW1Cfg
 cfg = DexforceW1Cfg.from_dict(
     {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
 )
-robot = sim.add_robot_v2(cfg=cfg)
+robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
 """
 
@@ -103,7 +101,7 @@ This mirrored design simplifies motion planning and ensures that both arms can p
 
 ## Configuration Method Selection
 
-Choose `build_dexforce_w1_cfg` for maximum flexibility and hardware customization. Use `DexforceW1Cfg.from_dict` for quick setup and prototyping. Both methods produce a configuration object (`cfg`) that can be passed to `sim.add_robot_v2(cfg=cfg)` to add the robot to the simulation.
+Choose `build_dexforce_w1_cfg` for maximum flexibility and hardware customization. Use `DexforceW1Cfg.from_dict` for quick setup and prototyping. Both methods produce a configuration object (`cfg`) that can be passed to `sim.add_robot(cfg=cfg)` to add the robot to the simulation.
 
 **Note:**
 
