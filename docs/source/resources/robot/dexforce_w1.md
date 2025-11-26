@@ -3,16 +3,18 @@
 
 Dexforce W1 is a versatile robot developed by DexForce Technology Co., Ltd., supporting both industrial and anthropomorphic arm types. It is suitable for various simulation and real-world application scenarios.
 
-<div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
-  <figure style="text-align: center; margin: 10px;">
-    <img src="../../../../assets/imgs/dexforcew1_anthropomorphic.jpg" alt="Anthropomorphic Version" style="height: 400px; width: auto;"/>
-    <figcaption><b>Anthropomorphic Version</b></figcaption>
-  </figure>
-  <figure style="text-align: center; margin: 10px;">
-    <img src="../../../../assets/imgs/dexforcew1_industrial.jpg" alt="Industrial Version" style="height: 400px; width: auto;"/>
-    <figcaption><b>Industrial Version</b></figcaption>
-  </figure>
-</div>
+```{list-table}
+:widths: 50 50
+:class: borderless
+:align: center
+
+* - ![Anthropomorphic Version](../../../../assets/imgs/dexforcew1_anthropomorphic.jpg)
+    
+    <p style="text-align: center;"><b>Anthropomorphic Version</b></p>
+  - ![Industrial Version](../../../../assets/imgs/dexforcew1_industrial.jpg)
+    
+    <p style="text-align: center;"><b>Industrial Version</b></p>
+```
 
 ## Key Features
 

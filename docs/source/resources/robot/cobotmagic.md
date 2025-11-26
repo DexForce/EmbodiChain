@@ -2,13 +2,15 @@
 
 CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robotics. It is widely used in simulation, education, industry, and service scenarios. All examples in this document are based on the latest PourWater task environment.
 
-<div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
-  <figure style="text-align: center; margin: 10px;">
-    <img src="../../../../assets/imgs/cobotmagic.jpg" alt="CobotMagic" style="height: 400px; width: auto;"/>
-    <figcaption><b>CobotMagic</b></figcaption>
-  </figure>
-</div>
+```{list-table}
+:widths: 100
+:class: borderless
+:align: center
 
+* - ![CobotMagic](../../../../assets/imgs/cobotmagic.jpg)
+    
+    <p style="text-align: center;"><b>CobotMagic</b></p>
+```
 
 ## Key Features
 
