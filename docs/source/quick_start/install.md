@@ -33,6 +33,12 @@ We strongly recommend using our pre-configured Docker environment, which contain
 docker pull dexforce/embodichain:ubuntu22.04-cuda12.8
 ```
 
+After pulling the Docker image, you can run a container with the provided [scripts](../../../docker/docker_run.sh).
+
+```bash
+./docker_run.sh [container_name] [data_path]
+```
+
 ---
 
 

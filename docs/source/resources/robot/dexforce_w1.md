@@ -21,21 +21,6 @@ Dexforce W1 is a versatile robot developed by DexForce Technology Co., Ltd., sup
 - Flexible URDF assembly and simulation configuration
 - Compatible with SimulationManager simulation environment
 
-## Usage in Simulation Environment
-
-"""python
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots.dexforce_w1.types import (
-    DexforceW1HandBrand, DexforceW1ArmSide, DexforceW1ArmKind, DexforceW1Version
-)
-from embodichain.lab.sim.robots.dexforce_w1.utils import build_dexforce_w1_cfg
-
-config = SimulationManagerCfg(headless=False, sim_device="cpu")
-sim = SimulationManager(config)
-sim.build_multiple_arenas(1)
-sim.set_manual_update(False)
-"""
-
 ## Method 1: Fine-grained configuration with `build_dexforce_w1_cfg`
 
 This method allows you to specify detailed parameters for each arm and hand. Recommended for advanced users who need full control over robot hardware options.
@@ -46,7 +31,7 @@ This method allows you to specify detailed parameters for each arm and hand. Rec
 - `hand_types`: Dict specifying hand brand for each arm side (`LEFT`/`RIGHT`).
 - `hand_versions`: Dict specifying hand version for each arm side.
 
-"""python
+```python
 hand_types = {
     DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
     DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
@@ -62,7 +47,7 @@ cfg = build_dexforce_w1_cfg(
 )
 robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
-"""
+```
 
 ## Method 2: Quick configuration with `DexforceW1Cfg.from_dict`
 
@@ -74,14 +59,14 @@ This method allows fast setup using a dictionary, suitable for simple scenarios 
 - `version`: Robot version, e.g., `v021`.
 - `arm_kind`: Arm type, e.g., `anthropomorphic` or `industrial` (string).
 
-"""python
+```python
 from embodichain.lab.sim.robots import DexforceW1Cfg
 cfg = DexforceW1Cfg.from_dict(
     {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
 )
 robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
-"""
+```
 
 ## Arm Joint Design: Mirrored Configuration
 
