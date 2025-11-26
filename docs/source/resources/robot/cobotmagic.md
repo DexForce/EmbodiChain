@@ -84,28 +84,6 @@ control_parts = {
 }
 ```
 
----
-
-## Common Issues & Notes
-
-- **URDF Path**: Ensure the corresponding URDF files exist in the data path (e.g., `CobotMagicArm/CobotMagicWithGripperV100.urdf`).
-- **Simulation Device**: Supports CPU/GPU simulation. Set `sim_device` according to your hardware.
-- **Multi-arena Simulation**: Use `build_multiple_arenas(n)` to quickly create n parallel simulation environments.
-- **Gripper Model Switching**: To switch gripper models, modify the URDF path in `urdf_cfg`.
-- **Mobile Base**: Not supported in the current version; related parameters will be ignored.
-
----
-
-## References
-
-- [AgileX CobotMagic Product Page](https://global.agilex.ai/products/cobot-magic)
-- Related URDF file path: `CobotMagicArm/`
-  - CobotMagicWithGripperV70.urdf
-  - CobotMagicWithGripperV100.urdf
-  - CobotMagicNoGripper.urdf
-- [embodichain Simulation Platform Documentation](https://github.com/dexforce/embodichain)
-
----
 
 ## References
 
@@ -114,4 +92,3 @@ control_parts = {
   - `CobotMagicWithGripperV70.urdf`
   - `CobotMagicWithGripperV100.urdf`
   - `CobotMagicNoGripper.urdf`
-- [embodichain Simulation Platform Documentation](https://github.com/dexforce/embodichain)
