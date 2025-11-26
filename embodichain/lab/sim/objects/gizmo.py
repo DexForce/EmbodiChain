@@ -196,11 +196,6 @@ class Gizmo:
         proxy_cube.set_location(position[0], position[1], position[2])
         proxy_cube.set_rotation_euler(euler[0], euler[1], euler[2])
 
-        # Add kinematic physics to proxy cube
-        attr = PhysicalAttr()
-        attr.mass = 0.05
-        proxy_cube.add_rigidbody(ActorType.KINEMATIC, RigidBodyShape.CONVEX, attr)
-
         # Connect gizmo to proxy cube
         self._gizmo.node.update_gizmo_follow(proxy_cube.node)
 
