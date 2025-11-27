@@ -86,7 +86,7 @@ class WorkspaceAnalyzerConfig:
     ik_success_threshold: float = 0.9
     """For Cartesian mode: minimum IK success rate to consider a point reachable."""
 
-    ik_samples_per_point: int = 5
+    ik_samples_per_point: int = 1
     """For Cartesian mode: number of random joint seeds to try for each Cartesian point."""
 
     def __post_init__(self):
@@ -313,7 +313,6 @@ class WorkspaceAnalyzer:
                 - workspace_points: End-effector positions, shape (num_valid, 3)
                 - valid_configs: Valid joint configurations, shape (num_valid, num_joints)
         """
-        batch_size = batch_size or self.config.sampling.batch_size
         num_samples = len(joint_configs)
 
         workspace_points_list = []
@@ -321,32 +320,50 @@ class WorkspaceAnalyzer:
 
         logger.log_info(f"Computing FK for {num_samples} samples...")
 
-        # Process in batches
-        for i in tqdm(range(0, num_samples, batch_size), desc="Computing FK"):
-            batch_end = min(i + batch_size, num_samples)
-            batch_qpos = joint_configs[i:batch_end]
+        # Track valid points for progress bar
+        total_valid = 0
+
+        # Robot expects one configuration at a time (batch_size from robot environments, not samples)
+        # Process each configuration individually
+        pbar = tqdm(
+            range(num_samples),
+            desc="Computing FK",
+            smoothing=0.05,  # 快速响应速度变化
+            mininterval=0.5,  # 每0.5秒更新一次
+            unit="cfg",  # 单位：配置
+            unit_scale=False,
+        )
+        for i in pbar:
+            qpos = joint_configs[i : i + 1]  # Keep batch dimension
 
             try:
                 # Compute forward kinematics
-                batch_poses = self.robot.compute_fk(
-                    qpos=batch_qpos,
+                pose = self.robot.compute_fk(
+                    qpos=qpos,
                     name=self.control_part_name,
                     to_matrix=True,
                 )
 
-                # Extract positions (x, y, z)
-                batch_positions = batch_poses[:, :3, 3]
+                # Extract position (x, y, z)
+                position = pose[:, :3, 3]  # Shape: (1, 3)
 
                 # Filter by constraints
-                valid_mask = self.constraint_checker.check_bounds(batch_positions)
+                valid_mask = self.constraint_checker.check_bounds(position)
 
                 # Store valid results
                 if valid_mask.any():
-                    workspace_points_list.append(batch_positions[valid_mask])
-                    valid_configs_list.append(batch_qpos[valid_mask])
+                    workspace_points_list.append(position[valid_mask])
+                    valid_configs_list.append(qpos[valid_mask])
+                    total_valid += 1
+
+                # Update progress bar with validity statistics
+                validity_rate = total_valid / (i + 1) * 100
+                pbar.set_postfix(
+                    {"valid": f"{total_valid}/{i+1}", "rate": f"{validity_rate:.1f}%"}
+                )
 
             except Exception as e:
-                logger.log_warning(f"FK computation failed for batch {i}: {e}")
+                logger.log_warning(f"FK computation failed for sample {i}: {e}")
                 continue
 
         # Concatenate all results
@@ -393,82 +410,96 @@ class WorkspaceAnalyzer:
             f"({ik_samples_per_point} seeds per point)..."
         )
 
-        # Process in batches
-        debug_first_batch = True  # Debug flag
-        for i in tqdm(range(0, num_samples, batch_size), desc="Computing IK"):
-            batch_end = min(i + batch_size, num_samples)
-            batch_positions = cartesian_points[i:batch_end]
-            batch_len = len(batch_positions)
+        # Create a random sampler for generating IK seeds (avoid UniformSampler issues)
+        from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
+            RandomSampler,
+        )
 
-            # Create poses with identity orientation (pointing down is common)
-            batch_poses = (
-                torch.eye(4, device=self.device).unsqueeze(0).repeat(batch_len, 1, 1)
-            )
-            batch_poses[:, :3, 3] = batch_positions
+        random_sampler = RandomSampler(seed=self.config.sampling.seed)
 
-            # Try multiple random seeds for each point
-            success_count = torch.zeros(batch_len, device=self.device)
-            best_qpos = torch.zeros(batch_len, self.num_joints, device=self.device)
+        # Track statistics for progress bar
+        total_reachable = 0
 
+        # Process each point individually (robot expects batch_size from environments, not samples)
+        pbar = tqdm(
+            range(num_samples),
+            desc="Computing IK",
+            smoothing=0.05,
+            mininterval=0.5,
+            unit="pt",
+            unit_scale=False,
+        )
+        # Get current end-effector orientation from FK
+        # Use current joint configuration to determine a realistic target orientation
+        current_qpos = self.robot.get_qpos()[0][
+            self.robot.get_joint_ids(self.control_part_name)
+        ]
+        current_ee_pose = self.robot.compute_fk(
+            name=self.control_part_name, qpos=current_qpos.unsqueeze(0), to_matrix=True
+        )  # Shape: (1, 4, 4)
+        for i in pbar:
+            position = cartesian_points[i]  # Shape: (3,)
+
+            # Create target pose: use current orientation, replace position with sampled position
+            pose = current_ee_pose.clone()
+            pose[0, :3, 3] = position
+
+            # Try multiple random seeds for this point
+            success_count = 0
+            best_qpos = None
+
+            logger.set_log_level("ERROR")  # Suppress warnings during IK attempts
             for seed_idx in range(ik_samples_per_point):
-                # Generate random joint seeds
-                random_seeds = self.sampler.sample(
-                    bounds=self.qpos_limits, num_samples=batch_len
-                )
+                # Generate random joint seed using RandomSampler
+                random_seed = random_sampler.sample(
+                    bounds=self.qpos_limits, num_samples=1
+                )  # Shape: (1, num_joints)
 
                 try:
                     # Compute IK
                     ret, qpos = self.robot.compute_ik(
-                        pose=batch_poses,
-                        joint_seed=random_seeds,
+                        pose=pose,
+                        joint_seed=random_seed,
                         name=self.control_part_name,
                     )
 
-                    # Debug output for first batch
-                    if debug_first_batch and i == 0 and seed_idx == 0:
-                        logger.log_info(f"[DEBUG] First batch IK results:")
-                        logger.log_info(f"  Batch size: {batch_len}")
-                        logger.log_info(f"  Sample positions: {batch_positions[0]}")
-                        logger.log_info(f"  ret: {ret}")
-                        logger.log_info(f"  ret is None: {ret is None}")
-                        if ret is not None:
-                            logger.log_info(f"  ret shape: {ret.shape}")
-                            logger.log_info(f"  ret values: {ret}")
-                            logger.log_info(
-                                f"  qpos shape: {qpos.shape if qpos is not None else None}"
-                            )
-                        logger.log_info(
-                            f"  control_part_name: {self.control_part_name}"
-                        )
-                        debug_first_batch = False  # Only debug once
-
                     # Count successes
-                    if ret is not None:
-                        success_count += ret.float()
+                    if ret is not None and ret[0]:
+                        success_count += 1
                         # Store first successful configuration
-                        for j in range(batch_len):
-                            if ret[j] and best_qpos[j].sum() == 0:
-                                best_qpos[j] = qpos[j]
+                        if best_qpos is None:
+                            best_qpos = qpos[0]  # Extract from batch dimension
 
                 except Exception as e:
-                    if debug_first_batch and i == 0:
-                        logger.log_error(f"[DEBUG] IK exception: {e}")
-                        debug_first_batch = False
                     logger.log_warning(
-                        f"IK computation failed for batch {i}, seed {seed_idx}: {e}"
+                        f"IK computation failed for sample {i}, seed {seed_idx}: {e}"
                     )
                     continue
+            logger.set_log_level("INFO")  # Restore log level
 
-            # Calculate success rates
-            batch_success_rates = success_count / ik_samples_per_point
+            # Calculate success rate for this point
+            success_rate = success_count / ik_samples_per_point
 
             # Filter by success threshold
-            reachable_mask = batch_success_rates >= self.config.ik_success_threshold
+            if (
+                success_rate >= self.config.ik_success_threshold
+                and best_qpos is not None
+            ):
+                reachable_points_list.append(position.unsqueeze(0))  # Add batch dim
+                success_rates_list.append(
+                    torch.tensor([success_rate], device=self.device)
+                )
+                best_configs_list.append(best_qpos.unsqueeze(0))  # Add batch dim
+                total_reachable += 1
 
-            if reachable_mask.any():
-                reachable_points_list.append(batch_positions[reachable_mask])
-                success_rates_list.append(batch_success_rates[reachable_mask])
-                best_configs_list.append(best_qpos[reachable_mask])
+            # Update progress bar with reachability statistics
+            reachability_rate = total_reachable / (i + 1) * 100
+            pbar.set_postfix(
+                {
+                    "reachable": f"{total_reachable}/{i+1}",
+                    "rate": f"{reachability_rate:.1f}%",
+                }
+            )
 
         # Concatenate results
         if reachable_points_list:
@@ -775,7 +806,51 @@ class WorkspaceAnalyzer:
             logger.log_info(f"GPU memory used: {mem_used:.2f} MB")
 
 
+def draw_workspace_points(
+    sim,
+    workspace_points,
+    marker_name="workspace_points",
+    axis_size=0.01,
+    axis_len=0.03,
+    arena_index=0,
+):
+    from embodichain.lab.sim.cfg import MarkerCfg
+
+    if isinstance(workspace_points, torch.Tensor):
+        points = workspace_points.cpu().numpy()
+    else:
+        points = np.array(workspace_points)
+
+    transforms = []
+    for point in points:
+        T = np.eye(4)
+        T[:3, 3] = point
+        transforms.append(T)
+
+    cfg = MarkerCfg(
+        name=marker_name,
+        marker_type="axis",
+        axis_xpos=transforms,
+        axis_size=axis_size,
+        axis_len=axis_len,
+        arena_index=arena_index,
+    )
+
+    # 绘制标记
+    markers = sim.draw_marker(cfg)
+
+    print(f"✓ 绘制了 {len(points)} 个工作空间点标记")
+    print(f"  标记名称: {marker_name}")
+    print(f"  坐标轴长度: {axis_len}m")
+    print(f"  坐标轴粗细: {axis_size}m")
+
+    return markers
+
+
 if __name__ == "__main__":
+    np.set_printoptions(precision=5, suppress=True)
+    torch.set_printoptions(precision=5, sci_mode=False)
+
     # Example usage
     from IPython import embed
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -799,6 +874,17 @@ if __name__ == "__main__":
     )
     robot = sim.add_robot(cfg=cfg)
     print("DexforceW1 robot added to the simulation.")
+
+    # Set left arm joint positions (mirrored)
+    robot.set_qpos(
+        qpos=[0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
+        joint_ids=robot.get_joint_ids("left_arm"),
+    )
+    # Set right arm joint positions (mirrored)
+    robot.set_qpos(
+        qpos=[0, np.pi / 4, 0.0, np.pi / 2, np.pi / 4, 0.0, 0.0],
+        joint_ids=robot.get_joint_ids("right_arm"),
+    )
 
     # Example 1: Joint space analysis (default)
     print("\n" + "=" * 60)
@@ -829,11 +915,11 @@ if __name__ == "__main__":
     cartesian_config = WorkspaceAnalyzerConfig(
         mode=AnalysisMode.CARTESIAN_SPACE,
         constraint=DimensionConstraint(
-            min_bounds=np.array([0.2, -0.5, 0.3]),
-            max_bounds=np.array([0.8, 0.5, 1.2]),
+            min_bounds=np.array([-0.4, -0.2, 0.7]),
+            max_bounds=np.array([0.4, 0.8, 2.0]),
         ),
-        ik_samples_per_point=3,
-        ik_success_threshold=0.7,
+        ik_samples_per_point=1,
+        ik_success_threshold=0.4,
     )
     wa_cartesian = WorkspaceAnalyzer(robot=robot, config=cartesian_config)
     results_cartesian = wa_cartesian.analyze(num_samples=500)
@@ -843,6 +929,14 @@ if __name__ == "__main__":
     )
     print(f"  Analysis time: {results_cartesian['analysis_time']:.2f}s")
     print(f"  Metrics: {results_cartesian['metrics']}")
+
+    markers = draw_workspace_points(
+        sim,
+        results_cartesian["workspace_points"],
+        marker_name="cartesian_workspace",
+        axis_size=0.002,
+        axis_len=0.005,
+    )
 
     # Visualize (optional)
     # wa_joint.visualize(show=True)
