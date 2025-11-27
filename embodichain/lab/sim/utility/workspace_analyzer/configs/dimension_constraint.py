@@ -13,3 +13,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from dataclasses import dataclass, field
+from typing import Optional, List, Tuple
+import numpy as np
+
+
+@dataclass
+class DimensionConstraint:
+    """Configuration for dimensional constraints in workspace analysis."""
+
+    min_bounds: Optional[np.ndarray] = None
+    """Minimum bounds for workspace [x_min, y_min, z_min] in meters."""
+
+    max_bounds: Optional[np.ndarray] = None
+    """Maximum bounds for workspace [x_max, y_max, z_max] in meters."""
+
+    joint_limits_scale: float = 1.0
+    """Scale factor for joint limits (1.0 = use full range, 0.8 = use 80% of range)."""
+
+    exclude_zones: List[Tuple[np.ndarray, np.ndarray]] = field(default_factory=list)
+    """List of excluded zones as [(min_bounds, max_bounds), ...]. Robot end-effector should avoid these regions."""
+
+    ground_height: float = 0.0
+    """Ground plane height in meters. Points below this will be filtered out."""
+
+    enforce_collision_free: bool = False
+    """Whether to enforce collision-free constraints during analysis."""
+
+    self_collision_check: bool = False
+    """Whether to check for self-collision when analyzing workspace."""

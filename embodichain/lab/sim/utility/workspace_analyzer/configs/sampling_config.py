@@ -14,25 +14,59 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
 
+# Import SamplingStrategy from samplers to avoid duplication
+if TYPE_CHECKING:
+    from ..samplers.base_sampler import SamplingStrategy
+else:
+    try:
+        from ..samplers.base_sampler import SamplingStrategy
+    except ImportError:
+        from enum import Enum
 
-class SamplingStrategy(Enum):
-    """Sampling strategy for joint space"""
+        class SamplingStrategy(Enum):
+            """Fallback SamplingStrategy if samplers not available."""
 
-    UNIFORM = "uniform"  # Uniform grid sampling
-    RANDOM = "random"  # Random sampling
+            UNIFORM = "uniform"
+            RANDOM = "random"
+            HALTON = "halton"
+            SOBOL = "sobol"
+            LATIN_HYPERCUBE = "lhs"
+            IMPORTANCE = "importance"
+            GAUSSIAN = "gaussian"
 
 
 @dataclass
-class sampling_config:
+class SamplingConfig:
     """Configuration for sampling strategies in workspace analysis."""
 
-    strategy: SamplingStrategy = SamplingStrategy.UNIFORM
-    num_samples: int = 1000  # Number of samples to generate
-    grid_resolution: int = 10  # Resolution for grid sampling
-    importance_weight_func: Optional[
-        Callable
-    ] = None  # Weight function for importance sampling
+    strategy: "SamplingStrategy" = (
+        None  # Will be set to UNIFORM by default in __post_init__
+    )
+    num_samples: int = 1000
+    """Number of samples to generate."""
+
+    grid_resolution: int = 10
+    """Resolution for grid sampling (used with UNIFORM strategy)."""
+
+    batch_size: int = 1000
+    """Number of samples to process in each batch."""
+
+    seed: int = 42
+    """Random seed for reproducibility."""
+
+    importance_weight_func: Optional[Callable] = None
+    """Weight function for importance sampling (used with IMPORTANCE strategy)."""
+
+    gaussian_mean: Optional[float] = None
+    """Mean for Gaussian sampling (used with GAUSSIAN strategy). If None, uses center of bounds."""
+
+    gaussian_std: Optional[float] = None
+    """Standard deviation for Gaussian sampling (used with GAUSSIAN strategy). If None, uses 1/6 of range."""
+
+    def __post_init__(self):
+        """Set default strategy after initialization."""
+        if self.strategy is None:
+            self.strategy = SamplingStrategy.UNIFORM

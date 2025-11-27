@@ -21,6 +21,9 @@ from embodichain.lab.sim.utility.workspace_analyzer.caches.memory_cache import (
     MemoryCache,
 )
 from embodichain.lab.sim.utility.workspace_analyzer.caches.disk_cache import DiskCache
+from embodichain.lab.sim.utility.workspace_analyzer.configs.cache_config import (
+    CacheConfig,
+)
 
 
 all = [
@@ -74,3 +77,29 @@ class CacheManager:
             )
         else:  # memory
             return MemoryCache(batch_size=batch_size, save_threshold=save_threshold)
+
+    @staticmethod
+    def create_cache_from_config(config: CacheConfig) -> Optional[BaseCache]:
+        """Create a cache instance from a CacheConfig object.
+
+        Args:
+            config: CacheConfig instance with cache settings
+
+        Returns:
+            Configured cache instance if enabled, None otherwise
+        """
+        if not config.enabled:
+            return None
+
+        cache_mode = "disk" if config.cache_dir is not None else "memory"
+        save_dir = str(config.cache_dir) if config.cache_dir else None
+
+        return CacheManager.create_cache(
+            cache_mode=cache_mode,
+            save_dir=save_dir,
+            batch_size=5000,  # Default batch size
+            save_threshold=config.max_cache_size_mb
+            * 1024
+            * 1024,  # Convert MB to bytes
+            use_cached=True,
+        )

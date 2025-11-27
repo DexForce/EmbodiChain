@@ -37,6 +37,9 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 from embodichain.utils import logger
+from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
+    VisualizationConfig,
+)
 
 
 __all__ = [
@@ -124,6 +127,27 @@ class BaseVisualizer(ABC):
 
         # Store last visualization for reuse
         self._last_visualization = None
+
+    @classmethod
+    def from_config(cls, config: VisualizationConfig, backend: str = "open3d"):
+        """Create a visualizer instance from a VisualizationConfig.
+
+        Args:
+            config: VisualizationConfig instance with visualization settings.
+            backend: Visualization backend to use.
+
+        Returns:
+            Configured visualizer instance.
+        """
+        config_dict = {
+            "enabled": config.enabled,
+            "voxel_size": config.voxel_size,
+            "nb_neighbors": config.nb_neighbors,
+            "std_ratio": config.std_ratio,
+            "is_voxel_down": config.is_voxel_down,
+            "color_by_distance": config.color_by_distance,
+        }
+        return cls(backend=backend, config=config_dict)
 
     def _validate_backend(self) -> None:
         """Validate the visualization backend is available.
