@@ -13,3 +13,64 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from abc import ABC, abstractmethod
+from typing import List, Optional
+import numpy as np
+
+
+all = [
+    "BaseCache",
+]
+
+
+class BaseCache(ABC):
+    """Abstract base class for workspace sampling cache strategies.
+
+    Defines the interface for different caching mechanisms (memory, disk)
+    used during workspace analysis sampling operations.
+    """
+
+    def __init__(self, batch_size: int = 5000, save_threshold: int = 10000000):
+        """Initialize base cache parameters.
+
+        Args:
+            batch_size: Number of samples to process in each batch
+            save_threshold: Number of samples to accumulate before triggering save/flush
+        """
+        self.batch_size = batch_size
+        self.save_threshold = save_threshold
+        self._total_processed = 0
+
+    @abstractmethod
+    def add(self, poses: List[np.ndarray]) -> None:
+        """Add pose samples to the cache.
+
+        Args:
+            poses: List of 4x4 transformation matrices
+        """
+        pass
+
+    @abstractmethod
+    def flush(self) -> None:
+        """Flush any pending data in the cache."""
+        pass
+
+    @abstractmethod
+    def get_all(self) -> Optional[List[np.ndarray]]:
+        """Retrieve all cached poses.
+
+        Returns:
+            List of all cached 4x4 transformation matrices, or None if unavailable
+        """
+        pass
+
+    @abstractmethod
+    def clear(self) -> None:
+        """Clear all cached data."""
+        pass
+
+    @property
+    def total_processed(self) -> int:
+        """Total number of poses processed by this cache."""
+        return self._total_processed

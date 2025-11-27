@@ -17,16 +17,22 @@
 from typing import Dict, Type, Optional, Any
 from threading import Lock
 
-try:
-    from .base_visualizer import BaseVisualizer, VisualizationType
-    from .point_cloud_visualizer import PointCloudVisualizer
-    from .voxel_visualizer import VoxelVisualizer
-    from .sphere_visualizer import SphereVisualizer
-except ImportError:
-    from base_visualizer import BaseVisualizer, VisualizationType
-    from point_cloud_visualizer import PointCloudVisualizer
-    from voxel_visualizer import VoxelVisualizer
-    from sphere_visualizer import SphereVisualizer
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.base_visualizer import (
+    BaseVisualizer,
+    VisualizationType,
+)
+
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.point_cloud_visualizer import (
+    PointCloudVisualizer,
+)
+
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.voxel_visualizer import (
+    VoxelVisualizer,
+)
+
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.sphere_visualizer import (
+    SphereVisualizer,
+)
 
 from embodichain.utils import logger
 

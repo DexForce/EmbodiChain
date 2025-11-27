@@ -19,10 +19,11 @@ import torch
 from typing import Union, Optional, Any, Dict
 from pathlib import Path
 
-try:
-    from .base_visualizer import BaseVisualizer, VisualizationType, OPEN3D_AVAILABLE
-except ImportError:
-    from base_visualizer import BaseVisualizer, VisualizationType, OPEN3D_AVAILABLE
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.base_visualizer import (
+    BaseVisualizer,
+    VisualizationType,
+    OPEN3D_AVAILABLE,
+)
 
 if OPEN3D_AVAILABLE:
     import open3d as o3d
