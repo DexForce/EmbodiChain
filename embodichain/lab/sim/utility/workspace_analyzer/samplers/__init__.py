@@ -41,17 +41,14 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers.sampler_factory imp
 )
 
 __all__ = [
-    # Base classes and interfaces
     "BaseSampler",
     "ISampler",
     "SamplingStrategy",
-    # Concrete samplers
     "UniformSampler",
     "RandomSampler",
     "HaltonSampler",
     "SobolSampler",
     "LatinHypercubeSampler",
-    # Factory
     "SamplerFactory",
     "create_sampler",
 ]

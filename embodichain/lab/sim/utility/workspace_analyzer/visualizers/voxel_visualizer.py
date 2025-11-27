@@ -13,3 +13,363 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+import numpy as np
+import torch
+from typing import Union, Optional, Any, Dict
+from pathlib import Path
+
+try:
+    from .base_visualizer import BaseVisualizer, VisualizationType, OPEN3D_AVAILABLE
+except ImportError:
+    from base_visualizer import BaseVisualizer, VisualizationType, OPEN3D_AVAILABLE
+
+if OPEN3D_AVAILABLE:
+    import open3d as o3d
+
+from embodichain.utils import logger
+
+
+__all__ = ["VoxelVisualizer"]
+
+
+class VoxelVisualizer(BaseVisualizer):
+    """Voxel grid visualizer using Open3D or matplotlib.
+
+    This visualizer renders workspace points as a voxel grid,
+    which provides a discretized representation of the workspace
+    useful for occupancy analysis and collision detection.
+
+    Advantages:
+        - Clear volumetric representation
+        - Good for occupancy maps
+        - Uniform spatial discretization
+        - Efficient for collision checking
+
+    Disadvantages:
+        - Memory intensive for high resolution
+        - May lose fine details
+        - Resolution-dependent accuracy
+
+    Attributes:
+        voxel_size: Size of each voxel cube.
+        show_coordinate_frame: Whether to show coordinate frame.
+    """
+
+    def __init__(
+        self,
+        backend: str = "open3d",
+        voxel_size: float = 0.01,
+        show_coordinate_frame: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+    ):
+        """Initialize the voxel visualizer.
+
+        Args:
+            backend: Visualization backend ('open3d', 'matplotlib', or 'data'). Defaults to 'open3d'.
+                    'data' backend returns voxelized data without visualization.
+            voxel_size: Size of each voxel. Defaults to 0.01.
+            show_coordinate_frame: Whether to show coordinate frame. Defaults to True.
+            config: Optional configuration dictionary. Defaults to None.
+        """
+        super().__init__(backend, config)
+        self.voxel_size = voxel_size
+        self.show_coordinate_frame = show_coordinate_frame
+
+    def visualize(
+        self,
+        points: Union[torch.Tensor, np.ndarray],
+        colors: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Visualize points as a voxel grid.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Optional array of shape (N, 3) or (N, 4) containing colors.
+            **kwargs: Additional visualization parameters:
+                - voxel_size: Override default voxel size
+                - show_coordinate_frame: Override coordinate frame display
+
+        Returns:
+            Open3D VoxelGrid geometry or matplotlib figure.
+
+        Examples:
+            >>> visualizer = VoxelVisualizer(voxel_size=0.02)
+            >>> points = np.random.rand(1000, 3)
+            >>> voxel_grid = visualizer.visualize(points)
+            >>> visualizer.show()
+        """
+        # Convert to numpy
+        points = self._to_numpy(points)
+        self._validate_points(points)
+
+        # Get visualization parameters
+        voxel_size = kwargs.get("voxel_size", self.voxel_size)
+        show_frame = kwargs.get("show_coordinate_frame", self.show_coordinate_frame)
+
+        # Validate and prepare colors
+        colors = self._validate_colors(colors, len(points))
+        if colors is None:
+            colors = self._get_default_colors(len(points))
+
+        # Convert to RGB if RGBA
+        if colors.shape[1] == 4:
+            colors = colors[:, :3]
+
+        if self.backend == "data":
+            # Return voxelized data
+            voxel_data = self._create_voxel_data(points, colors, voxel_size)
+            self._last_visualization = {"data": voxel_data}
+            return voxel_data
+        elif self.backend == "open3d":
+            voxel_grid = self._create_open3d_voxel_grid(points, colors, voxel_size)
+            self._last_visualization = {
+                "voxel_grid": voxel_grid,
+                "show_frame": show_frame,
+                "voxel_size": voxel_size,
+            }
+            return voxel_grid
+        elif self.backend == "matplotlib":
+            fig = self._create_matplotlib_voxel_grid(points, colors, voxel_size)
+            self._last_visualization = {"figure": fig}
+            return fig
+        else:
+            raise ValueError(f"Unsupported backend: {self.backend}")
+
+    def _create_open3d_voxel_grid(
+        self, points: np.ndarray, colors: np.ndarray, voxel_size: float
+    ) -> "o3d.geometry.VoxelGrid":
+        """Create Open3D voxel grid geometry.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Array of shape (N, 3) containing RGB colors.
+            voxel_size: Size of each voxel.
+
+        Returns:
+            Open3D VoxelGrid object.
+        """
+        # First create a point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        # Convert to voxel grid
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+            pcd, voxel_size=voxel_size
+        )
+
+        num_voxels = len(voxel_grid.get_voxels())
+        logger.log_info(
+            f"Created voxel grid with {num_voxels} voxels " f"(voxel_size={voxel_size})"
+        )
+
+        return voxel_grid
+
+    def _create_voxel_data(
+        self, points: np.ndarray, colors: np.ndarray, voxel_size: float
+    ) -> Dict[str, Any]:
+        """Create voxelized data structure.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Array of shape (N, 3) containing RGB colors.
+            voxel_size: Size of each voxel.
+
+        Returns:
+            Dictionary containing voxel data.
+        """
+        # Discretize points to voxel grid
+        min_bounds = points.min(axis=0)
+        max_bounds = points.max(axis=0)
+
+        # Create voxel indices
+        voxel_indices = np.floor((points - min_bounds) / voxel_size).astype(int)
+
+        # Create unique voxels with averaged colors
+        unique_voxels = {}
+        for idx, color in zip(voxel_indices, colors):
+            key = tuple(idx)
+            if key not in unique_voxels:
+                unique_voxels[key] = []
+            unique_voxels[key].append(color)
+
+        # Average colors for each voxel
+        voxel_positions = []
+        voxel_colors = []
+        voxel_indices_list = []
+        for idx, color_list in unique_voxels.items():
+            voxel_positions.append(np.array(idx) * voxel_size + min_bounds)
+            voxel_colors.append(np.mean(color_list, axis=0))
+            voxel_indices_list.append(idx)
+
+        data = {
+            "voxel_positions": np.array(voxel_positions),
+            "voxel_colors": np.array(voxel_colors),
+            "voxel_indices": np.array(voxel_indices_list),
+            "voxel_size": voxel_size,
+            "min_bounds": min_bounds,
+            "max_bounds": max_bounds,
+            "num_voxels": len(unique_voxels),
+            "type": "voxel_grid",
+        }
+
+        logger.log_info(
+            f"Created voxel data with {data['num_voxels']} voxels "
+            f"(voxel_size={voxel_size})"
+        )
+
+        return data
+
+    def _create_matplotlib_voxel_grid(
+        self, points: np.ndarray, colors: np.ndarray, voxel_size: float
+    ):
+        """Create matplotlib 3D voxel plot.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Array of shape (N, 3) containing RGB colors.
+            voxel_size: Size of each voxel.
+
+        Returns:
+            Matplotlib figure.
+        """
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+
+        # Discretize points to voxel grid
+        min_bounds = points.min(axis=0)
+        max_bounds = points.max(axis=0)
+
+        # Create voxel indices
+        voxel_indices = np.floor((points - min_bounds) / voxel_size).astype(int)
+
+        # Create unique voxels with averaged colors
+        unique_voxels = {}
+        for idx, color in zip(voxel_indices, colors):
+            key = tuple(idx)
+            if key not in unique_voxels:
+                unique_voxels[key] = []
+            unique_voxels[key].append(color)
+
+        # Average colors for each voxel
+        voxel_positions = []
+        voxel_colors = []
+        for idx, color_list in unique_voxels.items():
+            voxel_positions.append(np.array(idx) * voxel_size + min_bounds)
+            voxel_colors.append(np.mean(color_list, axis=0))
+
+        voxel_positions = np.array(voxel_positions)
+        voxel_colors = np.array(voxel_colors)
+
+        # Create figure
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+
+        # Plot voxels as cubes
+        ax.scatter(
+            voxel_positions[:, 0],
+            voxel_positions[:, 1],
+            voxel_positions[:, 2],
+            c=voxel_colors,
+            s=100,
+            marker="s",
+            alpha=0.8,
+        )
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_title(f"Workspace Voxel Grid (size={voxel_size:.4f})")
+
+        return fig
+
+    def _save_impl(self, filepath: Path, **kwargs: Any) -> None:
+        """Save voxel grid to file.
+
+        Args:
+            filepath: Path to save the visualization.
+            **kwargs: Additional save parameters.
+        """
+        if self.backend == "data":
+            # Save voxel data
+            data = self._last_visualization["data"]
+            np.savez(filepath, **data)
+        elif self.backend == "open3d":
+            voxel_grid = self._last_visualization["voxel_grid"]
+
+            # Determine file format from extension
+            suffix = filepath.suffix.lower()
+            if suffix in [".ply"]:
+                # Extract voxel centers and save as point cloud
+                voxels = voxel_grid.get_voxels()
+                points = np.array(
+                    [
+                        voxel_grid.origin + voxel.grid_index * voxel_grid.voxel_size
+                        for voxel in voxels
+                    ]
+                )
+                colors = np.array([voxel.color for voxel in voxels])
+
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(points)
+                pcd.colors = o3d.utility.Vector3dVector(colors)
+                o3d.io.write_point_cloud(str(filepath), pcd)
+            elif suffix in [".png", ".jpg", ".jpeg"]:
+                # Render to image
+                vis = o3d.visualization.Visualizer()
+                vis.create_window(visible=False)
+                vis.add_geometry(voxel_grid)
+
+                if self._last_visualization.get("show_frame", True):
+                    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                    vis.add_geometry(frame)
+
+                vis.update_geometry(voxel_grid)
+                vis.poll_events()
+                vis.update_renderer()
+                vis.capture_screen_image(str(filepath))
+                vis.destroy_window()
+            else:
+                raise ValueError(
+                    f"Unsupported file format: {suffix}. " f"Use .ply, .png, .jpg"
+                )
+
+        elif self.backend == "matplotlib":
+            fig = self._last_visualization["figure"]
+            fig.savefig(filepath, dpi=300, bbox_inches="tight")
+
+    def _show_impl(self, **kwargs: Any) -> None:
+        """Display voxel grid interactively.
+
+        Args:
+            **kwargs: Display parameters.
+        """
+        if self.backend == "data":
+            logger.log_warning(
+                "Cannot display visualization with 'data' backend. "
+                "Use 'open3d' or 'matplotlib' backend for interactive display."
+            )
+            return
+        elif self.backend == "open3d":
+            geometries = [self._last_visualization["voxel_grid"]]
+
+            if self._last_visualization.get("show_frame", True):
+                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                geometries.append(frame)
+
+            o3d.visualization.draw_geometries(geometries)
+
+        elif self.backend == "matplotlib":
+            import matplotlib.pyplot as plt
+
+            plt.show()
+
+    def get_type_name(self) -> str:
+        """Get the name of the visualization type.
+
+        Returns:
+            String identifier for the visualization type.
+        """
+        return VisualizationType.VOXEL.value
