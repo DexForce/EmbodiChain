@@ -56,7 +56,6 @@ if __name__ == "__main__":
 
     cartesian_config = WorkspaceAnalyzerConfig(
         mode=AnalysisMode.CARTESIAN_SPACE,
-        reference_pose=np.eye(4),
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim

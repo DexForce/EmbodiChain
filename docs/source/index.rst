@@ -39,6 +39,7 @@ Table of Contents
 
    resources/robot/index*
    resources/task/index*
+   resources/workspace_analyzer/index*
    resources/roadmap.md
 
 .. toctree::

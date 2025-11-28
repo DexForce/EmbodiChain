@@ -1082,7 +1082,7 @@ class WorkspaceAnalyzer:
             common_kwargs["sphere_resolution"] = getattr(
                 self.config.visualization, "sphere_resolution", 10
             )
-        # For other visualization types (MESH, HEATMAP), use only common arguments
+        # For other visualization types (AXIS, MESH, HEATMAP), use only common arguments
 
         return factory.create_visualizer(viz_type=vis_type, **common_kwargs)
 

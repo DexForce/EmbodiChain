@@ -23,8 +23,9 @@ class VisualizationType(Enum):
     POINT_CLOUD = "point_cloud"
     VOXEL = "voxel"
     SPHERE = "sphere"
-    MESH = "mesh"
-    HEATMAP = "heatmap"
+    # AXIS = "axes"
+    # MESH = "mesh"
+    # HEATMAP = "heatmap"
 
 
 @dataclass

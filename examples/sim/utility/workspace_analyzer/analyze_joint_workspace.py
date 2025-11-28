@@ -23,8 +23,6 @@ from embodichain.lab.sim.robots import DexforceW1Cfg
 
 from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
     WorkspaceAnalyzer,
-    WorkspaceAnalyzerConfig,
-    AnalysisMode,
 )
 
 if __name__ == "__main__":
