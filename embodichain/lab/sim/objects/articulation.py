@@ -20,7 +20,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import List, Sequence, Optional, Dict, Union
+from typing import List, Sequence, Optional, Dict, Union, Tuple
 
 from dexsim.engine import Articulation as _Articulation
 from dexsim.types import (
@@ -456,6 +456,26 @@ class ArticulationData:
             device=self.device,
         )
 
+    @cached_property
+    def link_vert_face(self) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+        """Get the vertices and faces of all links in the articulation.
+
+        Returns:
+            Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+                - key (str): The name of the link.
+                - vertices (torch.Tensor): The vertices of the specified link with shape (V, 3).
+                - faces (torch.Tensor): The faces of the specified link with shape (F, 3).
+        """
+        link_vert_face = dict()
+        for link_name in self.link_names:
+            verts, faces = self.entities[0].get_link_vert_face(link_name)
+            vertices_tensor = torch.as_tensor(
+                verts, dtype=torch.float32, device=self.device
+            )
+            faces_tensor = torch.as_tensor(faces, dtype=torch.int32, device=self.device)
+            link_vert_face[link_name] = (vertices_tensor, faces_tensor)
+        return link_vert_face
+
 
 class Articulation(BatchEntity):
     """Articulation represents a batch of articulations in the simulation.
@@ -536,7 +556,11 @@ class Articulation(BatchEntity):
         )
         self._set_default_joint_drive()
 
-        self.pk_chain = create_pk_chain(urdf_path=self.cfg.fpath, device=self.device)
+        self.pk_chain = None
+        if self.cfg.build_pk_chain:
+            self.pk_chain = create_pk_chain(
+                urdf_path=self.cfg.fpath, device=self.device
+            )
 
         # For rendering purposes, each articulation can have multiple material instances associated with its links.
         self._visual_material: List[Dict[str, VisualMaterialInst]] = [
@@ -803,6 +827,25 @@ class Articulation(BatchEntity):
             pose[:, :3, 3] = xyz
             pose[:, :3, :3] = mat
         return pose
+
+    def get_link_vert_face(self, link_name: str) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get the vertices and faces of a specific link in the articulation.
+
+        Args:
+            link_name (str): The name of the link.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - vertices (torch.Tensor): The vertices of the specified link with shape (V, 3).
+                - faces (torch.Tensor): The faces of the specified link with shape (F, 3).
+        """
+        if link_name not in self.link_names:
+            logger.log_error(
+                f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
+            )
+
+        verts, faces = self.body_data.link_vert_face[link_name]
+        return verts, faces
 
     def get_link_pose(
         self, link_name: str, env_ids: Optional[Sequence[int]] = None, to_matrix=False
@@ -1280,12 +1323,19 @@ class Articulation(BatchEntity):
             to_dict (bool, optional): If True, returns the FK result as a dictionary of Transform3d objects. Defaults to False.
             **kwargs: Additional keyword arguments for customization.
 
+        Raises:
+            RuntimeError: If the pk_chain is not initialized.
+            TypeError: If an invalid type is provided for `link_names`.
+            ValueError: If the shape of the resulting matrices is unexpected.
+
         Returns:
             torch.Tensor: The homogeneous transformation matrix/matrices for the specified links.
                         Shape is (batch_size, 4, 4) for batched input or (4, 4) for single input.
                         If `to_dict` is True, returns a dictionary of Transform3d objects instead.
         """
         frame_indices = None
+        if self.pk_chain is None:
+            logger.log_error("pk_chain is not initialized for this articulation.")
 
         # Adapt link_names to work with get_frame_indices
         if link_names is not None:
@@ -1381,12 +1431,19 @@ class Articulation(BatchEntity):
                                       - 'rot': Returns only the rotational part (3, dof) or (batch_size, 3, dof).
                                       Defaults to 'full'.
 
+        Raises:
+            RuntimeError: If the pk_chain is not initialized.
+            ValueError: If an invalid `jac_type` is provided.
+
         Returns:
             torch.Tensor: The Jacobian matrix. Shape depends on the input:
                           - For a single link: (6, dof) or (batch_size, 6, dof).
                           - For multiple links: (num_links, 6, dof) or (num_links, batch_size, 6, dof).
                           The shape also depends on the `jac_type` parameter.
         """
+        if self.pk_chain is None:
+            logger.log_error("pk_chain is not initialized for this articulation.")
+
         if qpos is None:
             qpos = torch.zeros(self.dof, device=self.device)
 

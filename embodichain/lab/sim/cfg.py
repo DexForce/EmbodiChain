@@ -918,6 +918,9 @@ class ArticulationCfg(ObjectBaseCfg):
     drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg()
     """Properties to define the drive mechanism of a joint."""
 
+    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    """Scale of the articulation in the simulation world frame."""
+
     attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
     """Physical attributes for all links . """
 
@@ -946,6 +949,9 @@ class ArticulationCfg(ObjectBaseCfg):
 
     min_velocity_iters: int = 1
     """Number of velocity iterations the solver should perform for this articulation. Range: [0,255]."""
+
+    build_pk_chain: bool = True
+    """Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation."""
 
 
 @configclass
