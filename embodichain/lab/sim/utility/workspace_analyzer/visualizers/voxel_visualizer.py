@@ -54,28 +54,30 @@ class VoxelVisualizer(BaseVisualizer):
 
     Attributes:
         voxel_size: Size of each voxel cube.
-        show_coordinate_frame: Whether to show coordinate frame.
     """
 
     def __init__(
         self,
-        backend: str = "open3d",
+        backend: str = "sim_manager",
         voxel_size: float = 0.01,
-        show_coordinate_frame: bool = True,
         config: Optional[Dict[str, Any]] = None,
+        sim_manager: Optional[Any] = None,
+        control_part_name: Optional[str] = None,
     ):
         """Initialize the voxel visualizer.
 
         Args:
-            backend: Visualization backend ('open3d', 'matplotlib', or 'data'). Defaults to 'open3d'.
-                    'data' backend returns voxelized data without visualization.
+            backend: Visualization backend ('sim_manager', 'open3d', 'matplotlib', or 'data').
+                    Defaults to 'sim_manager'. 'data' backend returns voxelized data without visualization.
             voxel_size: Size of each voxel. Defaults to 0.01.
-            show_coordinate_frame: Whether to show coordinate frame. Defaults to True.
             config: Optional configuration dictionary. Defaults to None.
+            sim_manager: SimulationManager instance for 'sim_manager' backend. Defaults to None.
+            control_part_name: Control part name for naming. Defaults to None.
         """
         super().__init__(backend, config)
         self.voxel_size = voxel_size
-        self.show_coordinate_frame = show_coordinate_frame
+        self.sim_manager = sim_manager
+        self.control_part_name = control_part_name
 
     def visualize(
         self,
@@ -90,8 +92,6 @@ class VoxelVisualizer(BaseVisualizer):
             colors: Optional array of shape (N, 3) or (N, 4) containing colors.
             **kwargs: Additional visualization parameters:
                 - voxel_size: Override default voxel size
-                - show_coordinate_frame: Override coordinate frame display
-
         Returns:
             Open3D VoxelGrid geometry or matplotlib figure.
 
@@ -107,7 +107,6 @@ class VoxelVisualizer(BaseVisualizer):
 
         # Get visualization parameters
         voxel_size = kwargs.get("voxel_size", self.voxel_size)
-        show_frame = kwargs.get("show_coordinate_frame", self.show_coordinate_frame)
 
         # Validate and prepare colors
         colors = self._validate_colors(colors, len(points))
@@ -123,11 +122,17 @@ class VoxelVisualizer(BaseVisualizer):
             voxel_data = self._create_voxel_data(points, colors, voxel_size)
             self._last_visualization = {"data": voxel_data}
             return voxel_data
+        elif self.backend == "sim_manager":
+            voxels_handle = self._create_sim_manager_voxels(points, colors, voxel_size)
+            self._last_visualization = {
+                "voxels_handle": voxels_handle,
+                "voxel_size": voxel_size,
+            }
+            return voxels_handle
         elif self.backend == "open3d":
             voxel_grid = self._create_open3d_voxel_grid(points, colors, voxel_size)
             self._last_visualization = {
                 "voxel_grid": voxel_grid,
-                "show_frame": show_frame,
                 "voxel_size": voxel_size,
             }
             return voxel_grid
@@ -137,6 +142,40 @@ class VoxelVisualizer(BaseVisualizer):
             return fig
         else:
             raise ValueError(f"Unsupported backend: {self.backend}")
+
+    def _create_sim_manager_voxels(
+        self, points: np.ndarray, colors: np.ndarray, voxel_size: float
+    ) -> Any:
+        """Create voxel visualization using sim_manager.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Array of shape (N, 3) containing RGB colors.
+            voxel_size: Size of each voxel.
+
+        Returns:
+            List of box handles from the simulation environment.
+        """
+        if self.sim_manager is None:
+            raise ValueError("sim_manager is required for 'sim_manager' backend")
+
+        # Get simulation env
+        env = self.sim_manager.get_env()
+        if env is None:
+            raise RuntimeError("Simulation manager has no active env")
+
+        cube_handles = []
+        for i, point in enumerate(points):
+            cube_handle = env.create_cube(l=voxel_size, w=voxel_size, h=voxel_size)
+            cube_handle.set_location(point)
+            # TODO: Unsupported in current sim_manager API
+            # cube_handle.set_color(colors[i].tolist())
+            cube_handle.set_name(f"workspace_cube_{i}")
+            cube_handles.append(cube_handle)
+
+        logger.log_info(f"Created {len(points)} cubes with size={voxel_size}")
+
+        return cube_handles
 
     def _create_open3d_voxel_grid(
         self, points: np.ndarray, colors: np.ndarray, voxel_size: float
@@ -323,9 +362,7 @@ class VoxelVisualizer(BaseVisualizer):
                 vis.create_window(visible=False)
                 vis.add_geometry(voxel_grid)
 
-                if self._last_visualization.get("show_frame", True):
-                    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                    vis.add_geometry(frame)
+                # Coordinate frame removed - implement separately if needed
 
                 vis.update_geometry(voxel_grid)
                 vis.poll_events()
@@ -356,9 +393,7 @@ class VoxelVisualizer(BaseVisualizer):
         elif self.backend == "open3d":
             geometries = [self._last_visualization["voxel_grid"]]
 
-            if self._last_visualization.get("show_frame", True):
-                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                geometries.append(frame)
+            # Coordinate frame removed - implement separately if needed
 
             o3d.visualization.draw_geometries(geometries)
 

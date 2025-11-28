@@ -48,28 +48,31 @@ class PointCloudVisualizer(BaseVisualizer):
 
     Attributes:
         point_size: Size of points in visualization.
-        show_coordinate_frame: Whether to show coordinate frame.
     """
 
     def __init__(
         self,
-        backend: str = "open3d",
+        backend: str = "sim_manager",
         point_size: float = 2.0,
-        show_coordinate_frame: bool = True,
         config: Optional[Dict[str, Any]] = None,
+        sim_manager: Optional[Any] = None,
+        control_part_name: Optional[str] = None,
     ):
         """Initialize the point cloud visualizer.
 
         Args:
-            backend: Visualization backend ('open3d', 'matplotlib', or 'data'). Defaults to 'open3d'.
-                    'data' backend returns raw data without visualization.
-            point_size: Size of points in visualization. Defaults to 2.0.
-            show_coordinate_frame: Whether to show coordinate frame. Defaults to True.
-            config: Optional configuration dictionary. Defaults to None.
+        backend: Visualization backend ('sim_manager', 'open3d', 'matplotlib', or 'data').
+                Defaults to 'sim_manager'. 'data' backend returns raw data without visualization.
+                'sim_manager' backend uses simulation environment for visualization.
+        point_size: Size of points in visualization. Defaults to 2.0.
+        config: Optional configuration dictionary. Defaults to None.
+            sim_manager: SimulationManager instance for 'sim_manager' backend. Defaults to None.
+            control_part_name: Control part name for naming the point cloud. Defaults to None.
         """
         super().__init__(backend, config)
         self.point_size = point_size
-        self.show_coordinate_frame = show_coordinate_frame
+        self.sim_manager = sim_manager
+        self.control_part_name = control_part_name
 
     def visualize(
         self,
@@ -84,7 +87,6 @@ class PointCloudVisualizer(BaseVisualizer):
             colors: Optional array of shape (N, 3) or (N, 4) containing colors.
             **kwargs: Additional visualization parameters:
                 - point_size: Override default point size
-                - show_coordinate_frame: Override coordinate frame display
 
         Returns:
             Open3D PointCloud geometry or matplotlib figure.
@@ -102,7 +104,6 @@ class PointCloudVisualizer(BaseVisualizer):
 
         # Get visualization parameters
         point_size = kwargs.get("point_size", self.point_size)
-        show_frame = kwargs.get("show_coordinate_frame", self.show_coordinate_frame)
 
         # Validate and prepare colors
         colors = self._validate_colors(colors, len(points))
@@ -119,17 +120,24 @@ class PointCloudVisualizer(BaseVisualizer):
                 "points": points,
                 "colors": colors,
                 "point_size": point_size,
-                "show_frame": show_frame,
                 "type": "point_cloud",
             }
             self._last_visualization = {"data": data}
             return data
+        elif self.backend == "sim_manager":
+            pcd_handle = self._create_sim_manager_point_cloud(
+                points, colors, point_size
+            )
+            self._last_visualization = {
+                "point_cloud_handle": pcd_handle,
+                "point_size": point_size,
+            }
+            return pcd_handle
         elif self.backend == "open3d":
             pcd = self._create_open3d_point_cloud(points, colors)
             self._last_visualization = {
                 "point_cloud": pcd,
                 "point_size": point_size,
-                "show_frame": show_frame,
             }
             return pcd
         elif self.backend == "matplotlib":
@@ -138,6 +146,43 @@ class PointCloudVisualizer(BaseVisualizer):
             return fig
         else:
             raise ValueError(f"Unsupported backend: {self.backend}")
+
+    def _create_sim_manager_point_cloud(
+        self, points: np.ndarray, colors: np.ndarray, point_size: float
+    ) -> Any:
+        """Create point cloud visualization using sim_manager.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Array of shape (N, 3) containing RGB colors.
+            point_size: Size of points.
+
+        Returns:
+            Point cloud handle from the simulation environment.
+        """
+        if self.sim_manager is None:
+            raise ValueError("sim_manager is required for 'sim_manager' backend")
+
+        # Get simulation environment
+        env = self.sim_manager.get_env()
+        if env is None:
+            raise RuntimeError("Simulation manager has no active simulation")
+
+        # Create point cloud name
+        pcd_name = f"workspace_pcd_{self.control_part_name or 'default'}"
+
+        # Create point cloud in simulation
+        pcd_handle = env.create_point_cloud(name=pcd_name)
+        pcd_handle.add_points(points)
+        pcd_handle.set_colors(colors)
+        pcd_handle.set_point_size(point_size)
+
+        logger.log_info(
+            f"Created point cloud '{pcd_name}' with {len(points)} points "
+            f"(point_size={point_size})"
+        )
+
+        return pcd_handle
 
     def _create_open3d_point_cloud(
         self, points: np.ndarray, colors: np.ndarray
@@ -213,9 +258,7 @@ class PointCloudVisualizer(BaseVisualizer):
                 vis.create_window(visible=False)
                 vis.add_geometry(pcd)
 
-                if self._last_visualization.get("show_frame", True):
-                    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                    vis.add_geometry(frame)
+                # Coordinate frame removed - implement separately if needed
 
                 vis.update_geometry(pcd)
                 vis.poll_events()
@@ -247,9 +290,7 @@ class PointCloudVisualizer(BaseVisualizer):
         elif self.backend == "open3d":
             geometries = [self._last_visualization["point_cloud"]]
 
-            if self._last_visualization.get("show_frame", True):
-                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                geometries.append(frame)
+            # Coordinate frame removed - implement separately if needed
 
             # Set point size in visualization
             vis = o3d.visualization.Visualizer()

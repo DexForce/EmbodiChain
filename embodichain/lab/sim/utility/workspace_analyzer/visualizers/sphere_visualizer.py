@@ -55,31 +55,33 @@ class SphereVisualizer(BaseVisualizer):
     Attributes:
         sphere_radius: Radius of each sphere.
         sphere_resolution: Resolution of sphere mesh (higher = smoother).
-        show_coordinate_frame: Whether to show coordinate frame.
     """
 
     def __init__(
         self,
-        backend: str = "open3d",
+        backend: str = "sim_manager",
         sphere_radius: float = 0.005,
         sphere_resolution: int = 10,
-        show_coordinate_frame: bool = True,
         config: Optional[Dict[str, Any]] = None,
+        sim_manager: Optional[Any] = None,
+        control_part_name: Optional[str] = None,
     ):
         """Initialize the sphere visualizer.
 
         Args:
-            backend: Visualization backend ('open3d', 'matplotlib', or 'data'). Defaults to 'open3d'.
-                    'data' backend returns sphere data without visualization.
+            backend: Visualization backend ('sim_manager', 'open3d', 'matplotlib', or 'data').
+                    Defaults to 'sim_manager'. 'data' backend returns sphere data without visualization.
             sphere_radius: Radius of each sphere. Defaults to 0.005.
             sphere_resolution: Sphere mesh resolution. Defaults to 10.
-            show_coordinate_frame: Whether to show coordinate frame. Defaults to True.
             config: Optional configuration dictionary. Defaults to None.
+            sim_manager: SimulationManager instance for 'sim_manager' backend. Defaults to None.
+            control_part_name: Control part name for naming. Defaults to None.
         """
         super().__init__(backend, config)
         self.sphere_radius = sphere_radius
         self.sphere_resolution = sphere_resolution
-        self.show_coordinate_frame = show_coordinate_frame
+        self.sim_manager = sim_manager
+        self.control_part_name = control_part_name
 
     def visualize(
         self,
@@ -95,7 +97,6 @@ class SphereVisualizer(BaseVisualizer):
             **kwargs: Additional visualization parameters:
                 - sphere_radius: Override default sphere radius
                 - sphere_resolution: Override sphere resolution
-                - show_coordinate_frame: Override coordinate frame display
                 - max_spheres: Maximum number of spheres to render (for performance)
 
         Returns:
@@ -115,7 +116,6 @@ class SphereVisualizer(BaseVisualizer):
         # Get visualization parameters
         sphere_radius = kwargs.get("sphere_radius", self.sphere_radius)
         sphere_resolution = kwargs.get("sphere_resolution", self.sphere_resolution)
-        show_frame = kwargs.get("show_coordinate_frame", self.show_coordinate_frame)
         max_spheres = kwargs.get("max_spheres", None)
 
         # Limit number of spheres for performance
@@ -149,7 +149,6 @@ class SphereVisualizer(BaseVisualizer):
                 "colors": colors,
                 "radius": sphere_radius,
                 "resolution": sphere_resolution,
-                "show_frame": show_frame,
                 "num_spheres": len(points),
                 "type": "spheres",
             }
@@ -158,11 +157,20 @@ class SphereVisualizer(BaseVisualizer):
                 f"Created sphere data with {len(points)} spheres (radius={sphere_radius})"
             )
             return data
+        elif self.backend == "sim_manager":
+            spheres_handle = self._create_sim_manager_spheres(
+                points, colors, sphere_radius
+            )
+            self._last_visualization = {
+                "spheres_handle": spheres_handle,
+                "radius": sphere_radius,
+            }
+            return spheres_handle
         elif self.backend == "open3d":
             mesh = self._create_open3d_spheres(
                 points, colors, sphere_radius, sphere_resolution
             )
-            self._last_visualization = {"mesh": mesh, "show_frame": show_frame}
+            self._last_visualization = {"mesh": mesh}
             return mesh
         elif self.backend == "matplotlib":
             fig = self._create_matplotlib_spheres(points, colors, sphere_radius)
@@ -170,6 +178,40 @@ class SphereVisualizer(BaseVisualizer):
             return fig
         else:
             raise ValueError(f"Unsupported backend: {self.backend}")
+
+    def _create_sim_manager_spheres(
+        self, points: np.ndarray, colors: np.ndarray, sphere_radius: float
+    ) -> Any:
+        """Create sphere visualization using sim_manager.
+
+        Args:
+            points: Array of shape (N, 3) containing point positions.
+            colors: Array of shape (N, 3) containing RGB colors.
+            sphere_radius: Radius of each sphere.
+
+        Returns:
+            List of sphere handles from the simulation environment.
+        """
+        if self.sim_manager is None:
+            raise ValueError("sim_manager is required for 'sim_manager' backend")
+
+        # Get simulation env
+        env = self.sim_manager.get_env()
+        if env is None:
+            raise RuntimeError("Simulation manager has no active env")
+
+        sphere_handles = []
+        for i, point in enumerate(points):
+            sphere_handle = env.create_sphere(radius=sphere_radius, resolution=10)
+            sphere_handle.set_location(point)
+            # TODO: Unsupported in current sim_manager API
+            # sphere_handle.set_color(colors[i].tolist())
+            sphere_handle.set_name(f"workspace_sphere_{i}")
+            sphere_handles.append(sphere_handle)
+
+        logger.log_info(f"Created {len(points)} spheres with radius={sphere_radius}")
+
+        return sphere_handles
 
     def _create_open3d_spheres(
         self,
@@ -276,10 +318,6 @@ class SphereVisualizer(BaseVisualizer):
                 vis.create_window(visible=False)
                 vis.add_geometry(mesh)
 
-                if self._last_visualization.get("show_frame", True):
-                    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                    vis.add_geometry(frame)
-
                 vis.update_geometry(mesh)
                 vis.poll_events()
                 vis.update_renderer()
@@ -310,9 +348,7 @@ class SphereVisualizer(BaseVisualizer):
         elif self.backend == "open3d":
             geometries = [self._last_visualization["mesh"]]
 
-            if self._last_visualization.get("show_frame", True):
-                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                geometries.append(frame)
+            # Coordinate frame removed - implement separately if needed
 
             o3d.visualization.draw_geometries(geometries)
 

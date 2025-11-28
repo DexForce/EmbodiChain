@@ -14,32 +14,35 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import gc
-import os
 import time
-import numpy as np
 import torch
+import numpy as np
 
-from dataclasses import dataclass
-from typing import List, Tuple, Optional, Dict, Any
 from tqdm import tqdm
-from contextlib import contextmanager
-from pathlib import Path
 from enum import Enum
+from pathlib import Path
+from dataclasses import dataclass
+from contextlib import contextmanager
+from typing import List, Tuple, Optional, Dict, Any
+import os
+import sys
 
-from embodichain.utils import logger
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.objects.robot import Robot
 
-# Import configuration classes
 from embodichain.lab.sim.utility.workspace_analyzer.configs import (
     CacheConfig,
     DimensionConstraint,
     SamplingConfig,
+    VisualizationType,
     VisualizationConfig,
     MetricConfig,
 )
-
-# Import modules
 from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
     SamplerFactory,
     BaseSampler,
@@ -48,15 +51,13 @@ from embodichain.lab.sim.utility.workspace_analyzer.caches import CacheManager
 from embodichain.lab.sim.utility.workspace_analyzer.constraints import (
     WorkspaceConstraintChecker,
 )
-from embodichain.lab.sim.utility.workspace_analyzer.visualizers import (
-    create_visualizer,
-    VisualizationType,
-)
+
+from embodichain.utils import logger
 
 __all__ = [
-    "WorkspaceAnalyzer",
-    "WorkspaceAnalyzerConfig",
     "AnalysisMode",
+    "WorkspaceAnalyzerConfig",
+    "WorkspaceAnalyzer",
 ]
 
 
@@ -78,16 +79,22 @@ class WorkspaceAnalyzerConfig:
     """Analysis mode: joint space or Cartesian space sampling."""
 
     sampling: SamplingConfig = None
+    """Sampling configuration."""
     cache: CacheConfig = None
+    """Cache configuration."""
     constraint: DimensionConstraint = None
+    """Dimension constraint configuration."""
     visualization: VisualizationConfig = None
+    """Visualization configuration."""
     metric: MetricConfig = None
+    """Metric configuration."""
 
     ik_success_threshold: float = 0.9
     """For Cartesian mode: minimum IK success rate to consider a point reachable."""
-
     ik_samples_per_point: int = 1
     """For Cartesian mode: number of random joint seeds to try for each Cartesian point."""
+    reference_pose: Optional[Any] = None
+    """Optional reference pose (4x4 matrix) for IK target orientation. If None, uses current robot pose."""
 
     def __post_init__(self):
         """Initialize sub-configs with defaults if not provided."""
@@ -115,6 +122,7 @@ class WorkspaceAnalyzer:
         robot: Robot,
         config: Optional[WorkspaceAnalyzerConfig] = None,
         control_part_name: Optional[str] = None,
+        sim_manager: Optional[SimulationManager] = None,
         device: torch.device = torch.device("cpu"),
     ):
         """Initialize the workspace analyzer.
@@ -124,12 +132,14 @@ class WorkspaceAnalyzer:
             config: Configuration object. If None, uses defaults.
             control_part_name: Name of the control part (e.g., "left_arm", "right_arm").
                               If None, uses the default solver or first available control part.
+            sim_manager: SimulationManager instance. Defaults None.
             device: PyTorch device for computations.
         """
         self.robot = robot
         self.config = config or WorkspaceAnalyzerConfig()
-        self.device = device
+        self.sim_manager = sim_manager
 
+        self.device = device
         # Determine control part name
         self.control_part_name = self._determine_control_part(control_part_name)
 
@@ -145,8 +155,8 @@ class WorkspaceAnalyzer:
         self.workspace_points: Optional[torch.Tensor] = None
         self.joint_configurations: Optional[torch.Tensor] = None
         self.metrics_results: Dict[str, Any] = {}
-
-        logger.log_info("WorkspaceAnalyzer initialized successfully")
+        self.current_mode: Optional[AnalysisMode] = None
+        self.success_rates: Optional[torch.Tensor] = None
 
     def _determine_control_part(
         self, control_part_name: Optional[str]
@@ -239,6 +249,172 @@ class WorkspaceAnalyzer:
             self.config.constraint, device=self.device
         )
 
+    def _create_optimized_tqdm(
+        self, iterable, desc: str, unit: str, color: str = "blue", emoji: str = "⚡"
+    ):
+        """Create an optimized tqdm progress bar with adaptive updates and smart formatting.
+
+        Args:
+            iterable: The iterable to track progress for
+            desc: Description text
+            unit: Unit name (e.g., 'cfg', 'pt')
+            color: Progress bar color
+            emoji: Emoji for the description
+
+        Returns:
+            Configured tqdm instance
+        """
+        total = len(iterable) if hasattr(iterable, "__len__") else None
+
+        # Adaptive parameters based on total count
+        if total:
+            if total < 100:
+                mininterval, maxinterval = 0.1, 1.0
+                smoothing = 0.1
+            elif total < 1000:
+                mininterval, maxinterval = 0.2, 2.0
+                smoothing = 0.05
+            else:
+                mininterval, maxinterval = 0.5, 5.0
+                smoothing = 0.02
+        else:
+            mininterval, maxinterval = 0.5, 5.0
+            smoothing = 0.05
+
+        # Terminal width detection
+        try:
+            terminal_width = os.get_terminal_size().columns
+            ncols = min(120, max(80, terminal_width - 10))
+        except:
+            ncols = 100
+
+        # Color codes for different states
+        color_codes = {
+            "blue": "\033[34m",
+            "cyan": "\033[36m",
+            "magenta": "\033[35m",
+            "green": "\033[32m",
+            "yellow": "\033[33m",
+            "red": "\033[31m",
+        }
+
+        # Enhanced bar format with better spacing
+        bar_format = (
+            f"{color_codes.get(color, '')}{{desc}}\033[0m: "
+            f"{{percentage:3.0f}}%|{{bar}}| {{n_fmt}}/{{total_fmt}} "
+            f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+        )
+
+        # Performance-aware tqdm configuration
+        pbar = tqdm(
+            iterable,
+            desc=f"{emoji} {desc}",
+            unit=unit,
+            unit_scale=True,
+            smoothing=smoothing,
+            mininterval=mininterval,
+            maxinterval=maxinterval,
+            bar_format=bar_format,
+            ncols=ncols,
+            dynamic_ncols=True,
+            colour=color,
+            leave=True,
+            ascii=False if sys.stdout.encoding == "utf-8" else True,
+            # Advanced features
+            position=0,  # Top position for multiple bars
+            file=sys.stdout,
+            disable=False,
+        )
+
+        # Add performance tracking attributes
+        pbar._start_time = time.time()
+        pbar._last_update = 0
+        pbar._update_count = 0
+
+        return pbar
+
+    def _update_progress_with_stats(
+        self,
+        pbar,
+        current_idx: int,
+        success_count: int,
+        metric_name: str = "success",
+        show_rate: bool = True,
+    ):
+        """Update progress bar with intelligent statistics and color coding.
+
+        Args:
+            pbar: tqdm progress bar instance
+            current_idx: Current iteration index
+            success_count: Number of successful operations
+            metric_name: Name of the metric being tracked
+            show_rate: Whether to show the success rate
+        """
+        if not show_rate:
+            return
+
+        total_processed = current_idx + 1
+        rate = (success_count / total_processed) * 100 if total_processed > 0 else 0
+
+        # Intelligent color coding with thresholds
+        if rate >= 85:
+            color, icon = "\033[92m", "🟢"  # Bright green, excellent
+        elif rate >= 70:
+            color, icon = "\033[32m", "✅"  # Green, good
+        elif rate >= 50:
+            color, icon = "\033[93m", "🟡"  # Bright yellow, moderate
+        elif rate >= 30:
+            color, icon = "\033[33m", "🟠"  # Yellow, low
+        else:
+            color, icon = "\033[91m", "🔴"  # Bright red, poor
+
+        # Adaptive display with performance metrics
+        current_time = time.time()
+
+        # Smart update throttling based on performance
+        if hasattr(pbar, "_last_update") and hasattr(pbar, "_update_count"):
+            time_since_last = current_time - pbar._last_update
+            pbar._update_count += 1
+
+            # Adaptive update frequency based on processing speed
+            if pbar._update_count > 100:  # After first 100 updates
+                avg_time_per_update = time_since_last / max(
+                    1,
+                    pbar._update_count - pbar._last_update_count
+                    if hasattr(pbar, "_last_update_count")
+                    else 1,
+                )
+                if avg_time_per_update < 0.01:  # Very fast processing
+                    update_threshold = 0.5  # Update every 0.5s
+                elif avg_time_per_update < 0.1:  # Medium speed
+                    update_threshold = 0.3  # Update every 0.3s
+                else:  # Slow processing
+                    update_threshold = 0.1  # Update every 0.1s
+
+                if time_since_last < update_threshold:
+                    return  # Skip update to reduce overhead
+
+            pbar._last_update = current_time
+            pbar._last_update_count = pbar._update_count
+
+        # Enhanced display with ETA and throughput
+        if total_processed < 10:
+            # Show individual counts for small numbers
+            stats = f" {icon} {success_count}/{total_processed}"
+        else:
+            # Show percentage and throughput for larger numbers
+            if hasattr(pbar, "_start_time"):
+                elapsed = current_time - pbar._start_time
+                throughput = total_processed / elapsed if elapsed > 0 else 0
+                if throughput > 10:
+                    stats = f" {icon} {color}{rate:.1f}%\033[0m {metric_name} ({throughput:.0f}/s)"
+                else:
+                    stats = f" {icon} {color}{rate:.1f}%\033[0m {metric_name} ({throughput:.1f}/s)"
+            else:
+                stats = f" {icon} {color}{rate:.1f}%\033[0m {metric_name}"
+
+        pbar.set_postfix_str(stats, refresh=False)
+
     def sample_joint_space(self, num_samples: Optional[int] = None) -> torch.Tensor:
         """Sample joint configurations within joint limits.
 
@@ -250,12 +426,23 @@ class WorkspaceAnalyzer:
         """
         num_samples = num_samples or self.config.sampling.num_samples
 
+        # Performance-aware sampling with progress indication
+        start_time = time.time()
+
         # Sample from joint space
         joint_samples = self.sampler.sample(
             bounds=self.qpos_limits, num_samples=num_samples
         )
 
-        logger.log_info(f"Generated {num_samples} joint space samples")
+        sampling_time = time.time() - start_time
+        samples_per_sec = (
+            num_samples / sampling_time if sampling_time > 0 else float("inf")
+        )
+
+        logger.log_info(
+            f"Generated {num_samples} joint space samples "
+            f"({samples_per_sec:.0f} samples/s)"
+        )
         return joint_samples
 
     def sample_cartesian_space(self, num_samples: Optional[int] = None) -> torch.Tensor:
@@ -282,21 +469,59 @@ class WorkspaceAnalyzer:
                 dim=1,
             )
         else:
-            # Use a default reasonable workspace
-            logger.log_warning(
-                "No Cartesian bounds specified, using default [-1, 1] for all axes"
+            # Compute bounds from joint space FK
+            logger.log_info(
+                "No Cartesian bounds specified, computing from joint space..."
             )
-            cartesian_bounds = torch.tensor(
-                [[-1.0, 1.0], [-1.0, 1.0], [0.0, 2.0]],
-                device=self.device,
-            )
+
+            # Sample joint space to compute FK bounds
+            joint_samples = self.sample_joint_space(num_samples=1000)
+            workspace_pts, _ = self.compute_workspace_points(joint_samples)
+
+            if len(workspace_pts) > 0:
+                # Compute min/max bounds for each dimension
+                min_bounds = workspace_pts.min(dim=0).values  # More explicit than [0]
+                max_bounds = workspace_pts.max(dim=0).values  # More explicit than [0]
+
+                # Add small margin (10%)
+                margin = (max_bounds - min_bounds) * 0.1
+                min_bounds = min_bounds - margin
+                max_bounds = max_bounds + margin
+
+                # Create bounds tensor: [[x_min, x_max], [y_min, y_max], [z_min, z_max]]
+                cartesian_bounds = torch.stack([min_bounds, max_bounds], dim=1)
+
+                # Format bounds with better precision and units
+                min_bounds_np = min_bounds.cpu().numpy()
+                max_bounds_np = max_bounds.cpu().numpy()
+
+                # Calculate workspace dimensions for additional context
+                dimensions = max_bounds_np - min_bounds_np
+                volume = np.prod(dimensions)
+
+                logger.log_info(
+                    f"Computed Cartesian workspace bounds from {len(workspace_pts)} FK samples:\n"
+                    f"\t X-axis: [{min_bounds_np[0]:.3f}, {max_bounds_np[0]:.3f}] m (range: {dimensions[0]:.3f} m)\n"
+                    f"\t Y-axis: [{min_bounds_np[1]:.3f}, {max_bounds_np[1]:.3f}] m (range: {dimensions[1]:.3f} m)\n"
+                    f"\t Z-axis: [{min_bounds_np[2]:.3f}, {max_bounds_np[2]:.3f}] m (range: {dimensions[2]:.3f} m)"
+                )
+            else:
+                # Fallback to default if FK computation fails
+                logger.log_warning(
+                    "Failed to compute bounds from FK, using default bounds: "
+                    "X: [-1, 1], Y: [-1, 1], Z: [0, 2] (meters)"
+                )
+                cartesian_bounds = torch.tensor(
+                    [[-1.0, 1.0], [-1.0, 1.0], [0.0, 2.0]],
+                    device=self.device,
+                )
 
         # Sample from Cartesian space
         cartesian_samples = self.sampler.sample(
             bounds=cartesian_bounds, num_samples=num_samples
         )
 
-        logger.log_info(f"Generated {num_samples} Cartesian space samples")
+        logger.log_info(f"Generated {num_samples} Cartesian space samples.")
         return cartesian_samples
 
     def compute_workspace_points(
@@ -325,13 +550,12 @@ class WorkspaceAnalyzer:
 
         # Robot expects one configuration at a time (batch_size from robot environments, not samples)
         # Process each configuration individually
-        pbar = tqdm(
+        pbar = self._create_optimized_tqdm(
             range(num_samples),
-            desc="Computing FK",
-            smoothing=0.05,  # 快速响应速度变化
-            mininterval=0.5,  # 每0.5秒更新一次
-            unit="cfg",  # 单位：配置
-            unit_scale=False,
+            desc="Forward Kinematics",
+            unit="cfg",
+            color="cyan",
+            emoji="🤖",
         )
         for i in pbar:
             qpos = joint_configs[i : i + 1]  # Keep batch dimension
@@ -356,10 +580,9 @@ class WorkspaceAnalyzer:
                     valid_configs_list.append(qpos[valid_mask])
                     total_valid += 1
 
-                # Update progress bar with validity statistics
-                validity_rate = total_valid / (i + 1) * 100
-                pbar.set_postfix(
-                    {"valid": f"{total_valid}/{i+1}", "rate": f"{validity_rate:.1f}%"}
+                # Update progress bar with intelligent statistics
+                self._update_progress_with_stats(
+                    pbar, i, total_valid, metric_name="valid", show_rate=True
                 )
 
             except Exception as e:
@@ -374,17 +597,30 @@ class WorkspaceAnalyzer:
             workspace_points = torch.empty((0, 3), device=self.device)
             valid_configs = torch.empty((0, self.num_joints), device=self.device)
 
+        # Performance summary for FK computation
+        pbar.close()  # Ensure progress bar is closed
+        success_rate = len(workspace_points) / num_samples * 100
+
+        # Performance indicator based on success rate
+        if success_rate >= 90:
+            perf_icon = "🏆"  # Trophy for excellent performance
+        elif success_rate >= 75:
+            perf_icon = "✅"  # Check mark for good performance
+        elif success_rate >= 50:
+            perf_icon = "🟡"  # Yellow circle for moderate performance
+        else:
+            perf_icon = "⚠️"  # Warning for low performance
+
         logger.log_info(
-            f"Computed {len(workspace_points)} valid workspace points "
-            f"from {num_samples} samples "
-            f"({len(workspace_points) / num_samples * 100:.1f}% success rate)"
+            f"{perf_icon} FK Results: {len(workspace_points)}/{num_samples} valid points "
+            f"({success_rate:.1f}% success rate)"
         )
 
         return workspace_points, valid_configs
 
     def compute_reachability(
         self, cartesian_points: torch.Tensor, batch_size: Optional[int] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute reachability for Cartesian points using IK.
 
         Args:
@@ -393,16 +629,19 @@ class WorkspaceAnalyzer:
 
         Returns:
             Tuple of:
+                - all_points: All Cartesian positions, shape (num_samples, 3)
                 - reachable_points: Reachable positions, shape (num_reachable, 3)
                 - success_rates: IK success rate for each point, shape (num_samples,)
+                - reachability_mask: Boolean mask indicating reachable points, shape (num_samples,)
                 - best_configs: Best joint configurations, shape (num_reachable, num_joints)
         """
         batch_size = batch_size or self.config.sampling.batch_size
         num_samples = len(cartesian_points)
         ik_samples_per_point = self.config.ik_samples_per_point
 
+        # Store results for all points
+        all_success_rates = torch.zeros(num_samples, device=self.device)
         reachable_points_list = []
-        success_rates_list = []
         best_configs_list = []
 
         logger.log_info(
@@ -421,22 +660,80 @@ class WorkspaceAnalyzer:
         total_reachable = 0
 
         # Process each point individually (robot expects batch_size from environments, not samples)
-        pbar = tqdm(
+        pbar = self._create_optimized_tqdm(
             range(num_samples),
-            desc="Computing IK",
-            smoothing=0.05,
-            mininterval=0.5,
+            desc="Inverse Kinematics",
             unit="pt",
-            unit_scale=False,
+            color="magenta",
+            emoji="🎯",
         )
-        # Get current end-effector orientation from FK
-        # Use current joint configuration to determine a realistic target orientation
-        current_qpos = self.robot.get_qpos()[0][
-            self.robot.get_joint_ids(self.control_part_name)
-        ]
-        current_ee_pose = self.robot.compute_fk(
-            name=self.control_part_name, qpos=current_qpos.unsqueeze(0), to_matrix=True
-        )  # Shape: (1, 4, 4)
+        # Get reference end-effector pose for IK target orientation
+        # Priority: use reference_pose if provided, otherwise compute from current joint configuration
+        if (
+            hasattr(self.config, "reference_pose")
+            and self.config.reference_pose is not None
+        ):
+            # Use provided reference pose (should be 4x4 transformation matrix)
+            reference_pose = self.config.reference_pose
+            if isinstance(reference_pose, np.ndarray):
+                reference_pose = torch.from_numpy(reference_pose).to(self.device)
+            if reference_pose.dim() == 2:  # Shape: (4, 4) -> (1, 4, 4)
+                reference_pose = reference_pose.unsqueeze(0)
+            current_ee_pose = reference_pose  # Shape: (1, 4, 4)
+        else:
+            # Fallback: compute current end-effector pose from joint configuration
+            current_qpos = self.robot.get_qpos()[0][
+                self.robot.get_joint_ids(self.control_part_name)
+            ]
+            current_ee_pose = self.robot.compute_fk(
+                name=self.control_part_name,
+                qpos=current_qpos.unsqueeze(0),
+                to_matrix=True,
+            )  # Shape: (1, 4, 4)
+
+            # Print current joint configuration and computed pose
+            pose_np = current_ee_pose[0].cpu().numpy()
+            position = pose_np[:3, 3]
+            rotation_matrix = pose_np[:3, :3]
+
+            # Convert rotation matrix to Euler angles
+            import scipy.spatial.transform as spt
+
+            euler_angles = spt.Rotation.from_matrix(rotation_matrix).as_euler(
+                "xyz", degrees=True
+            )
+
+            logger.log_info(
+                f"🤖 Computing reference pose from current joint configuration:\n"
+                f"  🔧 Joint angles: {current_qpos.cpu().numpy()}\n"
+                f"  📍 EE Position: [{position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}] m\n"
+                f"  🔄 EE Rotation (XYZ Euler): [{euler_angles[0]:.2f}°, {euler_angles[1]:.2f}°, {euler_angles[2]:.2f}°]"
+            )
+
+        # Print detailed reference pose information
+        pose_np = current_ee_pose[0].cpu().numpy()
+        position = pose_np[:3, 3]
+        rotation_matrix = pose_np[:3, :3]
+
+        # Convert rotation matrix to Euler angles (ZYX convention)
+        import scipy.spatial.transform as spt
+
+        euler_angles = spt.Rotation.from_matrix(rotation_matrix).as_euler(
+            "xyz", degrees=True
+        )
+
+        # Format matrix with proper indentation
+        matrix_lines = np.array2string(pose_np, precision=4, suppress_small=True).split(
+            "\n"
+        )
+        matrix_str = "\n".join(f"\t   {line}" for line in matrix_lines)
+        logger.log_info(
+            f"🎯 Using provided reference pose for IK target orientation:\n"
+            f"\t Position: [{position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}] m\n"
+            f"\t Rotation (XYZ Euler): [{euler_angles[0]:.2f}°, {euler_angles[1]:.2f}°, {euler_angles[2]:.2f}°]\n"
+            f"\t Matrix:\n{matrix_str}"
+        )
+
         for i in pbar:
             position = cartesian_points[i]  # Shape: (3,)
 
@@ -479,61 +776,89 @@ class WorkspaceAnalyzer:
 
             # Calculate success rate for this point
             success_rate = success_count / ik_samples_per_point
+            all_success_rates[i] = success_rate
 
-            # Filter by success threshold
+            # Filter by success threshold for reachable points
             if (
                 success_rate >= self.config.ik_success_threshold
                 and best_qpos is not None
             ):
                 reachable_points_list.append(position.unsqueeze(0))  # Add batch dim
-                success_rates_list.append(
-                    torch.tensor([success_rate], device=self.device)
-                )
                 best_configs_list.append(best_qpos.unsqueeze(0))  # Add batch dim
                 total_reachable += 1
 
             # Update progress bar with reachability statistics
             reachability_rate = total_reachable / (i + 1) * 100
-            pbar.set_postfix(
-                {
-                    "reachable": f"{total_reachable}/{i+1}",
-                    "rate": f"{reachability_rate:.1f}%",
-                }
+            # Use color coding for the reachability rate
+            if reachability_rate >= 70:
+                reach_color = "\033[32m"  # Green for high reachability
+            elif reachability_rate >= 40:
+                reach_color = "\033[33m"  # Yellow for medium reachability
+            else:
+                reach_color = "\033[31m"  # Red for low reachability
+
+            pbar.set_postfix_str(
+                f"🎯 Reachable: {total_reachable}/{i+1} | {reach_color}{reachability_rate:.1f}%\033[0m rate"
             )
 
-        # Concatenate results
+        # Concatenate reachable results
         if reachable_points_list:
             reachable_points = torch.cat(reachable_points_list, dim=0)
-            success_rates = torch.cat(success_rates_list, dim=0)
             best_configs = torch.cat(best_configs_list, dim=0)
         else:
             reachable_points = torch.empty((0, 3), device=self.device)
-            success_rates = torch.empty((0,), device=self.device)
             best_configs = torch.empty((0, self.num_joints), device=self.device)
 
+        # Create reachability mask
+        reachability_mask = all_success_rates >= self.config.ik_success_threshold
+
+        # Performance summary for IK computation
+        pbar.close()  # Ensure progress bar is closed
+        reachability = len(reachable_points) / num_samples * 100
+
+        # Reachability performance indicator
+        if reachability >= 80:
+            reach_icon = "🏆"  # Trophy for high reachability
+        elif reachability >= 60:
+            reach_icon = "🚀"  # Rocket for good reachability
+        elif reachability >= 40:
+            reach_icon = "🟡"  # Yellow for moderate reachability
+        elif reachability >= 20:
+            reach_icon = "🟠"  # Orange for low reachability
+        else:
+            reach_icon = "⚠️"  # Warning for very low reachability
+
         logger.log_info(
-            f"Found {len(reachable_points)} reachable points "
-            f"from {num_samples} samples "
-            f"({len(reachable_points) / num_samples * 100:.1f}% reachability)"
+            f"{reach_icon} IK Results: {len(reachable_points)}/{num_samples} reachable points "
+            f"({reachability:.1f}% reachability)"
         )
 
-        return reachable_points, success_rates, best_configs
+        return (
+            cartesian_points,
+            reachable_points,
+            all_success_rates,
+            reachability_mask,
+            best_configs,
+        )
 
     def analyze(
-        self, num_samples: Optional[int] = None, force_recompute: bool = False
+        self,
+        num_samples: Optional[int] = None,
+        force_recompute: bool = False,
+        visualize: bool = False,
     ) -> Dict[str, Any]:
         """Perform complete workspace analysis.
 
         Args:
             num_samples: Number of samples to generate. If None, uses config value.
             force_recompute: If True, recomputes even if cached results exist.
+            visualize: If True, visualizes the workspace points. Prefers sim_manager visualization
+                      if available, otherwise falls back to visualizers module.
 
         Returns:
             Dictionary containing analysis results.
         """
-        logger.log_info("=" * 60)
-        logger.log_info("Starting Workspace Analysis")
-        logger.log_info("=" * 60)
+        logger.log_info("Starting Workspace Analysis...")
 
         start_time = time.time()
 
@@ -547,14 +872,14 @@ class WorkspaceAnalyzer:
         # Choose analysis mode
         if self.config.mode == AnalysisMode.JOINT_SPACE:
             # Joint space mode: Sample joints → FK → Workspace points
-            logger.log_info(f"\nMode: {AnalysisMode.JOINT_SPACE.value}")
+            logger.log_info(f"Mode: {AnalysisMode.JOINT_SPACE.value}")
 
             # Step 1: Sample joint space
-            logger.log_info("\n[1/3] Sampling joint space...")
+            logger.log_info("[1/3] Sampling joint space...")
             joint_configs = self.sample_joint_space(num_samples)
 
             # Step 2: Compute workspace points
-            logger.log_info("\n[2/3] Computing workspace points via FK...")
+            logger.log_info("[2/3] Computing workspace points via computing FK...")
             workspace_points, valid_configs = self.compute_workspace_points(
                 joint_configs
             )
@@ -562,6 +887,8 @@ class WorkspaceAnalyzer:
             # Store results
             self.workspace_points = workspace_points
             self.joint_configurations = valid_configs
+            self.current_mode = AnalysisMode.JOINT_SPACE
+            self.success_rates = None  # All points are reachable in joint space mode
 
             results = {
                 "mode": AnalysisMode.JOINT_SPACE.value,
@@ -571,35 +898,46 @@ class WorkspaceAnalyzer:
                 "num_valid": len(workspace_points),
             }
 
-        else:  # CARTESIAN_SPACE mode
+        elif self.config.mode == AnalysisMode.CARTESIAN_SPACE:
             # Cartesian space mode: Sample Cartesian → IK → Verify reachability
-            logger.log_info(f"\nMode: {AnalysisMode.CARTESIAN_SPACE.value}")
+            logger.log_info(f"Mode: {AnalysisMode.CARTESIAN_SPACE.value}")
 
             # Step 1: Sample Cartesian space
-            logger.log_info("\n[1/3] Sampling Cartesian space...")
+            logger.log_info("[1/3] Sampling Cartesian space...")
             cartesian_samples = self.sample_cartesian_space(num_samples)
 
             # Step 2: Compute reachability via IK
-            logger.log_info("\n[2/3] Computing reachability via IK...")
-            reachable_points, success_rates, best_configs = self.compute_reachability(
-                cartesian_samples
-            )
+            logger.log_info("[2/3] Computing reachability via computing IK...")
+            (
+                all_points,
+                reachable_points,
+                success_rates,
+                reachability_mask,
+                best_configs,
+            ) = self.compute_reachability(cartesian_samples)
 
-            # Store results
-            self.workspace_points = reachable_points
+            # Store results - now storing all points for visualization
+            self.workspace_points = all_points  # Store all sampled points
+            self.reachable_points = reachable_points  # Store only reachable points
             self.joint_configurations = best_configs
+            self.current_mode = AnalysisMode.CARTESIAN_SPACE
+            self.success_rates = success_rates  # Store success rates for all points
+            self.reachability_mask = reachability_mask  # Store reachability mask
 
             results = {
                 "mode": AnalysisMode.CARTESIAN_SPACE.value,
-                "workspace_points": reachable_points,
+                "all_points": all_points,  # All sampled Cartesian points
+                "workspace_points": all_points,  # For compatibility
+                "reachable_points": reachable_points,  # Only reachable points
                 "joint_configurations": best_configs,
                 "success_rates": success_rates,
+                "reachability_mask": reachability_mask,
                 "num_samples": num_samples or self.config.sampling.num_samples,
                 "num_reachable": len(reachable_points),
             }
 
         # Step 3: Compute metrics (common for both modes)
-        logger.log_info("\n[3/3] Computing metrics...")
+        logger.log_info("[3/3] Computing metrics...")
         metrics = self._compute_metrics()
         results["metrics"] = metrics
         results["config"] = self.config
@@ -609,11 +947,235 @@ class WorkspaceAnalyzer:
         if self.cache is not None:
             self._save_to_cache(results)
 
-        logger.log_info("\n" + "=" * 60)
-        logger.log_info(f"Analysis completed in {results['analysis_time']:.2f}s")
-        logger.log_info("=" * 60)
+        # Enhanced completion summary with performance insights
+        self._log_analysis_summary(results)
+
+        # Visualize if requested
+        if visualize:
+            self._visualize_workspace()
 
         return results
+
+    def _log_analysis_summary(self, results: Dict[str, Any]) -> None:
+        """Log enhanced analysis summary with performance insights."""
+        analysis_time = results["analysis_time"]
+        mode = results["mode"]
+
+        # Time-based performance indicators
+        if analysis_time < 30:
+            time_icon, time_color = "⚡", "\033[92m"  # Lightning, bright green
+        elif analysis_time < 120:
+            time_icon, time_color = "🚀", "\033[32m"  # Rocket, green
+        elif analysis_time < 300:
+            time_icon, time_color = "⏱️", "\033[33m"  # Clock, yellow
+        else:
+            time_icon, time_color = "🐌", "\033[31m"  # Snail, red
+
+        logger.log_info(
+            f"{time_icon} Analysis completed in {time_color}{analysis_time:.2f}s\033[0m"
+        )
+
+        if mode == "joint_space":
+            success_rate = results["num_valid"] / results["num_samples"] * 100
+            logger.log_info(
+                f"📊 Joint Space Results: {results['num_valid']}/{results['num_samples']} "
+                f"valid points ({success_rate:.1f}% success)"
+            )
+        elif mode == "cartesian_space":
+            reachability = results["num_reachable"] / results["num_samples"] * 100
+            logger.log_info(
+                f"📊 Cartesian Space Results: {results['num_reachable']}/{results['num_samples']} "
+                f"reachable points ({reachability:.1f}% reachability)"
+            )
+
+    def _visualize_workspace(self) -> None:
+        """Visualize the workspace using configured visualization type and backend.
+
+        Uses the vis_type specified in configuration (default: POINT_CLOUD).
+        Tries multiple backends in order: sim_manager → open3d → matplotlib.
+        """
+        # Early return checks
+        if self.workspace_points is None or len(self.workspace_points) == 0:
+            logger.log_warning("No workspace points available for visualization")
+            return
+
+        if not self.config.visualization.enabled:
+            logger.log_warning("Visualization is disabled in configuration")
+            return
+
+        # Define backend priority order
+        backends = self._get_backend_priority_list()
+
+        # Try each backend in order until one succeeds
+        for i, backend in enumerate(backends):
+            try:
+                logger.log_info(f"Attempting visualization with '{backend}' backend")
+                self.visualize(
+                    vis_type=self.config.visualization.vis_type,
+                    show=True,
+                    backend=backend,
+                )
+                logger.log_info(f"Successfully visualized with '{backend}' backend")
+                return
+
+            except Exception as e:
+                logger.log_warning(f"Failed to visualize with '{backend}' backend: {e}")
+
+                # If this is not the last backend, try the next one
+                if i < len(backends) - 1:
+                    continue
+                else:
+                    logger.log_error(
+                        f"All visualization backends failed. "
+                        f"Tried: {', '.join(backends)}"
+                    )
+                    break
+
+    def _get_backend_priority_list(self) -> List[str]:
+        """Get the priority-ordered list of visualization backends to try.
+
+        Returns:
+            List of backend names in order of preference.
+        """
+        backends = []
+
+        # Prefer sim_manager if available
+        if self.sim_manager is not None and hasattr(self.sim_manager, "get_env"):
+            backends.append("sim_manager")
+
+        # Always include open3d and matplotlib as fallbacks
+        backends.extend(["open3d", "matplotlib"])
+
+        return backends
+
+    def _create_visualizer_with_config(self, factory, vis_type, backend):
+        """Create a visualizer with appropriate configuration parameters.
+
+        Args:
+            factory: VisualizerFactory instance.
+            vis_type: VisualizationType enum.
+            backend: Backend string.
+
+        Returns:
+            Configured visualizer instance.
+        """
+        # Prepare common arguments for all visualizers
+        common_kwargs = {
+            "backend": backend,
+            "sim_manager": self.sim_manager,
+            "control_part_name": self.control_part_name,
+        }
+
+        # Add visualization-type specific arguments
+        if vis_type == VisualizationType.POINT_CLOUD:
+            common_kwargs["point_size"] = getattr(
+                self.config.visualization, "point_size", 4.0
+            )
+        elif vis_type == VisualizationType.VOXEL:
+            common_kwargs["voxel_size"] = getattr(
+                self.config.visualization, "voxel_size", 0.05
+            )
+        elif vis_type == VisualizationType.SPHERE:
+            common_kwargs["sphere_radius"] = getattr(
+                self.config.visualization, "sphere_radius", 0.005
+            )
+            common_kwargs["sphere_resolution"] = getattr(
+                self.config.visualization, "sphere_resolution", 10
+            )
+        # For other visualization types (MESH, HEATMAP), use only common arguments
+
+        return factory.create_visualizer(viz_type=vis_type, **common_kwargs)
+
+    def _generate_point_colors_and_sizes(
+        self, points: np.ndarray, filtered_to_reachable: bool = False
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Generate colors and sizes for workspace points based on reachability.
+
+        Args:
+            points: Workspace points, shape (N, 3).
+            filtered_to_reachable: Whether points have been pre-filtered to only include reachable ones.
+
+        Returns:
+            Tuple of:
+                - Colors array, shape (N, 3) with RGB values in [0, 1].
+                - Sizes array, shape (N,) with point sizes.
+        """
+        num_points = len(points)
+        colors = np.zeros((num_points, 3))
+        sizes = (
+            np.ones(num_points) * self.config.visualization.point_size
+        )  # Default size
+
+        # Check if we have current_mode attribute (set during analyze)
+        if not hasattr(self, "current_mode"):
+            # Fallback: assume all points are reachable (green)
+            colors[:, 1] = 1.0  # Green
+            return colors, sizes
+
+        if self.current_mode == AnalysisMode.JOINT_SPACE:
+            # Joint space mode: all points are reachable (green, same size)
+            colors[:, 1] = 1.0  # Green channel = 1.0
+            logger.log_debug(f"Coloring {num_points} points as reachable (green)")
+
+        elif self.current_mode == AnalysisMode.CARTESIAN_SPACE:
+            # Cartesian space mode: different colors and sizes based on reachability
+            if self.success_rates is not None and hasattr(self, "reachability_mask"):
+                if filtered_to_reachable:
+                    # Points have been pre-filtered to only include reachable ones
+                    # All points should be colored as reachable (green, large)
+                    colors[:, 1] = 1.0  # All green
+                    sizes[:] = self.config.visualization.point_size * 1.2  # All large
+                    logger.log_debug(
+                        f"Coloring {num_points} pre-filtered reachable points (green, large)"
+                    )
+                else:
+                    # Original logic for showing both reachable and unreachable points
+                    success_rates_np = self.success_rates.cpu().numpy()
+                    reachability_mask_np = self.reachability_mask.cpu().numpy()
+
+                    # Reachable points: green color, larger size
+                    reachable_indices = reachability_mask_np
+                    colors[reachable_indices, 1] = 1.0  # Pure green
+                    sizes[reachable_indices] = (
+                        self.config.visualization.point_size * 1.2
+                    )  # Larger size
+
+                    # Unreachable points: red color, smaller size
+                    unreachable_indices = ~reachability_mask_np
+                    colors[unreachable_indices, 0] = 1.0  # Pure red
+                    sizes[unreachable_indices] = (
+                        self.config.visualization.point_size * 0.7
+                    )  # Smaller size
+
+                    num_reachable = np.sum(reachable_indices)
+                    num_unreachable = np.sum(unreachable_indices)
+                    logger.log_debug(
+                        f"Coloring {num_reachable} reachable points (green, large) and "
+                        f"{num_unreachable} unreachable points (red, small)"
+                    )
+            else:
+                # No success rates available, assume all reachable
+                colors[:, 1] = 1.0  # Green
+                logger.log_warning(
+                    "No success rates available in Cartesian mode, "
+                    "defaulting to green (reachable)"
+                )
+
+        return colors, sizes
+
+    def _generate_point_colors(self, points: np.ndarray) -> np.ndarray:
+        """Generate colors for workspace points based on reachability (backward compatibility).
+
+        Args:
+            points: Workspace points, shape (N, 3).
+
+        Returns:
+            Colors array, shape (N, 3) with RGB values in [0, 1].
+        """
+        colors, _ = self._generate_point_colors_and_sizes(
+            points, filtered_to_reachable=False
+        )
+        return colors
 
     def _compute_metrics(self) -> Dict[str, Any]:
         """Compute workspace metrics based on configuration."""
@@ -646,16 +1208,21 @@ class WorkspaceAnalyzer:
 
     def visualize(
         self,
-        vis_type: VisualizationType = VisualizationType.POINT_CLOUD,
+        vis_type: Optional[VisualizationType] = None,
         show: bool = True,
         save_path: Optional[str] = None,
+        backend: Optional[str] = None,
     ) -> Any:
         """Visualize the workspace.
 
         Args:
-            vis_type: Type of visualization to create.
+            vis_type: Type of visualization to create. Can be VisualizationType enum or string.
+                     If None, uses the vis_type from configuration (default: POINT_CLOUD).
+                     Supported types: 'point_cloud', 'voxel', 'sphere'.
             show: Whether to display the visualization.
             save_path: Optional path to save the visualization.
+            backend: Backend to use ('sim_manager', 'open3d', 'matplotlib', 'data').
+                    If None, automatically selects based on availability.
 
         Returns:
             Visualization object.
@@ -668,33 +1235,87 @@ class WorkspaceAnalyzer:
             logger.log_warning("Visualization is disabled in configuration")
             return None
 
-        logger.log_info(f"Creating {vis_type.value} visualization...")
+        # Use configured vis_type if not specified
+        if vis_type is None:
+            vis_type = self.config.visualization.vis_type
 
-        # Create visualizer
-        visualizer = create_visualizer(
-            vis_type=vis_type, config=self.config.visualization
+        # Handle string vis_type by converting to enum
+        if isinstance(vis_type, str):
+            try:
+                vis_type = VisualizationType(vis_type)
+            except ValueError:
+                logger.log_warning(
+                    f"Unknown visualization type '{vis_type}', falling back to POINT_CLOUD"
+                )
+                vis_type = VisualizationType.POINT_CLOUD
+
+        # Convert points to numpy first
+        points_np = self.workspace_points.cpu().numpy()
+        filtered_points = False  # Track if points were filtered
+
+        # Enhanced visualization logging with point count info
+        vis_start_time = time.time()
+        logger.log_info(
+            f"Creating {vis_type.value} visualization for {len(points_np)} points..."
         )
 
-        # Convert points to numpy
-        points_np = self.workspace_points.cpu().numpy()
+        # Auto-select backend if not specified
+        if backend is None:
+            if self.sim_manager is not None and hasattr(self.sim_manager, "sim"):
+                backend = "sim_manager"
+            else:
+                backend = "open3d"
 
-        # Create visualization
-        vis_obj = visualizer.visualize(points_np)
+        # Filter points if configured to hide unreachable ones in Cartesian space mode
+        if (
+            self.current_mode == AnalysisMode.CARTESIAN_SPACE
+            and not self.config.visualization.show_unreachable_points
+            and hasattr(self, "reachability_mask")
+        ):
+            # Only show reachable points
+            reachable_mask = self.reachability_mask.cpu().numpy()
+            points_np = points_np[reachable_mask]
+            filtered_points = True
+            logger.log_info(f"Filtering to show only {len(points_np)} reachable points")
+
+        # Generate colors and sizes based on reachability
+        colors, sizes = self._generate_point_colors_and_sizes(
+            points_np, filtered_points
+        )
+
+        # Create visualizer using factory pattern
+        from embodichain.lab.sim.utility.workspace_analyzer.visualizers import (
+            VisualizerFactory,
+        )
+
+        factory = VisualizerFactory()
+        visualizer = self._create_visualizer_with_config(factory, vis_type, backend)
+
+        # Create visualization with sizes if supported
+        try:
+            # Try to pass sizes to visualizer (some backends may support it)
+            vis_obj = visualizer.visualize(points_np, colors=colors, sizes=sizes)
+        except TypeError:
+            # Fallback to colors-only visualization if sizes not supported
+            vis_obj = visualizer.visualize(points_np, colors=colors)
+
+        # Performance tracking for visualization
+        vis_time = time.time() - vis_start_time
+        logger.log_info(f"✨ Visualization created in {vis_time:.2f}s")
 
         # Save if requested
         if save_path:
+            save_start = time.time()
             visualizer.save(save_path)
-            logger.log_info(f"Saved visualization to {save_path}")
+            save_time = time.time() - save_start
+            logger.log_info(f"💾 Saved visualization to {save_path} ({save_time:.2f}s)")
 
-        # Show if requested
-        if show:
+        # Show if requested (only for non-sim_manager backends)
+        if show and backend != "sim_manager":
             try:
-                import open3d as o3d
-
-                if hasattr(vis_obj, "paint_uniform_color"):
-                    o3d.visualization.draw_geometries([vis_obj])
-            except ImportError:
-                logger.log_warning("Open3D not available for interactive visualization")
+                visualizer.show()
+            except Exception as e:
+                logger.log_warning(f"Failed to show visualization: {e}")
 
         return vis_obj
 
@@ -786,160 +1407,74 @@ class WorkspaceAnalyzer:
             logger.log_error(f"Unsupported format: {format}")
             return
 
-        logger.log_info(f"Exported results to {output_path}")
+        # File size information for export
+        try:
+            file_size = output_path.stat().st_size
+            if file_size > 1024 * 1024:  # > 1MB
+                size_str = f"{file_size / (1024*1024):.1f} MB"
+            elif file_size > 1024:  # > 1KB
+                size_str = f"{file_size / 1024:.1f} KB"
+            else:
+                size_str = f"{file_size} bytes"
+            logger.log_info(f"💾 Exported results to {output_path} ({size_str})")
+        except:
+            logger.log_info(f"💾 Exported results to {output_path}")
 
     @contextmanager
     def profiling(self):
-        """Context manager for profiling workspace analysis."""
-        logger.log_info("Starting profiled analysis...")
+        """Enhanced context manager for profiling workspace analysis with detailed metrics."""
+        logger.log_info("🔍 Starting profiled analysis...")
         start_time = time.time()
         start_mem = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+
+        # CPU memory tracking (if psutil is available)
+        start_cpu_mem = 0
+        process = None
+        if psutil is not None:
+            try:
+                process = psutil.Process()
+                start_cpu_mem = process.memory_info().rss
+            except:
+                process = None
 
         yield
 
         end_time = time.time()
         end_mem = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+        end_cpu_mem = 0
+        if process is not None:
+            try:
+                end_cpu_mem = process.memory_info().rss
+            except:
+                end_cpu_mem = start_cpu_mem
 
-        logger.log_info(f"Analysis time: {end_time - start_time:.2f}s")
+        # Detailed performance summary
+        analysis_time = end_time - start_time
+        if analysis_time < 60:
+            time_str = f"{analysis_time:.2f}s"
+        else:
+            minutes = int(analysis_time // 60)
+            seconds = analysis_time % 60
+            time_str = f"{minutes}m {seconds:.1f}s"
+
+        logger.log_info(f"⏱️ Analysis time: {time_str}")
+
+        # Memory usage summary
         if torch.cuda.is_available():
-            mem_used = (end_mem - start_mem) / 1024**2
-            logger.log_info(f"GPU memory used: {mem_used:.2f} MB")
+            gpu_mem_used = (end_mem - start_mem) / 1024**2
+            logger.log_info(f"💾 GPU memory used: {gpu_mem_used:.2f} MB")
 
+        # CPU memory tracking (if available)
+        if process is not None and end_cpu_mem > start_cpu_mem:
+            cpu_mem_used = (end_cpu_mem - start_cpu_mem) / 1024**2
+            logger.log_info(f"💻 CPU memory used: {cpu_mem_used:.2f} MB")
 
-def draw_workspace_points(
-    sim,
-    workspace_points,
-    marker_name="workspace_points",
-    axis_size=0.01,
-    axis_len=0.03,
-    arena_index=0,
-):
-    from embodichain.lab.sim.cfg import MarkerCfg
-
-    if isinstance(workspace_points, torch.Tensor):
-        points = workspace_points.cpu().numpy()
-    else:
-        points = np.array(workspace_points)
-
-    transforms = []
-    for point in points:
-        T = np.eye(4)
-        T[:3, 3] = point
-        transforms.append(T)
-
-    cfg = MarkerCfg(
-        name=marker_name,
-        marker_type="axis",
-        axis_xpos=transforms,
-        axis_size=axis_size,
-        axis_len=axis_len,
-        arena_index=arena_index,
-    )
-
-    # 绘制标记
-    markers = sim.draw_marker(cfg)
-
-    print(f"✓ 绘制了 {len(points)} 个工作空间点标记")
-    print(f"  标记名称: {marker_name}")
-    print(f"  坐标轴长度: {axis_len}m")
-    print(f"  坐标轴粗细: {axis_size}m")
-
-    return markers
-
-
-if __name__ == "__main__":
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
-
-    # Example usage
-    from IPython import embed
-    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.robots.dexforce_w1.types import (
-        DexforceW1HandBrand,
-        DexforceW1ArmSide,
-        DexforceW1ArmKind,
-        DexforceW1Version,
-    )
-    from embodichain.lab.sim.robots.dexforce_w1.utils import build_dexforce_w1_cfg
-
-    config = SimulationManagerCfg(headless=False, sim_device="cpu")
-    sim = SimulationManager(config)
-    sim.build_multiple_arenas(1)
-    sim.set_manual_update(False)
-
-    from embodichain.lab.sim.robots import DexforceW1Cfg
-
-    cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
-    )
-    robot = sim.add_robot(cfg=cfg)
-    print("DexforceW1 robot added to the simulation.")
-
-    # Set left arm joint positions (mirrored)
-    robot.set_qpos(
-        qpos=[0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
-        joint_ids=robot.get_joint_ids("left_arm"),
-    )
-    # Set right arm joint positions (mirrored)
-    robot.set_qpos(
-        qpos=[0, np.pi / 4, 0.0, np.pi / 2, np.pi / 4, 0.0, 0.0],
-        joint_ids=robot.get_joint_ids("right_arm"),
-    )
-
-    # Example 1: Joint space analysis (default)
-    print("\n" + "=" * 60)
-    print("Example 1: Joint Space Analysis")
-    print("=" * 60)
-    wa_joint = WorkspaceAnalyzer(robot=robot)
-    results_joint = wa_joint.analyze(num_samples=1000)
-    print(f"\nJoint Space Results:")
-    print(
-        f"  Valid points: {results_joint['num_valid']} / {results_joint['num_samples']}"
-    )
-    print(f"  Analysis time: {results_joint['analysis_time']:.2f}s")
-    print(f"  Metrics: {results_joint['metrics']}")
-
-    # Example 2: Cartesian space analysis
-    print("\n" + "=" * 60)
-    print("Example 2: Cartesian Space Analysis")
-    print("=" * 60)
-    from embodichain.lab.sim.utility.workspace_analyzer import (
-        WorkspaceAnalyzerConfig,
-        AnalysisMode,
-    )
-    from embodichain.lab.sim.utility.workspace_analyzer.configs import (
-        DimensionConstraint,
-    )
-    import numpy as np
-
-    cartesian_config = WorkspaceAnalyzerConfig(
-        mode=AnalysisMode.CARTESIAN_SPACE,
-        constraint=DimensionConstraint(
-            min_bounds=np.array([-0.4, -0.2, 0.7]),
-            max_bounds=np.array([0.4, 0.8, 2.0]),
-        ),
-        ik_samples_per_point=1,
-        ik_success_threshold=0.4,
-    )
-    wa_cartesian = WorkspaceAnalyzer(robot=robot, config=cartesian_config)
-    results_cartesian = wa_cartesian.analyze(num_samples=500)
-    print(f"\nCartesian Space Results:")
-    print(
-        f"  Reachable points: {results_cartesian['num_reachable']} / {results_cartesian['num_samples']}"
-    )
-    print(f"  Analysis time: {results_cartesian['analysis_time']:.2f}s")
-    print(f"  Metrics: {results_cartesian['metrics']}")
-
-    markers = draw_workspace_points(
-        sim,
-        results_cartesian["workspace_points"],
-        marker_name="cartesian_workspace",
-        axis_size=0.002,
-        axis_len=0.005,
-    )
-
-    # Visualize (optional)
-    # wa_joint.visualize(show=True)
-    # wa_cartesian.visualize(show=True)
-
-    embed(header="Workspace Analyzer Test Environment")
+        # Performance rating
+        if analysis_time < 30 and (not torch.cuda.is_available() or gpu_mem_used < 100):
+            logger.log_info("🚀 Performance: Excellent!")
+        elif analysis_time < 120:
+            logger.log_info("✅ Performance: Good")
+        elif analysis_time < 300:
+            logger.log_info("🟡 Performance: Moderate")
+        else:
+            logger.log_info("🐌 Performance: Needs optimization")

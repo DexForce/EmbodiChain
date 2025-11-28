@@ -17,7 +17,6 @@
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.base_sampler import (
     BaseSampler,
     ISampler,
-    SamplingStrategy,
 )
 
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.iniform_sampler import (
@@ -43,7 +42,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers.sampler_factory imp
 __all__ = [
     "BaseSampler",
     "ISampler",
-    "SamplingStrategy",
     "UniformSampler",
     "RandomSampler",
     "HaltonSampler",

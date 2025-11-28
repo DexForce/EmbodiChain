@@ -38,25 +38,15 @@ except ImportError:
 
 from embodichain.utils import logger
 from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
+    VisualizationType,
     VisualizationConfig,
 )
 
 
 __all__ = [
-    "VisualizationType",
     "IVisualizer",
     "BaseVisualizer",
 ]
-
-
-class VisualizationType(Enum):
-    """Visualization type for workspace."""
-
-    VOXEL = "voxel"  # Voxel grid visualization
-    POINT_CLOUD = "point_cloud"  # Point cloud visualization
-    SPHERE = "sphere"  # Sphere-based visualization
-    MESH = "mesh"  # Mesh visualization
-    HEATMAP = "heatmap"  # 2D/3D heatmap
 
 
 class IVisualizer(Protocol):
@@ -296,13 +286,13 @@ class BaseVisualizer(ABC):
         return colors
 
     def _get_default_colors(
-        self, num_points: int, color: Tuple[float, float, float] = (0.0, 0.5, 1.0)
+        self, num_points: int, color: Tuple[float, float, float] = (0.0, 1.0, 0.0)
     ) -> np.ndarray:
         """Generate default colors for points.
 
         Args:
             num_points: Number of points.
-            color: RGB color tuple. Defaults to blue (0.0, 0.5, 1.0).
+            color: RGB color tuple. Defaults to green (0.0, 1.0, 0.0).
 
         Returns:
             Array of shape (num_points, 3) with default colors.

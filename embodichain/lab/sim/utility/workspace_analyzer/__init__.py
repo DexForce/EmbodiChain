@@ -40,15 +40,19 @@ Example:
     >>> results = analyzer.analyze(num_samples=10000)
 """
 
-from .workspace_analyzer import WorkspaceAnalyzer, WorkspaceAnalyzerConfig, AnalysisMode
+from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
+    WorkspaceAnalyzer,
+    WorkspaceAnalyzerConfig,
+    AnalysisMode,
+)
 
 # Import submodules for convenience
-from . import configs
-from . import samplers
-from . import caches
-from . import visualizers
-from . import metrics
-from . import constraints
+from embodichain.lab.sim.utility.workspace_analyzer import configs
+from embodichain.lab.sim.utility.workspace_analyzer import samplers
+from embodichain.lab.sim.utility.workspace_analyzer import caches
+from embodichain.lab.sim.utility.workspace_analyzer import visualizers
+from embodichain.lab.sim.utility.workspace_analyzer import metrics
+from embodichain.lab.sim.utility.workspace_analyzer import constraints
 
 __all__ = [
     "WorkspaceAnalyzer",
@@ -61,5 +65,3 @@ __all__ = [
     "metrics",
     "constraints",
 ]
-
-__version__ = "0.1.0"

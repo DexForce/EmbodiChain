@@ -28,7 +28,6 @@ except ImportError:
 
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.base_sampler import (
     BaseSampler,
-    SamplingStrategy,
 )
 
 from embodichain.utils import logger

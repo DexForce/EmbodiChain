@@ -23,22 +23,9 @@ from enum import Enum
 from embodichain.utils import logger
 
 __all__ = [
-    "SamplingStrategy",
     "ISampler",
     "BaseSampler",
 ]
-
-
-class SamplingStrategy(Enum):
-    """Sampling strategy for joint space."""
-
-    UNIFORM = "uniform"  # Uniform grid sampling
-    RANDOM = "random"  # Random sampling
-    HALTON = "halton"  # Quasi-random Halton sequence
-    SOBOL = "sobol"  # Quasi-random Sobol sequence
-    LATIN_HYPERCUBE = "lhs"  # Latin Hypercube Sampling
-    IMPORTANCE = "importance"  # Importance sampling (requires weight function)
-    GAUSSIAN = "gaussian"  # Gaussian (normal) distribution sampling
 
 
 class ISampler(Protocol):

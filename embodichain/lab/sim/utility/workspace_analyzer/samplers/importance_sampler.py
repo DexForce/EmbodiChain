@@ -18,9 +18,11 @@ import numpy as np
 import torch
 from typing import Union, Callable, Optional
 
+from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
+    SamplingStrategy,
+)
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.base_sampler import (
     BaseSampler,
-    SamplingStrategy,
 )
 
 from embodichain.utils import logger

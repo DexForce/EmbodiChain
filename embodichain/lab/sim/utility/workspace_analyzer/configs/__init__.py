@@ -14,11 +14,21 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .cache_config import CacheConfig
-from .dimension_constraint import DimensionConstraint
-from .sampling_config import SamplingConfig
-from .visualization_config import VisualizationConfig
-from .metric_config import (
+from embodichain.lab.sim.utility.workspace_analyzer.configs.cache_config import (
+    CacheConfig,
+)
+from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import (
+    DimensionConstraint,
+)
+from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
+    SamplingConfig,
+    SamplingStrategy,
+)
+from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
+    VisualizationConfig,
+    VisualizationType,
+)
+from embodichain.lab.sim.utility.workspace_analyzer.configs.metric_config import (
     MetricConfig,
     MetricType,
     ReachabilityConfig,
@@ -26,36 +36,14 @@ from .metric_config import (
     DensityConfig,
 )
 
-# Import SamplingStrategy from samplers module (avoid duplication)
-try:
-    from ..samplers.base_sampler import SamplingStrategy
-except ImportError:
-    # Fallback if samplers module is not available yet
-    from enum import Enum
-
-    class SamplingStrategy(Enum):
-        """Fallback SamplingStrategy."""
-
-        UNIFORM = "uniform"
-        RANDOM = "random"
-        HALTON = "halton"
-        SOBOL = "sobol"
-        LATIN_HYPERCUBE = "lhs"
-        IMPORTANCE = "importance"
-        GAUSSIAN = "gaussian"
-
 
 __all__ = [
-    # Cache
     "CacheConfig",
-    # Constraints
     "DimensionConstraint",
-    # Sampling
     "SamplingConfig",
     "SamplingStrategy",
-    # Visualization
     "VisualizationConfig",
-    # Metrics
+    "VisualizationType",
     "MetricConfig",
     "MetricType",
     "ReachabilityConfig",

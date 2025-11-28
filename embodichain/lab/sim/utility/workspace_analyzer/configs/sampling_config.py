@@ -13,38 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-
+from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional, Callable, TYPE_CHECKING
 
-# Import SamplingStrategy from samplers to avoid duplication
-if TYPE_CHECKING:
-    from ..samplers.base_sampler import SamplingStrategy
-else:
-    try:
-        from ..samplers.base_sampler import SamplingStrategy
-    except ImportError:
-        from enum import Enum
 
-        class SamplingStrategy(Enum):
-            """Fallback SamplingStrategy if samplers not available."""
+class SamplingStrategy(Enum):
+    """Sampling strategy for joint space."""
 
-            UNIFORM = "uniform"
-            RANDOM = "random"
-            HALTON = "halton"
-            SOBOL = "sobol"
-            LATIN_HYPERCUBE = "lhs"
-            IMPORTANCE = "importance"
-            GAUSSIAN = "gaussian"
+    UNIFORM = "uniform"  # Uniform grid sampling
+    RANDOM = "random"  # Random sampling
+    HALTON = "halton"  # Quasi-random Halton sequence
+    SOBOL = "sobol"  # Quasi-random Sobol sequence
+    LATIN_HYPERCUBE = "lhs"  # Latin Hypercube Sampling
+    IMPORTANCE = "importance"  # Importance sampling (requires weight function)
+    GAUSSIAN = "gaussian"  # Gaussian (normal) distribution sampling
 
 
 @dataclass
 class SamplingConfig:
     """Configuration for sampling strategies in workspace analysis."""
 
-    strategy: "SamplingStrategy" = (
-        None  # Will be set to UNIFORM by default in __post_init__
-    )
+    strategy: SamplingStrategy = None
+    """Sampling strategy to use."""
+
     num_samples: int = 1000
     """Number of samples to generate."""
 

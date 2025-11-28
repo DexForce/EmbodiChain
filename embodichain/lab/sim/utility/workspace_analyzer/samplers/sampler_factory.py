@@ -17,10 +17,11 @@
 from typing import Dict, Type, Optional, Any
 from threading import Lock
 
-
+from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
+    SamplingStrategy,
+)
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.base_sampler import (
     BaseSampler,
-    SamplingStrategy,
 )
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.iniform_sampler import (
     UniformSampler,
@@ -111,7 +112,7 @@ class SamplerFactory:
         self._samplers[SamplingStrategy.IMPORTANCE.value] = ImportanceSampler
         self._samplers[SamplingStrategy.GAUSSIAN.value] = GaussianSampler
 
-        logger.log_info(f"Registered built-in samplers: {list(self._samplers.keys())}")
+        logger.log_debug(f"Registered built-in samplers: {list(self._samplers.keys())}")
 
     def register_sampler(self, name: str, sampler_class: Type[BaseSampler]) -> None:
         """Register a new sampler class.

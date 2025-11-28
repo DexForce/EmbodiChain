@@ -106,7 +106,7 @@ class VisualizerFactory:
         self._visualizers[VisualizationType.VOXEL.value] = VoxelVisualizer
         self._visualizers[VisualizationType.SPHERE.value] = SphereVisualizer
 
-        logger.log_info(
+        logger.log_debug(
             f"Registered built-in visualizers: {list(self._visualizers.keys())}"
         )
 
