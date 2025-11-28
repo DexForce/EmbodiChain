@@ -1049,3 +1049,21 @@ class RobotCfg(ArticulationCfg):
             Dict[str, pk.SerialChain]: The serial chain of the robot for specified control part.
         """
         return {}
+
+
+@configclass
+class ContactFilterCfg:
+    rigid_uid_list: List[str]
+    """rigid body contact filter configs"""
+
+    articulation_cfg_list: List[ArticulationContactFilterCfg]
+    """articulation link contact filter configs"""
+
+    filter_need_both_actor: bool = True
+    """Whether to filter contact only when both actors are in the filter list."""
+
+
+@configclass
+class ArticulationContactFilterCfg:
+    articulation_uid: str
+    link_name_list: List[str]

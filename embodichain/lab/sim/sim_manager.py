@@ -27,6 +27,7 @@ from copy import deepcopy
 from functools import cached_property
 from typing import List, Union, Optional, Dict, Tuple, Union, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
+from .contact import ContactReport
 
 # Global cache directories
 SIM_CACHE_DIR = Path.home() / ".cache" / "embodichain_cache"
@@ -46,7 +47,7 @@ from dexsim.types import (
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType
-from dexsim.render import GizmoController
+from dexsim.engine import GizmoController
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -73,6 +74,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectGroupCfg,
     ArticulationCfg,
     RobotCfg,
+    ContactFilterCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.data.assets import SimResources
@@ -973,6 +975,55 @@ class SimulationManager:
         self._robots[uid] = robot
 
         return robot
+
+    def get_contact(self, contact_filter_cfg: ContactFilterCfg) -> ContactReport:
+        """get contact
+
+        Args:
+            contact_filter_cfg (ContactFilterCfg): contact filter configuration.
+
+        Returns:
+            ContactReport
+        """
+        item_user_ids = torch.tensor([], dtype=torch.int32, device=self.device)
+        item_env_ids = torch.tensor([], dtype=torch.int32, device=self.device)
+
+        for rigid_uid in contact_filter_cfg.rigid_uid_list:
+            if rigid_uid not in self._rigid_objects:
+                logger.log_warning(f"Rigid object {rigid_uid} not found.")
+                continue
+            rigid_object = self._rigid_objects[rigid_uid]
+            rigid_user_ids = rigid_object.get_user_ids()
+            item_user_ids = torch.concatenate((item_user_ids, rigid_user_ids))
+            item_env_ids = torch.concatenate((item_env_ids, rigid_object.all_env_ids))
+
+        for articulation_cfg in contact_filter_cfg.articulation_cfg_list:
+            if articulation_cfg.uid not in self._articulations:
+                logger.log_warning(f"Articulation {articulation_cfg.uid} not found.")
+                continue
+            articulation = self._articulations[articulation_cfg.uid]
+            all_link_names = articulation.link_names()
+            link_names = (
+                all_link_names
+                if articulation_cfg.link_name_list is None
+                else articulation_cfg.link_name_list
+            )
+            for link_name in link_names:
+                if link_name not in all_link_names:
+                    logger.log_warning(
+                        f"Link {link_name} not found in articulation {articulation_cfg.uid}."
+                    )
+                    continue
+                link_user_ids = articulation.get_user_ids(link_name)
+                item_user_ids = torch.concatenate((item_user_ids, link_user_ids))
+                item_env_ids = torch.concatenate((item_env_ids, articulation.all_env_ids))
+
+        # fetch contact data from physics scene
+
+        # filter contact data 
+
+        # generate contact report
+
 
     def get_robot(self, uid: str) -> Optional[Robot]:
         """Get a Robot by its unique ID.
