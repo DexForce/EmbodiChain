@@ -10,6 +10,7 @@ Currently, EmbodiChain is under active development. Our plan for the feature roa
         - Add a new rasterization backend for basic rendering tasks.
         - Support 3DGS rendering mode (If we have enough bandwidth).
     - Physics:
+        - Improve GPU physics throughput.
         - Improve soft body simulation stability and add more examples and tasks.
         - We are also exploring how to integrate [newton physics](https://github.com/newton-physics/newton) into EmbodiChain as an alternative physics backend.
     - Sensors:
@@ -20,6 +21,17 @@ Currently, EmbodiChain is under active development. Our plan for the feature roa
         - Add more advanced motion generation methods and examples.
     - Useful Tools:
         - Add a robot workspace analysis tool for better visualization and sampling of robot accessible workspace.
-    - We are working on USD support for EmbodiChain to enable better scene creation and asset management.
+        - We are working on USD support for EmbodiChain to enable better scene creation and asset management.
+        - We will release a simple Real2Sim pipeline, which enables automatic task generation from real-world data.
+    - Robots Integration:
+        - Add support for more robot models (eg: LeRobot, Unitree H1/G1, etc).
 
-- Models and Training Workflows:
+- Agents:
+    - Add more Reinforcement Learning examples and environments.
+    - We will release a Modular VLA framework for fast prototyping and training of embodied agents.
+    - We will release a simple online data streaming pipeline for Imitation Learning.
+
+- Tasks:
+    - We will release a set of Real2Sim tasks as examples for EmbodiChain.
+    - We will release a set of tableware manipulation tasks for demonstration of data generation pipeline.
+    
