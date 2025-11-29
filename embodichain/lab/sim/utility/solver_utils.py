@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
+import numpy as np
 from embodichain.lab.sim.utility.io_utils import suppress_stdout_stderr
 
 from typing import Optional, Union, Tuple, Any, List, TYPE_CHECKING
@@ -212,10 +213,8 @@ def compute_pinocchio_fk(
             transformation matrix.
 
     Raises:
-        ValueError: If qpos shape is not (nq,).
+        ValueError: If qpos shape is not (nq,) or if the end_link_name is not found.
     """
-    import numpy as np
-
     if isinstance(qpos, torch.Tensor):
         qpos_np = qpos.detach().cpu().numpy()
     else:
@@ -229,6 +228,8 @@ def compute_pinocchio_fk(
 
     # Retrieve the pose of the specified link
     frame_index = robot.model.getFrameId(end_link_name)
+    if frame_index >= robot.model.nframes:
+        raise ValueError(f"End link name '{end_link_name}' not found in robot model.")
     joint_index = robot.model.frames[frame_index].parent
     xpos_se3 = robot.data.oMi.tolist()[joint_index]
 
