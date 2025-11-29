@@ -452,14 +452,15 @@ def postprocess_small_regions(
 
     Args:
         masks: Array of binary masks or list of masks.
-        min_area: Minimum area threshold.
-        max_area: Maximum area threshold.
+        min_area: Minimum area threshold (exclusive - areas must be strictly greater).
+        max_area: Maximum area threshold (inclusive - areas can equal this value).
 
     Returns:
-        List of indices for masks that meet the area constraints.
+        List of indices for masks that meet the area constraints (min_area < area <= max_area).
     """
     n = len(masks) if isinstance(masks, list) else masks.shape[0]
     # Use list comprehension for more efficient filtering
+    # Logic: area > min_area and area <= max_area (original behavior preserved)
     return [
         i
         for i in range(n)
