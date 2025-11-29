@@ -352,13 +352,6 @@ def save_json(path: str, data):
         json.dump(data, f, indent=4)
 
 
-def save_json(path: str, data):
-    import json
-
-    with open(path, "w") as f:
-        json.dump(data, f, indent=4)
-
-
 def load_json(path: str) -> Dict:
     import json
 
@@ -455,14 +448,23 @@ def postprocess_small_regions(
     min_area: int,
     max_area: int,
 ) -> List[int]:
-    keep_idx = []
+    """Filter masks based on area constraints.
+
+    Args:
+        masks: Array of binary masks or list of masks.
+        min_area: Minimum area threshold.
+        max_area: Maximum area threshold.
+
+    Returns:
+        List of indices for masks that meet the area constraints.
+    """
     n = len(masks) if isinstance(masks, list) else masks.shape[0]
-    for i in range(n):
-        area = masks[i].astype(np.uint8).sum()
-        keep = area > min_area and area <= max_area
-        if keep:
-            keep_idx.append(i)
-    return keep_idx
+    # Use list comprehension for more efficient filtering
+    return [
+        i
+        for i in range(n)
+        if min_area < masks[i].astype(np.uint8).sum() <= max_area
+    ]
 
 
 def mask_to_box(mask: np.ndarray) -> np.ndarray:
@@ -478,27 +480,13 @@ def mask_to_box(mask: np.ndarray) -> np.ndarray:
     return bbox
 
 
-def postprocess_small_regions(
-    masks: np.ndarray,
-    min_area: int,
-    max_area: int,
-) -> List[int]:
-    keep_idx = []
-    n = len(masks) if isinstance(masks, list) else masks.shape[0]
-    for i in range(n):
-        area = masks[i].astype(np.uint8).sum()
-        keep = area > min_area and area <= max_area
-        if keep:
-            keep_idx.append(i)
-    return keep_idx
-
-
 def remove_overlap_mask(
     masks: List[np.ndarray], keep_inner_threshold: float = 0.5, eps: float = 1e-5
 ) -> List[int]:
     keep_ids = []
 
-    areas = [mask.astype(np.uint8).sum() for mask in masks]
+    # Pre-compute areas once for efficiency
+    areas = np.array([mask.astype(np.uint8).sum() for mask in masks])
 
     for i, maskA in enumerate(masks):
         keep = True
