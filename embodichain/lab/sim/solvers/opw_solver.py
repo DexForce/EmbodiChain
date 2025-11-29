@@ -95,11 +95,7 @@ class OPWSolverCfg(SolverCfg):
         solver = OPWSolver(cfg=self, device=device, **kwargs)
 
         # Set the Tool Center Point (TCP) for the solver
-        if isinstance(self.tcp, torch.Tensor):
-            tcp = self.tcp.cpu().numpy()
-        else:
-            tcp = self.tcp
-        solver.set_tcp(tcp)
+        solver.set_tcp(self._get_tcp_as_numpy())
 
         return solver
 
