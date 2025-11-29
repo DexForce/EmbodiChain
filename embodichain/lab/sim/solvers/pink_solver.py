@@ -24,6 +24,10 @@ from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pinocchio,
     lazy_import_pink,
 )
+from embodichain.lab.sim.utility.solver_utils import (
+    build_reduced_pinocchio_robot,
+    compute_pinocchio_fk,
+)
 
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
@@ -111,12 +115,7 @@ class PinkSolverCfg(SolverCfg):
         solver = PinkSolver(cfg=self, **kwargs)
 
         # Set the Tool Center Point (TCP) for the solver
-        if isinstance(self.tcp, torch.Tensor):
-            tcp = self.tcp.cpu().numpy()
-        else:
-            tcp = self.tcp
-
-        solver.set_tcp(tcp)
+        solver.set_tcp(self._get_tcp_as_numpy())
 
         return solver
 
@@ -162,7 +161,7 @@ class PinkSolver(BaseSolver):
         )  # Degrees of freedom of robot joints
 
         # Get reduced robot model
-        self.robot = self._get_reduce_robot()
+        self.robot = build_reduced_pinocchio_robot(self.entire_robot, self.joint_names)
 
         # Initialize Pink configuration
         self.pink_cfg = self.pink.configuration.Configuration(
@@ -206,26 +205,6 @@ class PinkSolver(BaseSolver):
         else:
             self.dexsim_to_pink_ordering = None
             self.pink_to_dexsim_ordering = None
-
-    def _get_reduce_robot(self) -> "pin.RobotWrapper":
-        """Build a reduced robot model by locking all joints except those in self.joint_names.
-
-        Returns:
-            pin.RobotWrapper: The reduced robot model with specified joints unlocked.
-        """
-        pink_joint_names = self.entire_robot.model.names.tolist()
-
-        # Lock all joints except those in self.joint_names and 'universe'
-        fixed_joint_names = [
-            name
-            for name in pink_joint_names
-            if name not in self.joint_names and name != "universe"
-        ]
-
-        reduced_robot = self.entire_robot.buildReducedRobot(
-            list_of_joints_to_lock=fixed_joint_names
-        )
-        return reduced_robot
 
     def reorder_array(
         self, input_array: List[float], reordering_array: List[int]
@@ -393,25 +372,7 @@ class PinkSolver(BaseSolver):
         Returns:
             torch.Tensor: The homogeneous transformation matrix (4x4) of the end-effector (after applying TCP).
         """
-        if isinstance(qpos, torch.Tensor):
-            qpos_np = qpos.detach().cpu().numpy()
-        else:
-            qpos_np = np.array(qpos)
-
-        qpos_np = np.squeeze(qpos_np)
-        if qpos_np.ndim != 1:
-            raise ValueError(f"qpos shape must be (nq,), but got {qpos_np.shape}")
-
-        self.pin.forwardKinematics(self.robot.model, self.robot.data, qpos_np)
-
-        # Retrieve the pose of the specified link
-        frame_index = self.robot.model.getFrameId(self.end_link_name)
-        joint_index = self.robot.model.frames[frame_index].parent
-        xpos_se3 = self.robot.data.oMi.tolist()[joint_index]
-
-        xpos = np.eye(4)
-        xpos[:3, :3] = xpos_se3.rotation
-        xpos[:3, 3] = xpos_se3.translation.T
-
-        result = np.dot(xpos, self.tcp_xpos)
+        result = compute_pinocchio_fk(
+            self.pin, self.robot, qpos, self.end_link_name, self.tcp_xpos
+        )
         return torch.from_numpy(result)

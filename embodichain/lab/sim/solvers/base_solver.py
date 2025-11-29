@@ -76,6 +76,19 @@ class SolverCfg:
     def init_solver(self, device: torch.device, **kwargs) -> "BaseSolver":
         pass
 
+    def _get_tcp_as_numpy(self) -> np.ndarray:
+        """Convert TCP to numpy array.
+
+        This helper method handles the conversion of TCP from torch.Tensor to numpy
+        if needed. Used by subclass init_solver methods to set TCP on the solver.
+
+        Returns:
+            np.ndarray: The TCP as a numpy array.
+        """
+        if isinstance(self.tcp, torch.Tensor):
+            return self.tcp.cpu().numpy()
+        return self.tcp
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> "SolverCfg":
         """Initialize the configuration from a dictionary."""
