@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union
+from typing import Union, Optional, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -46,15 +46,22 @@ class RandomSampler(BaseSampler):
         - May miss important regions
     """
 
-    def __init__(self, seed: int = 42):
+    def __init__(
+        self,
+        seed: int = 42,
+        constraint: Optional["GeometricConstraint"] = None,
+        device: Optional[torch.device] = None,
+    ):
         """Initialize the random sampler.
 
         Args:
             seed: Random seed for reproducibility. Defaults to 42.
+            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
+            device: PyTorch device for tensor operations.
         """
-        super().__init__(seed)
+        super().__init__(seed, device, constraint)
 
-    def sample(
+    def _sample_from_bounds(
         self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
     ) -> torch.Tensor:
         """Generate random samples within the given bounds.

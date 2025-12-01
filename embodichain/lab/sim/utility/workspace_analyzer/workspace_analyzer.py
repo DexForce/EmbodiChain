@@ -46,6 +46,8 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs import (
 from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
     SamplerFactory,
     BaseSampler,
+    BoxConstraint,
+    SphereConstraint,
 )
 from embodichain.lab.sim.utility.workspace_analyzer.caches import CacheManager
 from embodichain.lab.sim.utility.workspace_analyzer.constraints import (
@@ -109,6 +111,22 @@ class WorkspaceAnalyzerConfig:
 
     plane_bounds: Optional[torch.Tensor] = None
     """Bounds for 2D plane coordinates [[u_min, u_max], [v_min, v_max]]"""
+
+    # Geometric constraint parameters for sampling
+    constraint_type: Optional[str] = None
+    """Type of geometric constraint: 'box', 'sphere', None. If None, no constraint applied."""
+
+    constraint_bounds: Optional[torch.Tensor] = None
+    """Bounds for constraint: For box: [[x_min, x_max], [y_min, y_max], ...]. For sphere: used to auto-calculate radius if sphere_radius is None."""
+
+    sphere_center: Optional[torch.Tensor] = None
+    """Center point for sphere constraint [x, y, z, ...]. If None and constraint_type='sphere', calculated from constraint_bounds."""
+
+    sphere_radius: Optional[float] = None
+    """Radius for sphere constraint. If None and constraint_type='sphere', auto-calculated from constraint_bounds."""
+
+    sphere_radius_mode: str = "inscribed"
+    """Mode for auto-calculating sphere radius from bounds: 'inscribed' or 'circumscribed'. Only used if sphere_radius is None."""
 
     def __post_init__(self):
         """Initialize sub-configs with defaults if not provided."""
@@ -244,12 +262,244 @@ class WorkspaceAnalyzer:
         logger.log_debug(f"Number of joints: {self.num_joints}")
 
     def _create_sampler(self) -> BaseSampler:
-        """Create sampler based on configuration."""
+        """Create sampler based on configuration with optional geometric constraints."""
         factory = SamplerFactory()
+
+        # Create geometric constraint based on analysis mode and config
+        geometric_constraint = self._create_geometric_constraint_for_mode()
+
         return factory.create_sampler(
             strategy=self.config.sampling.strategy,
             seed=self.config.sampling.seed,
+            constraint=geometric_constraint,
         )
+
+    def _create_geometric_constraint_for_mode(self):
+        """Create geometric constraint based on analysis mode and configuration.
+
+        Different analysis modes have different default constraint behaviors:
+        - JOINT_SPACE: No constraint by default (samples all joint space)
+        - CARTESIAN_SPACE: Box constraint by default (focuses on workspace bounds)
+        - PLANE_SAMPLING: Sphere constraint by default (focuses on planar operations)
+
+        Returns:
+            GeometricConstraint instance or None if no constraint specified.
+        """
+        # If user explicitly specified constraint_type, use that
+        if self.config.constraint_type is not None:
+            return self._create_explicit_constraint()
+
+        # Otherwise, use mode-based default constraints
+        return self._create_mode_default_constraint()
+
+    def _create_explicit_constraint(self):
+        """Create constraint when user explicitly specified constraint_type."""
+        if self.config.constraint_type == "box":
+            if self.config.constraint_bounds is None:
+                logger.log_warning(
+                    "Box constraint specified but constraint_bounds not provided"
+                )
+                return None
+            return BoxConstraint(
+                bounds=self.config.constraint_bounds, device=self.device
+            )
+
+        elif self.config.constraint_type == "sphere":
+            # Handle sphere constraint creation with various parameter combinations
+            if (
+                self.config.sphere_center is not None
+                and self.config.sphere_radius is not None
+            ):
+                # Both center and radius explicitly provided
+                return SphereConstraint(
+                    center=self.config.sphere_center,
+                    radius=self.config.sphere_radius,
+                    device=self.device,
+                )
+            elif self.config.constraint_bounds is not None:
+                # Auto-calculate from bounds
+                if self.config.sphere_center is not None:
+                    # Custom center with auto-calculated radius
+                    return SphereConstraint(
+                        center=self.config.sphere_center,
+                        bounds=self.config.constraint_bounds,
+                        radius_mode=self.config.sphere_radius_mode,
+                        device=self.device,
+                    )
+                else:
+                    # Both center and radius auto-calculated from bounds
+                    if self.config.sphere_radius_mode == "inscribed":
+                        return SphereConstraint.from_bounds_inscribed(
+                            bounds=self.config.constraint_bounds, device=self.device
+                        )
+                    else:  # circumscribed
+                        return SphereConstraint.from_bounds_circumscribed(
+                            bounds=self.config.constraint_bounds, device=self.device
+                        )
+            else:
+                logger.log_warning(
+                    "Sphere constraint specified but neither center+radius nor constraint_bounds provided"
+                )
+                return None
+        else:
+            logger.log_warning(
+                f"Unknown constraint type: {self.config.constraint_type}"
+            )
+            return None
+
+    def _compute_dynamic_workspace_bounds(self) -> torch.Tensor:
+        """Compute workspace bounds dynamically from joint space FK.
+
+        Returns:
+            Tensor of shape (3, 2) representing [[x_min, x_max], [y_min, y_max], [z_min, z_max]]
+        """
+        logger.log_info("Computing workspace bounds dynamically from joint space FK...")
+
+        # Create a temporary sampler without constraints for initial FK computation
+        from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
+            RandomSampler,
+        )
+
+        temp_sampler = RandomSampler(seed=self.config.sampling.seed)
+
+        # Sample joint space to compute FK bounds
+        joint_samples = temp_sampler.sample(num_samples=1000, bounds=self.qpos_limits)
+
+        # Compute FK for all samples
+        workspace_pts_list = []
+
+        for i in range(len(joint_samples)):
+            qpos = joint_samples[i : i + 1]  # Keep batch dimension
+            try:
+                pose = self.robot.compute_fk(
+                    qpos=qpos,
+                    name=self.control_part_name,
+                    to_matrix=True,
+                )
+                position = pose[:, :3, 3]  # Extract position
+                workspace_pts_list.append(position)
+            except Exception:
+                continue
+
+        if workspace_pts_list:
+            workspace_pts = torch.cat(workspace_pts_list, dim=0)
+            # Compute min/max bounds for each dimension
+            min_bounds = workspace_pts.min(dim=0).values
+            max_bounds = workspace_pts.max(dim=0).values
+
+            # Add margin (10%)
+            margin = (max_bounds - min_bounds) * 0.1
+            min_bounds = min_bounds - margin
+            max_bounds = max_bounds + margin
+
+            # Create bounds tensor: [[x_min, x_max], [y_min, y_max], [z_min, z_max]]
+            bounds = torch.stack([min_bounds, max_bounds], dim=1)
+
+            logger.log_info(
+                f"Computed workspace bounds from {len(workspace_pts)} FK samples:\n"
+                f"\t X: [{min_bounds[0]:.3f}, {max_bounds[0]:.3f}] m\n"
+                f"\t Y: [{min_bounds[1]:.3f}, {max_bounds[1]:.3f}] m\n"
+                f"\t Z: [{min_bounds[2]:.3f}, {max_bounds[2]:.3f}] m"
+            )
+            return bounds
+        else:
+            # Fallback to default bounds if FK computation fails
+            logger.log_warning("FK computation failed, using fallback bounds")
+            return torch.tensor(
+                [[-1.0, 1.0], [-1.0, 1.0], [0.0, 2.0]], device=self.device
+            )
+
+    def _create_mode_default_constraint(self):
+        """Create default constraint based on analysis mode."""
+        if self.config.mode == AnalysisMode.JOINT_SPACE:
+            # Joint space: Fixed Box constraint from joint limits
+            logger.log_info(
+                "Joint space mode: Using default Box constraint from joint limits"
+            )
+            return BoxConstraint(bounds=self.qpos_limits, device=self.device)
+
+        elif self.config.mode == AnalysisMode.CARTESIAN_SPACE:
+            # Cartesian space: Sphere constraint by default if bounds available
+            if self.config.constraint_bounds is not None:
+                logger.log_info(
+                    "Cartesian space mode: Using default inscribed Sphere constraint from bounds"
+                )
+                return SphereConstraint.from_bounds_inscribed(
+                    bounds=self.config.constraint_bounds, device=self.device
+                )
+            elif (
+                self.config.constraint.min_bounds is not None
+                and self.config.constraint.max_bounds is not None
+            ):
+                bounds = torch.stack(
+                    [
+                        torch.tensor(
+                            self.config.constraint.min_bounds, device=self.device
+                        ),
+                        torch.tensor(
+                            self.config.constraint.max_bounds, device=self.device
+                        ),
+                    ],
+                    dim=1,
+                )
+                logger.log_info(
+                    "Cartesian space mode: Using default inscribed Sphere constraint from workspace bounds"
+                )
+                return SphereConstraint.from_bounds_inscribed(
+                    bounds=bounds, device=self.device
+                )
+            else:
+                # Compute dynamic bounds from joint space FK
+                dynamic_bounds = self._compute_dynamic_workspace_bounds()
+                logger.log_info(
+                    "Cartesian space mode: Using default inscribed Sphere constraint from dynamically computed bounds"
+                )
+                return SphereConstraint.from_bounds_inscribed(
+                    bounds=dynamic_bounds, device=self.device
+                )
+
+        elif self.config.mode == AnalysisMode.PLANE_SAMPLING:
+            # Plane sampling: Sphere constraint by default if bounds available
+            if self.config.constraint_bounds is not None:
+                logger.log_info(
+                    "Plane sampling mode: Using default inscribed Sphere constraint from bounds"
+                )
+                return SphereConstraint.from_bounds_inscribed(
+                    bounds=self.config.constraint_bounds, device=self.device
+                )
+            elif (
+                self.config.constraint.min_bounds is not None
+                and self.config.constraint.max_bounds is not None
+            ):
+                bounds = torch.stack(
+                    [
+                        torch.tensor(
+                            self.config.constraint.min_bounds, device=self.device
+                        ),
+                        torch.tensor(
+                            self.config.constraint.max_bounds, device=self.device
+                        ),
+                    ],
+                    dim=1,
+                )
+                logger.log_info(
+                    "Plane sampling mode: Using default inscribed Sphere constraint from workspace bounds"
+                )
+                return SphereConstraint.from_bounds_inscribed(
+                    bounds=bounds, device=self.device
+                )
+            else:
+                # Compute dynamic bounds from joint space FK
+                dynamic_bounds = self._compute_dynamic_workspace_bounds()
+                logger.log_info(
+                    "Plane sampling mode: Using default inscribed Sphere constraint from dynamically computed bounds"
+                )
+                return SphereConstraint.from_bounds_inscribed(
+                    bounds=dynamic_bounds, device=self.device
+                )
+        else:
+            logger.log_warning(f"Unknown analysis mode: {self.config.mode}")
+            return None
 
     def _create_cache(self):
         """Create cache manager based on configuration."""
@@ -594,7 +844,7 @@ class WorkspaceAnalyzer:
             plane_bounds = plane_bounds.to(self.device)
 
         # Use existing sampler to generate 2D samples directly
-        plane_samples_2d = self.sampler.sample(plane_bounds, num_samples)
+        plane_samples_2d = self.sampler.sample(num_samples, bounds=plane_bounds)
 
         # Convert to 3D coordinates
         plane_samples_3d = self._plane_to_world_optimized(
@@ -669,7 +919,7 @@ class WorkspaceAnalyzer:
         u = u / torch.norm(u)
 
         # Generate second tangent vector via cross product
-        v = torch.cross(plane_normal, u)
+        v = torch.linalg.cross(plane_normal, u)
         v = v / torch.norm(v)
 
         return u, v
@@ -701,7 +951,7 @@ class WorkspaceAnalyzer:
         num_samples: int,
     ) -> torch.Tensor:
         """Generate 2D plane samples using existing base sampler directly."""
-        return self.sampler.sample(plane_bounds, num_samples)
+        return self.sampler.sample(num_samples, bounds=plane_bounds)
 
     def compute_workspace_points(
         self, joint_configs: torch.Tensor, batch_size: Optional[int] = None
@@ -847,17 +1097,6 @@ class WorkspaceAnalyzer:
 
         random_sampler = RandomSampler(seed=self.config.sampling.seed)
 
-        # Track statistics for progress bar
-        total_reachable = 0
-
-        # Process each point individually (robot expects batch_size from environments, not samples)
-        pbar = self._create_optimized_tqdm(
-            range(num_samples),
-            desc="Inverse Kinematics",
-            unit="pt",
-            color="magenta",
-            emoji="🎯",
-        )
         # Get reference end-effector pose for IK target orientation
         # Priority: use reference_pose if provided, otherwise compute from current joint configuration
         if (
@@ -894,13 +1133,6 @@ class WorkspaceAnalyzer:
                 "xyz", degrees=True
             )
 
-            logger.log_info(
-                f"🤖 Computing reference pose from current joint configuration:\n"
-                f"  🔧 Joint angles: {current_qpos.cpu().numpy()}\n"
-                f"  📍 EE Position: [{position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}] m\n"
-                f"  🔄 EE Rotation (XYZ Euler): [{euler_angles[0]:.2f}°, {euler_angles[1]:.2f}°, {euler_angles[2]:.2f}°]"
-            )
-
         # Print detailed reference pose information
         pose_np = current_ee_pose[0].cpu().numpy()
         position = pose_np[:3, 3]
@@ -923,6 +1155,18 @@ class WorkspaceAnalyzer:
             f"\t Position: [{position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}] m\n"
             f"\t Rotation (XYZ Euler): [{euler_angles[0]:.2f}°, {euler_angles[1]:.2f}°, {euler_angles[2]:.2f}°]\n"
             f"\t Matrix:\n{matrix_str}"
+        )
+
+        # Track statistics for progress bar
+        total_reachable = 0
+
+        # Process each point individually (robot expects batch_size from environments, not samples)
+        pbar = self._create_optimized_tqdm(
+            range(num_samples),
+            desc="Inverse Kinematics",
+            unit="pt",
+            color="magenta",
+            emoji="🎯",
         )
 
         for i in pbar:
@@ -1525,19 +1769,28 @@ class WorkspaceAnalyzer:
                     # Original logic for showing both reachable and unreachable points
                     reachability_mask_np = self.reachability_mask.cpu().numpy()
 
-                    # Reachable points: green color, larger size
-                    reachable_indices = reachability_mask_np
-                    colors[reachable_indices, 1] = 1.0  # Pure green
-                    sizes[reachable_indices] = (
-                        self.config.visualization.point_size * 1.5
-                    )  # Larger size
+                    # Check if mask length matches points length
+                    if len(reachability_mask_np) != num_points:
+                        logger.log_warning(
+                            f"Reachability mask length ({len(reachability_mask_np)}) doesn't match "
+                            f"points length ({num_points}). Defaulting to all green."
+                        )
+                        colors[:, 1] = 1.0  # All green as fallback
+                        sizes[:] = self.config.visualization.point_size * 1.5
+                    else:
+                        # Reachable points: green color, larger size
+                        reachable_indices = reachability_mask_np
+                        colors[reachable_indices, 1] = 1.0  # Pure green
+                        sizes[reachable_indices] = (
+                            self.config.visualization.point_size * 1.5
+                        )  # Larger size
 
-                    # Unreachable points: red color, smaller size
-                    unreachable_indices = ~reachability_mask_np
-                    colors[unreachable_indices, 0] = 1.0  # Pure red
-                    sizes[unreachable_indices] = (
-                        self.config.visualization.point_size * 0.7
-                    )  # Smaller size
+                        # Unreachable points: red color, smaller size
+                        unreachable_indices = ~reachability_mask_np
+                        colors[unreachable_indices, 0] = 1.0  # Pure red
+                        sizes[unreachable_indices] = (
+                            self.config.visualization.point_size * 0.7
+                        )  # Smaller size
 
                     num_reachable = np.sum(reachable_indices)
                     num_unreachable = np.sum(unreachable_indices)
@@ -1667,9 +1920,19 @@ class WorkspaceAnalyzer:
         ):
             # Only show reachable points
             reachable_mask = self.reachability_mask.cpu().numpy()
-            points_np = points_np[reachable_mask]
-            filtered_points = True
-            logger.log_info(f"Filtering to show only {len(points_np)} reachable points")
+
+            # Check if mask length matches points length before filtering
+            if len(reachable_mask) != len(points_np):
+                logger.log_warning(
+                    f"Cannot filter points: reachability mask length ({len(reachable_mask)}) "
+                    f"doesn't match points length ({len(points_np)}). Showing all points."
+                )
+            else:
+                points_np = points_np[reachable_mask]
+                filtered_points = True
+                logger.log_info(
+                    f"Filtering to show only {len(points_np)} reachable points"
+                )
 
         # Generate colors and sizes based on reachability
         colors, sizes = self._generate_point_colors_and_sizes(

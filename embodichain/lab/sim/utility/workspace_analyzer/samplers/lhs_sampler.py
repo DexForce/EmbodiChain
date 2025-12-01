@@ -67,9 +67,10 @@ class LatinHypercubeSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         strength: int = 1,
         optimization: Optional[str] = "random-cd",
+        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the Latin Hypercube sampler.
 
@@ -84,8 +85,9 @@ class LatinHypercubeSampler(BaseSampler):
                          'lloyd': Better quality, slower
                          None: No optimization (fastest)
                          Defaults to 'random-cd'.
+            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
         """
-        super().__init__(seed, device)
+        super().__init__(seed, device, constraint)
         self.strength = strength
         self.optimization = optimization
 

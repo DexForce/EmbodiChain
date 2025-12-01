@@ -40,21 +40,6 @@ __all__ = ["SphereVisualizer"]
 class SphereVisualizer(BaseVisualizer):
     """Sphere-based visualizer using Open3D or matplotlib.
 
-    This visualizer renders workspace points as spheres,
-    which provides a smooth, visually appealing representation
-    with adjustable sphere radius to show reachability zones.
-
-    Advantages:
-        - Smooth visual appearance
-        - Good for showing reachability regions
-        - Intuitive spatial understanding
-        - Can represent uncertainty/tolerance
-
-    Disadvantages:
-        - More computationally expensive than point clouds
-        - Higher memory usage
-        - Can be cluttered with many points
-
     Attributes:
         sphere_radius: Radius of each sphere.
         sphere_resolution: Resolution of sphere mesh (higher = smoother).
@@ -185,16 +170,6 @@ class SphereVisualizer(BaseVisualizer):
     def _create_sim_manager_spheres(
         self, points: np.ndarray, colors: np.ndarray, sphere_radius: float
     ) -> Any:
-        """Create sphere visualization using sim_manager.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            sphere_radius: Radius of each sphere.
-
-        Returns:
-            List of sphere handles from the simulation environment.
-        """
         if self.sim_manager is None:
             raise ValueError("sim_manager is required for 'sim_manager' backend")
 
@@ -223,17 +198,6 @@ class SphereVisualizer(BaseVisualizer):
         sphere_radius: float,
         sphere_resolution: int,
     ) -> "o3d.geometry.TriangleMesh":
-        """Create Open3D sphere meshes.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            sphere_radius: Radius of each sphere.
-            sphere_resolution: Sphere mesh resolution.
-
-        Returns:
-            Combined Open3D TriangleMesh object.
-        """
         # Create a template sphere
         sphere_template = o3d.geometry.TriangleMesh.create_sphere(
             radius=sphere_radius, resolution=sphere_resolution
@@ -261,16 +225,6 @@ class SphereVisualizer(BaseVisualizer):
     def _create_matplotlib_spheres(
         self, points: np.ndarray, colors: np.ndarray, sphere_radius: float
     ):
-        """Create matplotlib 3D scatter plot with sphere markers.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            sphere_radius: Radius of each sphere (affects marker size).
-
-        Returns:
-            Matplotlib figure.
-        """
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D
 
@@ -298,12 +252,6 @@ class SphereVisualizer(BaseVisualizer):
         return fig
 
     def _save_impl(self, filepath: Path, **kwargs: Any) -> None:
-        """Save sphere visualization to file.
-
-        Args:
-            filepath: Path to save the visualization.
-            **kwargs: Additional save parameters.
-        """
         if self.backend == "data":
             # Save sphere data
             data = self._last_visualization["data"]
@@ -337,11 +285,6 @@ class SphereVisualizer(BaseVisualizer):
             fig.savefig(filepath, dpi=300, bbox_inches="tight")
 
     def _show_impl(self, **kwargs: Any) -> None:
-        """Display sphere visualization interactively.
-
-        Args:
-            **kwargs: Display parameters.
-        """
         if self.backend == "data":
             logger.log_warning(
                 "Cannot display visualization with 'data' backend. "
@@ -361,9 +304,4 @@ class SphereVisualizer(BaseVisualizer):
             plt.show()
 
     def get_type_name(self) -> str:
-        """Get the name of the visualization type.
-
-        Returns:
-            String identifier for the visualization type.
-        """
         return VisualizationType.SPHERE.value

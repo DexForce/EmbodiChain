@@ -38,16 +38,6 @@ __all__ = ["PointCloudVisualizer"]
 class PointCloudVisualizer(BaseVisualizer):
     """Point cloud visualizer using Open3D or matplotlib.
 
-    This visualizer renders workspace points as a point cloud,
-    which is efficient for large numbers of points and provides
-    a clear view of the spatial distribution.
-
-    Advantages:
-        - Fast rendering for large point sets
-        - Memory efficient
-        - Clear spatial representation
-        - Interactive viewing with Open3D
-
     Attributes:
         point_size: Size of points in visualization.
     """
@@ -63,13 +53,13 @@ class PointCloudVisualizer(BaseVisualizer):
         """Initialize the point cloud visualizer.
 
         Args:
-        backend: Visualization backend ('sim_manager', 'open3d', 'matplotlib', or 'data').
-                Defaults to 'sim_manager'. 'data' backend returns raw data without visualization.
-                'sim_manager' backend uses simulation environment for visualization.
-        point_size: Size of points in visualization. Defaults to 2.0.
-        config: Optional configuration dictionary. Defaults to None.
-            sim_manager: SimulationManager instance for 'sim_manager' backend. Defaults to None.
-            control_part_name: Control part name for naming the point cloud. Defaults to None.
+            backend: Visualization backend ('sim_manager', 'open3d', 'matplotlib', or 'data').
+                    Defaults to 'sim_manager'. 'data' backend returns raw data without visualization.
+                    'sim_manager' backend uses simulation environment for visualization.
+            point_size: Size of points in visualization. Defaults to 2.0.
+            config: Optional configuration dictionary. Defaults to None.
+                sim_manager: SimulationManager instance for 'sim_manager' backend. Defaults to None.
+                control_part_name: Control part name for naming the point cloud. Defaults to None.
         """
         super().__init__(backend, config)
         self.point_size = point_size
@@ -152,16 +142,6 @@ class PointCloudVisualizer(BaseVisualizer):
     def _create_sim_manager_point_cloud(
         self, points: np.ndarray, colors: np.ndarray, point_size: float
     ) -> Any:
-        """Create point cloud visualization using sim_manager.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            point_size: Size of points.
-
-        Returns:
-            Point cloud handle from the simulation environment.
-        """
         if self.sim_manager is None:
             raise ValueError("sim_manager is required for 'sim_manager' backend")
 
@@ -189,15 +169,6 @@ class PointCloudVisualizer(BaseVisualizer):
     def _create_open3d_point_cloud(
         self, points: np.ndarray, colors: np.ndarray
     ) -> "o3d.geometry.PointCloud":
-        """Create Open3D point cloud geometry.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-
-        Returns:
-            Open3D PointCloud object.
-        """
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)
@@ -209,16 +180,6 @@ class PointCloudVisualizer(BaseVisualizer):
     def _create_matplotlib_point_cloud(
         self, points: np.ndarray, colors: np.ndarray, point_size: float
     ):
-        """Create matplotlib 3D scatter plot.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            point_size: Size of points.
-
-        Returns:
-            Matplotlib figure.
-        """
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D
 
@@ -237,12 +198,6 @@ class PointCloudVisualizer(BaseVisualizer):
         return fig
 
     def _save_impl(self, filepath: Path, **kwargs: Any) -> None:
-        """Save point cloud to file.
-
-        Args:
-            filepath: Path to save the visualization.
-            **kwargs: Additional save parameters.
-        """
         if self.backend == "data":
             # Save data as numpy file
             data = self._last_visualization["data"]
@@ -278,11 +233,6 @@ class PointCloudVisualizer(BaseVisualizer):
             fig.savefig(filepath, dpi=300, bbox_inches="tight")
 
     def _show_impl(self, **kwargs: Any) -> None:
-        """Display point cloud interactively.
-
-        Args:
-            **kwargs: Display parameters.
-        """
         if self.backend == "data":
             logger.log_warning(
                 "Cannot display visualization with 'data' backend. "
@@ -312,9 +262,4 @@ class PointCloudVisualizer(BaseVisualizer):
             plt.show()
 
     def get_type_name(self) -> str:
-        """Get the name of the visualization type.
-
-        Returns:
-            String identifier for the visualization type.
-        """
         return VisualizationType.POINT_CLOUD.value

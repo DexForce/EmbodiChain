@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Callable
+from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -62,9 +62,10 @@ class ImportanceSampler(BaseSampler):
         self,
         weight_fn: Callable[[torch.Tensor], torch.Tensor],
         seed: int = 42,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         num_candidates: int = 10,
         method: str = "rejection",
+        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the importance sampler.
 
@@ -79,8 +80,9 @@ class ImportanceSampler(BaseSampler):
             method: Sampling method. Defaults to 'rejection'.
                    'rejection': Rejection sampling (simple, unbiased)
                    'transform': Inverse transform sampling (requires normalized weights)
+            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
         """
-        super().__init__(seed, device)
+        super().__init__(seed, device, constraint)
         self.weight_fn = weight_fn
         self.num_candidates = num_candidates
         self.method = method

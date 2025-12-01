@@ -40,21 +40,6 @@ __all__ = ["VoxelVisualizer"]
 class VoxelVisualizer(BaseVisualizer):
     """Voxel grid visualizer using Open3D or matplotlib.
 
-    This visualizer renders workspace points as a voxel grid,
-    which provides a discretized representation of the workspace
-    useful for occupancy analysis and collision detection.
-
-    Advantages:
-        - Clear volumetric representation
-        - Good for occupancy maps
-        - Uniform spatial discretization
-        - Efficient for collision checking
-
-    Disadvantages:
-        - Memory intensive for high resolution
-        - May lose fine details
-        - Resolution-dependent accuracy
-
     Attributes:
         voxel_size: Size of each voxel cube.
     """
@@ -149,16 +134,6 @@ class VoxelVisualizer(BaseVisualizer):
     def _create_sim_manager_voxels(
         self, points: np.ndarray, colors: np.ndarray, voxel_size: float
     ) -> Any:
-        """Create voxel visualization using sim_manager.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            voxel_size: Size of each voxel.
-
-        Returns:
-            List of box handles from the simulation environment.
-        """
         if self.sim_manager is None:
             raise ValueError("sim_manager is required for 'sim_manager' backend")
 
@@ -183,16 +158,6 @@ class VoxelVisualizer(BaseVisualizer):
     def _create_open3d_voxel_grid(
         self, points: np.ndarray, colors: np.ndarray, voxel_size: float
     ) -> "o3d.geometry.VoxelGrid":
-        """Create Open3D voxel grid geometry.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            voxel_size: Size of each voxel.
-
-        Returns:
-            Open3D VoxelGrid object.
-        """
         # First create a point cloud
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
@@ -213,16 +178,6 @@ class VoxelVisualizer(BaseVisualizer):
     def _create_voxel_data(
         self, points: np.ndarray, colors: np.ndarray, voxel_size: float
     ) -> Dict[str, Any]:
-        """Create voxelized data structure.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            voxel_size: Size of each voxel.
-
-        Returns:
-            Dictionary containing voxel data.
-        """
         # Discretize points to voxel grid
         min_bounds = points.min(axis=0)
         max_bounds = points.max(axis=0)
@@ -268,16 +223,6 @@ class VoxelVisualizer(BaseVisualizer):
     def _create_matplotlib_voxel_grid(
         self, points: np.ndarray, colors: np.ndarray, voxel_size: float
     ):
-        """Create matplotlib 3D voxel plot.
-
-        Args:
-            points: Array of shape (N, 3) containing point positions.
-            colors: Array of shape (N, 3) containing RGB colors.
-            voxel_size: Size of each voxel.
-
-        Returns:
-            Matplotlib figure.
-        """
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D
 
@@ -328,12 +273,6 @@ class VoxelVisualizer(BaseVisualizer):
         return fig
 
     def _save_impl(self, filepath: Path, **kwargs: Any) -> None:
-        """Save voxel grid to file.
-
-        Args:
-            filepath: Path to save the visualization.
-            **kwargs: Additional save parameters.
-        """
         if self.backend == "data":
             # Save voxel data
             data = self._last_visualization["data"]
@@ -381,11 +320,6 @@ class VoxelVisualizer(BaseVisualizer):
             fig.savefig(filepath, dpi=300, bbox_inches="tight")
 
     def _show_impl(self, **kwargs: Any) -> None:
-        """Display voxel grid interactively.
-
-        Args:
-            **kwargs: Display parameters.
-        """
         if self.backend == "data":
             logger.log_warning(
                 "Cannot display visualization with 'data' backend. "
@@ -405,9 +339,4 @@ class VoxelVisualizer(BaseVisualizer):
             plt.show()
 
     def get_type_name(self) -> str:
-        """Get the name of the visualization type.
-
-        Returns:
-            String identifier for the visualization type.
-        """
         return VisualizationType.VOXEL.value

@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union
+from typing import Union, Optional
 
 try:
     from scipy.stats import qmc
@@ -65,9 +65,10 @@ class SobolSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         scramble: bool = True,
         skip: int = 0,
+        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the Sobol sampler.
 
@@ -78,8 +79,9 @@ class SobolSampler(BaseSampler):
                      Scrambling improves randomization while maintaining low discrepancy.
             skip: Number of initial samples to skip. Defaults to 0.
                   Recommended: 0 for scrambled, >0 (e.g., 100) for unscrambled.
+            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
         """
-        super().__init__(seed, device)
+        super().__init__(seed, device, constraint)
         self.scramble = scramble
         self.skip = skip
 

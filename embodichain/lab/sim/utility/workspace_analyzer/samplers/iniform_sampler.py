@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -25,7 +25,13 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers.base_sampler import
     BaseSampler,
 )
 
+
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.utility.workspace_analyzer.samplers.constraints.geometric_constraint import (
+        GeometricConstraint,
+    )
 
 __all__ = ["UniformSampler"]
 
@@ -43,18 +49,26 @@ class UniformSampler(BaseSampler):
             this takes precedence over num_samples in the sample() method.
     """
 
-    def __init__(self, seed: int = 42, samples_per_dim: Optional[int] = None):
+    def __init__(
+        self,
+        seed: int = 42,
+        samples_per_dim: Optional[int] = None,
+        constraint: Optional["GeometricConstraint"] = None,
+        device: Optional[torch.device] = None,
+    ):
         """Initialize the uniform sampler.
 
         Args:
             seed: Random seed for reproducibility. Defaults to 42.
             samples_per_dim: Fixed number of samples per dimension. If None,
                 will be calculated automatically from num_samples. Defaults to None.
+            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
+            device: PyTorch device for tensor operations.
         """
-        super().__init__(seed)
+        super().__init__(seed, device, constraint)
         self.samples_per_dim = samples_per_dim
 
-    def sample(
+    def _sample_from_bounds(
         self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
     ) -> torch.Tensor:
         """Generate uniform grid samples within the given bounds.

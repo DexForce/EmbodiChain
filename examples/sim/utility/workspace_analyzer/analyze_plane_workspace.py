@@ -67,7 +67,7 @@ if __name__ == "__main__":
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim
     )
-    results_cartesian = wa_cartesian.analyze(num_samples=2000, visualize=True)
+    results_cartesian = wa_cartesian.analyze(num_samples=1000, visualize=True)
     print(f"\nCartesian Space Results:")
     print(
         f"  Reachable points: {results_cartesian['num_reachable']} / {results_cartesian['num_samples']}"

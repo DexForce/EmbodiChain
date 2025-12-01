@@ -65,7 +65,7 @@ class VisualizationConfig:
     sphere_resolution: int = 10
     """Sphere mesh resolution for sphere visualization."""
 
-    show_unreachable_points: bool = False
+    show_unreachable_points: bool = True
     """Whether to show unreachable points in Cartesian space and Plane sampling modes.
     
     If True, shows both reachable (green, large) and unreachable (red, small) points.

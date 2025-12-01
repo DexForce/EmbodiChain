@@ -28,6 +28,7 @@ class SamplingStrategy(Enum):
     LATIN_HYPERCUBE = "lhs"  # Latin Hypercube Sampling
     IMPORTANCE = "importance"  # Importance sampling (requires weight function)
     GAUSSIAN = "gaussian"  # Gaussian (normal) distribution sampling
+    SPHERE = "sphere"  # Sphere-constrained uniform sampling
 
 
 @dataclass
@@ -57,6 +58,22 @@ class SamplingConfig:
 
     gaussian_std: Optional[float] = None
     """Standard deviation for Gaussian sampling (used with GAUSSIAN strategy). If None, uses 1/6 of range."""
+
+    # Sphere sampling parameters
+    sphere_center_mode: str = "bounds_center"
+    """How to determine sphere center for SPHERE strategy. Options: 'bounds_center', 'custom', 'auto'."""
+
+    sphere_radius_mode: str = "inscribed"
+    """How to determine sphere radius for SPHERE strategy. Options: 'inscribed', 'circumscribed', 'custom'."""
+
+    sphere_boundary_handling: str = "reject"
+    """How to handle boundary violations for SPHERE strategy. Options: 'clip', 'reject', 'extend'."""
+
+    sphere_center: Optional[list] = None
+    """Custom sphere center for SPHERE strategy (used when sphere_center_mode='custom')."""
+
+    sphere_radius: Optional[float] = None
+    """Custom sphere radius for SPHERE strategy (used when sphere_radius_mode='custom')."""
 
     def __post_init__(self):
         """Set default strategy after initialization."""
