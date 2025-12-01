@@ -26,7 +26,7 @@ jobs:
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
-      - name: Start code style check
+      - name: (CI) Code Style check
         run: |
           echo "工作目录路径：${GITHUB_WORKSPACE}"
           ls
@@ -47,9 +47,9 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: Build docs
+      - name: (CI) Build docs
         run: |
-          pip install -e . --index-url http://192.168.3.43:8080/simple/ --trusted-host 192.168.3.43
+          pip install -e .
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           make html
@@ -65,12 +65,9 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: Run tests
+      - name: (CI) Run tests
         run: |
-          pip install http://192.168.3.120/CoreEngine/open3d_release/linux/cuda/open3d-0.18.0-cp39-cp39-manylinux_2_27_x86_64.whl
-          pip3 install http://192.168.3.120/CoreEngine/Data/GeoLib/3rdparty/torch/torch-2.0.1+cu118-cp39-cp39-linux_x86_64.whl
-          pip3 install http://192.168.3.120/CoreEngine/Data/GeoLib/3rdparty/torchvision/torchvision-0.15.2+cu118-cp39-cp39-linux_x86_64.whl
-          pip install -e . --index-url http://192.168.3.43:8080/simple/ --trusted-host 192.168.3.43
+          pip install -e .
           # ./tests/unitest.sh
 
   publish:
@@ -84,9 +81,9 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: publish docs
+      - name: (CI) Publish docs
         run: echo "start docs stage"
-      - name: publish package
+      - name: (CI) Publish package
         run: echo "start publish stage"
       # - name: Push to PyPI
       #   env:
