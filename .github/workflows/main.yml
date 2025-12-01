@@ -28,9 +28,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: (CI) Code Style check
         run: |
-          echo "工作目录路径：${GITHUB_WORKSPACE}"
+          echo "Workspace: ${GITHUB_WORKSPACE}"
           ls
-          pip install black==22.3
+          pip install black==24.3.0
           black --check --diff --color ./
           if [ $? -ne 0 ]; then
             echo "Code style check failed, please run [black ./] before commit!"
@@ -73,9 +73,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: (CI) Run tests
         run: |
-          # pip install -e .
+          pip install -e .
           echo "Unitest Start"
-          # bash ./tests/unitest.sh
+          pytest tests
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
