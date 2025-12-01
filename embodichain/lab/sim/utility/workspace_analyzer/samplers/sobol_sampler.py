@@ -25,7 +25,9 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
 
-
+from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
+    SamplingStrategy,
+)
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.base_sampler import (
     BaseSampler,
 )

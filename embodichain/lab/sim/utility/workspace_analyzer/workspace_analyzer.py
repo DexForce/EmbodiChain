@@ -70,6 +70,9 @@ class AnalysisMode(Enum):
     CARTESIAN_SPACE = "cartesian_space"
     """Sample in Cartesian space, compute IK to verify reachability."""
 
+    PLANE_SAMPLING = "plane_sampling"
+    """Sample on a specific plane within Cartesian space."""
+
 
 @dataclass
 class WorkspaceAnalyzerConfig:
@@ -89,12 +92,23 @@ class WorkspaceAnalyzerConfig:
     metric: MetricConfig = None
     """Metric configuration."""
 
-    ik_success_threshold: float = 0.9
-    """For Cartesian mode: minimum IK success rate to consider a point reachable."""
     ik_samples_per_point: int = 1
     """For Cartesian mode: number of random joint seeds to try for each Cartesian point."""
     reference_pose: Optional[Any] = None
     """Optional reference pose (4x4 matrix) for IK target orientation. If None, uses current robot pose."""
+
+    # Plane sampling parameters
+    enable_plane_sampling: bool = False
+    """Whether to enable plane sampling functionality (uses existing samplers directly)"""
+
+    plane_normal: Optional[torch.Tensor] = None
+    """Normal vector of the plane for plane sampling [nx, ny, nz]"""
+
+    plane_point: Optional[torch.Tensor] = None
+    """A point on the plane for plane sampling [x, y, z]"""
+
+    plane_bounds: Optional[torch.Tensor] = None
+    """Bounds for 2D plane coordinates [[u_min, u_max], [v_min, v_max]]"""
 
     def __post_init__(self):
         """Initialize sub-configs with defaults if not provided."""
@@ -525,8 +539,169 @@ class WorkspaceAnalyzer:
             bounds=cartesian_bounds, num_samples=num_samples
         )
 
-        logger.log_info(f"Generated {num_samples} Cartesian space samples.")
+        # Check how many samples pass workspace constraints
+        valid_bounds = self.constraint_checker.check_bounds(cartesian_samples)
+        valid_collision = self.constraint_checker.check_collision(cartesian_samples)
+        valid_constraints = valid_bounds & valid_collision
+
+        constraint_pass_rate = valid_constraints.sum().item() / num_samples * 100
+        exclude_zones_count = self.constraint_checker.get_num_exclude_zones()
+
+        logger.log_info(
+            f"Generated {num_samples} Cartesian space samples. "
+            f"Constraint check: {valid_constraints.sum()}/{num_samples} "
+            f"({constraint_pass_rate:.1f}%) pass bounds+collision constraints "
+            f"({exclude_zones_count} exclude zones configured)"
+        )
         return cartesian_samples
+
+    def sample_plane(
+        self,
+        num_samples: Optional[int] = None,
+        plane_normal: Optional[torch.Tensor] = None,
+        plane_point: Optional[torch.Tensor] = None,
+        plane_bounds: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Sample points on a specified plane using existing samplers (ultra-simplified version).
+
+        Args:
+            num_samples: Number of samples to generate. If None, uses config value.
+            plane_normal: Plane normal vector [nx, ny, nz]. Defaults to [0,0,1] (XY plane).
+            plane_point: A point on the plane [x, y, z]. Defaults to [0,0,0].
+            plane_bounds: 2D bounds [[u_min, u_max], [v_min, v_max]]. Defaults to [[-1,1], [-1,1]].
+
+        Returns:
+            Tensor of shape (num_samples, 3) containing 3D points on the plane.
+        """
+        num_samples = num_samples or self.config.sampling.num_samples
+
+        # Set default values
+        if plane_normal is None:
+            plane_normal = torch.tensor([0.0, 0.0, 1.0], device=self.device)  # XY plane
+        else:
+            plane_normal = plane_normal.to(self.device) / torch.norm(
+                plane_normal.to(self.device)
+            )
+
+        if plane_point is None:
+            plane_point = torch.tensor([0.0, 0.0, 0.0], device=self.device)
+        else:
+            plane_point = plane_point.to(self.device)
+
+        if plane_bounds is None:
+            plane_bounds = torch.tensor([[-1.0, 1.0], [-1.0, 1.0]], device=self.device)
+        else:
+            plane_bounds = plane_bounds.to(self.device)
+
+        # Use existing sampler to generate 2D samples directly
+        plane_samples_2d = self.sampler.sample(plane_bounds, num_samples)
+
+        # Convert to 3D coordinates
+        plane_samples_3d = self._plane_to_world_optimized(
+            plane_samples_2d, plane_normal, plane_point
+        )
+
+        logger.log_info(
+            f"Generated {num_samples} plane samples using {self.sampler.get_strategy_name()}"
+        )
+
+        return plane_samples_3d
+
+    def _plane_to_world_optimized(
+        self,
+        plane_coords: torch.Tensor,
+        plane_normal: torch.Tensor,
+        plane_point: torch.Tensor,
+    ) -> torch.Tensor:
+        """Convert 2D plane coordinates to 3D world coordinates with optimized basis generation.
+
+        This method uses a more numerically stable approach to generate orthogonal basis vectors
+        and supports orientation optimization for better workspace coverage.
+
+        Args:
+            plane_coords: 2D coordinates on the plane, shape (num_samples, 2)
+            plane_normal: Normal vector of the plane [nx, ny, nz]
+            plane_point: A point on the plane [x, y, z]
+
+        Returns:
+            3D world coordinates, shape (num_samples, 3)
+        """
+        num_samples = plane_coords.shape[0]
+
+        # Generate orthogonal basis vectors using improved method
+        u, v = self._generate_orthogonal_basis(plane_normal)
+
+        # Convert 2D plane coordinates to 3D with vectorized operations
+        world_coords = (
+            plane_point.unsqueeze(0)
+            + plane_coords[:, 0:1]  # Base point broadcast to all samples
+            * u.unsqueeze(0)
+            + plane_coords[:, 1:2]  # First plane direction
+            * v.unsqueeze(0)  # Second plane direction
+        )
+
+        return world_coords
+
+    def _generate_orthogonal_basis(
+        self, plane_normal: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Generate orthogonal basis vectors for a plane with improved numerical stability.
+
+        This method uses the most stable approach based on the plane normal direction
+        and optionally optimizes orientation for workspace coverage.
+
+        Args:
+            plane_normal: Normal vector of the plane [nx, ny, nz]
+
+        Returns:
+            Tuple of two orthogonal unit vectors (u, v) that span the plane
+        """
+        # Find the coordinate with smallest absolute value for numerical stability
+        abs_normal = torch.abs(plane_normal)
+        min_idx = torch.argmin(abs_normal)
+
+        # Create an arbitrary vector with 1 in the most stable coordinate
+        arbitrary = torch.zeros_like(plane_normal)
+        arbitrary[min_idx] = 1.0
+
+        # Generate first tangent vector using Gram-Schmidt
+        u = arbitrary - torch.dot(arbitrary, plane_normal) * plane_normal
+        u = u / torch.norm(u)
+
+        # Generate second tangent vector via cross product
+        v = torch.cross(plane_normal, u)
+        v = v / torch.norm(v)
+
+        return u, v
+
+    def _get_robot_base_position(self) -> torch.Tensor:
+        """Get the robot base position as default plane point.
+
+        Returns:
+            Robot base position as a 3D tensor
+        """
+        try:
+            # Try to get current robot pose
+            current_pose = self.robot.compute_fk(
+                qpos=self.robot.get_qpos()[None, :],  # Add batch dimension
+                name=self.control_part_name,
+                to_matrix=True,
+            )
+            # Use current end-effector position projected to a reasonable height
+            base_pos = current_pose[0, :3, 3].clone()
+            base_pos[2] = 0.0  # Project to ground plane
+            return base_pos
+        except Exception:
+            # Fallback to origin
+            return torch.tensor([0.0, 0.0, 0.0], device=self.device)
+
+    def _generate_plane_samples(
+        self,
+        plane_bounds: torch.Tensor,
+        num_samples: int,
+    ) -> torch.Tensor:
+        """Generate 2D plane samples using existing base sampler directly."""
+        return self.sampler.sample(plane_bounds, num_samples)
 
     def compute_workspace_points(
         self, joint_configs: torch.Tensor, batch_size: Optional[int] = None
@@ -575,8 +750,10 @@ class WorkspaceAnalyzer:
                 # Extract position (x, y, z)
                 position = pose[:, :3, 3]  # Shape: (1, 3)
 
-                # Filter by constraints
-                valid_mask = self.constraint_checker.check_bounds(position)
+                # Filter by constraints (bounds + collision check)
+                valid_bounds = self.constraint_checker.check_bounds(position)
+                valid_collision = self.constraint_checker.check_collision(position)
+                valid_mask = valid_bounds & valid_collision
 
                 # Store valid results
                 if valid_mask.any():
@@ -642,7 +819,18 @@ class WorkspaceAnalyzer:
         num_samples = len(cartesian_points)
         ik_samples_per_point = self.config.ik_samples_per_point
 
-        # Store results for all points
+        # Pre-filter Cartesian points by workspace constraints
+        # This eliminates points that are outside bounds or in collision zones
+        valid_cartesian_mask = self.constraint_checker.check_bounds(
+            cartesian_points
+        ) & self.constraint_checker.check_collision(cartesian_points)
+
+        logger.log_info(
+            f"Pre-filtered Cartesian points: {valid_cartesian_mask.sum()}/{num_samples} "
+            f"points pass workspace constraints ({(valid_cartesian_mask.sum()/num_samples*100):.1f}%)"
+        )
+
+        # Store results for all points (including invalid ones for consistent indexing)
         all_success_rates = torch.zeros(num_samples, device=self.device)
         reachable_points_list = []
         best_configs_list = []
@@ -740,6 +928,23 @@ class WorkspaceAnalyzer:
         for i in pbar:
             position = cartesian_points[i]  # Shape: (3,)
 
+            # Skip points that don't satisfy workspace constraints
+            if not valid_cartesian_mask[i]:
+                # Mark as unreachable due to constraint violation
+                all_success_rates[i] = 0.0
+                # Update progress bar
+                reachability_rate = total_reachable / (i + 1) * 100
+                if reachability_rate >= 70:
+                    reach_color = "\033[32m"  # Green for high reachability
+                elif reachability_rate >= 40:
+                    reach_color = "\033[33m"  # Yellow for medium reachability
+                else:
+                    reach_color = "\033[31m"  # Red for low reachability
+                pbar.set_postfix_str(
+                    f"🎯 Reachable: {total_reachable}/{i+1} | {reach_color}{reachability_rate:.1f}%\033[0m rate (❌ constraint)"
+                )
+                continue
+
             # Create target pose: use current orientation, replace position with sampled position
             pose = current_ee_pose.clone()
             pose[0, :3, 3] = position
@@ -782,10 +987,7 @@ class WorkspaceAnalyzer:
             all_success_rates[i] = success_rate
 
             # Filter by success threshold for reachable points
-            if (
-                success_rate >= self.config.ik_success_threshold
-                and best_qpos is not None
-            ):
+            if success_rate and best_qpos is not None:
                 reachable_points_list.append(position.unsqueeze(0))  # Add batch dim
                 best_configs_list.append(best_qpos.unsqueeze(0))  # Add batch dim
                 total_reachable += 1
@@ -800,8 +1002,16 @@ class WorkspaceAnalyzer:
             else:
                 reach_color = "\033[31m"  # Red for low reachability
 
+            # Add success rate indicator for this specific point
+            if success_rate:
+                point_status = "✅ IK"
+            elif success_rate > 0:
+                point_status = f"🟡 IK({success_rate:.1f})"
+            else:
+                point_status = "❌ IK"
+
             pbar.set_postfix_str(
-                f"🎯 Reachable: {total_reachable}/{i+1} | {reach_color}{reachability_rate:.1f}%\033[0m rate"
+                f"🎯 Reachable: {total_reachable}/{i+1} | {reach_color}{reachability_rate:.1f}%\033[0m rate | {point_status}"
             )
 
         # Concatenate reachable results
@@ -813,7 +1023,7 @@ class WorkspaceAnalyzer:
             best_configs = torch.empty((0, self.num_joints), device=self.device)
 
         # Create reachability mask
-        reachability_mask = all_success_rates >= self.config.ik_success_threshold
+        reachability_mask = all_success_rates > 0
 
         # Performance summary for IK computation
         pbar.close()  # Ensure progress bar is closed
@@ -893,12 +1103,16 @@ class WorkspaceAnalyzer:
             self.current_mode = AnalysisMode.JOINT_SPACE
             self.success_rates = None  # All points are reachable in joint space mode
 
+            # Add constraint check statistics
+            constraint_stats = self._compute_constraint_statistics(workspace_points)
+
             results = {
                 "mode": AnalysisMode.JOINT_SPACE.value,
                 "workspace_points": workspace_points,
                 "joint_configurations": valid_configs,
                 "num_samples": num_samples or self.config.sampling.num_samples,
                 "num_valid": len(workspace_points),
+                "constraint_statistics": constraint_stats,
             }
 
         elif self.config.mode == AnalysisMode.CARTESIAN_SPACE:
@@ -927,6 +1141,14 @@ class WorkspaceAnalyzer:
             self.success_rates = success_rates  # Store success rates for all points
             self.reachability_mask = reachability_mask  # Store reachability mask
 
+            # Add constraint check statistics for both all_points and reachable_points
+            constraint_stats_all = self._compute_constraint_statistics(all_points)
+            constraint_stats_reachable = (
+                self._compute_constraint_statistics(reachable_points)
+                if len(reachable_points) > 0
+                else {}
+            )
+
             results = {
                 "mode": AnalysisMode.CARTESIAN_SPACE.value,
                 "all_points": all_points,  # All sampled Cartesian points
@@ -937,7 +1159,74 @@ class WorkspaceAnalyzer:
                 "reachability_mask": reachability_mask,
                 "num_samples": num_samples or self.config.sampling.num_samples,
                 "num_reachable": len(reachable_points),
+                "constraint_statistics": {
+                    "all_points": constraint_stats_all,
+                    "reachable_points": constraint_stats_reachable,
+                },
             }
+
+        elif self.config.mode == AnalysisMode.PLANE_SAMPLING:
+            # Plane sampling mode: Sample on plane → IK → Verify reachability
+            logger.log_info(f"Mode: {AnalysisMode.PLANE_SAMPLING.value}")
+
+            # Step 1: Sample on specified plane
+            logger.log_info("[1/3] Sampling on specified plane...")
+            cartesian_samples = self.sample_plane(
+                num_samples=num_samples,
+                plane_normal=self.config.plane_normal,
+                plane_point=self.config.plane_point,
+                plane_bounds=self.config.plane_bounds,
+            )
+
+            # Step 2: Compute reachability via IK
+            logger.log_info("[2/3] Computing reachability via computing IK...")
+            (
+                all_points,
+                reachable_points,
+                success_rates,
+                reachability_mask,
+                best_configs,
+            ) = self.compute_reachability(cartesian_samples)
+
+            # Store results
+            self.workspace_points = all_points
+            self.reachable_points = reachable_points
+            self.joint_configurations = best_configs
+            self.current_mode = AnalysisMode.PLANE_SAMPLING
+            self.success_rates = success_rates
+            self.reachability_mask = reachability_mask
+
+            # Add constraint check statistics
+            constraint_stats_all = self._compute_constraint_statistics(all_points)
+            constraint_stats_reachable = (
+                self._compute_constraint_statistics(reachable_points)
+                if len(reachable_points) > 0
+                else {}
+            )
+
+            results = {
+                "mode": AnalysisMode.PLANE_SAMPLING.value,
+                "all_points": all_points,  # All sampled plane points
+                "workspace_points": all_points,  # For compatibility
+                "reachable_points": reachable_points,  # Only reachable points
+                "joint_configurations": best_configs,
+                "success_rates": success_rates,
+                "reachability_mask": reachability_mask,
+                "num_samples": num_samples or self.config.sampling.num_samples,
+                "num_reachable": len(reachable_points),
+                "constraint_statistics": {
+                    "all_points": constraint_stats_all,
+                    "reachable_points": constraint_stats_reachable,
+                },
+                "plane_sampling_config": {
+                    "plane_normal": self.config.plane_normal,
+                    "plane_point": self.config.plane_point,
+                    "plane_bounds": self.config.plane_bounds,
+                },
+            }
+
+        else:
+            raise ValueError(f"Unknown analysis mode: {self.config.mode}")
 
         # Step 3: Compute metrics (common for both modes)
         logger.log_info("[3/3] Computing metrics...")
@@ -984,12 +1273,56 @@ class WorkspaceAnalyzer:
                 f"📊 Joint Space Results: {results['num_valid']}/{results['num_samples']} "
                 f"valid points ({success_rate:.1f}% success)"
             )
-        elif mode == "cartesian_space":
+
+            # Show constraint statistics
+            if "constraint_statistics" in results:
+                stats = results["constraint_statistics"]
+                logger.log_info(
+                    f"🔒 Constraint Check: Bounds: {stats['bounds_pass_rate']:.1f}% | "
+                    f"Collision: {stats['collision_pass_rate']:.1f}% | "
+                    f"Overall: {stats['overall_pass_rate']:.1f}% "
+                    f"({stats['exclude_zones_count']} exclude zones)"
+                )
+
+        elif mode in ["cartesian_space", "plane_sampling"]:
             reachability = results["num_reachable"] / results["num_samples"] * 100
+            mode_name = (
+                "Plane Sampling" if mode == "plane_sampling" else "Cartesian Space"
+            )
             logger.log_info(
-                f"📊 Cartesian Space Results: {results['num_reachable']}/{results['num_samples']} "
+                f"📊 {mode_name} Results: {results['num_reachable']}/{results['num_samples']} "
                 f"reachable points ({reachability:.1f}% reachability)"
             )
+
+            # Show plane sampling specific info
+            if mode == "plane_sampling" and "plane_sampling_config" in results:
+                plane_config = results["plane_sampling_config"]
+                if plane_config:
+                    logger.log_info(
+                        f"🎯 Plane Configuration: Normal: {plane_config['plane_normal']}, "
+                        f"Point: {plane_config['plane_point']}"
+                    )
+
+            # Show constraint statistics for all points and reachable points
+            if "constraint_statistics" in results:
+                all_stats = results["constraint_statistics"]["all_points"]
+                logger.log_info(
+                    f"🔒 All Points Constraint Check: Bounds: {all_stats['bounds_pass_rate']:.1f}% | "
+                    f"Collision: {all_stats['collision_pass_rate']:.1f}% | "
+                    f"Overall: {all_stats['overall_pass_rate']:.1f}% "
+                    f"({all_stats['exclude_zones_count']} exclude zones)"
+                )
+
+                if (
+                    "reachable_points" in results["constraint_statistics"]
+                    and results["constraint_statistics"]["reachable_points"]
+                ):
+                    reach_stats = results["constraint_statistics"]["reachable_points"]
+                    logger.log_info(
+                        f"✅ Reachable Points Constraint Check: Bounds: {reach_stats['bounds_pass_rate']:.1f}% | "
+                        f"Collision: {reach_stats['collision_pass_rate']:.1f}% | "
+                        f"Overall: {reach_stats['overall_pass_rate']:.1f}%"
+                    )
 
     def _visualize_workspace(self) -> None:
         """Visualize the workspace using configured visualization type and backend.
@@ -1033,6 +1366,55 @@ class WorkspaceAnalyzer:
                         f"Tried: {', '.join(backends)}"
                     )
                     break
+
+    def _compute_constraint_statistics(self, points: torch.Tensor) -> Dict[str, Any]:
+        """Compute constraint check statistics for a set of points.
+
+        Args:
+            points: Tensor of shape (N, 3) containing workspace points.
+
+        Returns:
+            Dictionary containing constraint statistics.
+        """
+        if len(points) == 0:
+            return {
+                "num_points": 0,
+                "bounds_pass_count": 0,
+                "bounds_pass_rate": 0.0,
+                "collision_pass_count": 0,
+                "collision_pass_rate": 0.0,
+                "overall_pass_count": 0,
+                "overall_pass_rate": 0.0,
+                "exclude_zones_count": self.constraint_checker.get_num_exclude_zones(),
+            }
+
+        num_points = len(points)
+
+        # Check bounds constraints
+        bounds_pass = self.constraint_checker.check_bounds(points)
+        bounds_pass_count = bounds_pass.sum().item()
+        bounds_pass_rate = bounds_pass_count / num_points * 100
+
+        # Check collision constraints (exclude zones)
+        collision_pass = self.constraint_checker.check_collision(points)
+        collision_pass_count = collision_pass.sum().item()
+        collision_pass_rate = collision_pass_count / num_points * 100
+
+        # Overall constraint pass (both bounds and collision)
+        overall_pass = bounds_pass & collision_pass
+        overall_pass_count = overall_pass.sum().item()
+        overall_pass_rate = overall_pass_count / num_points * 100
+
+        return {
+            "num_points": num_points,
+            "bounds_pass_count": bounds_pass_count,
+            "bounds_pass_rate": bounds_pass_rate,
+            "collision_pass_count": collision_pass_count,
+            "collision_pass_rate": collision_pass_rate,
+            "overall_pass_count": overall_pass_count,
+            "overall_pass_rate": overall_pass_rate,
+            "exclude_zones_count": self.constraint_checker.get_num_exclude_zones(),
+        }
 
     def _get_backend_priority_list(self) -> List[str]:
         """Get the priority-ordered list of visualization backends to try.
@@ -1120,16 +1502,24 @@ class WorkspaceAnalyzer:
             colors[:, 1] = 1.0  # Green channel = 1.0
             logger.log_debug(f"Coloring {num_points} points as reachable (green)")
 
-        elif self.current_mode == AnalysisMode.CARTESIAN_SPACE:
-            # Cartesian space mode: different colors and sizes based on reachability
+        elif self.current_mode in [
+            AnalysisMode.CARTESIAN_SPACE,
+            AnalysisMode.PLANE_SAMPLING,
+        ]:
+            # Cartesian/Plane space mode: different colors and sizes based on reachability
+            mode_name = (
+                "Cartesian"
+                if self.current_mode == AnalysisMode.CARTESIAN_SPACE
+                else "Plane sampling"
+            )
             if self.success_rates is not None and hasattr(self, "reachability_mask"):
                 if filtered_to_reachable:
                     # Points have been pre-filtered to only include reachable ones
                     # All points should be colored as reachable (green, large)
                     colors[:, 1] = 1.0  # All green
-                    sizes[:] = self.config.visualization.point_size * 1.2  # All large
+                    sizes[:] = self.config.visualization.point_size * 1.5  # All large
                     logger.log_debug(
-                        f"Coloring {num_points} pre-filtered reachable points (green, large)"
+                        f"Coloring {num_points} pre-filtered reachable points (green, large) in {mode_name} mode"
                     )
                 else:
                     # Original logic for showing both reachable and unreachable points
@@ -1139,7 +1529,7 @@ class WorkspaceAnalyzer:
                     reachable_indices = reachability_mask_np
                     colors[reachable_indices, 1] = 1.0  # Pure green
                     sizes[reachable_indices] = (
-                        self.config.visualization.point_size * 1.2
+                        self.config.visualization.point_size * 1.5
                     )  # Larger size
 
                     # Unreachable points: red color, smaller size
@@ -1153,13 +1543,13 @@ class WorkspaceAnalyzer:
                     num_unreachable = np.sum(unreachable_indices)
                     logger.log_debug(
                         f"Coloring {num_reachable} reachable points (green, large) and "
-                        f"{num_unreachable} unreachable points (red, small)"
+                        f"{num_unreachable} unreachable points (red, small) in {mode_name} mode"
                     )
             else:
                 # No success rates available, assume all reachable
                 colors[:, 1] = 1.0  # Green
                 logger.log_warning(
-                    "No success rates available in Cartesian mode, "
+                    f"No success rates available in {mode_name} mode, "
                     "defaulting to green (reachable)"
                 )
 
@@ -1268,9 +1658,10 @@ class WorkspaceAnalyzer:
             else:
                 backend = "open3d"
 
-        # Filter points if configured to hide unreachable ones in Cartesian space mode
+        # Filter points if configured to hide unreachable ones in Cartesian/Plane space mode
         if (
-            self.current_mode == AnalysisMode.CARTESIAN_SPACE
+            self.current_mode
+            in [AnalysisMode.CARTESIAN_SPACE, AnalysisMode.PLANE_SAMPLING]
             and not self.config.visualization.show_unreachable_points
             and hasattr(self, "reachability_mask")
         ):

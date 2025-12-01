@@ -183,7 +183,6 @@ config = WorkspaceAnalyzerConfig(
     constraint=constraint_config,
     visualization=visualization_config,
     metric=metric_config,
-    ik_success_threshold=0.9,
     ik_samples_per_point=1,
     reference_pose=np.eye(4)
 )
@@ -206,7 +205,6 @@ config = WorkspaceAnalyzerConfig(
 ### Main Configuration Parameters
 
 - **mode**: `AnalysisMode` - Analysis mode (JOINT_SPACE or CARTESIAN_SPACE)
-- **ik_success_threshold**: `float` - Minimum IK success rate for Cartesian mode (default: 0.9)
 - **ik_samples_per_point**: `int` - Number of random joint seeds per Cartesian point (default: 1)
 - **reference_pose**: `Optional[Any]` - Reference 4x4 pose matrix for IK targets (default: None)
 

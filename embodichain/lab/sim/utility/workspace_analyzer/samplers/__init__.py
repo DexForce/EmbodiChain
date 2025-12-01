@@ -39,14 +39,21 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers.sampler_factory imp
     create_sampler,
 )
 
+# Note: PlaneSampler is intentionally not included here as it's a high-level
+# specialized sampler, not a base sampler. Import it directly when needed:
+# from embodichain.lab.sim.utility.workspace_analyzer.samplers.plane_sampler import PlaneSampler
+
 __all__ = [
+    # Base samplers and interfaces
     "BaseSampler",
     "ISampler",
+    # Concrete base samplers
     "UniformSampler",
     "RandomSampler",
     "HaltonSampler",
     "SobolSampler",
     "LatinHypercubeSampler",
+    # Factory for creating base samplers
     "SamplerFactory",
     "create_sampler",
 ]

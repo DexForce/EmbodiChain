@@ -66,9 +66,13 @@ class VisualizationConfig:
     """Sphere mesh resolution for sphere visualization."""
 
     show_unreachable_points: bool = False
-    """Whether to show unreachable points in Cartesian space mode.
+    """Whether to show unreachable points in Cartesian space and Plane sampling modes.
     
     If True, shows both reachable (green, large) and unreachable (red, small) points.
-    If False, only shows reachable points in Cartesian space mode.
+    If False, only shows reachable points in Cartesian space and Plane sampling modes.
     Has no effect in Joint space mode (all points are always shown as reachable).
+    
+    Note: This parameter now supports all IK-based analysis modes including:
+    - AnalysisMode.CARTESIAN_SPACE
+    - AnalysisMode.PLANE_SAMPLING
     """
