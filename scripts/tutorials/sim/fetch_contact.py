@@ -145,8 +145,10 @@ def run_simulation(sim: SimulationManager):
         sim.init_gpu_physics()
 
     step_count = 0
+    # contact filter config
     contact_filter_cfg = ContactFilterCfg()
     contact_filter_cfg.rigid_uid_list = ["cube0", "cube1", "cube2"]
+    contact_filter_cfg.filter_need_both_actor = True
     try:
         accmulated_cost_time = 0.0
         while True:
@@ -170,15 +172,11 @@ def run_simulation(sim: SimulationManager):
                     contact_report.contact_env_ids
                 )  # contact belongs to which environment
 
-                # filter contact for specific rigid object
+                # filter contact report for specific rigid object
                 cube1 = sim.get_rigid_object("cube1")
-                cube1_user_id = cube1.get_user_ids()
-                filter0_mask = torch.isin(contact_user_ids[:, 0], cube1_user_id)
-                filter1_mask = torch.isin(contact_user_ids[:, 1], cube1_user_id)
-                filter_mask = torch.logical_or(filter0_mask, filter1_mask)
-                filtered_contact_data = contact_report.contact_data[filter_mask]
-                filtered_env_ids = contact_env_ids[filter_mask]
-                n_filtered_contact = filtered_contact_data.shape[0]
+                filtered_contact_report = contact_report.filter_by_user_ids(
+                    cube1.get_user_ids()
+                )
 
             step_count += 1
 

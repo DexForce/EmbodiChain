@@ -50,3 +50,28 @@ class ContactReport:
 
     contact_env_ids: torch.Tensor
     """which arena the contact belongs to."""
+
+    def filter_by_user_ids(self, item_user_ids: torch.Tensor):
+        """Filter contact report by specific user IDs.
+
+        Args:
+            item_user_ids (torch.Tensor): Tensor of user IDs to filter by.
+
+        Returns:
+            ContactReport: A new ContactReport instance containing only the filtered contacts.
+        """
+        filter0_mask = torch.isin(
+            self.contact_user_ids[:, 0], item_user_ids
+        )
+        filter1_mask = torch.isin(
+            self.contact_user_ids[:, 1], item_user_ids
+        )
+        filter_mask = torch.logical_or(filter0_mask, filter1_mask)
+        filtered_contact_data = self.contact_data[filter_mask]
+        filtered_contact_user_ids = self.contact_user_ids[filter_mask]
+        filtered_contact_env_ids = self.contact_env_ids[filter_mask]
+        return ContactReport(
+            contact_data=filtered_contact_data,
+            contact_user_ids=filtered_contact_user_ids,
+            contact_env_ids=filtered_contact_env_ids,
+        )

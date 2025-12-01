@@ -979,6 +979,8 @@ class SimulationManager:
         return robot
 
     def _enable_contact_fetching(self) -> None:
+        """enable contact fetching
+        """
         if self.enable_contact:
             return
         if self.is_use_gpu_physics:
@@ -1003,7 +1005,10 @@ class SimulationManager:
         Returns:
             ContactReport
         """
+        # lazy initialize for contact buffer
         self._enable_contact_fetching()
+
+        # precompute filter ids
         contact_filter_cfg.precompute_filter_ids(self)
 
         # fetch contact data from physics scene
