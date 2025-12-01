@@ -29,5 +29,24 @@ class ContactReport:
     """
 
     contact_data: torch.Tensor
+    """
+    contact data:
+        [num_contacts, 11] tensor with each row representing a contact point:
+        [0] - position x
+        [1] - position y
+        [2] - position z
+        [3] - normal x
+        [4] - normal y
+        [5] - normal z
+        [6] - friction x
+        [7] - friction y
+        [8] - friction z
+        [9] - impulse
+        [10] - distance
+    """
+
     contact_user_ids: torch.Tensor
+    """contact user ids, use rigid_object.get_user_id() and find which object it belongs to."""
+
     contact_env_ids: torch.Tensor
+    """which arena the contact belongs to."""

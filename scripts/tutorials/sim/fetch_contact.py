@@ -21,6 +21,7 @@ It shows the basic setup of simulation context, adding objects, and sensors.
 
 import argparse
 import time
+import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, ContactFilterCfg
@@ -42,7 +43,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=100, help="Number of parallel environments"
+        "--num_envs", type=int, default=4, help="Number of parallel environments"
     )
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
@@ -88,6 +89,7 @@ def main():
             init_pos=[0.0, 0.0, 0.2],
         )
     )
+
     cube2: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube1",
@@ -161,8 +163,22 @@ def run_simulation(sim: SimulationManager):
                 contact_frictions = contact_report.contact_data[:, 6:9]
                 contact_impluses = contact_report.contact_data[:, 9]
                 contact_distances = contact_report.contact_data[:, 10]
-                contact_user_ids = contact_report.contact_user_ids
-                contact_env_ids = contact_report.contact_env_ids
+                contact_user_ids = (
+                    contact_report.contact_user_ids
+                )  # user can use userid to identify which object the contact belongs to, using rigid_object.get_user_id()
+                contact_env_ids = (
+                    contact_report.contact_env_ids
+                )  # contact belongs to which environment
+
+                # filter contact for specific rigid object
+                cube1 = sim.get_rigid_object("cube1")
+                cube1_user_id = cube1.get_user_ids()
+                filter0_mask = torch.isin(contact_user_ids[:, 0], cube1_user_id)
+                filter1_mask = torch.isin(contact_user_ids[:, 1], cube1_user_id)
+                filter_mask = torch.logical_or(filter0_mask, filter1_mask)
+                filtered_contact_data = contact_report.contact_data[filter_mask]
+                filtered_env_ids = contact_env_ids[filter_mask]
+                n_filtered_contact = filtered_contact_data.shape[0]
 
             step_count += 1
 
