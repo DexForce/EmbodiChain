@@ -1004,49 +1004,7 @@ class SimulationManager:
             ContactReport
         """
         self._enable_contact_fetching()
-        # TODO: parsing of contact filter cfg can be cached or precomputed
-        item_user_ids = np.array([], dtype=np.int32)
-        item_env_ids = np.array([], dtype=np.int32)
-
-        for rigid_uid in contact_filter_cfg.rigid_uid_list:
-            if rigid_uid not in self._rigid_objects:
-                logger.log_warning(f"Rigid object {rigid_uid} not found.")
-                continue
-            rigid_object = self._rigid_objects[rigid_uid]
-            rigid_user_ids = rigid_object.get_user_ids().to("cpu").numpy()
-            rigid_env_ids = rigid_object.all_env_ids.to("cpu").numpy()
-            item_user_ids = np.concatenate((item_user_ids, rigid_user_ids))
-            item_env_ids = np.concatenate((item_env_ids, rigid_env_ids))
-
-        for articulation_cfg in contact_filter_cfg.articulation_cfg_list:
-            if articulation_cfg.uid not in self._articulations:
-                logger.log_warning(f"Articulation {articulation_cfg.uid} not found.")
-                continue
-            articulation = self._articulations[articulation_cfg.uid]
-            all_link_names = articulation.link_names()
-            link_names = (
-                all_link_names
-                if articulation_cfg.link_name_list is None
-                else articulation_cfg.link_name_list
-            )
-            for link_name in link_names:
-                if link_name not in all_link_names:
-                    logger.log_warning(
-                        f"Link {link_name} not found in articulation {articulation_cfg.uid}."
-                    )
-                    continue
-                link_user_ids = articulation.get_user_ids(link_name).to("cpu").numpy()
-                item_user_ids = np.concatenate((item_user_ids, link_user_ids))
-                item_env_ids = np.concatenate((item_env_ids, articulation.all_env_ids))
-
-        item_unique_user_ids, first_idx = np.unique(item_user_ids, return_index=True)
-        item_unique_env_ids = item_env_ids[first_idx]
-        item_user_env_id_map = dict(
-            zip(item_unique_user_ids.tolist(), item_unique_env_ids.tolist())
-        )
-        item_user_ids = torch.tensor(
-            item_unique_user_ids, dtype=torch.int32, device=self.device
-        )
+        contact_filter_cfg.precompute_filter_ids(self)
 
         # fetch contact data from physics scene
         if not self.is_use_gpu_physics:
@@ -1065,30 +1023,32 @@ class SimulationManager:
             contact_data = self.contact_data_buffer[:n_contact]
             body_user_indices = self.contact_user_ids_buffer[:n_contact]
 
+        contact_report = ContactReport(
+            contact_data=torch.empty((0, 11), dtype=torch.float32, device=self.device),
+            contact_userid=torch.empty((0,), dtype=torch.int32, device=self.device),
+            contact_env_ids=torch.empty((0,), dtype=torch.int32, device=self.device),
+        )
         if n_contact == 0:
-            return
-        # filter contact data
-        filter0_mask = torch.isin(body_user_indices[:, 0], item_user_ids)
-        filter1_mask = torch.isin(body_user_indices[:, 1], item_user_ids)
+            return contact_report
+        filter0_mask = torch.isin(
+            body_user_indices[:, 0], contact_filter_cfg.item_user_ids
+        )
+        filter1_mask = torch.isin(
+            body_user_indices[:, 1], contact_filter_cfg.item_user_ids
+        )
         if contact_filter_cfg.filter_need_both_actor:
             filter_mask = torch.logical_and(filter0_mask, filter1_mask)
         else:
             filter_mask = torch.logical_or(filter0_mask, filter1_mask)
 
-        filter_contact_data = contact_data[filter_mask]
-        filter_body_user_ids = body_user_indices[filter_mask]
-        n_filter_contacts = filter_contact_data.shape[0]
-        filter_env_ids = torch.zeros(size=(n_filter_contacts,), dtype=torch.int32)
-        for i in range(n_filter_contacts):
-            # dexsim contact can only happen in the same env, so we only need to get env id from one body
-            env_id = item_user_env_id_map.get(int(filter_body_user_ids[i, 0]), -1)
-            filter_env_ids[i] = env_id
+        filtered_contact_data = contact_data[filter_mask]
+        filtered_user_ids = body_user_indices[filter_mask]
+        filtered_env_ids = contact_filter_cfg.item_user_env_ids_map[filtered_user_ids]
 
         # generate contact report
-        contact_report = ContactReport()
-        contact_report.contact_data = contact_data
-        contact_report.contact_dexsim_userid = filter_body_user_ids
-        contact_report.contact_env_ids = filter_env_ids
+        contact_report.contact_data = filtered_contact_data
+        contact_report.contact_userid = filtered_user_ids
+        contact_report.contact_env_ids = filtered_env_ids
         return contact_report
 
     def get_robot(self, uid: str) -> Optional[Robot]:

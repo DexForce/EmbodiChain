@@ -1062,8 +1062,78 @@ class ContactFilterCfg:
     filter_need_both_actor: bool = True
     """Whether to filter contact only when both actors are in the filter list."""
 
+    # TODO: cache for user id and env id calculation
+    item_user_ids: Optional[torch.Tensor] = None
+    item_env_ids: Optional[torch.Tensor] = None
+    item_user_env_ids_map: Optional[torch.Tensor] = None
+
+    def precompute_filter_ids(self, sim: "SimulationManager"):
+        """Precompute the user ids and env ids for the contact filter items."""
+        if not (
+            self.item_user_ids is None
+            or self.item_env_ids is None
+            or self.item_user_env_ids_map is None
+        ):
+            return  # already computed
+
+        self.item_user_ids = torch.tensor([], dtype=torch.int32, device=sim.device)
+        self.item_env_ids = torch.tensor([], dtype=torch.int32, device=sim.device)
+        self.item_user_env_ids_map = torch.tensor(
+            [], dtype=torch.int32, device=sim.device
+        )
+        for rigid_uid in self.rigid_uid_list:
+            rigid_object = sim.get_rigid_object(rigid_uid)
+            if rigid_object is None:
+                logger.log_warning(
+                    f"Rigid body with uid '{rigid_uid}' not found in simulation."
+                )
+                continue
+            self.item_user_ids = torch.cat(
+                (self.item_user_ids, rigid_object.get_user_ids())
+            )
+            self.item_env_ids = torch.cat((self.item_env_ids, rigid_object.all_env_ids))
+
+        for articulation_cfg in self.articulation_cfg_list:
+            articulation = sim.get_articulation(articulation_cfg.articulation_uid)
+            if articulation is None:
+                logger.log_warning(
+                    f"Articulation with uid '{articulation_cfg.articulation_uid}' not found in simulation."
+                )
+                continue
+            all_link_names = articulation.link_names()
+            link_names = (
+                all_link_names
+                if articulation_cfg.link_name_list is None
+                else articulation_cfg.link_name_list
+            )
+            for link_name in link_names:
+                if link_name not in all_link_names:
+                    logger.log_warning(
+                        f"Link {link_name} not found in articulation {articulation_cfg.uid}."
+                    )
+                    continue
+                self.item_user_ids = torch.cat(
+                    (self.item_user_ids, articulation.get_user_ids(link_name))
+                )
+                self.item_env_ids = torch.cat(
+                    (self.item_env_ids, articulation.all_env_ids)
+                )
+
+        # build user_id to env_id map
+        max_user_id = int(self.item_user_ids.max().item())
+        self.item_user_env_ids_map = torch.full(
+            size=(max_user_id + 1,),
+            fill_value=-1,
+            dtype=self.item_user_ids.dtype,
+            device=sim.device,
+        )
+        self.item_user_env_ids_map[self.item_user_ids] = self.item_env_ids
+
 
 @configclass
 class ArticulationContactFilterCfg:
     articulation_uid: str = ""
+    """Articulation unique identifier."""
+
     link_name_list: List[str] = []
+    """link names in the articulation whose contacts need to be filtered."""
