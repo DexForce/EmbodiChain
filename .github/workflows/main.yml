@@ -14,7 +14,7 @@ jobs:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
-    container:
+    container: &container_template
       image: 192.168.3.13:5000/dexsdk:1.1.1_py310_aliapt
       volumes:
         - "/cache:/cache"
@@ -26,24 +26,19 @@ jobs:
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install lint tools
-        run: echo "Installing flake8" && pip install flake8
       - name: start Lint check
         run: echo "start code style check"
 
   build:
     needs: lint
     runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Build docs
         run: |
           echo "build docs"
@@ -52,55 +47,33 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: lint
     runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          python --version
       - name: Run tests
         run: echo "test start"
 
-  # docs:
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #   needs: build
-  #   runs-on: Linux
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.11"
-  #     - name: Install doc tools
-  #       run: pip install sphinx sphinx-rtd-theme
-  #     - name: Build docs
-  #       run: sphinx-build -b html docs/source/ docs/build/html
-  #     - name: Deploy to GitHub Pages
-  #       uses: peaceiris/actions-gh-pages@v4
-  #       with:
-  #         github_token: ${{ secrets.GITHUB_TOKEN }}
-  #         publish_dir: ./docs/build/html
-  #         cname: your-domain.com  # 替换为自定义域名
-
-  # publish:
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #   needs: docs
-  #   runs-on: Linux
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.11"
-  #     - name: Install build tools
-  #       run: pip install build twine
-  #     - name: Build package
-  #       run: python -m build
-  #     - name: Push to PyPI
-  #       env:
-  #         TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-  #         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-  #       run: twine upload dist/*
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docs
+    runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: *container_template
+    steps:
+      - uses: actions/checkout@v4
+      - name: publish docs
+        run: echo "start docs stage"
+      - name: publish package
+        run: echo "start publish stage"
+      # - name: Push to PyPI
+      #   env:
+      #     TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+      #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      #   run: twine upload dist/*
