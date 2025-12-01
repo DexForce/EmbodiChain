@@ -75,6 +75,7 @@ jobs:
         run: |
           pip install -e .
           echo "Unitest Start"
+          export HF_ENDPOINT=https://hf-mirror.com
           pytest tests
 
   publish:

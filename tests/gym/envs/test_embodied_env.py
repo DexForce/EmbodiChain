@@ -97,10 +97,10 @@ METADATA = {
     ],
     "rigid_object": [
         {
-            "uid": "paper_cup",
+            "uid": "duck",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "PaperCup/paper_cup.ply",
+                "fpath": "ToyDuck/toy_duck.glb",
             },
             "body_scale": (0.75, 0.75, 1.0),
             "init_pos": (0.0, 0.0, 1.0),
