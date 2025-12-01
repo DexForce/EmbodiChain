@@ -1053,10 +1053,10 @@ class RobotCfg(ArticulationCfg):
 
 @configclass
 class ContactFilterCfg:
-    rigid_uid_list: List[str]
+    rigid_uid_list: List[str] = []
     """rigid body contact filter configs"""
 
-    articulation_cfg_list: List[ArticulationContactFilterCfg]
+    articulation_cfg_list: List[ArticulationContactFilterCfg] = []
     """articulation link contact filter configs"""
 
     filter_need_both_actor: bool = True
@@ -1065,5 +1065,5 @@ class ContactFilterCfg:
 
 @configclass
 class ArticulationContactFilterCfg:
-    articulation_uid: str
-    link_name_list: List[str]
+    articulation_uid: str = ""
+    link_name_list: List[str] = []

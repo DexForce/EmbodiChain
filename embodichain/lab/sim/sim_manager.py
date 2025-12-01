@@ -257,6 +257,8 @@ class SimulationManager:
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
 
+        self.enable_contact = False
+
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:
@@ -976,6 +978,22 @@ class SimulationManager:
 
         return robot
 
+    def _enable_contact_fetching(self) -> None:
+        if self.enable_contact:
+            return
+        if self.is_use_gpu_physics:
+            MAX_CONTACT = 65536
+            self.contact_data_buffer = torch.zeros(
+                MAX_CONTACT, 11, dtype=torch.float32, device=self.device
+            )
+            self.contact_user_ids_buffer = torch.zeros(
+                MAX_CONTACT, 2, dtype=torch.int32, device=self.device
+            )
+        else:
+            self._ps.enable_contact_data_update_on_cpu(True)
+
+        self.enable_contact = True
+
     def get_contact(self, contact_filter_cfg: ContactFilterCfg) -> ContactReport:
         """get contact
 
@@ -985,17 +1003,20 @@ class SimulationManager:
         Returns:
             ContactReport
         """
-        item_user_ids = torch.tensor([], dtype=torch.int32, device=self.device)
-        item_env_ids = torch.tensor([], dtype=torch.int32, device=self.device)
+        self._enable_contact_fetching()
+        # TODO: parsing of contact filter cfg can be cached or precomputed
+        item_user_ids = np.array([], dtype=np.int32)
+        item_env_ids = np.array([], dtype=np.int32)
 
         for rigid_uid in contact_filter_cfg.rigid_uid_list:
             if rigid_uid not in self._rigid_objects:
                 logger.log_warning(f"Rigid object {rigid_uid} not found.")
                 continue
             rigid_object = self._rigid_objects[rigid_uid]
-            rigid_user_ids = rigid_object.get_user_ids()
-            item_user_ids = torch.concatenate((item_user_ids, rigid_user_ids))
-            item_env_ids = torch.concatenate((item_env_ids, rigid_object.all_env_ids))
+            rigid_user_ids = rigid_object.get_user_ids().to("cpu").numpy()
+            rigid_env_ids = rigid_object.all_env_ids.to("cpu").numpy()
+            item_user_ids = np.concatenate((item_user_ids, rigid_user_ids))
+            item_env_ids = np.concatenate((item_env_ids, rigid_env_ids))
 
         for articulation_cfg in contact_filter_cfg.articulation_cfg_list:
             if articulation_cfg.uid not in self._articulations:
@@ -1014,16 +1035,61 @@ class SimulationManager:
                         f"Link {link_name} not found in articulation {articulation_cfg.uid}."
                     )
                     continue
-                link_user_ids = articulation.get_user_ids(link_name)
-                item_user_ids = torch.concatenate((item_user_ids, link_user_ids))
-                item_env_ids = torch.concatenate((item_env_ids, articulation.all_env_ids))
+                link_user_ids = articulation.get_user_ids(link_name).to("cpu").numpy()
+                item_user_ids = np.concatenate((item_user_ids, link_user_ids))
+                item_env_ids = np.concatenate((item_env_ids, articulation.all_env_ids))
+
+        item_unique_user_ids, first_idx = np.unique(item_user_ids, return_index=True)
+        item_unique_env_ids = item_env_ids[first_idx]
+        item_user_env_id_map = dict(
+            zip(item_unique_user_ids.tolist(), item_unique_env_ids.tolist())
+        )
+        item_user_ids = torch.tensor(
+            item_unique_user_ids, dtype=torch.int32, device=self.device
+        )
 
         # fetch contact data from physics scene
+        if not self.is_use_gpu_physics:
+            contact_data_np, body_user_indices_np = self._ps.get_cpu_contact_buffer()
+            n_contact = contact_data_np.shape[0]
+            contact_data = torch.tensor(
+                contact_data_np, dtype=torch.float32, device=self.device
+            )
+            body_user_indices = torch.tensor(
+                body_user_indices_np, dtype=torch.int32, device=self.device
+            )
+        else:
+            n_contact = self._ps.gpu_fetch_contact_data(
+                self.contact_data_buffer, self.contact_user_ids_buffer
+            )
+            contact_data = self.contact_data_buffer[:n_contact]
+            body_user_indices = self.contact_user_ids_buffer[:n_contact]
 
-        # filter contact data 
+        if n_contact == 0:
+            return
+        # filter contact data
+        filter0_mask = torch.isin(body_user_indices[:, 0], item_user_ids)
+        filter1_mask = torch.isin(body_user_indices[:, 1], item_user_ids)
+        if contact_filter_cfg.filter_need_both_actor:
+            filter_mask = torch.logical_and(filter0_mask, filter1_mask)
+        else:
+            filter_mask = torch.logical_or(filter0_mask, filter1_mask)
+
+        filter_contact_data = contact_data[filter_mask]
+        filter_body_user_ids = body_user_indices[filter_mask]
+        n_filter_contacts = filter_contact_data.shape[0]
+        filter_env_ids = torch.zeros(size=(n_filter_contacts,), dtype=torch.int32)
+        for i in range(n_filter_contacts):
+            # dexsim contact can only happen in the same env, so we only need to get env id from one body
+            env_id = item_user_env_id_map.get(int(filter_body_user_ids[i, 0]), -1)
+            filter_env_ids[i] = env_id
 
         # generate contact report
-
+        contact_report = ContactReport()
+        contact_report.contact_data = contact_data
+        contact_report.contact_dexsim_userid = filter_body_user_ids
+        contact_report.contact_env_ids = filter_env_ids
+        return contact_report
 
     def get_robot(self, uid: str) -> Optional[Robot]:
         """Get a Robot by its unique ID.
