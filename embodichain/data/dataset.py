@@ -20,7 +20,6 @@ import shutil
 import hashlib
 import open3d as o3d
 
-
 from embodichain.utils import logger
 
 

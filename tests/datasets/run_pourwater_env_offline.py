@@ -32,10 +32,8 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 
-os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
-
-class TestPourWaterv3OfflineRunEnv(unittest.TestCase, metaclass=UnittestMetaclass):
+class TestPourWaterOfflineRunEnv(unittest.TestCase, metaclass=UnittestMetaclass):
     datacenter_backup = Path("/tmp/datacenter_test")
 
     def setUp(self) -> None:
