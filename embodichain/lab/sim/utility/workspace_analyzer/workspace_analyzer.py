@@ -503,7 +503,8 @@ class WorkspaceAnalyzer:
                     f"Computed Cartesian workspace bounds from {len(workspace_pts)} FK samples:\n"
                     f"\t X-axis: [{min_bounds_np[0]:.3f}, {max_bounds_np[0]:.3f}] m (range: {dimensions[0]:.3f} m)\n"
                     f"\t Y-axis: [{min_bounds_np[1]:.3f}, {max_bounds_np[1]:.3f}] m (range: {dimensions[1]:.3f} m)\n"
-                    f"\t Z-axis: [{min_bounds_np[2]:.3f}, {max_bounds_np[2]:.3f}] m (range: {dimensions[2]:.3f} m)"
+                    f"\t Z-axis: [{min_bounds_np[2]:.3f}, {max_bounds_np[2]:.3f}] m (range: {dimensions[2]:.3f} m)\n"
+                    f"\t Volume: {volume:.3f} m³"
                 )
             else:
                 # Fallback to default if FK computation fails
