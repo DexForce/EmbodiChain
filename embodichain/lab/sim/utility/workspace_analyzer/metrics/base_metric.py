@@ -40,7 +40,7 @@ class BaseMetric(ABC):
         self,
         workspace_points: np.ndarray,
         joint_configurations: Optional[np.ndarray] = None,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """Compute the metric.
 

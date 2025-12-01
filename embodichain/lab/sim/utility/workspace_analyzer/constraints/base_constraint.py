@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from abc import ABC, abstractmethod
-from typing import Union, Tuple, Optional
+from typing import Union, Optional
 import numpy as np
 import torch
 
@@ -188,12 +188,12 @@ class BaseConstraintChecker(ABC):
             Dictionary containing bounds information.
         """
         return {
-            "min_bounds": self.min_bounds.tolist()
-            if self.min_bounds is not None
-            else None,
-            "max_bounds": self.max_bounds.tolist()
-            if self.max_bounds is not None
-            else None,
+            "min_bounds": (
+                self.min_bounds.tolist() if self.min_bounds is not None else None
+            ),
+            "max_bounds": (
+                self.max_bounds.tolist() if self.max_bounds is not None else None
+            ),
             "ground_height": self.ground_height,
             "volume": self.get_bounds_volume(),
         }

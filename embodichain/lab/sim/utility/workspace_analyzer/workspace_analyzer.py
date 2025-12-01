@@ -285,7 +285,8 @@ class WorkspaceAnalyzer:
         try:
             terminal_width = os.get_terminal_size().columns
             ncols = min(120, max(80, terminal_width - 10))
-        except:
+        except OSError:
+            # Terminal size unavailable (e.g., non-terminal environment)
             ncols = 100
 
         # Color codes for different states
@@ -380,9 +381,11 @@ class WorkspaceAnalyzer:
             if pbar._update_count > 100:  # After first 100 updates
                 avg_time_per_update = time_since_last / max(
                     1,
-                    pbar._update_count - pbar._last_update_count
-                    if hasattr(pbar, "_last_update_count")
-                    else 1,
+                    (
+                        pbar._update_count - pbar._last_update_count
+                        if hasattr(pbar, "_last_update_count")
+                        else 1
+                    ),
                 )
                 if avg_time_per_update < 0.01:  # Very fast processing
                     update_threshold = 0.5  # Update every 0.5s
@@ -497,7 +500,6 @@ class WorkspaceAnalyzer:
 
                 # Calculate workspace dimensions for additional context
                 dimensions = max_bounds_np - min_bounds_np
-                volume = np.prod(dimensions)
 
                 logger.log_info(
                     f"Computed Cartesian workspace bounds from {len(workspace_pts)} FK samples:\n"
@@ -636,7 +638,6 @@ class WorkspaceAnalyzer:
                 - reachability_mask: Boolean mask indicating reachable points, shape (num_samples,)
                 - best_configs: Best joint configurations, shape (num_reachable, num_joints)
         """
-        batch_size = batch_size or self.config.sampling.batch_size
         num_samples = len(cartesian_points)
         ik_samples_per_point = self.config.ik_samples_per_point
 
@@ -1131,7 +1132,6 @@ class WorkspaceAnalyzer:
                     )
                 else:
                     # Original logic for showing both reachable and unreachable points
-                    success_rates_np = self.success_rates.cpu().numpy()
                     reachability_mask_np = self.reachability_mask.cpu().numpy()
 
                     # Reachable points: green color, larger size
@@ -1325,23 +1325,16 @@ class WorkspaceAnalyzer:
         if self.cache is None:
             return None
 
-        try:
-            # TODO: Implement cache loading logic
-            return None
-        except Exception as e:
-            logger.log_warning(f"Failed to load from cache: {e}")
-            return None
+        # TODO: Implement cache loading logic
+        return None
 
     def _save_to_cache(self, results: Dict[str, Any]) -> None:
         """Save analysis results to cache."""
         if self.cache is None:
             return
 
-        try:
-            # TODO: Implement cache saving logic
-            pass
-        except Exception as e:
-            logger.log_warning(f"Failed to save to cache: {e}")
+        # TODO: Implement cache saving logic
+        pass
 
     def get_workspace_bounds(self) -> Dict[str, np.ndarray]:
         """Get the bounding box of the analyzed workspace.
@@ -1418,7 +1411,8 @@ class WorkspaceAnalyzer:
             else:
                 size_str = f"{file_size} bytes"
             logger.log_info(f"💾 Exported results to {output_path} ({size_str})")
-        except:
+        except OSError:
+            # File size unavailable
             logger.log_info(f"💾 Exported results to {output_path}")
 
     @contextmanager
@@ -1435,7 +1429,8 @@ class WorkspaceAnalyzer:
             try:
                 process = psutil.Process()
                 start_cpu_mem = process.memory_info().rss
-            except:
+            except (psutil.Error, OSError):
+                # Process info unavailable
                 process = None
 
         yield
@@ -1446,7 +1441,8 @@ class WorkspaceAnalyzer:
         if process is not None:
             try:
                 end_cpu_mem = process.memory_info().rss
-            except:
+            except (psutil.Error, OSError):
+                # Process info unavailable, use start value
                 end_cpu_mem = start_cpu_mem
 
         # Detailed performance summary

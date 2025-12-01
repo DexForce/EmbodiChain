@@ -280,7 +280,6 @@ class VoxelVisualizer(BaseVisualizer):
 
         # Discretize points to voxel grid
         min_bounds = points.min(axis=0)
-        max_bounds = points.max(axis=0)
 
         # Create voxel indices
         voxel_indices = np.floor((points - min_bounds) / voxel_size).astype(int)

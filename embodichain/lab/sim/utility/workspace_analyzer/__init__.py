@@ -32,7 +32,7 @@ Example:
     >>> # Joint space analysis (default)
     >>> analyzer = WorkspaceAnalyzer(robot=robot)
     >>> results = analyzer.analyze(num_samples=10000)
-    >>> 
+    >>>
     >>> # Cartesian space analysis
     >>> from embodichain.lab.sim.utility.workspace_analyzer import WorkspaceAnalyzerConfig
     >>> config = WorkspaceAnalyzerConfig(mode=AnalysisMode.CARTESIAN_SPACE)

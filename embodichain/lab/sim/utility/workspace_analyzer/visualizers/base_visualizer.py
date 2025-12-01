@@ -18,7 +18,6 @@ import numpy as np
 import torch
 from abc import ABC, abstractmethod
 from typing import Optional, Protocol, Union, Dict, Any, Tuple
-from enum import Enum
 from pathlib import Path
 
 try:
@@ -38,7 +37,6 @@ except ImportError:
 
 from embodichain.utils import logger
 from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
-    VisualizationType,
     VisualizationConfig,
 )
 

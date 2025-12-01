@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Callable, Optional
+from typing import Union, Callable
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
