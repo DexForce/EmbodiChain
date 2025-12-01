@@ -10,6 +10,10 @@ jobs:
   lint:
     if: github.event_name == 'pull_request'
     runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
     container:
       image: 192.168.3.13:5000/dexsdk:1.1.1_py310_aliapt
       volumes:
@@ -19,10 +23,7 @@ jobs:
         - "/usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d"
         - "/tmp/.X11-unix:/tmp/.X11-unix"
         - "/dev/shm/shared:/dev/shm/shared"
-      options: |
-        --memory 100g
-        --gpus device=1
-        --shm-size 53687091200
+      options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
