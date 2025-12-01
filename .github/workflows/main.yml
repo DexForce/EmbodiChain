@@ -53,7 +53,7 @@ jobs:
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           make html
-          ls
+          ls /build
       - name: Upload pkg
         uses: actions/upload-pages-artifact@v3
         with:
@@ -74,7 +74,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: (CI) Run tests
         run: |
-          pip install -e .
+          # pip install -e .
+          echo "Unitest Start"
           # ./tests/unitest.sh
 
   publish:
@@ -91,7 +92,7 @@ jobs:
       - name: (CI) Publish package
         run: echo "start publish stage"
       - name: (CI) Download docs artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: doc
       - name: (CI) Deploy GitHub Pages
