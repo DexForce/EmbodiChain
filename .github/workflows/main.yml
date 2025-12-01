@@ -75,7 +75,7 @@ jobs:
         run: |
           pip install -e .
           echo "Unitest Start"
-          ./tests/unitest.sh
+          bash ./tests/unitest.sh
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
