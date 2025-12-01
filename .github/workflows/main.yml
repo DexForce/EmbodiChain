@@ -15,7 +15,7 @@ jobs:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: &container_template
-      image: 192.168.3.13:5000/dexsdk:1.1.1_py310_aliapt
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3
       volumes:
         - "/cache:/cache"
         - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
@@ -26,8 +26,16 @@ jobs:
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
-      - name: start Lint check
-        run: echo "start code style check"
+      - name: Start code style check
+        run: |
+          echo "工作目录路径：${GITHUB_WORKSPACE}"
+          ls
+          pip install black==22.3
+          black --check --diff --color ./
+          if [ $? -ne 0 ]; then
+            echo "Code style check failed, please run [black ./] before commit!"
+            exit 1
+          fi
 
   build:
     needs: lint
@@ -41,7 +49,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build docs
         run: |
-          echo "build docs"
+          pip install -e . --index-url http://192.168.3.43:8080/simple/ --trusted-host 192.168.3.43
+          pip install -r docs/requirements.txt
+          cd ${GITHUB_WORKSPACE}/docs
+          make html
 
   test:
     if: github.event_name == 'pull_request'
@@ -55,7 +66,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
-        run: echo "test start"
+        run: |
+          pip install http://192.168.3.120/CoreEngine/open3d_release/linux/cuda/open3d-0.18.0-cp39-cp39-manylinux_2_27_x86_64.whl
+          pip3 install http://192.168.3.120/CoreEngine/Data/GeoLib/3rdparty/torch/torch-2.0.1+cu118-cp39-cp39-linux_x86_64.whl
+          pip3 install http://192.168.3.120/CoreEngine/Data/GeoLib/3rdparty/torchvision/torchvision-0.15.2+cu118-cp39-cp39-linux_x86_64.whl
+          pip install -e . --index-url http://192.168.3.43:8080/simple/ --trusted-host 192.168.3.43
+          # ./tests/unitest.sh
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
