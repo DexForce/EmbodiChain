@@ -53,6 +53,13 @@ jobs:
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           make html
+          ls
+      - name: Upload pkg
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: doc
+          path: ${{ github.workspace }}/docs/build/html
+          retention-days: 3
 
   test:
     if: github.event_name == 'pull_request'
@@ -71,7 +78,7 @@ jobs:
           # ./tests/unitest.sh
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: Linux
     env:
@@ -81,12 +88,11 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: (CI) Publish docs
-        run: echo "start docs stage"
       - name: (CI) Publish package
         run: echo "start publish stage"
-      # - name: Push to PyPI
-      #   env:
-      #     TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-      #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      #   run: twine upload dist/*
+      - name: (CI) Download docs artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: doc
+      - name: (CI) Deploy GitHub Pages
+        uses: actions/deploy-pages@v4
