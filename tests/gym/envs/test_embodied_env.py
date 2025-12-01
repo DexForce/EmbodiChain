@@ -151,6 +151,10 @@ class EmbodiedEnvTest:
         ), f"Expected truncated shape ({self.env.num_envs},), got {truncated.shape}"
         assert obs.get("robot") is not None, "Expected 'robot' info in the info dict"
 
+    def teardown_method(self):
+        """Clean up resources after each test method."""
+        self.env.close()
+
 
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):

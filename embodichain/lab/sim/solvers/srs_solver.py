@@ -236,9 +236,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             joints[0] = 0
 
         euclidean_norm = np.hypot(P26[0], P26[1])
-        angle_phi = np.arccos(
-            (d_se**2 + norm_P26**2 - d_ew**2) / (2 * d_se * norm_P26)
-        )
+        angle_phi = np.arccos((d_se**2 + norm_P26**2 - d_ew**2) / (2 * d_se * norm_P26))
         joints[1] = np.arctan2(euclidean_norm, P26[2]) + elbow_config * angle_phi
 
         return True

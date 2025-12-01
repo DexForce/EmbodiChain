@@ -101,6 +101,7 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
         logger.log_error(f"Unknow drive type {drive_type}")
 
     for art in arts:
+        art.set_body_scale(cfg.body_scale)
         art.set_physical_attr(cfg.attrs.attr())
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
         art.set_articulation_flag(

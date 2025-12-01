@@ -457,7 +457,7 @@ def register_info_to_env(
             "Calling env.sim.update(100) for after-physics-applied object attributes..",
             color="green",
         )
-        env.sim.update(100)
+        env.sim.update(step=100)
     for entity_registry in registry:
         entity_cfg = SceneEntityCfg(**entity_registry["entity_cfg"])
         logger.log_info(f"Registering {entity_cfg.uid}..", color="green")

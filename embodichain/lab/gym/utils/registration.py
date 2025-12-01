@@ -189,16 +189,20 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
         max_episode_steps=max_episode_steps,
         disable_env_checker=True,  # Temporary solution as we allow empty observation spaces
         kwargs=deepcopy(kwargs),
-        additional_wrappers=[
-            WrapperSpec(
-                "MSTimeLimit",
-                entry_point="embodichain.lab.gym.utils.registration:TimeLimitWrapper",
-                kwargs=dict(max_episode_steps=max_episode_steps)
-                if max_episode_steps is not None
-                else {},
-            )
-        ]
-        if max_episode_steps is not None
-        else [],
+        additional_wrappers=(
+            [
+                WrapperSpec(
+                    "MSTimeLimit",
+                    entry_point="embodichain.lab.gym.utils.registration:TimeLimitWrapper",
+                    kwargs=(
+                        dict(max_episode_steps=max_episode_steps)
+                        if max_episode_steps is not None
+                        else {}
+                    ),
+                )
+            ]
+            if max_episode_steps is not None
+            else []
+        ),
     )
     return cls
