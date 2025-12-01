@@ -42,7 +42,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of parallel environments"
+        "--num_envs", type=int, default=100, help="Number of parallel environments"
     )
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
@@ -146,30 +146,33 @@ def run_simulation(sim: SimulationManager):
     contact_filter_cfg = ContactFilterCfg()
     contact_filter_cfg.rigid_uid_list = ["cube0", "cube1", "cube2"]
     try:
-        last_time = time.time()
-        last_step = 0
+        accmulated_cost_time = 0.0
         while True:
             # Update physics simulation
             sim.update(step=1)
+            start_time = time.time()
             contact_report = sim.get_contact(contact_filter_cfg)
-            print(f"contact_data: {contact_report.contact_data}")
-            print(f"contact_userid: {contact_report.contact_userid}")
-            print(f"contact_env_ids: {contact_report.contact_env_ids}")
+            accmulated_cost_time += time.time() - start_time
 
-            # step_count += 1
+            n_contact = contact_report.contact_data.shape[0]
+            if n_contact > 0:
+                contact_positions = contact_report.contact_data[:, 0:3]
+                contact_normals = contact_report.contact_data[:, 3:6]
+                contact_frictions = contact_report.contact_data[:, 6:9]
+                contact_impluses = contact_report.contact_data[:, 9]
+                contact_distances = contact_report.contact_data[:, 10]
+                contact_user_ids = contact_report.contact_user_ids
+                contact_env_ids = contact_report.contact_env_ids
+
+            step_count += 1
 
             # # Print FPS every second
-            # if step_count % 100 == 0:
-            #     current_time = time.time()
-            #     elapsed = current_time - last_time
-            #     fps = (
-            #         sim.num_envs * (step_count - last_step) / elapsed
-            #         if elapsed > 0
-            #         else 0
-            #     )
-            #     print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
-            #     last_time = current_time
-            #     last_step = step_count
+            if step_count % 100 == 0:
+                average_cost_time = accmulated_cost_time / 100.0
+                print(
+                    f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
+                )
+                accmulated_cost_time = 0.0
 
     except KeyboardInterrupt:
         print("\n[INFO]: Stopping simulation...")

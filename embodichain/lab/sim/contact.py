@@ -24,10 +24,10 @@ class ContactReport:
     """Data structure for contact report in the simulation engine.
     Attributes:
         contact_data (torch.Tensor): Contact data tensor.
-        contact_userid (torch.Tensor): DexSim user IDs for the contacts.
+        contact_user_ids (torch.Tensor): DexSim user IDs for the contacts.
         contact_env_ids (torch.Tensor): Environment IDs for the contacts.
     """
 
     contact_data: torch.Tensor
-    contact_userid: torch.Tensor
+    contact_user_ids: torch.Tensor
     contact_env_ids: torch.Tensor

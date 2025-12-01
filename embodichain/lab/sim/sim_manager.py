@@ -1025,7 +1025,7 @@ class SimulationManager:
 
         contact_report = ContactReport(
             contact_data=torch.empty((0, 11), dtype=torch.float32, device=self.device),
-            contact_userid=torch.empty((0,), dtype=torch.int32, device=self.device),
+            contact_user_ids=torch.empty((0,), dtype=torch.int32, device=self.device),
             contact_env_ids=torch.empty((0,), dtype=torch.int32, device=self.device),
         )
         if n_contact == 0:
@@ -1047,7 +1047,7 @@ class SimulationManager:
 
         # generate contact report
         contact_report.contact_data = filtered_contact_data
-        contact_report.contact_userid = filtered_user_ids
+        contact_report.contact_user_ids = filtered_user_ids
         contact_report.contact_env_ids = filtered_env_ids
         return contact_report
 
