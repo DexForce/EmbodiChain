@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 
 from enum import Enum
-from dataclasses import dataclass, field
-from typing import Optional, Callable, Union
+from dataclasses import dataclass
+from typing import Union
 
 
 class VisualizationType(Enum):

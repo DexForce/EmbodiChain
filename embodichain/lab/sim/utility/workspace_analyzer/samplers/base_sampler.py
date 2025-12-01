@@ -18,7 +18,6 @@ import numpy as np
 import torch
 from abc import ABC, abstractmethod
 from typing import Optional, Protocol, Union
-from enum import Enum
 
 from embodichain.utils import logger
 

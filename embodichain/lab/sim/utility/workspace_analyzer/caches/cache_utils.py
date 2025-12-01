@@ -57,7 +57,8 @@ def get_dir_size(path):
                 total += entry.stat().st_size
             elif entry.is_dir(follow_symlinks=False):
                 total += get_dir_size(entry.path)
-    except Exception:
+    except (OSError, PermissionError):
+        # Directory access error, return partial total
         pass
     return total
 
@@ -148,8 +149,8 @@ def show_session_info(session_name):
                 try:
                     data = np.load(batch_path)
                     total_poses += len(data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Warning: Failed to load batch file '{batch_file}': {e}")
             print(f"Total poses: {total_poses:,}")
 
 

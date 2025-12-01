@@ -44,7 +44,7 @@ class ManipulabilityMetric(BaseMetric):
         workspace_points: np.ndarray,
         joint_configurations: Optional[np.ndarray] = None,
         jacobians: Optional[np.ndarray] = None,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """Compute manipulability metrics.
 
@@ -144,7 +144,8 @@ class ManipulabilityMetric(BaseMetric):
         for i, J in enumerate(jacobians):
             try:
                 condition_numbers[i] = np.linalg.cond(J)
-            except:
+            except np.linalg.LinAlgError:
+                # Singular matrix, use infinity as condition number
                 condition_numbers[i] = np.inf
 
         return condition_numbers

@@ -16,7 +16,6 @@
 
 import numpy as np
 import torch
-from itertools import product
 from typing import Optional, Union
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
