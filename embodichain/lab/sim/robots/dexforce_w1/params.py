@@ -228,14 +228,16 @@ class W1ArmKineParams:
                 inst, "dh_params", np.array(data["dh_params"], dtype=float)
             )
         if "qpos_limits" in data:
-            object.__setattr__(
-                inst,
-                "qpos_limits",
-                np.deg2rad(np.array(data["qpos_limits"], dtype=float)),
-            ) if np.max(
-                np.abs(np.array(data["qpos_limits"]))
-            ) > 2 * np.pi else object.__setattr__(
-                inst, "qpos_limits", np.array(data["qpos_limits"], dtype=float)
+            (
+                object.__setattr__(
+                    inst,
+                    "qpos_limits",
+                    np.deg2rad(np.array(data["qpos_limits"], dtype=float)),
+                )
+                if np.max(np.abs(np.array(data["qpos_limits"]))) > 2 * np.pi
+                else object.__setattr__(
+                    inst, "qpos_limits", np.array(data["qpos_limits"], dtype=float)
+                )
             )
         if "link_lengths" in data:
             object.__setattr__(

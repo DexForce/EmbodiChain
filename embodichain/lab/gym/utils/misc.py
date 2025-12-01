@@ -797,6 +797,7 @@ def resolve_formatted_string(obj, local_vars=None, global_vars=None):
                 {"__builtins__": None},  # eval with given locals & globals
                 {**global_vars, **local_vars},
             )
+
         # par tof the string is ${expr}：replace ...${expr}.. -> str(...eval(expr)..)
         def _sub(m):
             return str(

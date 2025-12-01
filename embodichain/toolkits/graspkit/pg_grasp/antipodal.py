@@ -483,15 +483,15 @@ class AntipodalGenerator:
             shape=(antipodal_sample_num * antipodal_num,), dtype=float
         )
         for i in range(antipodal_num):
-            grasp_poses[
-                i * antipodal_sample_num : (i + 1) * antipodal_sample_num
-            ] = antipodal_list[i].sample_pose(antipodal_sample_num)
-            scores[
-                i * antipodal_sample_num : (i + 1) * antipodal_sample_num
-            ] = antipodal_list[i].score
-            open_length[
-                i * antipodal_sample_num : (i + 1) * antipodal_sample_num
-            ] = antipodal_list[i].dis
+            grasp_poses[i * antipodal_sample_num : (i + 1) * antipodal_sample_num] = (
+                antipodal_list[i].sample_pose(antipodal_sample_num)
+            )
+            scores[i * antipodal_sample_num : (i + 1) * antipodal_sample_num] = (
+                antipodal_list[i].score
+            )
+            open_length[i * antipodal_sample_num : (i + 1) * antipodal_sample_num] = (
+                antipodal_list[i].dis
+            )
         return grasp_poses, scores, open_length
 
     def get_all_grasp(self) -> List[AntipodalGrasp]:
