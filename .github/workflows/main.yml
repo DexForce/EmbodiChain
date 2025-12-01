@@ -59,7 +59,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: docs
+    needs: build
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
