@@ -53,7 +53,7 @@ jobs:
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           make html
-          ls /build
+          ls ./build
       - name: Upload pkg
         uses: actions/upload-pages-artifact@v3
         with:
