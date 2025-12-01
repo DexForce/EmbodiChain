@@ -5,8 +5,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/DexForce/EmbodiChain/releases)
 [![License](https://img.shields.io/github/license/DexForce/EmbodiChain)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-online-blue)](https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/introduction)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/DexForce/EmbodiChain/ci.yml?branch=main)](https://github.com/DexForce/EmbodiChain/actions)
+[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-docs-blue?logo=github&logoColor=white)](https://dexforce.github.io/EmbodiChain/introduction.html)
 
 ---
 
@@ -31,9 +30,9 @@ EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It stre
 
 To get started with EmbodiChain, follow these steps:
 
-- [Installation Guide](https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/quick_start/install)
-- [Quick Start Tutorial](https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/tutorial/)
-- [API Reference](https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/api_reference/)
+- [Installation Guide](https://dexforce.github.io/EmbodiChain/quick_start/install.html)
+- [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/tutorial/index.html)
+- [API Reference](https://dexforce.github.io/EmbodiChain/api_reference/index.html)
 
 
 ## Citation
