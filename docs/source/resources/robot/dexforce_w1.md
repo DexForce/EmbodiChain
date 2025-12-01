@@ -21,21 +21,6 @@ Dexforce W1 is a versatile robot developed by DexForce Technology Co., Ltd., sup
 - Flexible URDF assembly and simulation configuration
 - Compatible with SimulationManager simulation environment
 
-## Usage in Simulation Environment
-
-```python
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots.dexforce_w1.types import (
-    DexforceW1HandBrand, DexforceW1ArmSide, DexforceW1ArmKind, DexforceW1Version
-)
-from embodichain.lab.sim.robots.dexforce_w1.utils import build_dexforce_w1_cfg
-
-config = SimulationManagerCfg(headless=False, sim_device="cpu")
-sim = SimulationManager(config)
-sim.build_multiple_arenas(1)
-sim.set_manual_update(False)
-```
-
 ## Method 1: Fine-grained configuration with `build_dexforce_w1_cfg`
 
 This method allows you to specify detailed parameters for each arm and hand. Recommended for advanced users who need full control over robot hardware options.

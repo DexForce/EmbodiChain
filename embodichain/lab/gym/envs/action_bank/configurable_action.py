@@ -65,7 +65,6 @@ class ActionBank:
     _function_type: Dict[str, Callable]
 
     def __init__(self, conf: Dict):
-        # 轨迹可以是qpos或者xpos，不同方法检查一下shape，每个姿态qpos是1维（16维），xpos是2维（4x4的矩阵）
         self.conf = conf
 
     @property
@@ -1261,9 +1260,7 @@ class GeneralActionBank(ActionBank):
         vis: bool = False,
         **kwargs,
     ) -> np.ndarray:
-        from embodichain.lab.gym.motion_generation.action.arm_action import (
-            ArmAction,
-        )
+        from embodichain.lab.sim.planners.motion_generator import MotionGenerator
 
         # Retrieve the start and end positions
         start_qpos = env.affordance_datas[keypose_names[0]]
@@ -1311,14 +1308,13 @@ class GeneralActionBank(ActionBank):
             filtered_keyposes = [start_qpos]
 
         if len(filtered_keyposes) == 1 and len(ref_poses) == 0:
-            # 只有一个点，返回静止轨迹
+
             ret = np.array([filtered_keyposes[0]] * duration)
         else:
-            # 生成轨迹
+            mo_gen = MotionGenerator(robot=env.robot, uid=agent_uid)
+
             if len(ref_poses) == 0:
-                ret, _ = ArmAction.create_discrete_trajectory(
-                    agent=env.robot,
-                    uid=get_control_part(env, agent_uid),
+                ret, _ = mo_gen.create_discrete_trajectory(
                     qpos_list=filtered_keyposes,
                     sample_num=duration,
                     qpos_seed=filtered_keyposes[0],
@@ -1326,9 +1322,7 @@ class GeneralActionBank(ActionBank):
                     **getattr(env, "planning_config", {}),
                 )
             else:
-                ret, _ = ArmAction.create_discrete_trajectory(
-                    agent=env.robot,
-                    uid=get_control_part(env, agent_uid),
+                ret, _ = mo_gen.create_discrete_trajectory(
                     xpos_list=[start_xpos] + ref_poses + [end_xpos],
                     sample_num=duration,
                     is_use_current_qpos=False,
