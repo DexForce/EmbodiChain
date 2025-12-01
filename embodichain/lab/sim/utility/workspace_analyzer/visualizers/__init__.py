@@ -17,6 +17,8 @@
 from embodichain.lab.sim.utility.workspace_analyzer.visualizers.base_visualizer import (
     BaseVisualizer,
     IVisualizer,
+)
+from embodichain.lab.sim.utility.workspace_analyzer.configs import (
     VisualizationType,
 )
 

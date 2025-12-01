@@ -500,6 +500,7 @@ class WorkspaceAnalyzer:
 
                 # Calculate workspace dimensions for additional context
                 dimensions = max_bounds_np - min_bounds_np
+                volume = np.prod(dimensions)
 
                 logger.log_info(
                     f"Computed Cartesian workspace bounds from {len(workspace_pts)} FK samples:\n"

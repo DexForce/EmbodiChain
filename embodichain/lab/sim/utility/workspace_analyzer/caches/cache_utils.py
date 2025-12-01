@@ -32,6 +32,7 @@ import shutil
 import argparse
 from pathlib import Path
 from datetime import datetime
+from embodichain.utils import logger
 
 # Add current directory to path for local imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -77,8 +78,8 @@ def list_sessions():
     cache_root = get_cache_root()
 
     if not os.path.exists(cache_root):
-        print("No cache sessions found.")
-        print(f"Cache directory: {cache_root}")
+        logger.log_info("No cache sessions found.")
+        logger.log_info(f"Cache directory: {cache_root}")
         return
 
     sessions = []
@@ -97,26 +98,28 @@ def list_sessions():
             )
 
     if not sessions:
-        print("No cache sessions found.")
+        logger.log_info("No cache sessions found.")
         return
 
     # Sort by modification time (newest first)
     sessions.sort(key=lambda x: x["modified"], reverse=True)
 
-    print(f"\n{'Session Name':<40} {'Size':<12} {'Last Modified'}")
-    print("-" * 80)
+    logger.log_info(f"\n{'Session Name':<40} {'Size':<12} {'Last Modified'}")
+    logger.log_info("-" * 80)
 
     total_size = 0
     for session in sessions:
-        print(
+        logger.log_info(
             f"{session['name']:<40} {format_size(session['size']):<12} "
             f"{session['modified'].strftime('%Y-%m-%d %H:%M:%S')}"
         )
         total_size += session["size"]
 
-    print("-" * 80)
-    print(f"{'Total':<40} {format_size(total_size):<12} {len(sessions)} session(s)")
-    print(f"\nCache location: {cache_root}")
+    logger.log_info("-" * 80)
+    logger.log_info(
+        f"{'Total':<40} {format_size(total_size):<12} {len(sessions)} session(s)"
+    )
+    logger.log_info(f"\nCache location: {cache_root}")
 
 
 def show_session_info(session_name):
@@ -125,20 +128,22 @@ def show_session_info(session_name):
     session_path = os.path.join(cache_root, session_name)
 
     if not os.path.exists(session_path):
-        print(f"Session '{session_name}' not found.")
-        print(f"Use 'list' command to see available sessions.")
+        logger.log_info(f"Session '{session_name}' not found.")
+        logger.log_info(f"Use 'list' command to see available sessions.")
         return
 
-    print(f"\nSession: {session_name}")
-    print(f"Path: {session_path}")
-    print(f"Size: {format_size(get_dir_size(session_path))}")
-    print(f"Modified: {datetime.fromtimestamp(os.path.getmtime(session_path))}")
+    logger.log_info(f"\nSession: {session_name}")
+    logger.log_info(f"Path: {session_path}")
+    logger.log_info(f"Size: {format_size(get_dir_size(session_path))}")
+    logger.log_info(
+        f"Modified: {datetime.fromtimestamp(os.path.getmtime(session_path))}"
+    )
 
     # Check for batches
     batches_dir = os.path.join(session_path, "batches")
     if os.path.exists(batches_dir):
         batch_files = [f for f in os.listdir(batches_dir) if f.endswith(".npy")]
-        print(f"Batches: {len(batch_files)} file(s)")
+        logger.log_info(f"Batches: {len(batch_files)} file(s)")
 
         if batch_files:
             import numpy as np
@@ -150,8 +155,10 @@ def show_session_info(session_name):
                     data = np.load(batch_path)
                     total_poses += len(data)
                 except Exception as e:
-                    print(f"Warning: Failed to load batch file '{batch_file}': {e}")
-            print(f"Total poses: {total_poses:,}")
+                    logger.log_warning(
+                        f"Warning: Failed to load batch file '{batch_file}': {e}"
+                    )
+            logger.log_info(f"Total poses: {total_poses:,}")
 
 
 def clean_session(session_name):
@@ -160,7 +167,7 @@ def clean_session(session_name):
     session_path = os.path.join(cache_root, session_name)
 
     if not os.path.exists(session_path):
-        print(f"Session '{session_name}' not found.")
+        logger.log_info(f"Session '{session_name}' not found.")
         return
 
     size = get_dir_size(session_path)
@@ -168,9 +175,9 @@ def clean_session(session_name):
 
     if response.lower() == "y":
         shutil.rmtree(session_path)
-        print(f"✓ Deleted session '{session_name}'")
+        logger.log_info(f"✓ Deleted session '{session_name}'")
     else:
-        print("Cancelled.")
+        logger.log_info("Cancelled.")
 
 
 def clean_all_sessions():
@@ -178,7 +185,7 @@ def clean_all_sessions():
     cache_root = get_cache_root()
 
     if not os.path.exists(cache_root):
-        print("No cache sessions found.")
+        logger.log_info("No cache sessions found.")
         return
 
     total_size = get_dir_size(cache_root)
@@ -187,17 +194,19 @@ def clean_all_sessions():
     ]
 
     if not sessions:
-        print("No cache sessions found.")
+        logger.log_info("No cache sessions found.")
         return
 
-    print(f"Found {len(sessions)} session(s), total size: {format_size(total_size)}")
+    logger.log_info(
+        f"Found {len(sessions)} session(s), total size: {format_size(total_size)}"
+    )
     response = input(f"Delete all cache sessions? [y/N]: ")
 
     if response.lower() == "y":
         shutil.rmtree(cache_root)
-        print(f"✓ Deleted all cache sessions")
+        logger.log_info(f"✓ Deleted all cache sessions")
     else:
-        print("Cancelled.")
+        logger.log_info("Cancelled.")
 
 
 def show_total_size():
@@ -205,8 +214,8 @@ def show_total_size():
     cache_root = get_cache_root()
 
     if not os.path.exists(cache_root):
-        print("No cache found.")
-        print(f"Cache directory: {cache_root}")
+        logger.log_info("No cache found.")
+        logger.log_info(f"Cache directory: {cache_root}")
         return
 
     total_size = get_dir_size(cache_root)
@@ -214,9 +223,9 @@ def show_total_size():
         d for d in os.listdir(cache_root) if os.path.isdir(os.path.join(cache_root, d))
     ]
 
-    print(f"\nCache location: {cache_root}")
-    print(f"Total sessions: {len(sessions)}")
-    print(f"Total size: {format_size(total_size)}")
+    logger.log_info(f"\nCache location: {cache_root}")
+    logger.log_info(f"Total sessions: {len(sessions)}")
+    logger.log_info(f"Total size: {format_size(total_size)}")
 
 
 def main():

@@ -19,9 +19,11 @@ import torch
 from typing import Union, Optional, Any, Dict
 from pathlib import Path
 
+from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+    VisualizationType,
+)
 from embodichain.lab.sim.utility.workspace_analyzer.visualizers.base_visualizer import (
     BaseVisualizer,
-    VisualizationType,
     OPEN3D_AVAILABLE,
 )
 

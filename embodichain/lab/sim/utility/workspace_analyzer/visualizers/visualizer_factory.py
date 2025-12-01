@@ -17,9 +17,12 @@
 from typing import Dict, Type, Optional, Any
 from threading import Lock
 
+from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+    VisualizationType,
+)
+
 from embodichain.lab.sim.utility.workspace_analyzer.visualizers.base_visualizer import (
     BaseVisualizer,
-    VisualizationType,
 )
 
 from embodichain.lab.sim.utility.workspace_analyzer.visualizers.point_cloud_visualizer import (
