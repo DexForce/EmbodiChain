@@ -24,10 +24,15 @@ import time
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, ContactFilterCfg
+from embodichain.lab.sim.cfg import (
+    RigidBodyAttributesCfg,
+    ContactFilterCfg,
+    ArticulationContactFilterCfg,
+)
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot, RobotCfg
 from embodichain.data import get_data_path
+from IPython import embed
 
 
 def create_cube(
@@ -43,7 +48,7 @@ def create_cube(
     Returns:
         RigidObject: rigid object
     """
-    cube_size = (0.02, 0.02, 0.02)
+    cube_size = (0.025, 0.025, 0.025)
     cube: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=uid,
@@ -60,6 +65,41 @@ def create_cube(
         )
     )
     return cube
+
+
+def robot_grasp_pose(robot: Robot, cube: RigidObject, sim: SimulationManager):
+    sim.update(step=100)
+    arm_ids = robot.get_joint_ids("arm")
+    gripper_ids = robot.get_joint_ids("hand")
+    rest_arm_qpos = robot.get_qpos()[:, arm_ids]
+    ee_xpos = robot.compute_fk(qpos=rest_arm_qpos, name="arm", to_matrix=True)
+    target_xpos = ee_xpos.clone()
+    cube_xpos = cube.get_local_pose(to_matrix=True)
+    cube_position = cube_xpos[:, :3, 3]
+
+    target_xpos[:, :3, 3] = cube_position
+
+    approach_xpos = target_xpos.clone()
+    approach_xpos[:, 2, 3] += 0.1
+
+    is_success, approach_qpos = robot.compute_ik(
+        pose=approach_xpos, joint_seed=rest_arm_qpos, name="arm"
+    )
+    is_success, target_qpos = robot.compute_ik(
+        pose=target_xpos, joint_seed=approach_qpos, name="arm"
+    )
+    robot.set_qpos(approach_qpos, joint_ids=arm_ids)
+    sim.update(step=40)
+
+    robot.set_qpos(target_qpos, joint_ids=arm_ids)
+    sim.update(step=40)
+    hand_close_qpos = (
+        torch.tensor([0.025, 0.025], device=sim.device)
+        .unsqueeze(0)
+        .repeat(sim.num_envs, 1)
+    )
+    robot.set_qpos(hand_close_qpos, joint_ids=gripper_ids)
+    sim.update(step=20)
 
 
 def create_robot(
@@ -104,7 +144,7 @@ def create_robot(
             ],
         },
         "init_pos": position,
-        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.025, 0.025],
+        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
         "drive_pros": {
             "stiffness": {"JOINT[1-6]": 1e4, "FINGER[1-2]_JOINT": 1e2},
             "damping": {"JOINT[1-6]": 1e3, "FINGER[1-2]_JOINT": 1e1},
@@ -118,12 +158,12 @@ def create_robot(
                 "tcp": [
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 1.0, 0.13],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
             }
         },
-        "control_parts": {"arm": ["JOINT[1-6]"], "gripper": ["FINGER[1-2]_JOINT"]},
+        "control_parts": {"arm": ["JOINT[1-6]"], "hand": ["FINGER[1-2]_JOINT"]},
     }
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(robot_cfg_dict))
     return robot
@@ -143,7 +183,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=100, help="Number of parallel environments"
+        "--num_envs", type=int, default=1, help="Number of parallel environments"
     )
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
@@ -174,9 +214,9 @@ def main():
         sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Add objects to the scene
-    cube0 = create_cube(sim, "cube0", position=[0.0, 0.0, 0.025])
-    cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.05])
-    cube2 = create_cube(sim, "cube2", position=[0.0, 0.0, 0.075])
+    cube0 = create_cube(sim, "cube0", position=[0.0, 0.0, 0.03])
+    cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.06])
+    cube2 = create_cube(sim, "cube2", position=[0.0, 0.0, 0.09])
     robot = create_robot(sim, "UR10_PGI", position=[0.5, 0.0, 0.0])
 
     print("[INFO]: Scene setup complete!")
@@ -187,6 +227,7 @@ def main():
     if not args.headless:
         sim.open_window()
 
+    robot_grasp_pose(robot, cube2, sim)
     # Run the simulation
     run_simulation(sim)
 
@@ -206,6 +247,10 @@ def run_simulation(sim: SimulationManager):
     # contact filter config
     contact_filter_cfg = ContactFilterCfg()
     contact_filter_cfg.rigid_uid_list = ["cube0", "cube1", "cube2"]
+    contact_filter_art_cfg = ArticulationContactFilterCfg()
+    contact_filter_art_cfg.articulation_uid = "UR10_PGI"
+    contact_filter_art_cfg.link_name_list = ["finger1_link", "finger2_link"]
+    contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
     contact_filter_cfg.filter_need_both_actor = True
     try:
         accmulated_cost_time = 0.0
@@ -231,11 +276,18 @@ def run_simulation(sim: SimulationManager):
                 )  # contact belongs to which environment
 
                 # filter contact report for specific rigid object
-                cube1 = sim.get_rigid_object("cube1")
-                filtered_contact_report = contact_report.filter_by_user_ids(
-                    cube1.get_user_ids()
-                )
+                cube1_user_ids = sim.get_rigid_object("cube1").get_user_ids()
+                cube1_contact_report = contact_report.filter_by_user_ids(cube1_user_ids)
+                n_cube1_contact = cube1_contact_report.contact_data.shape[0]
 
+                # filter contact report for specific link
+                finger1_user_ids = sim.get_robot("UR10_PGI").get_user_ids(
+                    "finger1_link"
+                )
+                finger1_contact_report = contact_report.filter_by_user_ids(
+                    finger1_user_ids
+                )
+                n_finger1_contact = finger1_contact_report.contact_data.shape[0]
             step_count += 1
 
             # # Print FPS every second
@@ -244,6 +296,7 @@ def run_simulation(sim: SimulationManager):
                 print(
                     f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
                 )
+
                 accmulated_cost_time = 0.0
 
     except KeyboardInterrupt:
