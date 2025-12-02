@@ -60,12 +60,8 @@ class ContactReport:
         Returns:
             ContactReport: A new ContactReport instance containing only the filtered contacts.
         """
-        filter0_mask = torch.isin(
-            self.contact_user_ids[:, 0], item_user_ids
-        )
-        filter1_mask = torch.isin(
-            self.contact_user_ids[:, 1], item_user_ids
-        )
+        filter0_mask = torch.isin(self.contact_user_ids[:, 0], item_user_ids)
+        filter1_mask = torch.isin(self.contact_user_ids[:, 1], item_user_ids)
         filter_mask = torch.logical_or(filter0_mask, filter1_mask)
         filtered_contact_data = self.contact_data[filter_mask]
         filtered_contact_user_ids = self.contact_user_ids[filter_mask]

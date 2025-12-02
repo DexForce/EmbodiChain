@@ -26,7 +26,107 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, ContactFilterCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot, RobotCfg
+from embodichain.data import get_data_path
+
+
+def create_cube(
+    sim: SimulationManager, uid: str, position: list = (0.0, 0.0, 0)
+) -> RigidObject:
+    """create cube
+
+    Args:
+        sim (SimulationManager): simulation manager
+        uid (str): uid of the rigid object
+        position (list, optional): init position. Defaults to (0., 0., 0).
+
+    Returns:
+        RigidObject: rigid object
+    """
+    cube_size = (0.02, 0.02, 0.02)
+    cube: RigidObject = sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid=uid,
+            shape=CubeCfg(size=cube_size),
+            body_type="dynamic",
+            attrs=RigidBodyAttributesCfg(
+                mass=0.1,
+                dynamic_friction=0.9,
+                static_friction=0.95,
+                restitution=0.01,
+                sleep_threshold=0.0,
+            ),
+            init_pos=position,
+        )
+    )
+    return cube
+
+
+def create_robot(
+    sim: SimulationManager, uid: str, position: list = (0.0, 0.0, 0)
+) -> Robot:
+    """create robot
+
+    Args:
+        sim (SimulationManager): _description_
+        uid (str): _description_
+        position (list, optional): _description_. Defaults to (0., 0., 0).
+
+    Returns:
+        Robot: _description_
+    """
+    ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
+    pgi_urdf_path = get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf")
+    robot_cfg_dict = {
+        "uid": "UR10_PGI",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": ur10_urdf_path,
+                    "transform": [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": pgi_urdf_path,
+                    "transform": [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                },
+            ],
+        },
+        "init_pos": position,
+        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.025, 0.025],
+        "drive_pros": {
+            "stiffness": {"JOINT[1-6]": 1e4, "FINGER[1-2]_JOINT": 1e2},
+            "damping": {"JOINT[1-6]": 1e3, "FINGER[1-2]_JOINT": 1e1},
+            "max_effort": {"JOINT[1-6]": 1e5, "FINGER[1-2]_JOINT": 1e3},
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            }
+        },
+        "control_parts": {"arm": ["JOINT[1-6]"], "gripper": ["FINGER[1-2]_JOINT"]},
+    }
+    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(robot_cfg_dict))
+    return robot
 
 
 def main():
@@ -43,7 +143,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of parallel environments"
+        "--num_envs", type=int, default=100, help="Number of parallel environments"
     )
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
@@ -74,52 +174,10 @@ def main():
         sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Add objects to the scene
-    cube: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="cube0",
-            shape=CubeCfg(size=[0.1, 0.1, 0.1]),
-            body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.01,
-                sleep_threshold=0.0,
-            ),
-            init_pos=[0.0, 0.0, 0.2],
-        )
-    )
-
-    cube2: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="cube1",
-            shape=CubeCfg(size=[0.1, 0.1, 0.1]),
-            body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.01,
-                sleep_threshold=0.0,
-            ),
-            init_pos=[0.0, 0.0, 0.25],
-        )
-    )
-    cube3: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="cube2",
-            shape=CubeCfg(size=[0.1, 0.1, 0.1]),
-            body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.01,
-                sleep_threshold=0.0,
-            ),
-            init_pos=[0.0, 0.0, 0.4],
-        )
-    )
+    cube0 = create_cube(sim, "cube0", position=[0.0, 0.0, 0.025])
+    cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.05])
+    cube2 = create_cube(sim, "cube2", position=[0.0, 0.0, 0.075])
+    robot = create_robot(sim, "UR10_PGI", position=[0.5, 0.0, 0.0])
 
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")

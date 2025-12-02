@@ -979,8 +979,7 @@ class SimulationManager:
         return robot
 
     def _enable_contact_fetching(self) -> None:
-        """enable contact fetching
-        """
+        """enable contact fetching"""
         if self.enable_contact:
             return
         if self.is_use_gpu_physics:
