@@ -263,10 +263,11 @@ def run_simulation(sim: SimulationManager):
 
             n_contact = contact_report.contact_data.shape[0]
             if n_contact > 0:
+                # contact position
                 contact_positions = contact_report.contact_data[:, 0:3]
                 contact_normals = contact_report.contact_data[:, 3:6]
                 contact_frictions = contact_report.contact_data[:, 6:9]
-                contact_impluses = contact_report.contact_data[:, 9]
+                contact_impulses = contact_report.contact_data[:, 9]
                 contact_distances = contact_report.contact_data[:, 10]
                 contact_user_ids = (
                     contact_report.contact_user_ids
@@ -281,16 +282,17 @@ def run_simulation(sim: SimulationManager):
                 n_cube1_contact = cube1_contact_report.contact_data.shape[0]
 
                 # filter contact report for specific link
-                finger1_user_ids = sim.get_robot("UR10_PGI").get_user_ids(
-                    "finger1_link"
+                finger1_user_ids = (
+                    sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
                 )
                 finger1_contact_report = contact_report.filter_by_user_ids(
                     finger1_user_ids
                 )
                 n_finger1_contact = finger1_contact_report.contact_data.shape[0]
+
             step_count += 1
 
-            # # Print FPS every second
+            # Print FPS every second
             if step_count % 100 == 0:
                 average_cost_time = accmulated_cost_time / 100.0
                 print(

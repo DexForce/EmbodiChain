@@ -1102,14 +1102,16 @@ class ContactFilterCfg:
         for articulation_cfg in self.articulation_cfg_list:
             articulation = sim.get_articulation(articulation_cfg.articulation_uid)
             if articulation is None:
+                articulation = sim.get_robot(articulation_cfg.articulation_uid)
+            if articulation is None:
                 logger.log_warning(
                     f"Articulation with uid '{articulation_cfg.articulation_uid}' not found in simulation."
                 )
                 continue
-            all_link_names = articulation.link_names()
+            all_link_names = articulation.link_names
             link_names = (
                 all_link_names
-                if articulation_cfg.link_name_list is None
+                if len(articulation_cfg.link_name_list) == 0
                 else articulation_cfg.link_name_list
             )
             for link_name in link_names:
@@ -1118,13 +1120,11 @@ class ContactFilterCfg:
                         f"Link {link_name} not found in articulation {articulation_cfg.uid}."
                     )
                     continue
-                self.item_user_ids = torch.cat(
-                    (self.item_user_ids, articulation.get_user_ids(link_name))
-                )
+                link_user_ids = articulation.get_user_ids(link_name).reshape(-1)
+                self.item_user_ids = torch.cat((self.item_user_ids, link_user_ids))
                 self.item_env_ids = torch.cat(
                     (self.item_env_ids, articulation.all_env_ids)
                 )
-
         # build user_id to env_id map
         max_user_id = int(self.item_user_ids.max().item())
         self.item_user_env_ids_map = torch.full(
