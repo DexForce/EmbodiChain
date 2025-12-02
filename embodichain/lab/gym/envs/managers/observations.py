@@ -135,9 +135,11 @@ def compute_semantic_mask(
     # cat assets uid (num_envs, n) into dim 1
     foreground_uids = torch.cat(
         [
-            asset.get_user_ids().unsqueeze(1)
-            if asset.get_user_ids().dim() == 1
-            else asset.get_user_ids()
+            (
+                asset.get_user_ids().unsqueeze(1)
+                if asset.get_user_ids().dim() == 1
+                else asset.get_user_ids()
+            )
             for asset in foreground_assets
         ],
         dim=1,
