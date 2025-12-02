@@ -36,7 +36,7 @@ if __name__ == "__main__":
     sim_manager.set_manual_update(False)
 
     cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
+        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"}
     )
     robot = sim_manager.add_robot(cfg=cfg)
     print("DexforceW1 robot added to the simulation.")
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     print("Example: Joint Space Analysis")
 
     wa_joint = WorkspaceAnalyzer(robot=robot, sim_manager=sim_manager)
-    results_joint = wa_joint.analyze(num_samples=1000, visualize=True)
+    results_joint = wa_joint.analyze(num_samples=3000, visualize=True)
 
     print(f"\nJoint Space Results:")
     print(

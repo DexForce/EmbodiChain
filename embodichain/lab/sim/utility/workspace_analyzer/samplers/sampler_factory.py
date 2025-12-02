@@ -47,13 +47,7 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers.gaussian_sampler im
     GaussianSampler,
 )
 
-# Constraint imports for convenience functions
-from embodichain.lab.sim.utility.workspace_analyzer.samplers.constraints.sphere_constraint import (
-    SphereConstraint,
-)
-from embodichain.lab.sim.utility.workspace_analyzer.samplers.constraints.box_constraint import (
-    BoxConstraint,
-)
+# Note: Constraint imports temporarily disabled
 
 from embodichain.utils import logger
 
@@ -165,9 +159,9 @@ class SamplerFactory:
             **kwargs: Additional keyword arguments to pass to the sampler constructor.
                 Common arguments include:
                     - seed: Random seed for reproducibility
-                    - constraint: GeometricConstraint for constraint-based sampling
                     - samples_per_dim: For UniformSampler
                     - device: PyTorch device for tensor operations
+                Note: constraint parameter is temporarily disabled
 
         Returns:
             An instance of the requested sampler.
@@ -177,20 +171,11 @@ class SamplerFactory:
 
         Examples:
             >>> factory = SamplerFactory()
-            >>> # Traditional bounds-based usage
+            >>> # Bounds-based usage
             >>> sampler = factory.create_sampler(SamplingStrategy.UNIFORM, seed=42)
-            >>>
-            >>> # Constraint-based usage for sphere sampling
-            >>> from .constraints.sphere_constraint import SphereConstraint
-            >>> import torch
-            >>> sphere = SphereConstraint(torch.tensor([0.0,0.0,0.0]), 1.0)
-            >>> sampler = factory.create_sampler("uniform", constraint=sphere)
-            >>>
-            >>> # Box constraint usage
-            >>> from .constraints.box_constraint import BoxConstraint
-            >>> bounds = torch.tensor([[-1.0, 1.0], [-1.0, 1.0]])
-            >>> box = BoxConstraint(bounds)
-            >>> sampler = factory.create_sampler("random", constraint=box)
+            >>> sampler = factory.create_sampler("random", seed=123)
+
+            Note: Constraint-based sampling examples are temporarily disabled
         """
         # Default to RANDOM if no strategy specified
         if strategy is None:
@@ -280,61 +265,10 @@ def create_sampler(
         >>> sampler = create_sampler(SamplingStrategy.UNIFORM, seed=42)
         >>> sampler = create_sampler("random", seed=123)
 
-        # Constraint-based sampling
-        >>> sphere = SphereConstraint([0,0,0], 1.0)
-        >>> sampler = create_sampler("uniform", constraint=sphere)
+        Note: Constraint-based sampling is temporarily disabled
     """
     factory = SamplerFactory()
     return factory.create_sampler(strategy, **kwargs)
 
 
-def create_sphere_sampler(
-    center: Union[torch.Tensor, np.ndarray, list],
-    radius: float,
-    strategy: str = "uniform",
-    seed: int = 42,
-    device: Optional[torch.device] = None,
-) -> BaseSampler:
-    """Convenience function to create a sphere-constrained sampler.
-
-    Args:
-        center: Center of the sphere.
-        radius: Radius of the sphere.
-        strategy: Sampling strategy ("uniform", "random", etc.).
-        seed: Random seed.
-        device: PyTorch device.
-
-    Returns:
-        Sampler configured for sphere constraint.
-
-    Examples:
-        >>> sampler = create_sphere_sampler([0, 0, 0], 1.0)
-        >>> sampler = create_sphere_sampler([0, 0], 2.0, strategy="random")
-    """
-    sphere = SphereConstraint(center, radius, device)
-    return create_sampler(strategy, constraint=sphere, seed=seed, device=device)
-
-
-def create_box_sampler(
-    bounds: Union[torch.Tensor, np.ndarray, list],
-    strategy: str = "uniform",
-    seed: int = 42,
-    device: Optional[torch.device] = None,
-) -> BaseSampler:
-    """Convenience function to create a box-constrained sampler.
-
-    Args:
-        bounds: Bounding box as [[min1, max1], [min2, max2], ...].
-        strategy: Sampling strategy ("uniform", "random", etc.).
-        seed: Random seed.
-        device: PyTorch device.
-
-    Returns:
-        Sampler configured for box constraint.
-
-    Examples:
-        >>> sampler = create_box_sampler([[-1, 1], [-1, 1]])
-        >>> sampler = create_box_sampler([[0, 10], [0, 5], [0, 2]], strategy="random")
-    """
-    box = BoxConstraint(bounds, device)
-    return create_sampler(strategy, constraint=box, seed=seed, device=device)
+# Note: Constraint-based convenience functions have been removed

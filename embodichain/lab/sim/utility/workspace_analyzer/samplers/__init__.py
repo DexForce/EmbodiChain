@@ -38,20 +38,9 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers.lhs_sampler import 
 from embodichain.lab.sim.utility.workspace_analyzer.samplers.sampler_factory import (
     SamplerFactory,
     create_sampler,
-    create_sphere_sampler,
-    create_box_sampler,
 )
 
-# Geometric constraints for advanced sampling
-from embodichain.lab.sim.utility.workspace_analyzer.samplers.constraints.geometric_constraint import (
-    GeometricConstraint,
-)
-from embodichain.lab.sim.utility.workspace_analyzer.samplers.constraints.box_constraint import (
-    BoxConstraint,
-)
-from embodichain.lab.sim.utility.workspace_analyzer.samplers.constraints.sphere_constraint import (
-    SphereConstraint,
-)
+# Note: Geometric constraints are temporarily disabled
 
 # Note: PlaneSampler is intentionally not included here as it's a high-level
 # specialized sampler, not a base sampler. Import it directly when needed:
@@ -67,14 +56,9 @@ __all__ = [
     "HaltonSampler",
     "SobolSampler",
     "LatinHypercubeSampler",
-    # Geometric constraints
-    "GeometricConstraint",
-    "BoxConstraint",
-    "SphereConstraint",
+    # Note: Geometric constraints temporarily disabled
     # Factory for creating base samplers
     "SamplerFactory",
     "create_sampler",
-    # Convenience functions
-    "create_sphere_sampler",
-    "create_box_sampler",
+    # Note: Constraint-based convenience functions temporarily disabled
 ]

@@ -49,17 +49,15 @@ class RandomSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        constraint: Optional["GeometricConstraint"] = None,
         device: Optional[torch.device] = None,
     ):
         """Initialize the random sampler.
 
         Args:
             seed: Random seed for reproducibility. Defaults to 42.
-            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
             device: PyTorch device for tensor operations.
         """
-        super().__init__(seed, device, constraint)
+        super().__init__(seed, device)
 
     def _sample_from_bounds(
         self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int

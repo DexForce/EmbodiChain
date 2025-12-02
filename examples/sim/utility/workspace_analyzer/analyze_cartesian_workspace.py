@@ -20,42 +20,69 @@ from IPython import embed
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
     WorkspaceAnalyzer,
     WorkspaceAnalyzerConfig,
     AnalysisMode,
 )
-
+from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
+    VisualizationConfig,
+)
 
 if __name__ == "__main__":
     # Example usage
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cpu")
+    config = SimulationManagerCfg(
+        headless=False, sim_device="cpu", width=1080, height=1080
+    )
     sim = SimulationManager(config)
     sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
+        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"}
     )
     robot = sim.add_robot(cfg=cfg)
     print("DexforceW1 robot added to the simulation.")
 
     # Set left arm joint positions (mirrored)
+    left_qpos = torch.tensor([0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0])
+    right_qpos = -left_qpos
     robot.set_qpos(
-        qpos=[0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
+        qpos=left_qpos,
         joint_ids=robot.get_joint_ids("left_arm"),
     )
     # Set right arm joint positions (mirrored)
     robot.set_qpos(
-        qpos=[0, np.pi / 4, 0.0, np.pi / 2, np.pi / 4, 0.0, 0.0],
+        qpos=right_qpos,
         joint_ids=robot.get_joint_ids("right_arm"),
+    )
+
+    left_arm_pose = robot.compute_fk(
+        qpos=left_qpos,
+        name="left_arm",
+        to_matrix=True,
+    )
+
+    sim.draw_marker(
+        cfg=MarkerCfg(
+            name=f"left_arm_pose_axis",
+            marker_type="axis",
+            axis_xpos=left_arm_pose,
+            axis_size=0.005,
+            axis_len=0.15,
+            arena_index=0,
+        )
     )
 
     cartesian_config = WorkspaceAnalyzerConfig(
         mode=AnalysisMode.CARTESIAN_SPACE,
+        visualization=VisualizationConfig(
+            show_unreachable_points=False, point_size=8.0
+        ),
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim

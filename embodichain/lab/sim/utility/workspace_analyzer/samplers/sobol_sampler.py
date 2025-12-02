@@ -68,7 +68,6 @@ class SobolSampler(BaseSampler):
         device: Optional[torch.device] = None,
         scramble: bool = True,
         skip: int = 0,
-        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the Sobol sampler.
 
@@ -81,7 +80,7 @@ class SobolSampler(BaseSampler):
                   Recommended: 0 for scrambled, >0 (e.g., 100) for unscrambled.
             constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
         """
-        super().__init__(seed, device, constraint)
+        super().__init__(seed, device)
         self.scramble = scramble
         self.skip = skip
 

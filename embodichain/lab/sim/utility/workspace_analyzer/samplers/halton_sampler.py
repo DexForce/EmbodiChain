@@ -161,7 +161,6 @@ class HaltonSampler(BaseSampler):
         device: Optional[torch.device] = None,
         bases: Optional[List[int]] = None,
         skip: int = 0,
-        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the Halton sampler.
 
@@ -171,9 +170,9 @@ class HaltonSampler(BaseSampler):
             bases: List of prime bases for each dimension. If None, uses first n primes.
             skip: Number of initial samples to skip. Defaults to 0.
                   Higher values (e.g., 100-1000) can improve distribution quality.
-            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
+
         """
-        super().__init__(seed, device, constraint)
+        super().__init__(seed, device)
         self.bases = bases
         self.skip = skip
 

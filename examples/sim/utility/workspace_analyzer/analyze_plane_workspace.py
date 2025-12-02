@@ -25,6 +25,7 @@ from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
     WorkspaceAnalyzerConfig,
     AnalysisMode,
 )
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
     VisualizationConfig,
 )
@@ -35,26 +36,47 @@ if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cpu")
+    config = SimulationManagerCfg(
+        headless=False, sim_device="cpu", width=1080, height=1080
+    )
     sim = SimulationManager(config)
     sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
+        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"}
     )
     robot = sim.add_robot(cfg=cfg)
     print("DexforceW1 robot added to the simulation.")
 
     # Set left arm joint positions (mirrored)
+    left_qpos = torch.tensor([0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0])
+    right_qpos = -left_qpos
     robot.set_qpos(
-        qpos=[0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
+        qpos=left_qpos,
         joint_ids=robot.get_joint_ids("left_arm"),
     )
     # Set right arm joint positions (mirrored)
     robot.set_qpos(
-        qpos=[0, np.pi / 4, 0.0, np.pi / 2, np.pi / 4, 0.0, 0.0],
+        qpos=right_qpos,
         joint_ids=robot.get_joint_ids("right_arm"),
+    )
+
+    left_arm_pose = robot.compute_fk(
+        qpos=left_qpos,
+        name="left_arm",
+        to_matrix=True,
+    )
+
+    sim.draw_marker(
+        cfg=MarkerCfg(
+            name=f"left_arm_pose_axis",
+            marker_type="axis",
+            axis_xpos=left_arm_pose,
+            axis_size=0.005,
+            axis_len=0.15,
+            arena_index=0,
+        )
     )
 
     cartesian_config = WorkspaceAnalyzerConfig(
@@ -62,12 +84,12 @@ if __name__ == "__main__":
         plane_normal=torch.tensor([0.0, 0.0, 1.0]),
         plane_point=torch.tensor([0.0, 0.0, 1.2]),
         # plane_bounds=torch.tensor([[-0.5, 0.5], [-0.5, 0.5]]),
-        visualization=VisualizationConfig(show_unreachable_points=True),
+        visualization=VisualizationConfig(show_unreachable_points=True, point_size=8.0),
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim
     )
-    results_cartesian = wa_cartesian.analyze(num_samples=1000, visualize=True)
+    results_cartesian = wa_cartesian.analyze(num_samples=1500, visualize=True)
     print(f"\nCartesian Space Results:")
     print(
         f"  Reachable points: {results_cartesian['num_reachable']} / {results_cartesian['num_samples']}"

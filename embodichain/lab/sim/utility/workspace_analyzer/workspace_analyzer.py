@@ -46,8 +46,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs import (
 from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
     SamplerFactory,
     BaseSampler,
-    BoxConstraint,
-    SphereConstraint,
 )
 from embodichain.lab.sim.utility.workspace_analyzer.caches import CacheManager
 from embodichain.lab.sim.utility.workspace_analyzer.constraints import (
@@ -262,90 +260,17 @@ class WorkspaceAnalyzer:
         logger.log_debug(f"Number of joints: {self.num_joints}")
 
     def _create_sampler(self) -> BaseSampler:
-        """Create sampler based on configuration with optional geometric constraints."""
+        """Create sampler based on configuration."""
         factory = SamplerFactory()
-
-        # Create geometric constraint based on analysis mode and config
-        geometric_constraint = self._create_geometric_constraint_for_mode()
 
         return factory.create_sampler(
             strategy=self.config.sampling.strategy,
             seed=self.config.sampling.seed,
-            constraint=geometric_constraint,
         )
 
-    def _create_geometric_constraint_for_mode(self):
-        """Create geometric constraint based on analysis mode and configuration.
+    # Note: Geometric constraint creation methods temporarily removed
 
-        Different analysis modes have different default constraint behaviors:
-        - JOINT_SPACE: No constraint by default (samples all joint space)
-        - CARTESIAN_SPACE: Box constraint by default (focuses on workspace bounds)
-        - PLANE_SAMPLING: Sphere constraint by default (focuses on planar operations)
-
-        Returns:
-            GeometricConstraint instance or None if no constraint specified.
-        """
-        # If user explicitly specified constraint_type, use that
-        if self.config.constraint_type is not None:
-            return self._create_explicit_constraint()
-
-        # Otherwise, use mode-based default constraints
-        return self._create_mode_default_constraint()
-
-    def _create_explicit_constraint(self):
-        """Create constraint when user explicitly specified constraint_type."""
-        if self.config.constraint_type == "box":
-            if self.config.constraint_bounds is None:
-                logger.log_warning(
-                    "Box constraint specified but constraint_bounds not provided"
-                )
-                return None
-            return BoxConstraint(
-                bounds=self.config.constraint_bounds, device=self.device
-            )
-
-        elif self.config.constraint_type == "sphere":
-            # Handle sphere constraint creation with various parameter combinations
-            if (
-                self.config.sphere_center is not None
-                and self.config.sphere_radius is not None
-            ):
-                # Both center and radius explicitly provided
-                return SphereConstraint(
-                    center=self.config.sphere_center,
-                    radius=self.config.sphere_radius,
-                    device=self.device,
-                )
-            elif self.config.constraint_bounds is not None:
-                # Auto-calculate from bounds
-                if self.config.sphere_center is not None:
-                    # Custom center with auto-calculated radius
-                    return SphereConstraint(
-                        center=self.config.sphere_center,
-                        bounds=self.config.constraint_bounds,
-                        radius_mode=self.config.sphere_radius_mode,
-                        device=self.device,
-                    )
-                else:
-                    # Both center and radius auto-calculated from bounds
-                    if self.config.sphere_radius_mode == "inscribed":
-                        return SphereConstraint.from_bounds_inscribed(
-                            bounds=self.config.constraint_bounds, device=self.device
-                        )
-                    else:  # circumscribed
-                        return SphereConstraint.from_bounds_circumscribed(
-                            bounds=self.config.constraint_bounds, device=self.device
-                        )
-            else:
-                logger.log_warning(
-                    "Sphere constraint specified but neither center+radius nor constraint_bounds provided"
-                )
-                return None
-        else:
-            logger.log_warning(
-                f"Unknown constraint type: {self.config.constraint_type}"
-            )
-            return None
+    # Note: Explicit constraint creation temporarily removed
 
     def _compute_dynamic_workspace_bounds(self) -> torch.Tensor:
         """Compute workspace bounds dynamically from joint space FK.
@@ -365,10 +290,19 @@ class WorkspaceAnalyzer:
         # Sample joint space to compute FK bounds
         joint_samples = temp_sampler.sample(num_samples=1000, bounds=self.qpos_limits)
 
-        # Compute FK for all samples
+        # Compute FK for all samples with progress tracking
         workspace_pts_list = []
 
-        for i in range(len(joint_samples)):
+        pbar = self._create_optimized_tqdm(
+            range(len(joint_samples)),
+            desc="Computing Workspace Bounds (FK)",
+            unit="cfg",
+            color="cyan",
+            emoji="📏",
+        )
+
+        successful_fk = 0
+        for i in pbar:
             qpos = joint_samples[i : i + 1]  # Keep batch dimension
             try:
                 pose = self.robot.compute_fk(
@@ -378,8 +312,14 @@ class WorkspaceAnalyzer:
                 )
                 position = pose[:, :3, 3]  # Extract position
                 workspace_pts_list.append(position)
+                successful_fk += 1
             except Exception:
                 continue
+
+            # Update progress bar with success rate
+            self._update_progress_with_stats(
+                pbar, i, successful_fk, metric_name="FK success", show_rate=True
+            )
 
         if workspace_pts_list:
             workspace_pts = torch.cat(workspace_pts_list, dim=0)
@@ -408,98 +348,6 @@ class WorkspaceAnalyzer:
             return torch.tensor(
                 [[-1.0, 1.0], [-1.0, 1.0], [0.0, 2.0]], device=self.device
             )
-
-    def _create_mode_default_constraint(self):
-        """Create default constraint based on analysis mode."""
-        if self.config.mode == AnalysisMode.JOINT_SPACE:
-            # Joint space: Fixed Box constraint from joint limits
-            logger.log_info(
-                "Joint space mode: Using default Box constraint from joint limits"
-            )
-            return BoxConstraint(bounds=self.qpos_limits, device=self.device)
-
-        elif self.config.mode == AnalysisMode.CARTESIAN_SPACE:
-            # Cartesian space: Sphere constraint by default if bounds available
-            if self.config.constraint_bounds is not None:
-                logger.log_info(
-                    "Cartesian space mode: Using default inscribed Sphere constraint from bounds"
-                )
-                return SphereConstraint.from_bounds_inscribed(
-                    bounds=self.config.constraint_bounds, device=self.device
-                )
-            elif (
-                self.config.constraint.min_bounds is not None
-                and self.config.constraint.max_bounds is not None
-            ):
-                bounds = torch.stack(
-                    [
-                        torch.tensor(
-                            self.config.constraint.min_bounds, device=self.device
-                        ),
-                        torch.tensor(
-                            self.config.constraint.max_bounds, device=self.device
-                        ),
-                    ],
-                    dim=1,
-                )
-                logger.log_info(
-                    "Cartesian space mode: Using default inscribed Sphere constraint from workspace bounds"
-                )
-                return SphereConstraint.from_bounds_inscribed(
-                    bounds=bounds, device=self.device
-                )
-            else:
-                # Compute dynamic bounds from joint space FK
-                dynamic_bounds = self._compute_dynamic_workspace_bounds()
-                logger.log_info(
-                    "Cartesian space mode: Using default inscribed Sphere constraint from dynamically computed bounds"
-                )
-                return BoxConstraint.from_bounds_inscribed(
-                    bounds=dynamic_bounds, device=self.device
-                )
-
-        elif self.config.mode == AnalysisMode.PLANE_SAMPLING:
-            # Plane sampling: Sphere constraint by default if bounds available
-            if self.config.constraint_bounds is not None:
-                logger.log_info(
-                    "Plane sampling mode: Using default inscribed Sphere constraint from bounds"
-                )
-                return SphereConstraint.from_bounds_inscribed(
-                    bounds=self.config.constraint_bounds, device=self.device
-                )
-            elif (
-                self.config.constraint.min_bounds is not None
-                and self.config.constraint.max_bounds is not None
-            ):
-                bounds = torch.stack(
-                    [
-                        torch.tensor(
-                            self.config.constraint.min_bounds, device=self.device
-                        ),
-                        torch.tensor(
-                            self.config.constraint.max_bounds, device=self.device
-                        ),
-                    ],
-                    dim=1,
-                )
-                logger.log_info(
-                    "Plane sampling mode: Using default inscribed Sphere constraint from workspace bounds"
-                )
-                return SphereConstraint.from_bounds_inscribed(
-                    bounds=bounds, device=self.device
-                )
-            else:
-                # Compute dynamic bounds from joint space FK
-                dynamic_bounds = self._compute_dynamic_workspace_bounds()
-                logger.log_info(
-                    "Plane sampling mode: Using default inscribed Sphere constraint from dynamically computed bounds"
-                )
-                return SphereConstraint.from_bounds_inscribed(
-                    bounds=dynamic_bounds, device=self.device
-                )
-        else:
-            logger.log_warning(f"Unknown analysis mode: {self.config.mode}")
-            return None
 
     def _create_cache(self):
         """Create cache manager based on configuration."""
@@ -736,63 +584,16 @@ class WorkspaceAnalyzer:
                 dim=1,
             )
         else:
-            # Compute bounds from joint space FK
+            # Compute bounds from joint space FK using dedicated method
             logger.log_info(
                 "No Cartesian bounds specified, computing from joint space..."
             )
+            cartesian_bounds = self._compute_dynamic_workspace_bounds()
 
-            # Sample joint space to compute FK bounds
-            joint_samples = self.sample_joint_space(num_samples=1000)
-            workspace_pts, _ = self.compute_workspace_points(joint_samples)
-
-            if len(workspace_pts) > 0:
-                # Compute min/max bounds for each dimension
-                min_bounds = workspace_pts.min(dim=0).values  # More explicit than [0]
-                max_bounds = workspace_pts.max(dim=0).values  # More explicit than [0]
-
-                # Add small margin (10%)
-                margin = (max_bounds - min_bounds) * 0.1
-                min_bounds = min_bounds - margin
-                max_bounds = max_bounds + margin
-
-                # Create bounds tensor: [[x_min, x_max], [y_min, y_max], [z_min, z_max]]
-                cartesian_bounds = torch.stack([min_bounds, max_bounds], dim=1)
-
-                # Format bounds with better precision and units
-                min_bounds_np = min_bounds.cpu().numpy()
-                max_bounds_np = max_bounds.cpu().numpy()
-
-                # Calculate workspace dimensions for additional context
-                dimensions = max_bounds_np - min_bounds_np
-                volume = np.prod(dimensions)
-
-                logger.log_info(
-                    f"Computed Cartesian workspace bounds from {len(workspace_pts)} FK samples:\n"
-                    f"\t X-axis: [{min_bounds_np[0]:.3f}, {max_bounds_np[0]:.3f}] m (range: {dimensions[0]:.3f} m)\n"
-                    f"\t Y-axis: [{min_bounds_np[1]:.3f}, {max_bounds_np[1]:.3f}] m (range: {dimensions[1]:.3f} m)\n"
-                    f"\t Z-axis: [{min_bounds_np[2]:.3f}, {max_bounds_np[2]:.3f}] m (range: {dimensions[2]:.3f} m)\n"
-                    f"\t Volume: {volume:.3f} m³"
-                )
-            else:
-                # Fallback to default if FK computation fails
-                logger.log_warning(
-                    "Failed to compute bounds from FK, using default bounds: "
-                    "X: [-1, 1], Y: [-1, 1], Z: [0, 2] (meters)"
-                )
-                cartesian_bounds = torch.tensor(
-                    [[-1.0, 1.0], [-1.0, 1.0], [0.0, 2.0]],
-                    device=self.device,
-                )
-
-        # Sample from Cartesian space using constraint (if available) or bounds
-        if self.sampler.constraint is not None:
-            # Use constraint-based sampling (e.g., sphere constraint with cube filtering)
-            cartesian_samples = self.sampler.sample(num_samples=num_samples)
-        else:
-            # Fallback to bounds-based sampling
-            cartesian_samples = self.sampler.sample(
-                bounds=cartesian_bounds, num_samples=num_samples
-            )
+        # Sample from Cartesian space using bounds
+        cartesian_samples = self.sampler.sample(
+            bounds=cartesian_bounds, num_samples=num_samples
+        )
 
         # Check how many samples pass workspace constraints
         valid_bounds = self.constraint_checker.check_bounds(cartesian_samples)
@@ -844,24 +645,28 @@ class WorkspaceAnalyzer:
             plane_point = plane_point.to(self.device)
 
         if plane_bounds is None:
-            plane_bounds = torch.tensor([[-1.0, 1.0], [-1.0, 1.0]], device=self.device)
+            # Compute dynamic workspace bounds from joint space FK
+            dynamic_bounds_3d = self._compute_dynamic_workspace_bounds()
+
+            # Project 3D bounds to 2D plane coordinate system
+            plane_bounds = self._compute_plane_bounds_from_3d(
+                dynamic_bounds_3d, plane_normal, plane_point
+            )
+
+            logger.log_info(
+                f"Using dynamic plane bounds computed from FK: "
+                f"U: [{plane_bounds[0, 0]:.3f}, {plane_bounds[0, 1]:.3f}], "
+                f"V: [{plane_bounds[1, 0]:.3f}, {plane_bounds[1, 1]:.3f}] "
+                f"(projected to plane with normal {plane_normal.cpu().numpy()})"
+            )
         else:
             plane_bounds = plane_bounds.to(self.device)
 
-        # Generate samples using constraint (if available) or fallback to 2D plane sampling
-        if self.sampler.constraint is not None:
-            # Use constraint-based sampling in 3D space, then project to plane
-            constraint_samples_3d = self.sampler.sample(num_samples=num_samples)
-            # Project to the specified plane
-            plane_samples_3d = self._project_to_plane(
-                constraint_samples_3d, plane_normal, plane_point
-            )
-        else:
-            # Fallback: generate 2D samples and convert to 3D
-            plane_samples_2d = self.sampler.sample(num_samples, bounds=plane_bounds)
-            plane_samples_3d = self._plane_to_world_optimized(
-                plane_samples_2d, plane_normal, plane_point
-            )
+        # Generate 2D samples and convert to 3D
+        plane_samples_2d = self.sampler.sample(num_samples, bounds=plane_bounds)
+        plane_samples_3d = self._plane_to_world_optimized(
+            plane_samples_2d, plane_normal, plane_point
+        )
 
         logger.log_info(
             f"Generated {num_samples} plane samples using {self.sampler.get_strategy_name()}"
@@ -967,6 +772,56 @@ class WorkspaceAnalyzer:
         v = v / torch.norm(v)
 
         return u, v
+
+    def _compute_plane_bounds_from_3d(
+        self,
+        bounds_3d: torch.Tensor,
+        plane_normal: torch.Tensor,
+        plane_point: torch.Tensor,
+    ) -> torch.Tensor:
+        """Project 3D workspace bounds to 2D plane coordinate system.
+
+        Args:
+            bounds_3d: 3D workspace bounds, shape (3, 2) representing
+                      [[x_min, x_max], [y_min, y_max], [z_min, z_max]]
+            plane_normal: Normal vector of the plane [nx, ny, nz]
+            plane_point: A point on the plane [x, y, z]
+
+        Returns:
+            2D plane bounds, shape (2, 2) representing [[u_min, u_max], [v_min, v_max]]
+        """
+        # Generate orthogonal basis vectors for the plane
+        u, v = self._generate_orthogonal_basis(plane_normal)
+
+        # Create all 8 corners of the 3D bounding box
+        corners_3d = []
+        for x in [bounds_3d[0, 0], bounds_3d[0, 1]]:  # x_min, x_max
+            for y in [bounds_3d[1, 0], bounds_3d[1, 1]]:  # y_min, y_max
+                for z in [bounds_3d[2, 0], bounds_3d[2, 1]]:  # z_min, z_max
+                    corners_3d.append(torch.tensor([x, y, z], device=self.device))
+
+        corners_3d = torch.stack(corners_3d)  # Shape: (8, 3)
+
+        # Project all corners to the plane coordinate system
+        # Transform from world coordinates to plane coordinates
+        corners_relative = corners_3d - plane_point.unsqueeze(
+            0
+        )  # Relative to plane point
+
+        # Project onto plane basis vectors
+        u_coords = torch.sum(corners_relative * u.unsqueeze(0), dim=1)  # Shape: (8,)
+        v_coords = torch.sum(corners_relative * v.unsqueeze(0), dim=1)  # Shape: (8,)
+
+        # Find min/max in both plane directions
+        u_min, u_max = u_coords.min(), u_coords.max()
+        v_min, v_max = v_coords.min(), v_coords.max()
+
+        # Create 2D plane bounds
+        plane_bounds = torch.tensor(
+            [[u_min, u_max], [v_min, v_max]], device=self.device
+        )
+
+        return plane_bounds
 
     def _get_robot_base_position(self) -> torch.Tensor:
         """Get the robot base position as default plane point.
@@ -1742,7 +1597,7 @@ class WorkspaceAnalyzer:
         # Add visualization-type specific arguments
         if vis_type == VisualizationType.POINT_CLOUD:
             common_kwargs["point_size"] = getattr(
-                self.config.visualization, "point_size", 4.0
+                self.config.visualization, "point_size", 8.0
             )
         elif vis_type == VisualizationType.VOXEL:
             common_kwargs["voxel_size"] = getattr(

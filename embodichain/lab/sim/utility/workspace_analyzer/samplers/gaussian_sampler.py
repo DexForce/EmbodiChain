@@ -62,7 +62,6 @@ class GaussianSampler(BaseSampler):
         mean: Optional[Union[torch.Tensor, np.ndarray]] = None,
         std: Union[float, torch.Tensor, np.ndarray] = 0.3,
         clip_to_bounds: bool = True,
-        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the Gaussian sampler.
 
@@ -76,9 +75,9 @@ class GaussianSampler(BaseSampler):
                 - Tensor/array (n_dims,): Per-dimension std
             clip_to_bounds: Whether to clip samples to bounds. Defaults to True.
                            If False, regenerates out-of-bounds samples (slower but unbiased).
-            constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
+
         """
-        super().__init__(seed, device, constraint)
+        super().__init__(seed, device)
         self.mean = self._to_tensor(mean) if mean is not None else None
 
         if isinstance(std, (int, float)):

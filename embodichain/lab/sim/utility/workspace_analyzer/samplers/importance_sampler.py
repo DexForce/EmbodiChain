@@ -65,7 +65,6 @@ class ImportanceSampler(BaseSampler):
         device: Optional[torch.device] = None,
         num_candidates: int = 10,
         method: str = "rejection",
-        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the importance sampler.
 
@@ -82,7 +81,7 @@ class ImportanceSampler(BaseSampler):
                    'transform': Inverse transform sampling (requires normalized weights)
             constraint: Optional geometric constraint for sampling (e.g., SphereConstraint).
         """
-        super().__init__(seed, device, constraint)
+        super().__init__(seed, device)
         self.weight_fn = weight_fn
         self.num_candidates = num_candidates
         self.method = method

@@ -21,8 +21,6 @@ from typing import Optional, Protocol, Union, TYPE_CHECKING
 
 from embodichain.utils import logger
 
-if TYPE_CHECKING:
-    from .constraints.geometric_constraint import GeometricConstraint
 
 __all__ = [
     "ISampler",
@@ -75,20 +73,16 @@ class BaseSampler(ABC):
         self,
         seed: int = 42,
         device: Optional[torch.device] = None,
-        constraint: Optional["GeometricConstraint"] = None,
     ):
         """Initialize the base sampler.
 
         Args:
             seed: Random seed for reproducibility. Defaults to 42.
             device: PyTorch device (cpu/cuda). Defaults to cpu.
-            constraint: Optional geometric constraint for sampling. If provided,
-                       the sampler will use this constraint instead of bounds.
         """
         self.seed = seed
         self.rng = np.random.RandomState(seed)
         self.device = device if device is not None else torch.device("cpu")
-        self.constraint = constraint
 
         # Set torch seed
         torch.manual_seed(seed)
@@ -98,52 +92,30 @@ class BaseSampler(ABC):
     def sample(
         self, num_samples: int, bounds: Optional[Union[torch.Tensor, np.ndarray]] = None
     ) -> torch.Tensor:
-        """Generate samples within the given bounds or constraint.
-
-        If a geometric constraint is provided during initialization, it will be used
-        for sampling. Otherwise, the legacy bounds-based sampling will be used.
+        """Generate samples within the given bounds.
 
         Args:
             num_samples: Number of samples to generate.
             bounds: Tensor/Array of shape (n_dims, 2) containing [lower, upper] bounds for each dimension.
-                   Required if constraint is not provided. Ignored if constraint is provided.
 
         Returns:
             Tensor of shape (num_samples, n_dims) containing the sampled points.
 
         Raises:
-            ValueError: If neither constraint nor bounds are provided.
+            ValueError: If bounds are not provided.
             NotImplementedError: If the method is not implemented in the derived class.
         """
-        if self.constraint is not None:
-            # Use constraint-based sampling
-            return self._sample_from_constraint(num_samples)
-        else:
-            # Use legacy bounds-based sampling
-            if bounds is None:
-                raise ValueError(
-                    "bounds parameter is required when no constraint is provided"
-                )
-            return self._sample_from_bounds(bounds, num_samples)
-
-    def _sample_from_constraint(self, num_samples: int) -> torch.Tensor:
-        """Sample from the geometric constraint.
-
-        Args:
-            num_samples: Number of samples to generate.
-
-        Returns:
-            Tensor of shape (num_samples, n_dims) containing the sampled points.
-        """
-        return self.constraint.sample_uniform(num_samples)
+        if bounds is None:
+            raise ValueError("bounds parameter is required")
+        return self._sample_from_bounds(bounds, num_samples)
 
     @abstractmethod
     def _sample_from_bounds(
         self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
     ) -> torch.Tensor:
-        """Generate samples within the given bounds (legacy method).
+        """Generate samples within the given bounds.
 
-        This method must be implemented by all derived classes for backward compatibility.
+        This method must be implemented by all derived classes.
 
         Args:
             bounds: Tensor/Array of shape (n_dims, 2) containing [lower, upper] bounds for each dimension.
