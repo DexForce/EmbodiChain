@@ -183,7 +183,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
+        "--num_envs", type=int, default=100, help="Number of parallel environments"
     )
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"

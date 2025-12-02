@@ -871,6 +871,24 @@ class SimulationManager:
             return None
         return self._rigid_object_groups[uid]
 
+    @cached_property
+    def arena_offsets(self) -> torch.Tensor:
+        """Get the arena offsets for all arenas.
+
+        Returns:
+            torch.Tensor: The arena offsets of shape (num_arenas, 3).
+        """
+        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+        arena_offsets = torch.zeros(
+            (len(env_list), 3), dtype=torch.float32, device=self.device
+        )
+        for i, env in enumerate(env_list):
+            arena_position = env.get_root_node().get_world_pose()[:3, 3]
+            arena_offsets[i] = torch.tensor(
+                arena_position, dtype=torch.float32, device=self.device
+            )
+        return arena_offsets
+
     def _get_non_static_rigid_obj_num(self) -> int:
         """Get the number of non-static rigid objects in the scene.
 
@@ -1047,9 +1065,15 @@ class SimulationManager:
 
         filtered_contact_data = contact_data[filter_mask]
         filtered_user_ids = body_user_indices[filter_mask]
-        filtered_env_ids = contact_filter_cfg.item_user_env_ids_map[filtered_user_ids]
+        filtered_env_ids = contact_filter_cfg.item_user_env_ids_map[
+            filtered_user_ids[:, 0]
+        ]
 
         # generate contact report
+        contact_offsets = self.arena_offsets[filtered_env_ids]
+        filtered_contact_data[:, 0:3] = (
+            filtered_contact_data[:, 0:3] - contact_offsets
+        )  # minus arean offsets
         contact_report.contact_data = filtered_contact_data
         contact_report.contact_user_ids = filtered_user_ids
         contact_report.contact_env_ids = filtered_env_ids
