@@ -8,7 +8,6 @@ on:
 
 jobs:
   lint:
-    if: github.event_name == 'pull_request'
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -74,7 +73,7 @@ jobs:
       - name: (CI) Run tests
         run: |
           # pip install -e .
-          echo "Unitest Start"
+          echo "Unit test Start"
           # export HF_ENDPOINT=https://hf-mirror.com
           # pytest tests
 
