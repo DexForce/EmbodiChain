@@ -12,113 +12,122 @@ The **Workspace Analyzer Constraints** module provides comprehensive constraint 
 
 ## Overview
 
-The constraints module enables robust workspace analysis by enforcing:
+The constraints module provides basic constraint checking for workspace analysis:
 
-- **Spatial Boundaries**: Define workspace limits and exclusion zones
-- **Physical Constraints**: Respect robot joint limits and reachability
-- **Safety Zones**: Implement collision avoidance and safety margins
-- **Ground Constraints**: Handle floor planes and elevation limits
-- **Custom Constraints**: Extensible framework for application-specific limits
+- **Spatial Boundaries**: Define workspace limits using min/max bounds
+- **Exclusion Zones**: Avoid specified rectangular obstacle regions  
+- **Ground Constraints**: Handle floor plane height limits
+- **Configuration-based Setup**: Easy configuration through DimensionConstraint
 
 ### Key Features
 
-- **Flexible Constraint Definition**: Support for complex geometric constraints
-- **High Performance**: Vectorized operations for large point sets
+- **Simple Boundary Checking**: Min/max bounds validation
+- **Basic Obstacle Avoidance**: Rectangular exclusion zone filtering
 - **Multi-Backend Support**: Works with both NumPy arrays and PyTorch tensors
-- **Extensible Design**: Easy to add custom constraint types
-- **Safety First**: Built-in safety margins and validation
-- **Real-time Filtering**: Efficient point filtering for interactive applications
+- **Configuration Integration**: Uses DimensionConstraint config objects
+
+### TODO - Not Yet Implemented
+
+- **Joint Limit Constraints**: Physical joint limitation checking
+- **Advanced Collision Detection**: Robot mesh-based collision checking with environment
+- **Self-Collision Detection**: Robot self-collision validation  
+- **Complex Safety Margins**: Advanced safety margin calculations
+- **Dynamic Constraint Updates**: Real-time constraint modification
+- **Performance Statistics**: Constraint checking metrics
+
+**Note**: The current `check_collision()` method only performs simple rectangular exclusion zone checking, not true geometric collision detection.
 
 ## Constraint Types
 
 ### 1. Spatial Boundary Constraints
 
-Define the operational workspace boundaries for the robot.
+Define workspace boundaries using min/max bounds:
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
 import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
 
 # Basic workspace boundaries
-constraint_checker = WorkspaceConstraintChecker(
+checker = WorkspaceConstraintChecker(
     min_bounds=np.array([-1.0, -1.0, 0.0]),  # [x_min, y_min, z_min]
     max_bounds=np.array([1.0, 1.0, 2.0]),    # [x_max, y_max, z_max]
     ground_height=0.0
 )
 ```
 
-**Applications**:
-
-- Define robot's maximum reach envelope
-- Set table/workspace surface limits
-- Implement safety perimeters
-- Restrict vertical working range
-
 ### 2. Exclusion Zone Constraints
 
-Specify regions that the robot must avoid.
+Avoid specified rectangular obstacle regions (simple collision avoidance):
 
 ```python
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
 # Workspace with exclusion zones
-constraint_checker = WorkspaceConstraintChecker(
+checker = WorkspaceConstraintChecker(
     min_bounds=np.array([-2.0, -1.5, 0.0]),
     max_bounds=np.array([2.0, 1.5, 2.0]),
     exclude_zones=[
-        # Obstacle 1: Table
+        # Table obstacle
         (np.array([0.3, -0.5, 0.0]), np.array([1.2, 0.5, 0.8])),
-        # Obstacle 2: Wall section
+        # Wall section
         (np.array([1.8, -1.5, 0.0]), np.array([2.0, 1.5, 2.0]))
     ]
 )
 ```
 
-**Applications**:
+### 3. Configuration-based Setup (Recommended)
 
-- Avoid static obstacles
-- Implement safety zones around humans
-- Protect sensitive equipment
-- Define no-go areas
-
-### 3. Ground Plane Constraints
-
-Handle floor constraints and elevation limits.
+Use DimensionConstraint for easy configuration:
 
 ```python
-# Elevated workspace with ground constraints
-constraint_checker = WorkspaceConstraintChecker(
-    min_bounds=np.array([-1.5, -1.5, 0.1]),  # 10cm above ground
-    max_bounds=np.array([1.5, 1.5, 2.5]),
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Create configuration
+config = DimensionConstraint(
+    min_bounds=np.array([-1.0, -1.0, 0.0]),
+    max_bounds=np.array([1.0, 1.0, 2.0]),
     ground_height=0.0,
-    enforce_ground_clearance=True
+    exclude_zones=[
+        (np.array([0.2, 0.2, 0.0]), np.array([0.4, 0.4, 0.2]))
+    ]
 )
+
+# Create checker from config
+checker = WorkspaceConstraintChecker.from_config(config)
 ```
 
-**Applications**:
+### TODO - Planned Features
 
-- Prevent ground collisions
-- Maintain minimum clearance
-- Handle elevated platforms
-- Implement floor safety margins
-
-### 4. Joint Limit Constraints
-
-Respect robot's physical joint limitations.
+#### Advanced Constraint Features (Not Implemented)
 
 ```python
-# Joint-aware constraint checking
-constraint_checker = WorkspaceConstraintChecker(
-    joint_limits_scale=0.95,        # Use 95% of joint range
-    enforce_joint_limits=True,
-    self_collision_check=True
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
+
+# TODO: These parameters exist in DimensionConstraint but are not implemented
+config = DimensionConstraint(
+    joint_limits_scale=0.95,        # TODO: Joint limit checking not implemented
+    enforce_collision_free=True,    # TODO: Mesh-based collision not implemented  
+    self_collision_check=True       # TODO: Self-collision checking not implemented
 )
 ```
 
-**Applications**:
+**Current Implementation Status**:
 
-- Enforce mechanical joint limits
-- Prevent over-extension
-- Avoid singular configurations
-- Check self-collision potential
+- ✅ **Simple exclusion zones**: Rectangular bounding box obstacle avoidance
+- ❌ **Joint limits**: Physical joint limitation checking not implemented
+- ❌ **Mesh collision**: Advanced geometric collision detection not implemented
+- ❌ **Self-collision**: Robot self-collision validation not implemented
+
+**Planned Features**:
+
+- Enforce mechanical joint limits and prevent over-extension
+- True mesh-based collision detection with environment geometry
+- Self-collision checking between robot links
+- Singular configuration avoidance
 
 ## Usage Examples
 
@@ -135,7 +144,7 @@ checker = WorkspaceConstraintChecker(
     ground_height=0.0
 )
 
-# Generate test points
+# Test points
 test_points = np.array([
     [0.5, 0.5, 0.5],    # Valid point
     [2.0, 0.0, 0.5],    # Outside x boundary
@@ -143,429 +152,264 @@ test_points = np.array([
     [0.8, 0.8, 1.2]     # Valid point
 ])
 
-# Check which points satisfy constraints
-valid_mask = checker.check_bounds(test_points)
-print(f"Valid points: {valid_mask}")  # [True, False, False, True]
+# Check boundaries
+valid_bounds = checker.check_bounds(test_points)
+print(f"Valid bounds: {valid_bounds}")  # [True, False, False, True]
 
-# Filter to keep only valid points
+# Filter valid points
 valid_points = checker.filter_points(test_points)
 print(f"Filtered points shape: {valid_points.shape}")  # (2, 3)
 ```
 
-### Complex Workspace with Obstacles
+### Workspace with Obstacles
 
 ```python
-# Define complex workspace environment
-complex_checker = WorkspaceConstraintChecker(
-    min_bounds=np.array([-2.0, -1.5, 0.05]),
-    max_bounds=np.array([2.0, 1.5, 2.5]),
-    ground_height=0.0,
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Workspace with exclusion zones
+checker = WorkspaceConstraintChecker(
+    min_bounds=np.array([-1.5, -1.5, 0.0]),
+    max_bounds=np.array([1.5, 1.5, 2.0]),
     exclude_zones=[
-        # Central table
-        (np.array([-0.5, -0.8, 0.0]), np.array([0.5, 0.8, 0.9])),
-        # Left wall segment
-        (np.array([-2.0, 1.3, 0.0]), np.array([-1.7, 1.5, 2.5])),
-        # Overhead beam
-        (np.array([-1.0, -0.2, 2.2]), np.array([1.0, 0.2, 2.5]))
+        # Table obstacle
+        (np.array([0.2, -0.4, 0.0]), np.array([0.8, 0.4, 0.8])),
     ]
 )
 
-# Test large point cloud
-num_points = 100000
-random_points = np.random.uniform(
-    low=[-2.5, -2.0, -0.5], 
-    high=[2.5, 2.0, 3.0], 
-    size=(num_points, 3)
-)
-
-# Filter points efficiently
-start_time = time.time()
-valid_points = complex_checker.filter_points(random_points)
-filter_time = time.time() - start_time
-
-print(f"Filtered {num_points} points in {filter_time:.3f}s")
-print(f"Valid points: {len(valid_points)}/{num_points} ({100*len(valid_points)/num_points:.1f}%)")
-```
-
-### Dynamic Constraint Updates
-
-```python
-# Adaptive constraint checking for changing environments
-class DynamicWorkspaceChecker:
-    def __init__(self, base_bounds):
-        self.base_checker = WorkspaceConstraintChecker(
-            min_bounds=base_bounds[0],
-            max_bounds=base_bounds[1]
-        )
-        self.dynamic_obstacles = []
-    
-    def add_temporary_obstacle(self, obstacle_bounds, duration):
-        """Add temporary obstacle that expires after duration."""
-        obstacle = {
-            'bounds': obstacle_bounds,
-            'expires': time.time() + duration
-        }
-        self.dynamic_obstacles.append(obstacle)
-        self.update_constraints()
-    
-    def update_constraints(self):
-        """Update constraints based on current dynamic obstacles."""
-        # Remove expired obstacles
-        current_time = time.time()
-        self.dynamic_obstacles = [
-            obs for obs in self.dynamic_obstacles 
-            if obs['expires'] > current_time
-        ]
-        
-        # Update exclusion zones
-        exclude_zones = [obs['bounds'] for obs in self.dynamic_obstacles]
-        
-        # Create new checker with updated constraints
-        self.base_checker = WorkspaceConstraintChecker(
-            min_bounds=self.base_checker.min_bounds,
-            max_bounds=self.base_checker.max_bounds,
-            exclude_zones=exclude_zones
-        )
-    
-    def check_points(self, points):
-        self.update_constraints()  # Ensure constraints are current
-        return self.base_checker.filter_points(points)
-
-# Usage example
-dynamic_checker = DynamicWorkspaceChecker([
-    np.array([-1.5, -1.5, 0.0]),
-    np.array([1.5, 1.5, 2.0])
+# Test points
+test_points = np.array([
+    [0.0, 0.0, 0.5],    # Valid point
+    [0.5, 0.0, 0.4],    # Inside table (excluded)
+    [1.0, 1.0, 1.0]     # Valid point
 ])
 
-# Add temporary human safety zone
-human_position = np.array([0.5, 0.0, 0.0])
-safety_radius = 0.4
-human_bounds = (
-    human_position - safety_radius,
-    human_position + safety_radius
-)
-dynamic_checker.add_temporary_obstacle(human_bounds, duration=30.0)  # 30 seconds
+# Check collision (simple exclusion zone checking)
+valid_collision = checker.check_collision(test_points)
+print(f"Collision-free: {valid_collision}")  # [True, False, True]
 
-# Check points with dynamic constraints
-workspace_points = generate_workspace_points()
-safe_points = dynamic_checker.check_points(workspace_points)
+# Comprehensive filtering (bounds + collision)
+safe_points = checker.filter_points(test_points)
+print(f"Safe points: {len(safe_points)} out of {len(test_points)}")
 ```
 
-### Performance Optimization
+### Configuration-based Setup
 
 ```python
-# High-performance constraint checking for large datasets
-class OptimizedConstraintChecker:
-    def __init__(self, constraints_config):
-        self.checker = WorkspaceConstraintChecker(**constraints_config)
-        self.batch_size = 50000  # Process in batches
-        
-    def check_large_dataset(self, points, show_progress=True):
-        """Efficiently check constraints for very large point sets."""
-        total_points = len(points)
-        valid_points_list = []
-        
-        for i in range(0, total_points, self.batch_size):
-            batch = points[i:i + self.batch_size]
-            
-            # Process batch
-            valid_batch = self.checker.filter_points(batch)
-            valid_points_list.append(valid_batch)
-            
-            if show_progress and (i // self.batch_size) % 10 == 0:
-                progress = (i + len(batch)) / total_points * 100
-                print(f"Progress: {progress:.1f}%")
-        
-        # Combine results
-        if valid_points_list:
-            return np.vstack(valid_points_list)
-        else:
-            return np.empty((0, 3))
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
 
-# Example with 1 million points
-optimizer = OptimizedConstraintChecker({
-    'min_bounds': np.array([-2.0, -2.0, 0.0]),
-    'max_bounds': np.array([2.0, 2.0, 2.0]),
-    'ground_height': 0.0
-})
+# Create configuration object
+config = DimensionConstraint(
+    min_bounds=np.array([-1.0, -1.0, 0.0]),
+    max_bounds=np.array([1.0, 1.0, 1.5]),
+    ground_height=0.0,
+    exclude_zones=[
+        # Add table obstacle
+        (np.array([0.2, 0.2, 0.0]), np.array([0.6, 0.6, 0.8]))
+    ]
+)
 
-# Generate large dataset
-large_dataset = np.random.uniform(-3, 3, size=(1000000, 3))
+# Create checker from config
+checker = WorkspaceConstraintChecker.from_config(config)
 
-# Process efficiently
-start_time = time.time()
-filtered_results = optimizer.check_large_dataset(large_dataset)
-process_time = time.time() - start_time
+# Add more obstacles dynamically
+checker.add_exclude_zone(
+    min_bounds=np.array([-0.3, 0.7, 0.0]),
+    max_bounds=np.array([0.3, 1.0, 1.2])
+)
 
-print(f"Processed 1M points in {process_time:.2f}s")
-print(f"Rate: {1000000/process_time:.0f} points/second")
+print(f"Total exclusion zones: {checker.get_num_exclude_zones()}")
+```
+
+### Dynamic Obstacle Management
+
+```python
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Add and remove obstacles dynamically
+checker = WorkspaceConstraintChecker(
+    min_bounds=np.array([-1.0, -1.0, 0.0]),
+    max_bounds=np.array([1.0, 1.0, 1.5])
+)
+
+# Add obstacles
+checker.add_exclude_zone(
+    min_bounds=np.array([0.2, 0.2, 0.0]),
+    max_bounds=np.array([0.4, 0.4, 0.8])
+)
+
+print(f"Exclusion zones: {checker.get_num_exclude_zones()}")
+
+# Clear all obstacles
+checker.clear_exclude_zones()
+print(f"After clearing: {checker.get_num_exclude_zones()} zones")
 ```
 
 ### Integration with Workspace Analysis
 
 ```python
-# Complete workspace analysis with constraints
-def analyze_constrained_workspace(robot, constraint_config, sampling_config):
-    """Perform workspace analysis respecting all constraints."""
-    
-    # Create constraint checker
-    checker = WorkspaceConstraintChecker(**constraint_config)
-    
-    # Generate workspace samples
-    joint_samples = generate_joint_samples(robot, sampling_config)
-    
-    # Convert to Cartesian poses
-    poses = []
-    for joint_config in joint_samples:
-        try:
-            pose = robot.forward_kinematics(joint_config)
-            poses.append(pose[:3, 3])  # Extract position
-        except:
-            continue  # Skip invalid configurations
-    
-    poses = np.array(poses)
-    
-    # Apply constraints
-    valid_poses = checker.filter_points(poses)
-    
-    # Calculate metrics
-    total_samples = len(poses)
-    valid_samples = len(valid_poses)
-    coverage = valid_samples / total_samples if total_samples > 0 else 0
-    
-    # Calculate workspace volume (approximate)
-    if len(valid_poses) > 100:
-        # Use convex hull for volume estimation
-        from scipy.spatial import ConvexHull
-        try:
-            hull = ConvexHull(valid_poses)
-            workspace_volume = hull.volume
-        except:
-            workspace_volume = 0
-    else:
-        workspace_volume = 0
-    
-    return {
-        'total_samples': total_samples,
-        'valid_samples': valid_samples,
-        'coverage_ratio': coverage,
-        'workspace_volume': workspace_volume,
-        'valid_poses': valid_poses,
-        'constraint_stats': checker.get_statistics()
-    }
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
 
-# Usage
-constraint_config = {
-    'min_bounds': np.array([-1.2, -1.2, 0.1]),
-    'max_bounds': np.array([1.2, 1.2, 1.8]),
-    'exclude_zones': [
-        (np.array([0.3, -0.4, 0.0]), np.array([0.8, 0.4, 0.7]))
-    ],
-    'ground_height': 0.0
-}
+# Define workspace constraints
+constraints = DimensionConstraint(
+    min_bounds=np.array([-0.8, -0.6, 0.0]),
+    max_bounds=np.array([0.8, 0.6, 1.2]),
+    exclude_zones=[
+        # Table obstacle
+        (np.array([0.2, 0.1, 0.0]), np.array([0.6, 0.4, 0.8]))
+    ]
+)
 
-sampling_config = {
-    'num_samples': 50000,
-    'strategy': 'uniform'
-}
+# Create checker
+checker = WorkspaceConstraintChecker.from_config(constraints)
 
-results = analyze_constrained_workspace(my_robot, constraint_config, sampling_config)
-print(f"Workspace coverage: {results['coverage_ratio']:.3f}")
-print(f"Estimated volume: {results['workspace_volume']:.4f} m³")
+# Filter workspace points
+workspace_points = np.random.uniform(-1, 1, size=(10000, 3))
+valid_points = checker.filter_points(workspace_points)
+
+print(f"Valid workspace points: {len(valid_points)}/{len(workspace_points)}")
+print(f"Coverage: {len(valid_points)/len(workspace_points)*100:.1f}%")
 ```
 
 ## Best Practices
 
-### Constraint Design Guidelines
+### Choosing Bounds
 
 ```python
-# Guidelines for effective constraint design
-class ConstraintDesignGuidelines:
-    @staticmethod
-    def create_conservative_bounds(robot_reach, safety_margin=0.1):
-        """Create conservative workspace bounds with safety margins."""
-        return {
-            'min_bounds': np.array([-robot_reach + safety_margin] * 3),
-            'max_bounds': np.array([robot_reach - safety_margin] * 3),
-            'ground_height': safety_margin
-        }
-    
-    @staticmethod
-    def validate_constraint_config(config):
-        """Validate constraint configuration for common issues."""
-        issues = []
-        
-        if 'min_bounds' in config and 'max_bounds' in config:
-            if not np.all(config['min_bounds'] < config['max_bounds']):
-                issues.append("min_bounds should be less than max_bounds")
-        
-        if 'exclude_zones' in config:
-            for i, (zone_min, zone_max) in enumerate(config['exclude_zones']):
-                if not np.all(zone_min < zone_max):
-                    issues.append(f"Exclude zone {i} has invalid bounds")
-        
-        return issues
-    
-    @staticmethod
-    def optimize_for_performance(config, expected_points):
-        """Optimize configuration for expected point count."""
-        optimized = config.copy()
-        
-        if expected_points > 100000:
-            # Use simpler constraints for large datasets
-            optimized['fast_mode'] = True
-        
-        return optimized
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Conservative workspace bounds
+def create_safe_bounds(robot_reach, safety_margin=0.1):
+    """Create workspace bounds with safety margins."""
+    return {
+        'min_bounds': np.array([-robot_reach + safety_margin] * 3),
+        'max_bounds': np.array([robot_reach - safety_margin] * 3),
+        'ground_height': safety_margin
+    }
+
+# Example usage
+bounds = create_safe_bounds(robot_reach=1.2, safety_margin=0.1)
+checker = WorkspaceConstraintChecker(**bounds)
 ```
 
-### Error Handling and Validation
+### Validation
 
 ```python
-# Robust constraint checking with error handling
-class RobustConstraintChecker:
-    def __init__(self, config):
-        self.config = self.validate_and_sanitize_config(config)
-        self.checker = WorkspaceConstraintChecker(**self.config)
-        
-    def validate_and_sanitize_config(self, config):
-        """Validate and sanitize configuration parameters."""
-        sanitized = config.copy()
-        
-        # Ensure bounds are numpy arrays
-        if 'min_bounds' in config and config['min_bounds'] is not None:
-            sanitized['min_bounds'] = np.array(config['min_bounds'])
-        
-        if 'max_bounds' in config and config['max_bounds'] is not None:
-            sanitized['max_bounds'] = np.array(config['max_bounds'])
-        
-        # Validate dimensions
-        for key in ['min_bounds', 'max_bounds']:
-            if key in sanitized and sanitized[key] is not None:
-                if len(sanitized[key]) != 3:
-                    raise ValueError(f"{key} must have exactly 3 dimensions")
-        
-        return sanitized
+import numpy as np
+
+def validate_bounds(min_bounds, max_bounds):
+    """Validate constraint bounds."""
+    if min_bounds is not None and max_bounds is not None:
+        if not np.all(min_bounds < max_bounds):
+            raise ValueError("min_bounds must be less than max_bounds")
     
-    def safe_filter_points(self, points):
-        """Safely filter points with comprehensive error handling."""
-        try:
-            # Validate input
-            points = np.asarray(points)
-            if points.ndim != 2 or points.shape[1] != 3:
-                raise ValueError("Points must be Nx3 array")
-            
-            # Check for invalid values
-            if not np.isfinite(points).all():
-                logger.log_warning("Removing non-finite points")
-                finite_mask = np.isfinite(points).all(axis=1)
-                points = points[finite_mask]
-            
-            # Apply constraints
-            return self.checker.filter_points(points)
-            
-        except Exception as e:
-            logger.log_error(f"Constraint checking failed: {e}")
-            return np.empty((0, 3))  # Return empty array on failure
+    for bounds in [min_bounds, max_bounds]:
+        if bounds is not None and len(bounds) != 3:
+            raise ValueError("Bounds must have exactly 3 dimensions")
+
+# Use validation
+min_bounds = np.array([-1, -1, 0])
+max_bounds = np.array([1, 1, 2])
+validate_bounds(min_bounds, max_bounds)
 ```
 
 ## API Reference
 
-### IConstraintChecker
+### WorkspaceConstraintChecker
 
-Interface protocol defining the constraint checker contract.
+Main constraint checker implementation.
+
+#### Constructor Parameters
+
+- **min_bounds**: `Optional[np.ndarray]` - Minimum bounds [x, y, z]
+- **max_bounds**: `Optional[np.ndarray]` - Maximum bounds [x, y, z]
+- **ground_height**: `float` - Ground plane height (default: 0.0)
+- **exclude_zones**: `List[Tuple[np.ndarray, np.ndarray]]` - Exclusion zones
+- **device**: `Optional[torch.device]` - PyTorch device
 
 #### Methods
 
-- **check_bounds(points) -> bool array**: Check which points satisfy bounds
-- **filter_points(points) -> filtered array**: Keep only constraint-satisfying points
+- **check_bounds(points)**: Check if points are within bounds
+- **check_collision(points)**: Check if points avoid rectangular exclusion zones (simple collision)
+- **filter_points(points)**: Filter points by all constraints
+- **add_exclude_zone(min_bounds, max_bounds)**: Add exclusion zone
+- **clear_exclude_zones()**: Remove all exclusion zones
+- **get_num_exclude_zones()**: Get number of exclusion zones
 
-### BaseConstraintChecker
+#### Class Methods
 
-Abstract base class for constraint implementations.
+- **from_config(config)**: Create checker from DimensionConstraint
 
-#### BaseConstraintChecker Parameters
+### DimensionConstraint
 
-- **min_bounds**: `Optional[np.ndarray]` - Minimum workspace bounds [x, y, z]
-- **max_bounds**: `Optional[np.ndarray]` - Maximum workspace bounds [x, y, z]  
-- **ground_height**: `float` - Ground plane elevation (default: 0.0)
-- **device**: `Optional[torch.device]` - PyTorch device for computations
+Configuration dataclass for constraints.
 
-#### BaseConstraintChecker Methods
-
-- **check_bounds(points) -> Union[torch.Tensor, np.ndarray]**: Bounds checking
-- **filter_points(points) -> Union[torch.Tensor, np.ndarray]**: Point filtering
-- **validate_bounds() -> bool**: Validate constraint configuration
-
-### WorkspaceConstraintChecker
-
-Concrete implementation of workspace constraints.
-
-#### WorkspaceConstraintChecker Parameters
+#### Parameters
 
 - **min_bounds**: `Optional[np.ndarray]` - Workspace minimum bounds
 - **max_bounds**: `Optional[np.ndarray]` - Workspace maximum bounds
-- **exclude_zones**: `List[Tuple[np.ndarray, np.ndarray]]` - Exclusion zone list
+- **exclude_zones**: `List[Tuple[np.ndarray, np.ndarray]]` - Exclusion zones
 - **ground_height**: `float` - Ground plane height (default: 0.0)
-- **joint_limits_scale**: `float` - Joint range scaling factor (default: 1.0)
-- **enforce_collision_free**: `bool` - Enable collision checking (default: False)
-- **self_collision_check**: `bool` - Check self-collisions (default: False)
+- **joint_limits_scale**: `float` - Joint limits scaling (TODO: not implemented)
+- **enforce_collision_free**: `bool` - Advanced collision checking (TODO: not implemented)
+- **self_collision_check**: `bool` - Self-collision check (TODO: not implemented)
 
-#### WorkspaceConstraintChecker Methods
+**Note**: These advanced collision detection features are defined in the config but not yet used by WorkspaceConstraintChecker.
 
-- **add_exclusion_zone(min_bounds, max_bounds) -> None**: Add new exclusion zone
-- **remove_exclusion_zone(index) -> None**: Remove exclusion zone by index
-- **get_statistics() -> Dict**: Get constraint checking statistics
-- **set_safety_margins(margins) -> None**: Configure safety margins
+## Quick Start
 
-#### Performance Characteristics
-
-- **Bounds Check**: O(1) per point for simple bounds
-- **Exclusion Zones**: O(k) per point where k is number of zones
-- **Memory Usage**: Constant overhead + input array size
-- **Batch Processing**: Vectorized operations for efficiency
-
-## Configuration Examples
-
-### Minimal Configuration
+### Basic Setup
 
 ```python
-# Simplest constraint setup
-simple_checker = WorkspaceConstraintChecker(
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Simple boundary constraints
+checker = WorkspaceConstraintChecker(
     min_bounds=np.array([-1, -1, 0]),
     max_bounds=np.array([1, 1, 1])
 )
 ```
 
-### Production Configuration
+### With Obstacles
 
 ```python
-# Production environment with safety margins
-production_checker = WorkspaceConstraintChecker(
-    min_bounds=np.array([-1.2, -1.2, 0.05]),    # 5cm ground clearance
-    max_bounds=np.array([1.2, 1.2, 1.8]),       # Conservative height limit
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Workspace with exclusion zones
+checker = WorkspaceConstraintChecker(
+    min_bounds=np.array([-1.2, -1.2, 0.05]),
+    max_bounds=np.array([1.2, 1.2, 1.8]),
     exclude_zones=[
-        # Safety zone around operator position
-        (np.array([-0.3, 0.8, 0.0]), np.array([0.3, 1.2, 2.0]))
-    ],
-    ground_height=0.0,
-    joint_limits_scale=0.95                       # 95% of joint range
+        # Table obstacle
+        (np.array([0.3, 0.2, 0.0]), np.array([0.8, 0.7, 0.8]))
+    ]
 )
 ```
 
-### Research Configuration
+### Using Configuration (Recommended)
 
 ```python
-# Detailed research setup with comprehensive constraints
-research_checker = WorkspaceConstraintChecker(
-    min_bounds=np.array([-2.0, -2.0, -0.1]),
-    max_bounds=np.array([2.0, 2.0, 2.5]),
+import numpy as np
+from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+
+# Create config
+config = DimensionConstraint(
+    min_bounds=np.array([-1.0, -1.0, 0.0]),
+    max_bounds=np.array([1.0, 1.0, 1.5]),
     exclude_zones=[
-        # Multiple obstacles for complex environment
-        (np.array([0.5, -0.5, 0.0]), np.array([1.0, 0.5, 1.0])),
-        (np.array([-1.0, 1.0, 0.0]), np.array([-0.5, 1.5, 1.5])),
-    ],
-    ground_height=-0.05,
-    enforce_collision_free=True,
-    self_collision_check=True
+        (np.array([0.2, 0.2, 0.0]), np.array([0.4, 0.4, 0.8]))
+    ]
 )
+
+# Create checker
+checker = WorkspaceConstraintChecker.from_config(config)
 ```
