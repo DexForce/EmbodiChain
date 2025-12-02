@@ -8,7 +8,6 @@ on:
 
 jobs:
   lint:
-    if: github.event_name == 'pull_request'
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -38,6 +37,7 @@ jobs:
           fi
 
   build:
+    needs: lint
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
