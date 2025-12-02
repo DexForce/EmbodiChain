@@ -37,6 +37,10 @@ from embodichain.lab.sim.utility.workspace_analyzer.visualizers.sphere_visualize
     SphereVisualizer,
 )
 
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.axis_visualizer import (
+    AxisVisualizer,
+)
+
 from embodichain.utils import logger
 
 __all__ = [
@@ -108,6 +112,7 @@ class VisualizerFactory:
         self._visualizers[VisualizationType.POINT_CLOUD.value] = PointCloudVisualizer
         self._visualizers[VisualizationType.VOXEL.value] = VoxelVisualizer
         self._visualizers[VisualizationType.SPHERE.value] = SphereVisualizer
+        self._visualizers[VisualizationType.AXIS.value] = AxisVisualizer
 
         logger.log_debug(
             f"Registered built-in visualizers: {list(self._visualizers.keys())}"

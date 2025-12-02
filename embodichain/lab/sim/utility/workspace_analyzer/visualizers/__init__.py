@@ -34,6 +34,10 @@ from embodichain.lab.sim.utility.workspace_analyzer.visualizers.sphere_visualize
     SphereVisualizer,
 )
 
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers.axis_visualizer import (
+    AxisVisualizer,
+)
+
 from embodichain.lab.sim.utility.workspace_analyzer.visualizers.visualizer_factory import (
     VisualizerFactory,
     create_visualizer,
@@ -46,6 +50,7 @@ __all__ = [
     "PointCloudVisualizer",
     "VoxelVisualizer",
     "SphereVisualizer",
+    "AxisVisualizer",
     "VisualizerFactory",
     "create_visualizer",
 ]

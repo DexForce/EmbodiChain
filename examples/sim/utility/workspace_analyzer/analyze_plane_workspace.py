@@ -84,7 +84,12 @@ if __name__ == "__main__":
         plane_normal=torch.tensor([0.0, 0.0, 1.0]),
         plane_point=torch.tensor([0.0, 0.0, 1.2]),
         # plane_bounds=torch.tensor([[-0.5, 0.5], [-0.5, 0.5]]),
-        visualization=VisualizationConfig(show_unreachable_points=True, point_size=8.0),
+        reference_pose=left_arm_pose[0]
+        .cpu()
+        .numpy(),  # Use computed left arm pose as reference
+        visualization=VisualizationConfig(
+            show_unreachable_points=False, vis_type="axis"
+        ),
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim

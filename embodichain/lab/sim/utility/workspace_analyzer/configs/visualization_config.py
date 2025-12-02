@@ -23,7 +23,7 @@ class VisualizationType(Enum):
     POINT_CLOUD = "point_cloud"
     VOXEL = "voxel"
     SPHERE = "sphere"
-    # AXIS = "axes"
+    AXIS = "axis"
     # MESH = "mesh"
     # HEATMAP = "heatmap"
 
@@ -36,7 +36,19 @@ class VisualizationConfig:
     """Enable or disable visualization."""
 
     vis_type: Union[VisualizationType, str] = VisualizationType.POINT_CLOUD
-    """Type of visualization to use. Can be VisualizationType enum or string."""
+    """Type of visualization to use. Can be VisualizationType enum or string.
+    
+    Available visualization types:
+    - POINT_CLOUD: Fast point cloud rendering, good for large datasets
+    - VOXEL: Volumetric voxel grid representation for occupancy mapping
+    - SPHERE: Smooth sphere rendering for publication-quality figures
+    - AXIS: Coordinate frame visualization for poses and transformations
+    
+    Examples:
+        vis_type = VisualizationType.SPHERE
+        vis_type = "point_cloud"
+        vis_type = "axis"  # For coordinate frames
+    """
 
     voxel_size: float = 0.05
     """Voxel size for downsampling."""
@@ -64,6 +76,12 @@ class VisualizationConfig:
 
     sphere_resolution: int = 10
     """Sphere mesh resolution for sphere visualization."""
+
+    axis_length: float = 0.05
+    """Length of coordinate axes for axis visualization."""
+
+    axis_size: float = 0.003
+    """Thickness/size of coordinate axes for axis visualization."""
 
     show_unreachable_points: bool = True
     """Whether to show unreachable points in Cartesian space and Plane sampling modes.

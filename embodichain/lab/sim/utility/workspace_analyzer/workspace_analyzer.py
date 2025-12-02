@@ -1009,16 +1009,29 @@ class WorkspaceAnalyzer:
             if reference_pose.dim() == 2:  # Shape: (4, 4) -> (1, 4, 4)
                 reference_pose = reference_pose.unsqueeze(0)
             current_ee_pose = reference_pose  # Shape: (1, 4, 4)
+            logger.log_info("Using provided reference pose for IK target orientation")
         else:
             # Fallback: compute current end-effector pose from joint configuration
-            current_qpos = self.robot.get_qpos()[0][
-                self.robot.get_joint_ids(self.control_part_name)
-            ]
-            current_ee_pose = self.robot.compute_fk(
-                name=self.control_part_name,
-                qpos=current_qpos.unsqueeze(0),
-                to_matrix=True,
-            )  # Shape: (1, 4, 4)
+            try:
+                current_qpos = self.robot.get_qpos()[0][
+                    self.robot.get_joint_ids(self.control_part_name)
+                ]
+                current_ee_pose = self.robot.compute_fk(
+                    name=self.control_part_name,
+                    qpos=current_qpos.unsqueeze(0),
+                    to_matrix=True,
+                )  # Shape: (1, 4, 4)
+                logger.log_info(
+                    "Computing reference pose from current robot configuration"
+                )
+            except Exception as e:
+                logger.log_warning(f"Failed to compute current robot pose: {e}")
+                # Create identity pose as fallback
+                current_ee_pose = torch.eye(4, device=self.device).unsqueeze(0)
+                current_ee_pose[0, :3, 3] = torch.tensor(
+                    [0.5, 0.0, 1.0], device=self.device
+                )  # Default position
+                logger.log_info("Using default identity pose as fallback")
 
             # Print current joint configuration and computed pose
             pose_np = current_ee_pose[0].cpu().numpy()
@@ -1610,7 +1623,20 @@ class WorkspaceAnalyzer:
             common_kwargs["sphere_resolution"] = getattr(
                 self.config.visualization, "sphere_resolution", 10
             )
-        # For other visualization types (AXIS, MESH, HEATMAP), use only common arguments
+        elif vis_type == VisualizationType.AXIS:
+            common_kwargs["axis_length"] = getattr(
+                self.config.visualization, "axis_length", 0.05
+            )
+            common_kwargs["axis_size"] = getattr(
+                self.config.visualization, "axis_size", 0.003
+            )
+            # Pass reference pose if available
+            if (
+                hasattr(self.config, "reference_pose")
+                and self.config.reference_pose is not None
+            ):
+                common_kwargs["reference_pose"] = self.config.reference_pose
+        # For other visualization types (MESH, HEATMAP), use only common arguments
 
         return factory.create_visualizer(viz_type=vis_type, **common_kwargs)
 

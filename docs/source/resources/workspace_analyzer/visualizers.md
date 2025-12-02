@@ -15,7 +15,7 @@ The visualizers module provides visualization tools for analyzing robotic worksp
 The visualizers module enables:
 
 - **Workspace reachability visualization** with multiple rendering styles
-- **3D point cloud, voxel, and sphere representations**
+- **3D point cloud, voxel, sphere, and coordinate axis representations**
 - **Multiple backends**: Open3D, Matplotlib, and simulation environments
 - **Factory pattern** for easy visualizer creation
 
@@ -57,6 +57,18 @@ visualizer = SphereVisualizer(backend='open3d', sphere_radius=0.005)
 
 **Best for**: Publication-quality figures, smooth appearance
 
+### 4. Axis Visualizer ✅
+
+Coordinate frame visualization for poses and transformations.
+
+```python
+from embodichain.lab.sim.utility.workspace_analyzer.visualizers import AxisVisualizer
+
+visualizer = AxisVisualizer(backend='sim_manager', sim_manager=sim, axis_length=0.15)
+```
+
+**Best for**: Robot poses, end-effector frames, coordinate system visualization
+
 ## Usage Examples
 
 ### Basic Usage
@@ -82,6 +94,9 @@ from embodichain.lab.sim.utility.workspace_analyzer.visualizers import Visualize
 
 factory = VisualizerFactory()
 visualizer = factory.create_visualizer('voxel', backend='open3d', voxel_size=0.02)
+
+# Create axis visualizer
+axis_viz = factory.create_visualizer('axis', backend='sim_manager', sim_manager=sim)
 ```
 
 ## Backend Support
@@ -100,20 +115,32 @@ visualizer = factory.create_visualizer('voxel', backend='open3d', voxel_size=0.0
 - **PointCloudVisualizer**: Fast rendering for large datasets
 - **VoxelVisualizer**: Volumetric representation for occupancy maps
 - **SphereVisualizer**: Smooth visualization for publication figures
+- **AxisVisualizer**: Coordinate frame visualization for poses
 
 **Common Parameters**:
 
 - **PointCloud**: `backend`, `point_size`
 - **Voxel**: `backend`, `voxel_size`
 - **Sphere**: `backend`, `sphere_radius`, `sphere_resolution`
+- **Axis**: `backend`, `axis_length`, `axis_size`, `sim_manager`
 
 **Quick Creation**:
 
 ```python
 from embodichain.lab.sim.utility.workspace_analyzer.visualizers import create_visualizer
+import numpy as np
 
 # Create any visualizer
 visualizer = create_visualizer('point_cloud', backend='open3d', point_size=2.0)
 visualizer = create_visualizer('voxel', backend='open3d', voxel_size=0.01)
 visualizer = create_visualizer('sphere', backend='open3d', sphere_radius=0.005)
+
+# Create axis visualizer for coordinate frames
+axis_viz = create_visualizer('axis', backend='sim_manager', sim_manager=sim, axis_length=0.05)
+
+# Visualize coordinate frame at robot end-effector
+pose = np.eye(4)
+pose[:3, 3] = [1.0, 0.5, 1.2]  # Set position
+axis_viz.visualize(pose, name_prefix="end_effector_frame")
+axis_viz.show()
 ```

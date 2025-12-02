@@ -145,7 +145,7 @@ class VoxelVisualizer(BaseVisualizer):
         cube_handles = []
         for i, point in enumerate(points):
             cube_handle = env.create_cube(l=voxel_size, w=voxel_size, h=voxel_size)
-            cube_handle.set_location(point)
+            cube_handle.set_location(float(point[0]), float(point[1]), float(point[2]))
             # TODO: Unsupported in current sim_manager API
             # cube_handle.set_color(colors[i].tolist())
             cube_handle.set_name(f"workspace_cube_{i}")

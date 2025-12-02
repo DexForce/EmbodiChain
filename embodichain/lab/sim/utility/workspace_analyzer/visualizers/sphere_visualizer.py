@@ -181,7 +181,10 @@ class SphereVisualizer(BaseVisualizer):
         sphere_handles = []
         for i, point in enumerate(points):
             sphere_handle = env.create_sphere(radius=sphere_radius, resolution=10)
-            sphere_handle.set_location(point)
+            # Unpack array to individual x, y, z coordinates
+            sphere_handle.set_location(
+                float(point[0]), float(point[1]), float(point[2])
+            )
             # TODO: Unsupported in current sim_manager API
             # sphere_handle.set_color(colors[i].tolist())
             sphere_handle.set_name(f"workspace_sphere_{i}")
