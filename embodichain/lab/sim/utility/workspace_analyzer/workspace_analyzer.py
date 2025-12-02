@@ -454,7 +454,7 @@ class WorkspaceAnalyzer:
                 logger.log_info(
                     "Cartesian space mode: Using default inscribed Sphere constraint from dynamically computed bounds"
                 )
-                return SphereConstraint.from_bounds_inscribed(
+                return BoxConstraint.from_bounds_inscribed(
                     bounds=dynamic_bounds, device=self.device
                 )
 
@@ -784,10 +784,15 @@ class WorkspaceAnalyzer:
                     device=self.device,
                 )
 
-        # Sample from Cartesian space
-        cartesian_samples = self.sampler.sample(
-            bounds=cartesian_bounds, num_samples=num_samples
-        )
+        # Sample from Cartesian space using constraint (if available) or bounds
+        if self.sampler.constraint is not None:
+            # Use constraint-based sampling (e.g., sphere constraint with cube filtering)
+            cartesian_samples = self.sampler.sample(num_samples=num_samples)
+        else:
+            # Fallback to bounds-based sampling
+            cartesian_samples = self.sampler.sample(
+                bounds=cartesian_bounds, num_samples=num_samples
+            )
 
         # Check how many samples pass workspace constraints
         valid_bounds = self.constraint_checker.check_bounds(cartesian_samples)
@@ -843,19 +848,58 @@ class WorkspaceAnalyzer:
         else:
             plane_bounds = plane_bounds.to(self.device)
 
-        # Use existing sampler to generate 2D samples directly
-        plane_samples_2d = self.sampler.sample(num_samples, bounds=plane_bounds)
-
-        # Convert to 3D coordinates
-        plane_samples_3d = self._plane_to_world_optimized(
-            plane_samples_2d, plane_normal, plane_point
-        )
+        # Generate samples using constraint (if available) or fallback to 2D plane sampling
+        if self.sampler.constraint is not None:
+            # Use constraint-based sampling in 3D space, then project to plane
+            constraint_samples_3d = self.sampler.sample(num_samples=num_samples)
+            # Project to the specified plane
+            plane_samples_3d = self._project_to_plane(
+                constraint_samples_3d, plane_normal, plane_point
+            )
+        else:
+            # Fallback: generate 2D samples and convert to 3D
+            plane_samples_2d = self.sampler.sample(num_samples, bounds=plane_bounds)
+            plane_samples_3d = self._plane_to_world_optimized(
+                plane_samples_2d, plane_normal, plane_point
+            )
 
         logger.log_info(
             f"Generated {num_samples} plane samples using {self.sampler.get_strategy_name()}"
         )
 
         return plane_samples_3d
+
+    def _project_to_plane(
+        self,
+        points_3d: torch.Tensor,
+        plane_normal: torch.Tensor,
+        plane_point: torch.Tensor,
+    ) -> torch.Tensor:
+        """Project 3D points onto a specified plane.
+
+        Args:
+            points_3d: 3D points to project, shape (num_samples, 3)
+            plane_normal: Normal vector of the plane [nx, ny, nz]
+            plane_point: A point on the plane [x, y, z]
+
+        Returns:
+            Projected 3D points on the plane, shape (num_samples, 3)
+        """
+        # Normalize the plane normal
+        plane_normal = plane_normal / torch.norm(plane_normal)
+
+        # Vector from plane_point to each 3D point
+        vectors_to_points = points_3d - plane_point.unsqueeze(0)
+
+        # Project vectors onto plane normal (signed distance from plane)
+        distances = torch.sum(vectors_to_points * plane_normal.unsqueeze(0), dim=1)
+
+        # Project points onto plane by subtracting the normal component
+        projected_points = points_3d - distances.unsqueeze(1) * plane_normal.unsqueeze(
+            0
+        )
+
+        return projected_points
 
     def _plane_to_world_optimized(
         self,
@@ -1456,7 +1500,7 @@ class WorkspaceAnalyzer:
                 "joint_configurations": best_configs,
                 "success_rates": success_rates,
                 "reachability_mask": reachability_mask,
-                "num_samples": num_samples or self.config.sampling.num_samples,
+                "num_samples": len(cartesian_samples),
                 "num_reachable": len(reachable_points),
                 "constraint_statistics": {
                     "all_points": constraint_stats_all,
@@ -1737,8 +1781,26 @@ class WorkspaceAnalyzer:
 
         # Check if we have current_mode attribute (set during analyze)
         if not hasattr(self, "current_mode"):
-            # Fallback: assume all points are reachable (green)
-            colors[:, 1] = 1.0  # Green
+            # Fallback: color based on available reachability information
+            if (
+                hasattr(self, "reachability_mask")
+                and self.reachability_mask is not None
+            ):
+                reachability_mask_np = self.reachability_mask.cpu().numpy()
+                if len(reachability_mask_np) == num_points:
+                    colors[reachability_mask_np, 1] = 1.0  # Green for reachable
+                    colors[~reachability_mask_np, 0] = 1.0  # Red for unreachable
+                    logger.log_debug("Using available reachability mask for coloring")
+                else:
+                    colors[:, 1] = 1.0  # Green fallback
+                    logger.log_debug(
+                        "Reachability mask size mismatch, using green fallback"
+                    )
+            else:
+                colors[:, 1] = 1.0  # Green fallback
+                logger.log_debug(
+                    "No reachability information available, using green fallback"
+                )
             return colors, sizes
 
         if self.current_mode == AnalysisMode.JOINT_SPACE:
@@ -1758,13 +1820,52 @@ class WorkspaceAnalyzer:
             )
             if self.success_rates is not None and hasattr(self, "reachability_mask"):
                 if filtered_to_reachable:
-                    # Points have been pre-filtered to only include reachable ones
-                    # All points should be colored as reachable (green, large)
-                    colors[:, 1] = 1.0  # All green
-                    sizes[:] = self.config.visualization.point_size * 1.5  # All large
-                    logger.log_debug(
-                        f"Coloring {num_points} pre-filtered reachable points (green, large) in {mode_name} mode"
-                    )
+                    # Points have been pre-filtered, but we still need to check IK reachability
+                    # Only color as green if we have verified IK solutions
+                    if (
+                        hasattr(self, "reachability_mask")
+                        and self.reachability_mask is not None
+                    ):
+                        # Use the actual IK reachability results
+                        reachability_mask_np = self.reachability_mask.cpu().numpy()
+                        if len(reachability_mask_np) == num_points:
+                            # Apply the actual reachability coloring
+                            reachable_indices = reachability_mask_np
+                            colors[reachable_indices, 1] = 1.0  # Green for IK-reachable
+                            sizes[reachable_indices] = (
+                                self.config.visualization.point_size * 1.5
+                            )
+
+                            unreachable_indices = ~reachability_mask_np
+                            colors[
+                                unreachable_indices, 0
+                            ] = 1.0  # Red for IK-unreachable
+                            sizes[unreachable_indices] = (
+                                self.config.visualization.point_size * 0.7
+                            )
+
+                            num_reachable = np.sum(reachable_indices)
+                            num_unreachable = np.sum(unreachable_indices)
+                            logger.log_debug(
+                                f"Coloring {num_reachable} IK-reachable points (green) and "
+                                f"{num_unreachable} IK-unreachable points (red) in {mode_name} mode"
+                            )
+                        else:
+                            # Fallback: color based on geometric constraint only
+                            colors[:, 1] = 1.0  # All green (geometrically valid)
+                            sizes[:] = self.config.visualization.point_size * 1.5
+                            logger.log_warning(
+                                f"IK reachability mask length mismatch. "
+                                f"Coloring {num_points} geometrically valid points (green) in {mode_name} mode"
+                            )
+                    else:
+                        # No IK verification available, assume geometric validity only
+                        colors[:, 1] = 1.0  # All green (geometrically valid)
+                        sizes[:] = self.config.visualization.point_size * 1.5
+                        logger.log_debug(
+                            f"No IK verification available. "
+                            f"Coloring {num_points} geometrically valid points (green) in {mode_name} mode"
+                        )
                 else:
                     # Original logic for showing both reachable and unreachable points
                     reachability_mask_np = self.reachability_mask.cpu().numpy()

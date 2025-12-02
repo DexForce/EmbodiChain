@@ -134,36 +134,97 @@ class SphereConstraint(GeometricConstraint):
         radius_sq_with_tolerance = (self.radius + tolerance) ** 2
         return distances_sq <= radius_sq_with_tolerance
 
-    def sample_uniform(self, num_samples: int) -> torch.Tensor:
-        """Generate uniformly distributed samples within the sphere.
+    def sample_uniform(
+        self, num_samples: int, samples_per_dim: Optional[int] = None
+    ) -> torch.Tensor:
+        """Generate samples within the sphere using cube-based grid filtering.
 
-        Uses the standard algorithm for uniform sampling in n-dimensional ball:
-        1. Sample direction uniformly on unit sphere using Gaussian method
-        2. Sample radius with appropriate distribution: r^(1/n) for uniform volume
+        This method generates a uniform grid in the circumscribed cube and filters
+        out points outside the sphere. This ensures that the sampling is based on
+        the underlying cubic grid structure.
 
         Args:
-            num_samples: Number of samples to generate.
+            num_samples: Target number of samples to generate (used for estimation if samples_per_dim not provided).
+            samples_per_dim: Number of grid points per dimension. If provided, this
+                           controls the exact grid density, overriding num_samples.
 
         Returns:
-            Tensor of shape (num_samples, n_dims) containing uniformly sampled points.
+            Tensor containing grid-filtered samples within the sphere.
+            The actual number of samples depends on grid density and sphere coverage.
         """
         if num_samples <= 0:
             raise ValueError(f"num_samples must be positive, got {num_samples}")
 
-        # Step 1: Generate random directions on unit sphere using Gaussian method
-        # Sample from standard normal distribution and normalize
-        directions = torch.randn(num_samples, self.n_dims, device=self.device)
-        directions = directions / torch.norm(directions, dim=1, keepdim=True)
+        bounds = self.get_bounds()
+        n_dims = bounds.shape[0]
 
-        # Step 2: Sample radial distances for uniform distribution in n-ball
-        # For uniform distribution in n-dimensional ball, use r^(1/n) scaling
-        u = torch.rand(num_samples, device=self.device)  # uniform [0, 1]
-        radii = self.radius * (u ** (1.0 / self.n_dims))
+        if samples_per_dim is not None:
+            # Use explicitly provided grid density
+            grid_density = samples_per_dim
+        else:
+            # Calculate grid density to get sufficient sampling for IK analysis
+            # Use higher density to ensure adequate coverage for workspace analysis
+            acceptance_rate = self._estimate_cube_acceptance_rate()
+            # Increase multiplier for better IK coverage
+            target_grid_samples = max(
+                num_samples, int(num_samples / max(acceptance_rate, 0.1) * 2.0)
+            )
+            grid_density = max(
+                10, int(np.ceil(target_grid_samples ** (1.0 / n_dims)))
+            )  # minimum 10 per dim
 
-        # Step 3: Combine direction and radius
-        samples = self.center + directions * radii.unsqueeze(1)
+        # Generate uniform grid in bounding cube
+        grid_samples = self._create_cube_grid(bounds, grid_density)
+
+        # Filter samples within sphere
+        valid_mask = self.contains(grid_samples)
+        valid_samples = grid_samples[valid_mask]
+
+        return valid_samples
+
+    def _create_cube_grid(
+        self, bounds: torch.Tensor, samples_per_dim: int
+    ) -> torch.Tensor:
+        """Create uniform grid in the bounding cube.
+
+        Args:
+            bounds: Tensor of shape (n_dims, 2) containing [lower, upper] bounds.
+            samples_per_dim: Number of samples per dimension.
+
+        Returns:
+            Tensor of shape (samples_per_dim^n_dims, n_dims) containing grid points.
+        """
+        n_dims = bounds.shape[0]
+
+        # Create linspace for each dimension
+        grids = []
+        for i in range(n_dims):
+            grid = torch.linspace(
+                bounds[i, 0].item(),
+                bounds[i, 1].item(),
+                samples_per_dim,
+                device=self.device,
+            )
+            grids.append(grid)
+
+        # Create meshgrid and flatten
+        mesh = torch.meshgrid(*grids, indexing="ij")
+        samples = torch.stack([m.flatten() for m in mesh], dim=-1)
 
         return samples
+
+    def _estimate_cube_acceptance_rate(self) -> float:
+        """Estimate acceptance rate for cube-based filtering.
+
+        Returns:
+            Estimated acceptance rate (sphere_volume / cube_volume).
+        """
+        sphere_volume = self.get_volume()
+        bounds = self.get_bounds()
+        cube_dimensions = bounds[:, 1] - bounds[:, 0]
+        cube_volume = float(torch.prod(cube_dimensions).item())
+
+        return sphere_volume / cube_volume if cube_volume > 0 else 0.0
 
     def get_bounds(self) -> torch.Tensor:
         """Get the axis-aligned bounding box of the sphere.
