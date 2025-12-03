@@ -46,7 +46,7 @@ def main():
         description="Create and simulate a robot in SimulationManager"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of environments to simulate"
+        "--num_envs", type=int, default=4, help="Number of environments to simulate"
     )
     parser.add_argument(
         "--device",
@@ -86,6 +86,12 @@ def main():
     # Open visualization window if not headless
     if not args.headless:
         sim.open_window()
+
+    robot.set_collision_render_visibility(
+        True, False, collision_visible_rgba=(0.1, 0.1, 0.9, 0.4)
+    )
+    time.sleep(1.0)
+    robot.set_collision_render_visibility(False, True)
 
     # Run simulation loop
     run_simulation(sim, robot)

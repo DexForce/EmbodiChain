@@ -67,6 +67,7 @@ class BaseRigidObjectTest:
                 uid="table", shape=MeshCfg(fpath=table_path), body_type="static"
             ),
         )
+
         self.chair: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="chair", shape=MeshCfg(fpath=chair_path), body_type="kinematic"
@@ -252,6 +253,36 @@ class BaseRigidObjectTest:
         assert (
             self.duck.uid not in self.sim.asset_uids
         ), "Duck UID still present after removal"
+
+    def test_set_collision_render_visibility(self):
+        """Test setting collision and render visibility of the duck object."""
+
+        # Set collision with color
+        self.table.set_collision_render_visibility(
+            collision_visible=True,
+            render_visible=True,
+            collision_visible_rgba=(0.1, 0.1, 0.9, 0.4),
+        )
+
+        # Set collision visible, render invisible
+        self.table.set_collision_render_visibility(
+            collision_visible=True, render_visible=False
+        )
+
+        # Set collision invisible, render visible
+        self.table.set_collision_render_visibility(
+            collision_visible=False, render_visible=True
+        )
+
+        # Set both visible
+        self.table.set_collision_render_visibility(
+            collision_visible=True, render_visible=True
+        )
+
+        # Set both invisible
+        self.table.set_collision_render_visibility(
+            collision_visible=False, render_visible=False
+        )
 
     def teardown_method(self):
         """Clean up resources after each test method."""

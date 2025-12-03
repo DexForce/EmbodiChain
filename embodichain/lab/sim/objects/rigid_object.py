@@ -196,6 +196,9 @@ class RigidObject(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        # reserve flag for collision visible node existence
+        self._has_collision_visible_node = False
+
     def __str__(self) -> str:
         parent_str = super().__str__()
         return (
@@ -629,6 +632,47 @@ class RigidObject(BatchEntity):
                 data=zeros,
                 gpu_indices=indices,
                 data_type=RigidBodyGPUAPIWriteType.TORQUE,
+            )
+
+    def set_collision_render_visibility(
+        self,
+        collision_visible: bool = True,
+        render_visible: bool = True,
+        collision_visible_rgba: Optional[Sequence[float]] = None,
+    ):
+        """set collion render visibility
+
+        Args:
+            collision_visible (bool, optional): is collision body visible. Defaults to True.
+            render_visible (bool, optional): is render body visible. Defaults to True.
+            collision_visible_rgba (Optional[Sequence[float]], optional): collision body visible rgba. Defaults to None.
+        """
+        collision_visible_rgba = (
+            collision_visible_rgba
+            if collision_visible_rgba is not None
+            else (0.8, 0.2, 0.2, 0.7)
+        )
+        if len(collision_visible_rgba) != 4:
+            logger.log_error(
+                f"Invalid collision_visible_rgba {collision_visible_rgba}, should be a sequence of 4 floats."
+            )
+        if collision_visible:
+            if not self._has_collision_visible_node:
+                for i, env_idx in enumerate(self._all_indices):
+                    self._entities[env_idx].create_physical_visible_node(
+                        np.array(
+                            [
+                                collision_visible_rgba[0],
+                                collision_visible_rgba[1],
+                                collision_visible_rgba[2],
+                                collision_visible_rgba[3],
+                            ]
+                        )
+                    )
+                self._has_collision_visible_node = True
+        for i, env_idx in enumerate(self._all_indices):
+            self._entities[env_idx].set_physical_visible(
+                collision_visible, render_visible
             )
 
     def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
