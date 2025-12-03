@@ -83,6 +83,7 @@ if __name__ == "__main__":
         visualization=VisualizationConfig(
             show_unreachable_points=False, point_size=8.0
         ),
+        control_part_name="left_arm",
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim

@@ -66,7 +66,8 @@ Analyzes reachable positions in 3D Cartesian space.
 ```python
 cartesian_config = WorkspaceAnalyzerConfig(
     mode=AnalysisMode.CARTESIAN_SPACE,
-    visualization=VisualizationConfig(show_unreachable_points=False, point_size=8.0)
+    visualization=VisualizationConfig(show_unreachable_points=False, point_size=8.0),
+    control_part_name="left_arm",
 )
 
 wa_cartesian = WorkspaceAnalyzer(robot=robot, config=cartesian_config, sim_manager=sim)
@@ -94,7 +95,8 @@ plane_config = WorkspaceAnalyzerConfig(
     mode=AnalysisMode.PLANE_SAMPLING,
     plane_normal=torch.tensor([0.0, 0.0, 1.0]),  # Horizontal plane
     plane_point=torch.tensor([0.0, 0.0, 1.2]),   # Height z=1.2m
-    visualization=VisualizationConfig(show_unreachable_points=True, point_size=8.0)
+    visualization=VisualizationConfig(show_unreachable_points=True, point_size=8.0),
+    control_part_name="left_arm",
 )
 
 wa_plane = WorkspaceAnalyzer(robot=robot, config=plane_config, sim_manager=sim)
@@ -133,7 +135,8 @@ vis_config = VisualizationConfig(
 
 config = WorkspaceAnalyzerConfig(
     mode=AnalysisMode.CARTESIAN_SPACE,
-    visualization=vis_config
+    visualization=vis_config,
+    control_part_name="left_arm",
 )
 ```
 
@@ -180,7 +183,8 @@ results = wa_joint.analyze(num_samples=1000, visualize=True)
 # 2. Cartesian Space Analysis
 cartesian_config = WorkspaceAnalyzerConfig(
     mode=AnalysisMode.CARTESIAN_SPACE,
-    visualization=VisualizationConfig(show_unreachable_points=False)
+    visualization=VisualizationConfig(show_unreachable_points=False),
+    control_part_name="left_arm",
 )
 wa_cartesian = WorkspaceAnalyzer(robot=robot, config=cartesian_config, sim_manager=sim)
 results = wa_cartesian.analyze(num_samples=1000, visualize=True)
@@ -189,7 +193,8 @@ results = wa_cartesian.analyze(num_samples=1000, visualize=True)
 plane_config = WorkspaceAnalyzerConfig(
     mode=AnalysisMode.PLANE_SAMPLING,
     plane_normal=torch.tensor([0.0, 0.0, 1.0]),  # Horizontal plane
-    plane_point=torch.tensor([0.0, 0.0, 1.2])    # Height 1.2m
+    plane_point=torch.tensor([0.0, 0.0, 1.2]),   # Height 1.2m
+    control_part_name="left_arm",                # robot control part name
 )
 wa_plane = WorkspaceAnalyzer(robot=robot, config=plane_config, sim_manager=sim)
 results = wa_plane.analyze(num_samples=1500, visualize=True)

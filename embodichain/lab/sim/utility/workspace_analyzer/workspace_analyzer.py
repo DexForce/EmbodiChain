@@ -96,6 +96,8 @@ class WorkspaceAnalyzerConfig:
     """For Cartesian mode: number of random joint seeds to try for each Cartesian point."""
     reference_pose: Optional[Any] = None
     """Optional reference pose (4x4 matrix) for IK target orientation. If None, uses current robot pose."""
+    control_part_name: Optional[str] = None
+    """Name of the control part (e.g., 'left_arm', 'right_arm'). If None, uses the default solver or first available control part."""
 
     # Plane sampling parameters
     enable_plane_sampling: bool = False
@@ -145,33 +147,45 @@ class WorkspaceAnalyzer:
 
     Analyzes the reachable workspace of a robot by sampling joint configurations,
     computing forward kinematics, and generating metrics and visualizations.
+
+    Note:
+        Currently designed for single environment operation (num_envs=1). When multiple
+        environments are present, the analyzer will use the first environment (index 0)
+        and log appropriate warnings. Multi-environment support will be added in future versions.
     """
+
+    # Default priority order for control parts selection
+    DEFAULT_CONTROL_PART_PRIORITY = ["left_arm", "right_arm"]
 
     def __init__(
         self,
         robot: Robot,
         config: Optional[WorkspaceAnalyzerConfig] = None,
-        control_part_name: Optional[str] = None,
         sim_manager: Optional[SimulationManager] = None,
-        device: torch.device = torch.device("cpu"),
     ):
         """Initialize the workspace analyzer.
 
         Args:
             robot: Robot instance to analyze.
             config: Configuration object. If None, uses defaults.
-            control_part_name: Name of the control part (e.g., "left_arm", "right_arm").
-                              If None, uses the default solver or first available control part.
             sim_manager: SimulationManager instance. Defaults None.
-            device: PyTorch device for computations.
         """
         self.robot = robot
         self.config = config or WorkspaceAnalyzerConfig()
         self.sim_manager = sim_manager
 
-        self.device = device
-        # Determine control part name
-        self.control_part_name = self._determine_control_part(control_part_name)
+        # Check multi-environment compatibility and add protection
+        self._check_num_envs_compatibility()
+
+        # Use sim_manager's device if available, otherwise default to CPU
+        self.device = (
+            sim_manager.device if sim_manager is not None else torch.device("cpu")
+        )
+
+        # Determine control part name from config
+        self.control_part_name = self._determine_control_part(
+            self.config.control_part_name
+        )
 
         # Extract joint limits from robot
         self._setup_joint_limits()
@@ -208,11 +222,8 @@ class WorkspaceAnalyzer:
         if hasattr(self.robot, "cfg") and hasattr(self.robot.cfg, "control_parts"):
             control_parts = self.robot.cfg.control_parts
             if control_parts:
-                # Priority order for default control parts
-                priority_parts = ["left_arm", "right_arm"]
-
                 # Try priority parts first
-                for part in priority_parts:
+                for part in self.DEFAULT_CONTROL_PART_PRIORITY:
                     if part in control_parts:
                         logger.log_info(f"Auto-selected control part: {part}")
                         return part
@@ -228,10 +239,37 @@ class WorkspaceAnalyzer:
         logger.log_info("No specific control part specified, using default solver")
         return None
 
+    def _check_num_envs_compatibility(self) -> None:
+        """Check multi-environment compatibility and provide appropriate warnings.
+
+        WorkspaceAnalyzer is currently designed for num_envs=1. If multiple environments
+        are present, it will use the first environment and log appropriate warnings.
+        """
+        if self.sim_manager is None:
+            # No sim_manager provided, cannot check num_envs
+            logger.log_debug(
+                "No SimulationManager provided, assuming single environment setup"
+            )
+            return
+
+        num_envs = self.sim_manager.num_envs
+
+        if num_envs == 1:
+            logger.log_debug(
+                "WorkspaceAnalyzer initialized with single environment (num_envs=1)"
+            )
+        else:
+            logger.log_warning(
+                f"WorkspaceAnalyzer is currently designed for single environment operation (num_envs=1), "
+                f"but {num_envs} environments detected. Will use the first environment (index 0) for analysis. "
+                f"Multi-environment support will be added in future versions."
+            )
+            logger.log_info("Using environment index 0 for workspace analysis")
+
     def _setup_joint_limits(self) -> None:
         """Extract and setup joint limits from the robot."""
-        # Get all joint limits from robot
-        all_joint_limits = self.robot._entities[0].get_joint_limits()
+        # Get all joint limits from robot (using first entity/environment)
+        all_joint_limits = self.robot.body_data.qpos_limits[0]
 
         # If control_part_name is specified, get only the joints for that part
         if self.control_part_name is not None:
@@ -830,7 +868,7 @@ class WorkspaceAnalyzer:
             Robot base position as a 3D tensor
         """
         try:
-            # Try to get current robot pose
+            # Try to get current robot pose (using first environment)
             current_pose = self.robot.compute_fk(
                 qpos=self.robot.get_qpos()[None, :],  # Add batch dimension
                 name=self.control_part_name,
@@ -1013,6 +1051,7 @@ class WorkspaceAnalyzer:
         else:
             # Fallback: compute current end-effector pose from joint configuration
             try:
+                # Using first environment (index 0) for qpos retrieval
                 current_qpos = self.robot.get_qpos()[0][
                     self.robot.get_joint_ids(self.control_part_name)
                 ]

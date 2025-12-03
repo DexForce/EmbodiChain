@@ -101,11 +101,11 @@ class TestJointWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
         joint_config = WorkspaceAnalyzerConfig(
             mode=AnalysisMode.JOINT_SPACE,
             sampling=SamplingConfig(num_samples=100),
+            control_part_name="left_arm",
         )
         wa_joint = WorkspaceAnalyzer(
             robot=self.robot,
             config=joint_config,
-            control_part_name="left_arm",
             sim_manager=self.sim,
         )
         results = wa_joint.analyze(num_samples=100)
@@ -148,12 +148,12 @@ class TestCartesianWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
             ),
             reference_pose=reference_pose[0].cpu().numpy(),
             ik_samples_per_point=1,  # Single IK attempt per point for speed
+            control_part_name="left_arm",
         )
 
         wa_cartesian = WorkspaceAnalyzer(
             robot=self.robot,
             config=cartesian_config,
-            control_part_name="left_arm",
             sim_manager=self.sim,
         )
         results = wa_cartesian.analyze(num_samples=50)
@@ -196,12 +196,12 @@ class TestPlaneWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
             visualization=VisualizationConfig(
                 enabled=False,  # Disable visualization for testing
             ),
+            control_part_name="left_arm",
         )
 
         wa_plane = WorkspaceAnalyzer(
             robot=self.robot,
             config=plane_config,
-            control_part_name="left_arm",
             sim_manager=self.sim,
         )
         results = wa_plane.analyze(num_samples=30)
@@ -247,12 +247,12 @@ class TestWorkspaceAnalyzerComprehensive(BaseWorkspaceAnalyzeTest):
         # Test joint space mode
         joint_config = WorkspaceAnalyzerConfig(
             mode=AnalysisMode.JOINT_SPACE,
-            sampling=SamplingConfig(num_samples=num_samples),
+            sampling=SamplingConfig(num_samples=100),
+            control_part_name="left_arm",
         )
         wa_joint = WorkspaceAnalyzer(
             robot=self.robot,
             config=joint_config,
-            control_part_name="left_arm",
             sim_manager=self.sim,
         )
         results["joint"] = wa_joint.analyze(num_samples=num_samples)
@@ -267,11 +267,11 @@ class TestWorkspaceAnalyzerComprehensive(BaseWorkspaceAnalyzeTest):
             ),
             reference_pose=reference_pose[0].cpu().numpy(),
             ik_samples_per_point=1,
+            control_part_name="left_arm",
         )
         wa_cartesian = WorkspaceAnalyzer(
             robot=self.robot,
             config=cartesian_config,
-            control_part_name="left_arm",
             sim_manager=self.sim,
         )
         results["cartesian"] = wa_cartesian.analyze(num_samples=num_samples)
@@ -284,11 +284,11 @@ class TestWorkspaceAnalyzerComprehensive(BaseWorkspaceAnalyzeTest):
             plane_point=torch.tensor([0.0, 0.0, 1.2]),
             reference_pose=reference_pose[0].cpu().numpy(),
             ik_samples_per_point=1,
+            control_part_name="left_arm",
         )
         wa_plane = WorkspaceAnalyzer(
             robot=self.robot,
             config=plane_config,
-            control_part_name="left_arm",
             sim_manager=self.sim,
         )
         results["plane"] = wa_plane.analyze(num_samples=num_samples)
