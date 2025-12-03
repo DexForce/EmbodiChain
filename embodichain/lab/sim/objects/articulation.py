@@ -1571,15 +1571,18 @@ class Articulation(BatchEntity):
             ]
         )
         link_names = self.link_names if link_names is None else link_names
+
+        # create collision visible node if not exist
         if collision_visible:
             if not self._has_collision_visible_node:
                 for i, env_idx in enumerate(self._all_indices):
-                    print("collision visible rgba:", collision_visible_rgba)
                     for link_name in link_names:
                         self._entities[env_idx].create_physical_visible_node(
                             collision_visible_rgba, link_name
                         )
                 self._has_collision_visible_node = True
+
+        # set visibility
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
                 self._entities[env_idx].set_physical_visible(

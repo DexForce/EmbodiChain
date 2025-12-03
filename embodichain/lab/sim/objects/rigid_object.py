@@ -656,6 +656,8 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Invalid collision_visible_rgba {collision_visible_rgba}, should be a sequence of 4 floats."
             )
+
+        # create collision visible node if not exist
         if collision_visible:
             if not self._has_collision_visible_node:
                 for i, env_idx in enumerate(self._all_indices):
@@ -670,6 +672,8 @@ class RigidObject(BatchEntity):
                         )
                     )
                 self._has_collision_visible_node = True
+
+        # create collision visible node if not exist
         for i, env_idx in enumerate(self._all_indices):
             self._entities[env_idx].set_physical_visible(
                 collision_visible, render_visible
