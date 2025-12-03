@@ -462,9 +462,7 @@ def postprocess_small_regions(
     # Use list comprehension for more efficient filtering
     # Logic: area > min_area and area <= max_area (original behavior preserved)
     return [
-        i
-        for i in range(n)
-        if min_area < masks[i].astype(np.uint8).sum() <= max_area
+        i for i in range(n) if min_area < masks[i].astype(np.uint8).sum() <= max_area
     ]
 
 
