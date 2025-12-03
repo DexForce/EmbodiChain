@@ -85,9 +85,9 @@ class SoftBodyData:
         )
 
         for i, softbody in enumerate(softbodies):
-            self._rest_sim_position_buffer[
-                i
-            ] = softbody.get_sim_position_inv_mass_buffer()
+            self._rest_sim_position_buffer[i] = (
+                softbody.get_sim_position_inv_mass_buffer()
+            )
 
         self._collision_position_buffer = torch.zeros(
             (self.num_instances, self.n_collision_vertices, 4),
@@ -139,18 +139,18 @@ class SoftBodyData:
     def sim_vertex_position_buffer(self):
         """Get the current sim vertex position buffer of the soft bodies."""
         for i, softbody in enumerate(self.soft_bodies):
-            self._sim_vertex_position_buffer[
-                i
-            ] = softbody.get_sim_position_inv_mass_buffer()
+            self._sim_vertex_position_buffer[i] = (
+                softbody.get_sim_position_inv_mass_buffer()
+            )
         return self._sim_vertex_position_buffer.clone()
 
     @property
     def sim_vertex_velocity_buffer(self):
         """Get the current vertex velocity buffer of the soft bodies."""
         for i, softbody in enumerate(self.soft_bodies):
-            self._sim_vertex_velocity_buffer[
-                i
-            ] = softbody.get_sim_position_inv_mass_buffer()
+            self._sim_vertex_velocity_buffer[i] = (
+                softbody.get_sim_position_inv_mass_buffer()
+            )
         return self._sim_vertex_velocity_buffer.clone()
 
 

@@ -28,6 +28,7 @@ from embodichain.utils import logger
 
 class PlannerType(Enum):
     r"""Enumeration for different planner types."""
+
     TOPPRA = "toppra"
     """TOPPRA planner for time-optimal trajectory planning."""
 
@@ -188,12 +189,12 @@ class MotionGenerator:
             position = position.squeeze()
 
         return {
-            "position": position.tolist()
-            if isinstance(position, np.ndarray)
-            else position,
-            "velocity": velocity.tolist()
-            if isinstance(velocity, np.ndarray)
-            else velocity,
+            "position": (
+                position.tolist() if isinstance(position, np.ndarray) else position
+            ),
+            "velocity": (
+                velocity.tolist() if isinstance(velocity, np.ndarray) else velocity
+            ),
             "acceleration": [0.0] * self.dof,
         }
 

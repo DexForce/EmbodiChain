@@ -1757,9 +1757,9 @@ class WorkspaceAnalyzer:
                             )
 
                             unreachable_indices = ~reachability_mask_np
-                            colors[
-                                unreachable_indices, 0
-                            ] = 1.0  # Red for IK-unreachable
+                            colors[unreachable_indices, 0] = (
+                                1.0  # Red for IK-unreachable
+                            )
                             sizes[unreachable_indices] = (
                                 self.config.visualization.point_size * 0.7
                             )

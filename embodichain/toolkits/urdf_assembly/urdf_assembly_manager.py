@@ -78,6 +78,7 @@ class URDFAssemblyManager:
     r"""
     A class to manage the assembly of URDF files and their components.
     """
+
     # Supported wheel types for chassis components
     SUPPORTED_WHEEL_TYPES = [
         "omni",

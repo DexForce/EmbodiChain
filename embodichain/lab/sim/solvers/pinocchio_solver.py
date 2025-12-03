@@ -463,9 +463,9 @@ class PinocchioSolver(BaseSolver):
                 # Fix the rotation part of the pose
                 fixed_pose = np.eye(4)
                 fixed_pose[:3, :3] = compute_xpos[:3, :3]  # Use target rotation
-                fixed_pose[
-                    :3, 3
-                ] = current_pose_se3.translation.T  # Use current position
+                fixed_pose[:3, 3] = (
+                    current_pose_se3.translation.T
+                )  # Use current position
                 fixed_pose_SE3 = self.pin.SE3(fixed_pose)
                 current_pose_se3 = self.pin.SE3(fixed_pose_SE3)
 

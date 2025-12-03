@@ -47,6 +47,7 @@ CONTROL_PARTS = {
     ],
 }
 
+
 # Base test class for CPU and CUDA
 class BaseRobotTest:
     def setup_simulation(self, sim_device):
