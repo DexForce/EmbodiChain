@@ -64,9 +64,9 @@ class SensorAttachment:
     sensor_urdf: str  # Path to the sensor's URDF file
     parent_component: str  # Name of the component to which the sensor is attached
     parent_link: str  # Specific link name within the parent component for attachment
-    transform: Optional[
-        np.ndarray
-    ] = None  # Optional 4x4 transformation matrix for sensor positioning
+    transform: Optional[np.ndarray] = (
+        None  # Optional 4x4 transformation matrix for sensor positioning
+    )
     sensor_type: Optional[str] = None  # Optional sensor type field
 
 

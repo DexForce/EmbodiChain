@@ -25,6 +25,7 @@ class TrajectorySampleMethod(Enum):
     This enum defines various methods for sampling trajectories,
     providing meaningful names for different sampling strategies.
     """
+
     TIME = "time"
     """Sample based on time intervals."""
 

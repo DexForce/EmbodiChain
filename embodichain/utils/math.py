@@ -836,50 +836,6 @@ def quat_apply_yaw(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
     return quat_apply(quat_yaw, vec)
 
 
-def quat_rotate(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Rotate a vector by a quaternion along the last dimension of q and v.
-    .. deprecated v2.1.0:
-         This function will be removed in a future release in favor of the faster implementation :meth:`quat_apply`.
-
-    Args:
-        q: The quaternion in (w, x, y, z). Shape is (..., 4).
-        v: The vector in (x, y, z). Shape is (..., 3).
-
-    Returns:
-        The rotated vector in (x, y, z). Shape is (..., 3).
-    """
-    # deprecation warning
-    warnings.warn(
-        "The function 'quat_rotate' is deprecated and will be removed in a future release. "
-        "Please use 'quat_apply' instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return quat_apply(q, v)
-
-
-def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Rotate a vector by the inverse of a quaternion along the last dimension of q and v.
-
-    .. deprecated v2.1.0:
-         This function will be removed in a future release in favor of the faster implementation :meth:`quat_apply_inverse`.
-    Args:
-        q: The quaternion in (w, x, y, z). Shape is (..., 4).
-        v: The vector in (x, y, z). Shape is (..., 3).
-
-    Returns:
-        The rotated vector in (x, y, z). Shape is (..., 3).
-    """
-    # deprecation warning
-    warnings.warn(
-        "The function 'quat_rotate_inverse' is deprecated and will be removed in a future release. "
-        "Please use 'quat_apply_inverse' instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return quat_apply_inverse(q, v)
-
-
 @torch.jit.script
 def quat_error_magnitude(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Computes the rotation difference between two quaternions.
