@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 import torch
-from copy import deepcopy
 from typing import Optional, Union, Tuple, Any, Literal, TYPE_CHECKING
 from scipy.spatial.transform import Rotation
 
@@ -241,11 +240,13 @@ class DifferentialSolver(BaseSolver):
             current_xpos = self.get_fk(qpos_seed, to_matrix=True)
 
         # Transform target_xpos by TCP
+        # Note: torch.as_tensor does not modify the input, so deepcopy is unnecessary
         tcp_xpos = torch.as_tensor(
-            deepcopy(self.tcp_xpos), device=self.device, dtype=torch.float32
+            self.tcp_xpos, device=self.device, dtype=torch.float32
         )
-        current_xpos = current_xpos @ torch.inverse(tcp_xpos)
-        compute_xpos = target_xpos @ torch.inverse(tcp_xpos)
+        tcp_xpos_inv = torch.inverse(tcp_xpos)
+        current_xpos = current_xpos @ tcp_xpos_inv
+        compute_xpos = target_xpos @ tcp_xpos_inv
 
         # Ensure compute_xpos is a batch of matrices
         if current_xpos.dim() == 2 and current_xpos.shape == (4, 4):

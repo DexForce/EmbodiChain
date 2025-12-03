@@ -1400,12 +1400,12 @@ class ActionBankMimic:
                 temp_graph2id = action_bank_mimic_for_this_node.graph2id()
 
                 if node in mimic_node_names[scope]:
-                    ret_acb.conf["node"][scope][ret_node_grap2id[scope][node]][
-                        node
-                    ] = deepcopy(
-                        action_bank_mimic_for_this_node.conf["node"][scope][
-                            temp_graph2id[scope][node]
-                        ][node]
+                    ret_acb.conf["node"][scope][ret_node_grap2id[scope][node]][node] = (
+                        deepcopy(
+                            action_bank_mimic_for_this_node.conf["node"][scope][
+                                temp_graph2id[scope][node]
+                            ][node]
+                        )
                     )
 
                     edges = ret_acb.get_edge_names(node_name=node)

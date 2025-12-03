@@ -64,9 +64,9 @@ class URDFComponent:
         "base_link"  # Default link name for attachment (usually the first link)
     )
     params: Dict = None  # Component-specific parameters (e.g., wheel_type for chassis)
-    transform: Optional[
-        np.ndarray
-    ] = None  # Optional 4x4 transformation matrix for positioning
+    transform: Optional[np.ndarray] = (
+        None  # Optional 4x4 transformation matrix for positioning
+    )
 
     def __post_init__(self):
         # Convert path to Path object for better path handling

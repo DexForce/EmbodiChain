@@ -187,12 +187,11 @@ class Antipodal:
         Returns:
             np.ndarray: distance array
         """
-        other_num = len(others)
-        other_a = np.empty(shape=(other_num, 3), dtype=float)
-        other_b = np.empty(shape=(other_num, 3), dtype=float)
-        for i in range(other_num):
-            other_a[i] = others[i].point_a
-            other_b[i] = others[i].point_b
+        if not others:
+            return np.array([], dtype=float)
+        # Vectorized extraction of points using list comprehension and np.array
+        other_a = np.array([o.point_a for o in others], dtype=float)
+        other_b = np.array([o.point_b for o in others], dtype=float)
         aa_dis = np.linalg.norm(other_a - self.point_a, axis=1)
         ab_dis = np.linalg.norm(other_a - self.point_b, axis=1)
         ba_dis = np.linalg.norm(other_b - self.point_a, axis=1)
@@ -382,22 +381,26 @@ class AntipodalGenerator:
         # self.antipodal_visual(nms_antipodal_list)
         grasp_num = grasp_poses.shape[0]
         logger.log_debug(f"Write {grasp_num} poses to pickle file {cache_file}.")
-        grasp_list = [None for i in range(grasp_num)]
-        for i in range(grasp_num):
-            grasp_list[i] = AntipodalGrasp(grasp_poses[i], open_length[i], score[i])
+        # Use list comprehension for efficient list construction
+        grasp_list = [
+            AntipodalGrasp(grasp_poses[i], open_length[i], score[i])
+            for i in range(grasp_num)
+        ]
         return grasp_list
 
     def _load_cache(self, cache_file: str):
         data_dict = pickle.load(open(cache_file, "rb"))
         grasp_num = data_dict["grasp_poses"].shape[0]
         logger.log_debug(f"Load {grasp_num} poses from pickle file {cache_file}.")
-        grasp_list = [None for i in range(grasp_num)]
-        for i in range(grasp_num):
-            grasp_list[i] = AntipodalGrasp(
+        # Use list comprehension for efficient list construction
+        grasp_list = [
+            AntipodalGrasp(
                 data_dict["grasp_poses"][i],
                 data_dict["open_length"][i],
                 data_dict["score"][i],
             )
+            for i in range(grasp_num)
+        ]
         return grasp_list
 
     def _get_pc_size(self, vertices):
@@ -483,15 +486,15 @@ class AntipodalGenerator:
             shape=(antipodal_sample_num * antipodal_num,), dtype=float
         )
         for i in range(antipodal_num):
-            grasp_poses[
-                i * antipodal_sample_num : (i + 1) * antipodal_sample_num
-            ] = antipodal_list[i].sample_pose(antipodal_sample_num)
-            scores[
-                i * antipodal_sample_num : (i + 1) * antipodal_sample_num
-            ] = antipodal_list[i].score
-            open_length[
-                i * antipodal_sample_num : (i + 1) * antipodal_sample_num
-            ] = antipodal_list[i].dis
+            grasp_poses[i * antipodal_sample_num : (i + 1) * antipodal_sample_num] = (
+                antipodal_list[i].sample_pose(antipodal_sample_num)
+            )
+            scores[i * antipodal_sample_num : (i + 1) * antipodal_sample_num] = (
+                antipodal_list[i].score
+            )
+            open_length[i * antipodal_sample_num : (i + 1) * antipodal_sample_num] = (
+                antipodal_list[i].dis
+            )
         return grasp_poses, scores, open_length
 
     def get_all_grasp(self) -> List[AntipodalGrasp]:
@@ -521,13 +524,11 @@ class AntipodalGenerator:
         """
         grasp_num = len(self._grasp_list)
         all_idx = np.arange(grasp_num)
-        grasp_poses = np.empty(shape=(grasp_num, 4, 4), dtype=float)
-        scores = np.empty(shape=(grasp_num,), dtype=float)
-        position = grasp_poses[:, :3, 3]
 
-        for i in range(grasp_num):
-            grasp_poses[i] = self._grasp_list[i].pose
-            scores[i] = self._grasp_list[i].score
+        # Vectorized extraction of poses and scores using list comprehension
+        grasp_poses = np.array([g.pose for g in self._grasp_list], dtype=float)
+        scores = np.array([g.score for g in self._grasp_list], dtype=float)
+        position = grasp_poses[:, :3, 3]
 
         # mask acoording to table up direction
         grasp_z = grasp_poses[:, :3, 2]
@@ -557,10 +558,8 @@ class AntipodalGenerator:
         best_valid_idx = sort_valid_idx[:result_num]
         best_idx = valid_id[best_valid_idx]
 
-        result_grasp_list = []
-        for idx in best_idx:
-            result_grasp_list.append(self._grasp_list[idx])
-        return result_grasp_list
+        # Use list comprehension for faster list construction
+        return [self._grasp_list[idx] for idx in best_idx]
 
     def _antipodal_nms(
         self, antipodal_list: List[Antipodal], nms_ratio: float = 0.02

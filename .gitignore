@@ -176,8 +176,6 @@ cache
 *.csv
 materials
 
-!embodichain/agents/dexforce_vla/data/empty_lang_embed.pt
-!resources/Arch.png
 embodichain/toolkits/outputs/*
 embodichain/toolkits/outputs/*
 
@@ -185,38 +183,15 @@ embodichain/database/*
 
 3rdparty/
 Log/
-embodichain/deploy/h1/sim/unitree_h1
-embodichain/deploy/inspire/inspire_hand
-embodichain/devices/camera/king_fisher/kingfisher
 
 # tensorboard logs
 embodichain/agents/policy/runs/*
-embodichain/agents/dexrdt/wandb
 *.pth
 outputs
 test_configs/*
 
 wandb/
-embodichain/deploy/mobile_aloha/collect_data/data
 *.mp4
 
 # vscode settings
 .vscode/
-
-# web server backend
-*/backend/datas/
-*/backend/logs/
-*/backend/__pycache__/
-
-# web server frontend
-*/backend/export_datas/
-*/backend/**/__pycache__/
-
-# web server frontend
-!web_server/frontend/**/*
-!web_server/frontend/**/event*
-*/frontend/node_modules
-*/frontend/.DS_Store
-*/frontend/*.local
-*/frontend/.eslintcache
-*/frontend/.stylelintcache

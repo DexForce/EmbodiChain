@@ -541,7 +541,12 @@ def visualize_trajectory(poses: np.ndarray):
     # positions of the trajectory
     positions = poses[:, :3, 3]
     ax.plot(
-        positions[:, 0], positions[:, 1], positions[:, 2], "r-", linewidth=3, label="轨迹"
+        positions[:, 0],
+        positions[:, 1],
+        positions[:, 2],
+        "r-",
+        linewidth=3,
+        label="轨迹",
     )
 
     # direction of z-axis

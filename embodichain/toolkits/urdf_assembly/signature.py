@@ -101,9 +101,11 @@ class URDFAssemblySignatureManager:
                 "urdf_path": str(comp_obj.urdf_path),
                 "file_md5": file_md5,
                 "params": to_serializable(comp_obj.params or {}),
-                "transform": comp_obj.transform.tolist()
-                if comp_obj.transform is not None
-                else None,
+                "transform": (
+                    comp_obj.transform.tolist()
+                    if comp_obj.transform is not None
+                    else None
+                ),
             }
 
             signature_data["components"][comp_type] = comp_data
