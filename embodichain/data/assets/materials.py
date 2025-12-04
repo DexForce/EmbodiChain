@@ -28,11 +28,14 @@ from embodichain.data.constants import (
 )
 
 
+material_assets = "materials"
+
+
 class SimResources(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "materials/embodisim_resources.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, material_assets, "embodisim_resources.zip"
             ),
             "53c054b3ae0857416dc52632eb562c12",
         )
@@ -101,7 +104,9 @@ class SimResources(EmbodiChainDataset):
 class CocoBackground(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "materials/CocoBackground.zip"),
+            os.path.join(
+                EMBODICHAIN_DOWNLOAD_PREFIX, material_assets, "CocoBackground.zip"
+            ),
             "fda82404a317281263bd5849e9eb31a1",
         )
         prefix = "CocoBackground"

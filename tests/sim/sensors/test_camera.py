@@ -26,7 +26,7 @@ from embodichain.data import get_data_path
 
 
 NUM_ENVS = 4
-ART_PATH = "AiLiMu_BoxDrawer/AiLiMu_BoxDrawer.urdf"
+ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
@@ -113,6 +113,7 @@ class CameraTest:
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
+        # from IPython import embed; embed()
         self.camera: Camera = self.sim.add_sensor(
             sensor_cfg=CameraCfg(
                 uid="test", extrinsics=CameraCfg.ExtrinsicsCfg(parent="handle_xpos")
@@ -151,3 +152,4 @@ class TestCameraFastRT(CameraTest):
 if __name__ == "__main__":
     test = CameraTest()
     test.setup_simulation("cpu", enable_rt=False)
+    test.test_attach_to_parent()
