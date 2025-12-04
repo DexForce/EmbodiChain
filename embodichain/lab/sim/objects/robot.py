@@ -697,13 +697,13 @@ class Robot(Articulation):
 
         # create collision visible node if not exist
         if collision_visible:
-            if not self._has_collision_visible_node:
-                for i, env_idx in enumerate(self._all_indices):
-                    for link_name in link_names:
+            for i, env_idx in enumerate(self._all_indices):
+                for link_name in link_names:
+                    if self._has_collision_visible_node_dict[link_name] is False:
                         self._entities[env_idx].create_physical_visible_node(
                             rgba, link_name
                         )
-                self._has_collision_visible_node = True
+                        self._has_collision_visible_node_dict[link_name] = True
 
         # set visibility
         for i, env_idx in enumerate(self._all_indices):
