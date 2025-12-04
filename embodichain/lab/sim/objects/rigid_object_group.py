@@ -205,7 +205,8 @@ class RigidObjectGroup(BatchEntity):
         self._set_default_collision_filter()
 
         # reserve flag for collision visible node existence
-        self._has_collision_visible_node = False
+        n_instances = len(self._entities[0])
+        self._has_collision_visible_node_list = [False] * n_instances
 
     def __str__(self) -> str:
         parent_str = super().__str__()
@@ -525,9 +526,9 @@ class RigidObjectGroup(BatchEntity):
 
         # create collision visible node if not exist
         if collision_visible:
-            if not self._has_collision_visible_node:
-                for i, env_idx in enumerate(self._all_indices):
-                    for entity in self._entities[env_idx]:
+            for i, env_idx in enumerate(self._all_indices):
+                for intance_id, entity in enumerate(self._entities[env_idx]):
+                    if not self._has_collision_visible_node_list[intance_id]:
                         entity.create_physical_visible_node(
                             np.array(
                                 [
@@ -538,7 +539,7 @@ class RigidObjectGroup(BatchEntity):
                                 ]
                             )
                         )
-                self._has_collision_visible_node = True
+                        self._has_collision_visible_node_list[intance_id] = True
 
         # create collision visible node if not exist
         for i, env_idx in enumerate(self._all_indices):
