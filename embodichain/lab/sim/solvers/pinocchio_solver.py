@@ -29,6 +29,11 @@ from embodichain.lab.sim.utility.import_utils import (
     lazy_import_casadi,
     # lazy_import_pinocchio_casadi,
 )
+from embodichain.lab.sim.utility.solver_utils import (
+    build_reduced_pinocchio_robot,
+    validate_iteration_params,
+    compute_pinocchio_fk,
+)
 
 
 if TYPE_CHECKING:
@@ -72,12 +77,7 @@ class PinocchioSolverCfg(SolverCfg):
         solver = PinocchioSolver(cfg=self, **kwargs)
 
         # Set the Tool Center Point (TCP) for the solver
-        if isinstance(self.tcp, torch.Tensor):
-            tcp = self.tcp.cpu().numpy()
-        else:
-            tcp = self.tcp
-
-        solver.set_tcp(tcp)
+        solver.set_tcp(self._get_tcp_as_numpy())
 
         return solver
 
@@ -121,7 +121,7 @@ class PinocchioSolver(BaseSolver):
         )  # Degrees of freedom of robot joints
 
         # Build reduced robot model (only relevant joints unlocked)
-        self.robot = self._get_reduce_robot()
+        self.robot = build_reduced_pinocchio_robot(self.entire_robot, self.joint_names)
         self.joint_names = self.robot.model.names.tolist()[
             1:
         ]  # Exclude 'universe' joint
@@ -221,26 +221,6 @@ class PinocchioSolver(BaseSolver):
         self.root_base_xpos[:3, :3] = root_base_pose.rotation
         self.root_base_xpos[:3, 3] = root_base_pose.translation.T
 
-    def _get_reduce_robot(self) -> "pin.RobotWrapper":
-        """Build a reduced robot model by locking all joints except those in self.joint_names.
-
-        Returns:
-            pin.RobotWrapper: The reduced robot model with specified joints unlocked.
-        """
-        all_joint_names = self.entire_robot.model.names.tolist()
-
-        # Lock all joints except those in self.joint_names and 'universe'
-        fixed_joint_names = [
-            name
-            for name in all_joint_names
-            if name not in self.joint_names and name != "universe"
-        ]
-
-        reduced_robot = self.entire_robot.buildReducedRobot(
-            list_of_joints_to_lock=fixed_joint_names
-        )
-        return reduced_robot
-
     def set_tcp(self, tcp: np.ndarray):
         self.tcp = tcp
 
@@ -290,25 +270,10 @@ class PinocchioSolver(BaseSolver):
         Returns:
             bool: True if all parameters are valid and set, False otherwise.
         """
-        # TODO: Check which parameters are no longer needed.
         # Validate parameters
-        if pos_eps <= 0:
-            logger.log_warning("Pos epsilon must be positive.")
-            return False
-        if rot_eps <= 0:
-            logger.log_warning("Rot epsilon must be positive.")
-            return False
-        if max_iterations <= 0:
-            logger.log_warning("Max iterations must be positive.")
-            return False
-        if dt <= 0:
-            logger.log_warning("Time step must be positive.")
-            return False
-        if damp < 0:
-            logger.log_warning("Damping factor must be non-negative.")
-            return False
-        if num_samples <= 0:
-            logger.log_warning("Number of samples must be positive.")
+        if not validate_iteration_params(
+            pos_eps, rot_eps, max_iterations, dt, damp, num_samples
+        ):
             return False
 
         # Set parameters if all are valid
@@ -620,25 +585,6 @@ class PinocchioSolver(BaseSolver):
         Returns:
             np.ndarray: The resulting end-effector pose as a (4, 4) homogeneous transformation matrix.
         """
-        if isinstance(qpos, torch.Tensor):
-            qpos_np = qpos.detach().cpu().numpy()
-        else:
-            qpos_np = np.array(qpos)
-
-        qpos_np = np.squeeze(qpos_np)
-        if qpos_np.ndim != 1:
-            raise ValueError(f"qpos shape must be (nq,), but got {qpos_np.shape}")
-
-        self.pin.forwardKinematics(self.robot.model, self.robot.data, qpos_np)
-
-        # Retrieve the pose of the specified link
-        frame_index = self.robot.model.getFrameId(self.end_link_name)
-        joint_index = self.robot.model.frames[frame_index].parent
-        xpos_se3 = self.robot.data.oMi.tolist()[joint_index]
-
-        xpos = np.eye(4)
-        xpos[:3, :3] = xpos_se3.rotation
-        xpos[:3, 3] = xpos_se3.translation.T
-
-        result = np.dot(xpos, self.tcp_xpos)
-        return result
+        return compute_pinocchio_fk(
+            self.pin, self.robot, qpos, self.end_link_name, self.tcp_xpos
+        )
