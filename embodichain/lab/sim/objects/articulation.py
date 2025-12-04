@@ -1543,7 +1543,7 @@ class Articulation(BatchEntity):
         collision_visible: bool = True,
         render_visible: bool = True,
         link_names: Optional[List[str]] = None,
-        collision_visible_rgba: Optional[Sequence[float]] = None,
+        rgba: Optional[Sequence[float]] = None,
     ):
         """set collision
 
@@ -1551,23 +1551,17 @@ class Articulation(BatchEntity):
             collision_visible (bool, optional): is collision body visible. Defaults to True.
             render_visible (bool, optional): is render body visible. Defaults to True.
             link_names (Optional[List[str]], optional): links to set visibility. Defaults to None.
-            collision_visible_rgba (Optional[Sequence[float]], optional): collision body visible rgba. Defaults to None.
+            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
-        collision_visible_rgba = (
-            collision_visible_rgba
-            if collision_visible_rgba is not None
-            else (0.8, 0.2, 0.2, 0.7)
-        )
-        if len(collision_visible_rgba) != 4:
-            logger.log_error(
-                f"Invalid collision_visible_rgba {collision_visible_rgba}, should be a sequence of 4 floats."
-            )
-        collision_visible_rgba = np.array(
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+        rgba = np.array(
             [
-                collision_visible_rgba[0],
-                collision_visible_rgba[1],
-                collision_visible_rgba[2],
-                collision_visible_rgba[3],
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                rgba[3],
             ]
         )
         link_names = self.link_names if link_names is None else link_names
@@ -1578,7 +1572,7 @@ class Articulation(BatchEntity):
                 for i, env_idx in enumerate(self._all_indices):
                     for link_name in link_names:
                         self._entities[env_idx].create_physical_visible_node(
-                            collision_visible_rgba, link_name
+                            rgba, link_name
                         )
                 self._has_collision_visible_node = True
 

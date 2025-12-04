@@ -87,12 +87,6 @@ def main():
     if not args.headless:
         sim.open_window()
 
-    robot.set_collision_render_visibility(
-        True, False, collision_visible_rgba=(0.1, 0.1, 0.9, 0.4)
-    )
-    time.sleep(1.0)
-    robot.set_collision_render_visibility(False, True)
-
     # Run simulation loop
     run_simulation(sim, robot)
 

@@ -182,7 +182,7 @@ class BaseArticulationTest:
         self.art.set_collision_render_visibility(
             collision_visible=True,
             render_visible=True,
-            collision_visible_rgba=(0.1, 0.1, 0.9, 0.4),
+            rgba=(0.1, 0.1, 0.9, 0.4),
         )
 
         # Set collision visible, render invisible

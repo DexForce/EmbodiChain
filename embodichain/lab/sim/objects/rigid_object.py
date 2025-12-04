@@ -638,24 +638,18 @@ class RigidObject(BatchEntity):
         self,
         collision_visible: bool = True,
         render_visible: bool = True,
-        collision_visible_rgba: Optional[Sequence[float]] = None,
+        rgba: Optional[Sequence[float]] = None,
     ):
         """set collion render visibility
 
         Args:
             collision_visible (bool, optional): is collision body visible. Defaults to True.
             render_visible (bool, optional): is render body visible. Defaults to True.
-            collision_visible_rgba (Optional[Sequence[float]], optional): collision body visible rgba. Defaults to None.
+            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
-        collision_visible_rgba = (
-            collision_visible_rgba
-            if collision_visible_rgba is not None
-            else (0.8, 0.2, 0.2, 0.7)
-        )
-        if len(collision_visible_rgba) != 4:
-            logger.log_error(
-                f"Invalid collision_visible_rgba {collision_visible_rgba}, should be a sequence of 4 floats."
-            )
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
 
         # create collision visible node if not exist
         if collision_visible:
@@ -664,10 +658,10 @@ class RigidObject(BatchEntity):
                     self._entities[env_idx].create_physical_visible_node(
                         np.array(
                             [
-                                collision_visible_rgba[0],
-                                collision_visible_rgba[1],
-                                collision_visible_rgba[2],
-                                collision_visible_rgba[3],
+                                rgba[0],
+                                rgba[1],
+                                rgba[2],
+                                rgba[3],
                             ]
                         )
                     )

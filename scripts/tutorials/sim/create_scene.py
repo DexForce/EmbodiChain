@@ -89,47 +89,9 @@ def main():
         )
     )
 
-    cow: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="cow",
-            shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow.obj"),
-            ),
-            body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
-            ),
-            init_pos=[1.5, 0.0, 1.0],
-        )
-    )
-
-    cow1: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="cow1",
-            shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow.obj"),
-            ),
-            body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
-            ),
-            init_pos=[1.5, 1.5, 1.0],
-        )
-    )
-
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")
-
-    cow.set_collision_render_visibility(
-        True, False, collision_visible_rgba=(0.1, 0.1, 0.9, 0.4)
-    )
 
     # Open window when the scene has been set up
     if not args.headless:
