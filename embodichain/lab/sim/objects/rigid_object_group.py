@@ -204,6 +204,9 @@ class RigidObjectGroup(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        # reserve flag for collision visible node existence
+        self._has_collision_visible_node = False
+
     def __str__(self) -> str:
         parent_str = super().__str__()
         return (
@@ -502,6 +505,45 @@ class RigidObjectGroup(BatchEntity):
         self.set_local_pose(pose, env_ids=local_env_ids)
 
         self.clear_dynamics(env_ids=local_env_ids)
+
+    def set_collision_render_visibility(
+        self,
+        collision_visible: bool = True,
+        render_visible: bool = True,
+        rgba: Optional[Sequence[float]] = None,
+    ):
+        """set collion render visibility
+
+        Args:
+            collision_visible (bool, optional): is collision body visible. Defaults to True.
+            render_visible (bool, optional): is render body visible. Defaults to True.
+            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+        """
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+
+        # create collision visible node if not exist
+        if collision_visible:
+            if not self._has_collision_visible_node:
+                for i, env_idx in enumerate(self._all_indices):
+                    for entity in self._entities[env_idx]:
+                        entity.create_physical_visible_node(
+                            np.array(
+                                [
+                                    rgba[0],
+                                    rgba[1],
+                                    rgba[2],
+                                    rgba[3],
+                                ]
+                            )
+                        )
+                self._has_collision_visible_node = True
+
+        # create collision visible node if not exist
+        for i, env_idx in enumerate(self._all_indices):
+            for entity in self._entities[env_idx]:
+                entity.set_physical_visible(collision_visible, render_visible)
 
     def destroy(self) -> None:
         env = self._world.get_env()
