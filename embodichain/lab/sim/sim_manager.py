@@ -47,7 +47,7 @@ from dexsim.types import (
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType
-from dexsim.engine import GizmoController
+from dexsim.render import GizmoController
 
 from embodichain.lab.sim.objects import (
     RigidObject,
