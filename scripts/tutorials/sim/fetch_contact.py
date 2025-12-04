@@ -276,20 +276,6 @@ def run_simulation(sim: SimulationManager):
                     contact_report.contact_env_ids
                 )  # contact belongs to which environment
 
-                # filter contact report for specific rigid object
-                cube1_user_ids = sim.get_rigid_object("cube1").get_user_ids()
-                cube1_contact_report = contact_report.filter_by_user_ids(cube1_user_ids)
-                n_cube1_contact = cube1_contact_report.contact_data.shape[0]
-
-                # filter contact report for specific link
-                finger1_user_ids = (
-                    sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
-                )
-                finger1_contact_report = contact_report.filter_by_user_ids(
-                    finger1_user_ids
-                )
-                n_finger1_contact = finger1_contact_report.contact_data.shape[0]
-
             step_count += 1
 
             # Print FPS every second
@@ -299,6 +285,26 @@ def run_simulation(sim: SimulationManager):
                     f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
                 )
 
+                # filter contact report for specific rigid object
+                cube1_user_ids = sim.get_rigid_object("cube1").get_user_ids()
+                cube1_contact_report = contact_report.filter_by_user_ids(cube1_user_ids)
+                cube1_contact_report.set_contact_point_visibility(
+                    sim, visible=True, rgba=(1.0, 0.0, 0.0, 1.0), point_size=6.0
+                )
+                n_cube1_contact = cube1_contact_report.contact_data.shape[0]
+
+                # filter contact report for specific link
+                finger1_user_ids = (
+                    sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
+                )
+                finger1_contact_report = contact_report.filter_by_user_ids(
+                    finger1_user_ids
+                )
+                # visualize contact points
+                finger1_contact_report.set_contact_point_visibility(
+                    sim, visible=True, rgba=(0.0, 0.0, 1.0, 1.0), point_size=6.0
+                )
+                n_finger1_contact = finger1_contact_report.contact_data.shape[0]
                 accmulated_cost_time = 0.0
 
     except KeyboardInterrupt:
