@@ -21,7 +21,7 @@ version = "0.0.1"
 description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
 authors = [ { name = "EmbodiChain Developers" } ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 
 # Core install dependencies (kept from requirements.txt). Some VCS links are
