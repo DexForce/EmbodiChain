@@ -179,17 +179,17 @@ class BaseArticulationTest:
         """Test setting collision and render visibility of the duck object."""
 
         # Set collision with color
-        self.art.set_collision_render_visibility(
+        self.art.set_collision_visibility(
             collision_visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
         )
 
         # Set collision invisible, render visible
-        self.art.set_collision_render_visibility(collision_visible=False)
+        self.art.set_collision_visibility(collision_visible=False)
 
         # set visible with link names
         all_link_names = self.art.link_names
-        self.art.set_collision_render_visibility(
+        self.art.set_collision_visibility(
             collision_visible=True, link_names=all_link_names[:3]
         )
 

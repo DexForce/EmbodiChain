@@ -507,7 +507,7 @@ class RigidObjectGroup(BatchEntity):
 
         self.clear_dynamics(env_ids=local_env_ids)
 
-    def set_collision_render_visibility(
+    def set_collision_visibility(
         self,
         collision_visible: bool = True,
         render_visible: bool = True,
@@ -545,6 +545,16 @@ class RigidObjectGroup(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             for entity in self._entities[env_idx]:
                 entity.set_physical_visible(collision_visible)
+
+    def set_visibility(self, visible: bool = True) -> None:
+        """Set the visibility of the rigid object group.
+
+        Args:
+            visible (bool, optional): Whether the rigid object group is visible. Defaults to True.
+        """
+        for i, env_idx in enumerate(self._all_indices):
+            for entity in self._entities[env_idx]:
+                entity.set_visible(visible)
 
     def destroy(self) -> None:
         env = self._world.get_env()

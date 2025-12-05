@@ -258,16 +258,16 @@ class BaseRigidObjectTest:
         """Test setting collision and render visibility of the duck object."""
 
         # Set collision with color
-        self.table.set_collision_render_visibility(
+        self.table.set_collision_visibility(
             collision_visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
         )
 
         # Set collision visible, render invisible
-        self.table.set_collision_render_visibility(collision_visible=True)
+        self.table.set_collision_visibility(collision_visible=True)
 
         # Set collision invisible, render visible
-        self.table.set_collision_render_visibility(collision_visible=False)
+        self.table.set_collision_visibility(collision_visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

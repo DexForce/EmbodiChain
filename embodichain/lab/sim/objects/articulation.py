@@ -1540,7 +1540,7 @@ class Articulation(BatchEntity):
                 result.append(mat_dict)
         return result
 
-    def set_collision_render_visibility(
+    def set_collision_visibility(
         self,
         collision_visible: bool = True,
         link_names: Optional[List[str]] = None,

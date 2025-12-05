@@ -667,13 +667,13 @@ class Robot(Articulation):
         """
         self.pk_serial_chain = self.cfg.build_pk_serial_chain(device=self.device)
 
-    def set_collision_render_visibility(
+    def set_collision_visibility(
         self,
         collision_visible: bool = True,
         control_part: Optional[str] = None,
         rgba: Optional[Sequence[float]] = None,
     ):
-        """set collision
+        """set collision of the robot or a specific control part.
 
         Args:
             collision_visible (bool, optional): is collision body visible. Defaults to True.
@@ -709,6 +709,21 @@ class Robot(Articulation):
                 self._entities[env_idx].set_physical_visible(
                     collision_visible, link_name
                 )
+
+    def set_visibility(
+        self, visible: bool = True, control_part: Optional[str] = None
+    ) -> None:
+        """Set the visibility of the robot or a specific control part.
+
+        Args:
+            visible (bool, optional): Whether the robot or control part is visible. Defaults to True.
+            control_part (Optional[str], optional): The name of the control part to set visibility for. If None, all links are set. Defaults to None.
+        """
+        link_names = self.get_control_part_link_names(name=control_part)
+
+        for i, env_idx in enumerate(self._all_indices):
+            for link_name in link_names:
+                self._entities[env_idx].set_visible(visible, link_name)
 
     def destroy(self) -> None:
         return super().destroy()
