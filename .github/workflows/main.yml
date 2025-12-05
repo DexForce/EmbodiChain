@@ -104,7 +104,7 @@ jobs:
           path: ${{ github.workspace }}/dist/*.whl
           retention-days: 3
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@v1.13.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
       # - name: Download docs artifact
