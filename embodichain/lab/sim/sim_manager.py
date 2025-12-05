@@ -143,21 +143,12 @@ class SimulationManager:
 
     This class is used to manage the global simulation environment and simulated assets.
         - assets loading, creation, modification and deletion.
-            - assets include robots, fixed actors, dynamic actors and background.
+            - assets include rigid objects, soft objects, articulations, robots, sensors and lights.
         - manager the scenes and the simulation environment.
             - parallel scenes simulation on both CPU and GPU.
-            - sensors arrangement
-            - lighting and indirect lighting
-            - physics simulation parameters control
-        - ...
-
-    Note:
-        1. The arena is used as a standalone space for robots to simulate in. When :meth:`build_multiple_arenas` is called,
-             it will create multiple arenas in a grid pattern. Meanwhile, each simulation assets adding interface will
-             take an additional parameter `arena_index` to specify which arena to place the asset. The name of the asset to
-             be added will be appended with the arena index to avoid name conflict.
-        2. In GUI mode, the physics will be set to a fps (or a wait time for manual mode) for better visualization.
-
+            - create and setup the rendering related settings, eg. environment map, lighting, materials, etc.
+            - physics simulation management, eg. time step, manual update, etc.
+            - interactive control via gizmo and window callbacks events.
 
     Args:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
@@ -199,11 +190,8 @@ class SimulationManager:
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
-        if sys.platform == "linux":
-            dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
-            dexsim.set_physics_gpu_memory_config(
-                **sim_config.gpu_memory_config.to_dict()
-            )
+        dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
+        dexsim.set_physics_gpu_memory_config(**sim_config.gpu_memory_config.to_dict())
 
         self._is_initialized_gpu_physics = False
         self._ps = self._world.get_physics_scene()
@@ -216,9 +204,10 @@ class SimulationManager:
         self._default_resources = SimResources()
 
         # set unique material path to accelerate material creation.
+        # TODO: This will be removed.
         if self.sim_config.enable_rt is False:
             self._env.set_unique_mat_path(
-                os.path.join(self._material_cache_dir, "dexsim_mat")
+                os.path.join(self._material_cache_dir, "default_mat")
             )
 
         # arena is used as a standalone space for robots to simulate in.
