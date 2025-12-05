@@ -516,6 +516,23 @@ class RigidObject(BatchEntity):
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return [self._visual_material[i] for i in ids]
 
+    def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
+        """Share material instances for the rigid object.
+
+        Args:
+            mat_insts (List[VisualMaterialInst]): List of material instances to share.
+        """
+        if len(self._entities) != len(mat_insts):
+            logger.log_error(
+                f"Length of entities {len(self._entities)} does not match length of material instances {len(mat_insts)}."
+            )
+
+        for i, entity in enumerate(self._entities):
+            if mat_insts[i] is None:
+                continue
+            entity.set_material(mat_insts[i].mat)
+            self._visual_material[i] = mat_insts[i]
+
     def get_body_scale(self, env_ids: Optional[Sequence[int]] = None) -> torch.Tensor:
         """
         Retrieve the body scale for specified environment instances.

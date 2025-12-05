@@ -121,6 +121,9 @@ def randomize_rigid_object_pose(
         relative_rotation (bool): Whether to randomize the rotation relative to the object's initial rotation. Default is False.
     """
 
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return
+
     rigid_object: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
     num_instance = len(env_ids)
 

@@ -661,6 +661,8 @@ class SimulationManager:
             return self._rigid_objects[uid]
         if uid in self._rigid_object_groups:
             return self._rigid_object_groups[uid]
+        if uid in self._soft_objects:
+            return self._soft_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -1260,34 +1262,6 @@ class SimulationManager:
             return True
 
         return False
-
-    def get_asset(
-        self, uid: str
-    ) -> Optional[Union[RigidObject, Articulation, Robot, Light, BaseSensor]]:
-        """Get an asset by its UID.
-
-        The asset can be a rigid object, articulation or robot.
-
-        Args:
-            uid (str): The UID of the asset.
-        """
-        if uid in self._rigid_objects:
-            return self._rigid_objects[uid]
-
-        if uid in self._articulations:
-            return self._articulations[uid]
-
-        if uid in self._robots:
-            return self._robots[uid]
-
-        if uid in self._lights:
-            return self._lights[uid]
-
-        if uid in self._sensors:
-            return self._sensors[uid]
-
-        logger.log_warning(f"Asset {uid} not found.")
-        return None
 
     def draw_marker(
         self,

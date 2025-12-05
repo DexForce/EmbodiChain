@@ -40,6 +40,9 @@ def get_rigid_object_pose(
 ) -> torch.Tensor:
     """Get the world poses of the rigid objects in the environment.
 
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
     Args:
         env: The environment instance.
         obs: The observation dictionary.
@@ -48,6 +51,9 @@ def get_rigid_object_pose(
     Returns:
         A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
     """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return torch.zeros((env.num_envs, 4, 4), dtype=torch.float32)
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
@@ -130,7 +136,10 @@ def compute_semantic_mask(
 
     robot_mask = (mask_exp == robot_uids_exp).any(-1).squeeze_(-1)
 
-    foreground_assets = [env.sim.get_asset(uid) for uid in foreground_uids]
+    asset_uids = env.sim.asset_uids
+    foreground_assets = [
+        env.sim.get_asset(uid) for uid in foreground_uids if uid in asset_uids
+    ]
 
     # cat assets uid (num_envs, n) into dim 1
     foreground_uids = torch.cat(

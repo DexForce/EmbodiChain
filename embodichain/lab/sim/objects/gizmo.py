@@ -331,7 +331,7 @@ class Gizmo:
                     new_qpos = new_qpos.unsqueeze(0)  # Make it (1, dof) for set_qpos
 
                 # Update robot joint positions
-                self.target.set_qpos(qpos=new_qpos, joint_ids=current_joint_ids)
+                self.target.set_qpos(qpos=new_qpos[0], joint_ids=current_joint_ids)
                 return True
             else:
                 logger.log_warning("IK solution not found")

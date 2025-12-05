@@ -48,7 +48,6 @@ dependencies = [
   "cvxpy==1.4.0",
   "ortools",
   "prettytable",
-  "hdfdict@git+http://69.235.177.182:8081/externalrepo/hdfdict",
   "black==24.3.0",
   "h5py",
 ]
