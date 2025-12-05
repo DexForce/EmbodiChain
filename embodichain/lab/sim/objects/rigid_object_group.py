@@ -544,7 +544,7 @@ class RigidObjectGroup(BatchEntity):
         # create collision visible node if not exist
         for i, env_idx in enumerate(self._all_indices):
             for entity in self._entities[env_idx]:
-                entity.set_physical_visible(collision_visible, render_visible)
+                entity.set_physical_visible(collision_visible)
 
     def destroy(self) -> None:
         env = self._world.get_env()

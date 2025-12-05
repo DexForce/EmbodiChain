@@ -637,14 +637,12 @@ class RigidObject(BatchEntity):
     def set_collision_render_visibility(
         self,
         collision_visible: bool = True,
-        render_visible: bool = True,
         rgba: Optional[Sequence[float]] = None,
     ):
         """set collion render visibility
 
         Args:
             collision_visible (bool, optional): is collision body visible. Defaults to True.
-            render_visible (bool, optional): is render body visible. Defaults to True.
             rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
@@ -669,9 +667,7 @@ class RigidObject(BatchEntity):
 
         # create collision visible node if not exist
         for i, env_idx in enumerate(self._all_indices):
-            self._entities[env_idx].set_physical_visible(
-                collision_visible, render_visible
-            )
+            self._entities[env_idx].set_physical_visible(collision_visible)
 
     def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids

@@ -670,7 +670,6 @@ class Robot(Articulation):
     def set_collision_render_visibility(
         self,
         collision_visible: bool = True,
-        render_visible: bool = True,
         control_part: Optional[str] = None,
         rgba: Optional[Sequence[float]] = None,
     ):
@@ -678,7 +677,6 @@ class Robot(Articulation):
 
         Args:
             collision_visible (bool, optional): is collision body visible. Defaults to True.
-            render_visible (bool, optional): is render body visible. Defaults to True.
             control_part (Optional[str], optional): control part to set visibility. Defaults to None. If None, all links are set.
             rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
@@ -709,7 +707,7 @@ class Robot(Articulation):
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
                 self._entities[env_idx].set_physical_visible(
-                    collision_visible, render_visible, link_name
+                    collision_visible, link_name
                 )
 
     def destroy(self) -> None:
