@@ -92,21 +92,20 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: (CI) Build whl package
+      - name: (CI) Publish whl package
         run: |
           echo "start build whl package..."
           pip install build
           python -m build --wheel
+          echo "start publish to PYPI..."
+          pip install twine
+          twine upload ./dist/*.whl -u __token__ -p "${{ secrets.PYPI_API_TOKEN }}" --verbose
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with: 
           name: embodichain-wheel-package
           path: ${{ github.workspace }}/dist/*.whl
           retention-days: 3
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.13.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
       # - name: Download docs artifact
       #   uses: actions/download-artifact@v4
       #   with:
