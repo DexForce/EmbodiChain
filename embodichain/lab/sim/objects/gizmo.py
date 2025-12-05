@@ -40,7 +40,7 @@ from dexsim.types import (
     RigidBodyShape,
     PhysicalAttr,
 )
-from dexsim.engine import GizmoController
+from dexsim.render import GizmoController
 
 from embodichain.lab.sim.utility.gizmo_utils import create_gizmo_callback
 
