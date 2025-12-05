@@ -98,13 +98,6 @@ API Reference
 - **set_position_limits / get_position_limits**: Set or get joint position limits.
 - **set_tcp / get_tcp**: Set or get the tool center point (TCP) transformation.
 
-
-**SrsSolver**
-
-- Implements all BaseSolver methods using the SRS library.
-- Supports batch FK/IK/Jacobian queries and custom configuration.
-- See SrsSolverCfg for all configuration options.
-
 Configuration
 ~~~~~~~~~~~~~
 
