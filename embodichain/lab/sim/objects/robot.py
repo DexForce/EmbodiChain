@@ -587,6 +587,24 @@ class Robot(Articulation):
             link_name=root_link_name, env_ids=local_env_ids, to_matrix=to_matrix
         )
 
+    def get_control_part_link_names(self, name: Optional[str] = None) -> List[str]:
+        """Get the link names of the control part.
+
+        Args:
+            name (Optional[str]): The name of the control part. If None, return all link names.
+        Returns:
+            List[str]: link names of the control part.
+        """
+        if name is None:
+            return self.link_names
+        if name in self._control_groups:
+            return self._control_groups[name].link_names
+        else:
+            logger.log_warning(
+                f"The control part '{name}' does not exist in the robot's control parts."
+            )
+            return []
+
     def _extract_control_groups(self) -> Dict[str, ControlGroup]:
         r"""Extract control groups from the active joint names.
 
@@ -648,6 +666,64 @@ class Robot(Articulation):
             - Imitation learning dataset generation.
         """
         self.pk_serial_chain = self.cfg.build_pk_serial_chain(device=self.device)
+
+    def set_collision_visibility(
+        self,
+        collision_visible: bool = True,
+        control_part: Optional[str] = None,
+        rgba: Optional[Sequence[float]] = None,
+    ):
+        """set collision of the robot or a specific control part.
+
+        Args:
+            collision_visible (bool, optional): is collision body visible. Defaults to True.
+            control_part (Optional[str], optional): control part to set visibility. Defaults to None. If None, all links are set.
+            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+        """
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+        rgba = np.array(
+            [
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                rgba[3],
+            ]
+        )
+        link_names = self.get_control_part_link_names(name=control_part)
+
+        # create collision visible node if not exist
+        if collision_visible:
+            for i, env_idx in enumerate(self._all_indices):
+                for link_name in link_names:
+                    if self._has_collision_visible_node_dict[link_name] is False:
+                        self._entities[env_idx].create_physical_visible_node(
+                            rgba, link_name
+                        )
+                        self._has_collision_visible_node_dict[link_name] = True
+
+        # set visibility
+        for i, env_idx in enumerate(self._all_indices):
+            for link_name in link_names:
+                self._entities[env_idx].set_physical_visible(
+                    collision_visible, link_name
+                )
+
+    def set_visibility(
+        self, visible: bool = True, control_part: Optional[str] = None
+    ) -> None:
+        """Set the visibility of the robot or a specific control part.
+
+        Args:
+            visible (bool, optional): Whether the robot or control part is visible. Defaults to True.
+            control_part (Optional[str], optional): The name of the control part to set visibility for. If None, all links are set. Defaults to None.
+        """
+        link_names = self.get_control_part_link_names(name=control_part)
+
+        for i, env_idx in enumerate(self._all_indices):
+            for link_name in link_names:
+                self._entities[env_idx].set_visible(visible, link_name)
 
     def destroy(self) -> None:
         return super().destroy()

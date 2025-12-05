@@ -23,12 +23,13 @@ import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import (
     RigidObjectGroup,
     RigidObjectGroupCfg,
     RigidObjectCfg,
 )
+from dexsim.utility.path import get_resources_data_path
 
 
 def main():
@@ -89,21 +90,27 @@ def main():
             rigid_objects={
                 "cube_1": RigidObjectCfg(
                     uid="cube_1",
-                    shape=CubeCfg(size=[0.1, 0.1, 0.1]),
+                    shape=MeshCfg(
+                        fpath=get_resources_data_path("Model", "cow", "cow.obj"),
+                    ),
                     attrs=physics_attrs,
-                    init_pos=[0.0, 0.0, 1.0],
+                    init_pos=[-1.5, 0.0, 1.0],
                 ),
                 "cube_2": RigidObjectCfg(
                     uid="cube_2",
-                    shape=CubeCfg(size=[0.2, 0.2, 0.2]),
+                    shape=MeshCfg(
+                        fpath=get_resources_data_path("Model", "cow", "cow.obj"),
+                    ),
                     attrs=physics_attrs,
-                    init_pos=[0.5, 0.0, 1.0],
+                    init_pos=[0.0, 0.0, 1.0],
                 ),
                 "cube_3": RigidObjectCfg(
                     uid="cube_3",
-                    shape=CubeCfg(size=[0.3, 0.3, 0.3]),
+                    shape=MeshCfg(
+                        fpath=get_resources_data_path("Model", "cow", "cow.obj"),
+                    ),
                     attrs=physics_attrs,
-                    init_pos=[-0.5, 0.0, 1.0],
+                    init_pos=[1.5, 0.0, 1.0],
                 ),
             },
         )
@@ -116,6 +123,12 @@ def main():
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
+    obj_group.set_collision_visibility(
+        collision_visible=True, rgba=(0.9, 0.1, 0.1, 0.4)
+    )
+    from IPython import embed
+
+    embed()
 
     # Run the simulation
     run_simulation(sim)

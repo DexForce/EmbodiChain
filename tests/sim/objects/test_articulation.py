@@ -175,6 +175,24 @@ class BaseArticulationTest:
             self.art.uid not in self.sim.asset_uids
         ), "FAIL: Articulation UID still present after removal"
 
+    def test_set_collision_render_visibility(self):
+        """Test setting collision and render visibility of the duck object."""
+
+        # Set collision with color
+        self.art.set_collision_visibility(
+            collision_visible=True,
+            rgba=(0.1, 0.1, 0.9, 0.4),
+        )
+
+        # Set collision invisible, render visible
+        self.art.set_collision_visibility(collision_visible=False)
+
+        # set visible with link names
+        all_link_names = self.art.link_names
+        self.art.set_collision_visibility(
+            collision_visible=True, link_names=all_link_names[:3]
+        )
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
