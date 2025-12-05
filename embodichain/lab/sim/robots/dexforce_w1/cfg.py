@@ -129,6 +129,22 @@ class DexforceW1Cfg(RobotCfg):
                 arm_kind=DexforceW1ArmKind.INDUSTRIAL,
                 version=DexforceW1Version.V021,
             )
+            left_arm_tcp = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.15],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+            right_arm_tcp = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.15],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
         else:
             w1_left_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.LEFT,
@@ -139,6 +155,22 @@ class DexforceW1Cfg(RobotCfg):
                 arm_side=DexforceW1ArmSide.RIGHT,
                 arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
                 version=DexforceW1Version.V021,
+            )
+            left_arm_tcp = np.array(
+                [
+                    [-1.0, 0.0, 0.0, 0.012],
+                    [0.0, 0.0, 1.0, 0.0675],
+                    [0.0, 1.0, 0.0, 0.127],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+            right_arm_tcp = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.012],
+                    [0.0, 0.0, -1.0, -0.0675],
+                    [0.0, 1.0, 0.0, 0.127],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
             )
 
         return {
@@ -151,14 +183,7 @@ class DexforceW1Cfg(RobotCfg):
                 T_b_ob=w1_right_arm_params.T_b_ob,
                 link_lengths=w1_right_arm_params.link_lengths,
                 rotation_directions=w1_right_arm_params.rotation_directions,
-                tcp=np.array(
-                    [
-                        [1.0, 0.0, 0.0, 0.012],
-                        [0.0, 0.0, -1.0, -0.0675],
-                        [0.0, 1.0, 0.0, 0.127],
-                        [0.0, 0.0, 0.0, 1.0],
-                    ]
-                ),
+                tcp=right_arm_tcp,
             ),
             "left_arm": SRSSolverCfg(
                 end_link_name="left_ee",
@@ -169,14 +194,7 @@ class DexforceW1Cfg(RobotCfg):
                 T_b_ob=w1_left_arm_params.T_b_ob,
                 link_lengths=w1_left_arm_params.link_lengths,
                 rotation_directions=w1_left_arm_params.rotation_directions,
-                tcp=np.array(
-                    [
-                        [-1.0, 0.0, 0.0, 0.012],
-                        [0.0, 0.0, 1.0, 0.0675],
-                        [0.0, 1.0, 0.0, 0.127],
-                        [0.0, 0.0, 0.0, 1.0],
-                    ]
-                ),
+                tcp=left_arm_tcp,
             ),
         }
 
