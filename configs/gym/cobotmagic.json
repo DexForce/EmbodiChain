@@ -14,15 +14,6 @@
                     "intensity_range": [50.0, 100.0]
                 }
             },
-            "random_camera_left_wrist_extrinsics": {
-                "func": "randomize_camera_extrinsics",
-                "mode": "reset",
-                "params": {
-                    "entity_cfg": {"uid": "camera_1"},
-                    "pos_range": [[-0.03, -0.03, -0.03], [0.03, 0.03, 0.03]],
-                    "euler_range": [[-0.1, -0.1, -0.1], [0.1, 0.1, 0.1]]
-                }
-            },
             "random_material": {
                 "func": "randomize_visual_material",
                 "mode": "interval",
