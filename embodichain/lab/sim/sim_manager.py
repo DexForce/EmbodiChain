@@ -1051,7 +1051,7 @@ class SimulationManager:
                     if hasattr(self._world, "get_windows")
                     else None
                 )
-                self._gizmo_controller = GizmoController(windows)
+                self._gizmo_controller = GizmoController()
 
         except Exception as e:
             logger.log_error(
