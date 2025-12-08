@@ -1046,12 +1046,13 @@ class SimulationManager:
 
             # Initialize GizmoController if not already done.
             if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
-                windows = (
+                window = (
                     self._world.get_windows()
                     if hasattr(self._world, "get_windows")
                     else None
                 )
                 self._gizmo_controller = GizmoController()
+                window.add_input_control(self._gizmo_controller)
 
         except Exception as e:
             logger.log_error(

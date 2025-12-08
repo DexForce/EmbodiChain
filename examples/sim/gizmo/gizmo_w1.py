@@ -104,8 +104,9 @@ def main():
             ),
         },
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"LEFT_J[1-7]": 1e4, "RIGHT_J[1-7]": 1e4},
-            damping={"LEFT_J[1-7]": 1e3, "RIGHT_J[1-7]": 1e3},
+            stiffness={"(LEFT|RIGHT)_J[1-7]": 1e4, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e7},
+            damping={"(LEFT|RIGHT)_J[1-7]": 1e3, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e4},
+            max_effort={"(LEFT|RIGHT)_J[1-7]": 1e5, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e10},
         ),
     )
     robot = sim.add_robot(cfg=robot_cfg)
