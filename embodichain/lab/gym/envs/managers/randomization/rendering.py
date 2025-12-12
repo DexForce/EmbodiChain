@@ -483,9 +483,7 @@ class randomize_visual_material(Functor):
                 getattr(mat_inst, f"set_{key}")(value[idx].item())
 
         # randomize texture or base color based on the probability.
-        if random_texture_prob <= 0.0 or len(self.textures) == 0:
-            return
-        if random.random() < random_texture_prob:
+        if random.random() < random_texture_prob and len(self.textures) != 0:
             self._randomize_texture(mat_inst)
         else:
             # set a random base color instead.
