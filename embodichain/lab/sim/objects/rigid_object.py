@@ -196,6 +196,9 @@ class RigidObject(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        # reserve flag for collision visible node existence
+        self._has_collision_visible_node = False
+
     def __str__(self) -> str:
         parent_str = super().__str__()
         return (
@@ -647,6 +650,50 @@ class RigidObject(BatchEntity):
                 gpu_indices=indices,
                 data_type=RigidBodyGPUAPIWriteType.TORQUE,
             )
+
+    def set_physical_visible(
+        self,
+        visible: bool = True,
+        rgba: Optional[Sequence[float]] = None,
+    ):
+        """set collion render visibility
+
+        Args:
+            visible (bool, optional): is collision body visible. Defaults to True.
+            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+        """
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+
+        # create collision visible node if not exist
+        if visible:
+            if not self._has_collision_visible_node:
+                for i, env_idx in enumerate(self._all_indices):
+                    self._entities[env_idx].create_physical_visible_node(
+                        np.array(
+                            [
+                                rgba[0],
+                                rgba[1],
+                                rgba[2],
+                                rgba[3],
+                            ]
+                        )
+                    )
+                self._has_collision_visible_node = True
+
+        # create collision visible node if not exist
+        for i, env_idx in enumerate(self._all_indices):
+            self._entities[env_idx].set_physical_visible(visible)
+
+    def set_visible(self, visible: bool = True) -> None:
+        """Set the visibility of the rigid object.
+
+        Args:
+            visible (bool, optional): Whether the rigid object is visible. Defaults to True.
+        """
+        for i, env_idx in enumerate(self._all_indices):
+            self._entities[env_idx].set_visible(visible)
 
     def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids

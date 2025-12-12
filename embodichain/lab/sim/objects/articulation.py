@@ -579,6 +579,11 @@ class Articulation(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        # flag for collision visible node existence
+        self._has_collision_visible_node_dict = dict()
+        for link_name in self.link_names:
+            self._has_collision_visible_node_dict[link_name] = False
+
     def __str__(self) -> str:
         parent_str = super().__str__()
         return parent_str + f" | dof: {self.dof} | num_links: {self.num_links}"
@@ -1534,6 +1539,64 @@ class Articulation(BatchEntity):
                 }
                 result.append(mat_dict)
         return result
+
+    def set_physical_visible(
+        self,
+        visible: bool = True,
+        link_names: Optional[List[str]] = None,
+        rgba: Optional[Sequence[float]] = None,
+    ):
+        """set collision
+
+        Args:
+            visible (bool, optional): is collision body visible. Defaults to True.
+            link_names (Optional[List[str]], optional): links to set visibility. Defaults to None.
+            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+        """
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+        rgba = np.array(
+            [
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                rgba[3],
+            ]
+        )
+        link_names = self.link_names if link_names is None else link_names
+
+        # create collision visible node if not exist
+        if visible:
+            for i, env_idx in enumerate(self._all_indices):
+                for link_name in link_names:
+                    if self._has_collision_visible_node_dict[link_name] is False:
+                        self._entities[env_idx].create_physical_visible_node(
+                            rgba, link_name
+                        )
+                        self._has_collision_visible_node_dict[link_name] = True
+
+        # set visibility
+        for i, env_idx in enumerate(self._all_indices):
+            for link_name in link_names:
+                self._entities[env_idx].set_physical_visible(visible, link_name)
+
+    def set_visible(
+        self,
+        visible: bool = True,
+        link_names: Optional[List[str]] = None,
+    ) -> None:
+        """Set the visibility of the robot or a specific control part.
+
+        Args:
+            visible (bool, optional): Whether the robot or control part is visible. Defaults to True.
+            link_names (Optional[List[str]], optional): links to set visibility. Defaults to None.
+        """
+        link_names = self.link_names if link_names is None else link_names
+
+        for i, env_idx in enumerate(self._all_indices):
+            for link_name in link_names:
+                self._entities[env_idx].set_visible(visible, link_name)
 
     def destroy(self) -> None:
         env = self._world.get_env()

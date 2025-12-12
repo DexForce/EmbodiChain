@@ -175,6 +175,21 @@ class BaseArticulationTest:
             self.art.uid not in self.sim.asset_uids
         ), "FAIL: Articulation UID still present after removal"
 
+    def test_set_physical_visible(self):
+        self.art.set_physical_visible(
+            visible=True,
+            rgba=(0.1, 0.1, 0.9, 0.4),
+        )
+        self.art.set_physical_visible(visible=False)
+        all_link_names = self.art.link_names
+        self.art.set_physical_visible(visible=True, link_names=all_link_names[:3])
+
+    def test_set_visible(self):
+        self.art.set_visible(visible=True)
+        self.art.set_visible(visible=False)
+        all_link_names = self.art.link_names
+        self.art.set_visible(visible=True, link_names=all_link_names[:3])
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
