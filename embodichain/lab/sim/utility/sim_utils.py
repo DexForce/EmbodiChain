@@ -100,7 +100,7 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
     else:
         logger.log_error(f"Unknow drive type {drive_type}")
 
-    for art in arts:
+    for i, art in enumerate(arts):
         art.set_body_scale(cfg.body_scale)
         art.set_physical_attr(cfg.attrs.attr())
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
@@ -117,6 +117,15 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
             inertia = physical_body.get_mass_space_inertia_tensor()
             inertia = np.maximum(inertia, 1e-4)
             physical_body.set_mass_space_inertia_tensor(inertia)
+
+            if i == 0 and cfg.compute_uv:
+                render_body = art.get_render_body(name)
+                if render_body:
+                    render_body.set_projective_uv()
+
+                # TODO: will crash when exit if not explicitly delete.
+                # This may due to the destruction of render body order when exiting.
+                del render_body
 
 
 def is_rt_enabled() -> bool:
