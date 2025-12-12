@@ -40,7 +40,6 @@ from dexsim.types import (
     RigidBodyShape,
     PhysicalAttr,
 )
-from dexsim.render import GizmoController
 
 from embodichain.lab.sim.utility.gizmo_utils import create_gizmo_callback
 
@@ -421,7 +420,7 @@ class Gizmo:
 
         # Apply the visibility setting to the gizmo node
         if self._gizmo and hasattr(self._gizmo, "node"):
-            self._gizmo.node.set_physical_visible(self._is_visible, self._is_visible)
+            self._gizmo.node.set_visible(self._is_visible)
 
         return self._is_visible
 
@@ -436,7 +435,7 @@ class Gizmo:
 
         # Apply the visibility setting to the gizmo node
         if self._gizmo and hasattr(self._gizmo, "node"):
-            self._gizmo.node.set_physical_visible(self._is_visible, self._is_visible)
+            self._gizmo.node.set_visible(self._is_visible)
 
     def is_visible(self) -> bool:
         """

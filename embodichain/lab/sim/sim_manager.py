@@ -46,7 +46,7 @@ from dexsim.types import (
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType
-from dexsim.render import GizmoController
+from dexsim.engine import GizmoController
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -1037,12 +1037,13 @@ class SimulationManager:
 
             # Initialize GizmoController if not already done.
             if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
-                windows = (
+                window = (
                     self._world.get_windows()
                     if hasattr(self._world, "get_windows")
                     else None
                 )
-                self._gizmo_controller = GizmoController(windows)
+                self._gizmo_controller = GizmoController()
+                window.add_input_control(self._gizmo_controller)
 
         except Exception as e:
             logger.log_error(
