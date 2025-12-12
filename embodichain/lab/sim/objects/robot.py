@@ -667,7 +667,7 @@ class Robot(Articulation):
         """
         self.pk_serial_chain = self.cfg.build_pk_serial_chain(device=self.device)
 
-    def set_collision_visibility(
+    def set_physical_visible(
         self,
         visible: bool = True,
         control_part: Optional[str] = None,
@@ -708,7 +708,7 @@ class Robot(Articulation):
             for link_name in link_names:
                 self._entities[env_idx].set_physical_visible(visible, link_name)
 
-    def set_visibility(
+    def set_visible(
         self, visible: bool = True, control_part: Optional[str] = None
     ) -> None:
         """Set the visibility of the robot or a specific control part.

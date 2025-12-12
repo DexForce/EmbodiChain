@@ -424,7 +424,7 @@ class Gizmo:
 
         return self._is_visible
 
-    def set_visibility(self, visible: bool):
+    def set_visible(self, visible: bool):
         """
         Set the visibility of the gizmo.
 

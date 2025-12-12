@@ -1540,7 +1540,7 @@ class Articulation(BatchEntity):
                 result.append(mat_dict)
         return result
 
-    def set_collision_visibility(
+    def set_physical_visible(
         self,
         visible: bool = True,
         link_names: Optional[List[str]] = None,
@@ -1580,6 +1580,23 @@ class Articulation(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
                 self._entities[env_idx].set_physical_visible(visible, link_name)
+
+    def set_visible(
+        self,
+        visible: bool = True,
+        link_names: Optional[List[str]] = None,
+    ) -> None:
+        """Set the visibility of the robot or a specific control part.
+
+        Args:
+            visible (bool, optional): Whether the robot or control part is visible. Defaults to True.
+            link_names (Optional[List[str]], optional): links to set visibility. Defaults to None.
+        """
+        link_names = self.link_names if link_names is None else link_names
+
+        for i, env_idx in enumerate(self._all_indices):
+            for link_name in link_names:
+                self._entities[env_idx].set_visible(visible, link_name)
 
     def destroy(self) -> None:
         env = self._world.get_env()

@@ -507,7 +507,7 @@ class RigidObjectGroup(BatchEntity):
 
         self.clear_dynamics(env_ids=local_env_ids)
 
-    def set_collision_visibility(
+    def set_physical_visible(
         self,
         visible: bool = True,
         rgba: Optional[Sequence[float]] = None,
@@ -516,7 +516,6 @@ class RigidObjectGroup(BatchEntity):
 
         Args:
             visible (bool, optional): is collision body visible. Defaults to True.
-            render_visible (bool, optional): is render body visible. Defaults to True.
             rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
@@ -545,7 +544,7 @@ class RigidObjectGroup(BatchEntity):
             for entity in self._entities[env_idx]:
                 entity.set_physical_visible(visible)
 
-    def set_visibility(self, visible: bool = True) -> None:
+    def set_visible(self, visible: bool = True) -> None:
         """Set the visibility of the rigid object group.
 
         Args:

@@ -254,20 +254,17 @@ class BaseRigidObjectTest:
             self.duck.uid not in self.sim.asset_uids
         ), "Duck UID still present after removal"
 
-    def test_set_collision_render_visibility(self):
-        """Test setting collision and render visibility of the duck object."""
-
-        # Set collision with color
-        self.table.set_collision_visibility(
+    def test_set_physical_visible(self):
+        self.table.set_physical_visible(
             visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
         )
+        self.table.set_physical_visible(visible=True)
+        self.table.set_physical_visible(visible=False)
 
-        # Set collision visible, render invisible
-        self.table.set_collision_visibility(visible=True)
-
-        # Set collision invisible, render visible
-        self.table.set_collision_visibility(visible=False)
+    def test_set_visible(self):
+        self.table.set_visible(visible=True)
+        self.table.set_visible(visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

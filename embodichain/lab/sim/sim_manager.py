@@ -1158,7 +1158,7 @@ class SimulationManager:
         """
         gizmo = self.get_gizmo(uid, control_part)
         if gizmo is not None:
-            gizmo.set_visibility(visible)
+            gizmo.set_visible(visible)
 
     def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
         """General interface to add a sensor to the scene and returns a handle.

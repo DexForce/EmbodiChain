@@ -245,17 +245,29 @@ class BaseRobotTest:
         """Clean up resources after each test method."""
         self.sim.destroy()
 
-    def test_set_collision_render_visibility(self):
-        self.robot.set_collision_visibility(
+    def test_set_physical_visible(self):
+        self.robot.set_physical_visible(
             visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
             control_part="left_arm",
         )
-        self.robot.set_collision_visibility(
+        self.robot.set_physical_visible(
             visible=True,
             control_part="left_arm",
         )
-        self.robot.set_collision_visibility(
+        self.robot.set_physical_visible(
+            visible=False,
+            control_part="left_arm",
+        )
+
+    def test_set_visible(self):
+        # Set collision visible, render invisible
+        self.robot.set_visible(visible=True)
+
+        # Set collision invisible, render visible
+        self.robot.set_visible(visible=False)
+
+        self.robot.set_visible(
             visible=False,
             control_part="left_arm",
         )

@@ -651,7 +651,7 @@ class RigidObject(BatchEntity):
                 data_type=RigidBodyGPUAPIWriteType.TORQUE,
             )
 
-    def set_collision_visibility(
+    def set_physical_visible(
         self,
         visible: bool = True,
         rgba: Optional[Sequence[float]] = None,
@@ -686,7 +686,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             self._entities[env_idx].set_physical_visible(visible)
 
-    def set_visibility(self, visible: bool = True) -> None:
+    def set_visible(self, visible: bool = True) -> None:
         """Set the visibility of the rigid object.
 
         Args:
