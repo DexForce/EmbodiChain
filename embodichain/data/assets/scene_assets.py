@@ -24,6 +24,9 @@ from embodichain.data.constants import (
 )
 
 
+scene_assets = "scene_assets"
+
+
 class SceneData(EmbodiChainDataset):
     """Dataset class for the Scene.
 
@@ -44,7 +47,7 @@ class SceneData(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
 
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "scene_assets/SceneData.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, scene_assets, "SceneData.zip"),
             "fb46e4694cc88886fc785704e891a68a",
         )
         prefix = "SceneData"
@@ -55,7 +58,7 @@ class SceneData(EmbodiChainDataset):
 class EmptyRoom(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "scene_assets/empty_room.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, scene_assets, "empty_room.zip"),
             "612ffead4fac95114bec2e3812469f96",
         )
         prefix = "EmptyRoom"

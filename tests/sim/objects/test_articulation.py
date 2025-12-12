@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import ArticulationCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
 
-ART_PATH = "AiLiMu_BoxDrawer/AiLiMu_BoxDrawer.urdf"
+ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
 
 

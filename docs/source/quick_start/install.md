@@ -14,7 +14,6 @@ The following minimum system requirements are recommended to run EmbodiChain rel
 
 - Python:
     - Supported Python versions:
-        - Python 3.9
         - Python 3.10
     - Use a virtual environment (venv, virtualenv, or conda) to isolate dependencies
 

@@ -6,9 +6,6 @@ Motion Generator
 
 .. currentmodule:: embodichain.lab.sim.planners.motion_generator
 
-Overview
-~~~~~~~~
-
 The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation (currently via TOPPRA), joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
 
 Key Features
@@ -19,6 +16,19 @@ Key Features
 - **Flexible Input**: Supports both joint space and Cartesian space waypoints
 - **Extensible**: Easy to add new planners (RRT, PRM, etc.)
 - **Integration Ready**: Can be used in RL, imitation learning, or classical pipelines
+
+
+The Code
+~~~~~~~~
+
+The tutorial corresponds to the ``motion_generator.py`` script in the ``scripts/tutorials/sim`` directory.
+
+.. dropdown:: Code for motion_generator.py
+    :icon: code
+
+    .. literalinclude:: ../../../scripts/tutorials/sim/motion_generator.py
+        :language: python
+        :linenos:
 
 Typical Usage
 ~~~~~~~~~~~~~

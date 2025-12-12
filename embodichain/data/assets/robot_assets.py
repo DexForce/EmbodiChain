@@ -24,6 +24,9 @@ from embodichain.data.constants import (
 )
 
 
+robot_assets = "robot_assets"
+
+
 class CobotMagicArm(EmbodiChainDataset):
     """Dataset class for the Cobot Magic Arm robot.
 
@@ -51,7 +54,7 @@ class CobotMagicArm(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/CobotMagicArmV2.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "CobotMagicArmV2.zip"
             ),
             "14af3e84b74193680899a59fc74e8337",
         )
@@ -81,7 +84,7 @@ class RidgeBack(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/RidgeBack.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "RidgeBack.zip"),
             "f03e1a6f4c781ad8957a88bdb010e9b6",
         )
         prefix = "RidgeBack"
@@ -112,7 +115,7 @@ class UnitreeH1(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/UnitreeH1.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UnitreeH1.zip"),
             "339417cef5051a912693f3c64d29dddc",
         )
         prefix = "UnitreeH1"
@@ -143,7 +146,7 @@ class ABB(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/ABB.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ABB.zip"),
             "ea6df4983982606c43387783e5fb8c05",
         )
         prefix = "ABB"
@@ -174,7 +177,7 @@ class Motoman(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Motoman.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Motoman.zip"),
             "ee5f16cfce34d8e2cb996fcff8a25986",
         )
         prefix = "Motoman"
@@ -205,7 +208,7 @@ class KUKA(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/KUKA.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "KUKA.zip"),
             "da7a2dfd0db3f486e407f038d25c7537",
         )
         prefix = "KUKA"
@@ -236,7 +239,7 @@ class Fanuc(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Fanuc.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Fanuc.zip"),
             "0a1c562f4719f7cdc1b24545fec4a301",
         )
         prefix = "Fanuc"
@@ -276,7 +279,7 @@ class UniversalRobots(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/UniversalRobots.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UniversalRobots.zip"
             ),
             "dbd12f7e36cef4e5025b82f748233b80",
         )
@@ -308,7 +311,7 @@ class Rokae(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Rokae.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Rokae.zip"),
             "fbfb852d6139e94b7c422771542f988f",
         )
         prefix = "Rokae"
@@ -341,7 +344,7 @@ class Franka(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Franka.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Franka.zip"),
             "c2de367fe1da02eeb45a8129f903d0b6",
         )
         prefix = "Franka"
@@ -370,7 +373,7 @@ class Agile(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Agile.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Agile.zip"),
             "fd47d7ab8a4d13960fd76e59544ba836",
         )
         prefix = "Agile"
@@ -401,7 +404,7 @@ class Hans(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Hans.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Hans.zip"),
             "c867c406e3dffd6982fd0a15e7dc7e29",
         )
         prefix = "Hans"
@@ -430,7 +433,7 @@ class Aubo(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/Aubo.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Aubo.zip"),
             "2574649cd199c11267cc0f4aeac65557",
         )
         prefix = "Aubo"
@@ -459,7 +462,7 @@ class RainbowY1(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "robot_assets/RainbowY1.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "RainbowY1.zip"),
             "5979a3aaadb5de6488b13765d523564f",
         )
         prefix = "RainbowY1"

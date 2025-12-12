@@ -31,7 +31,11 @@ from embodichain.lab.sim import (
     VisualMaterialCfg,
 )
 from embodichain.utils.string import resolve_matching_names
-from embodichain.utils.math import sample_uniform
+from embodichain.utils.math import (
+    sample_uniform,
+    quat_from_euler_xyz,
+    euler_xyz_from_quat,
+)
 from embodichain.utils import logger
 from embodichain.data import get_data_path
 
@@ -40,10 +44,133 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "randomize_camera_extrinsics",
     "randomize_light",
     "randomize_camera_intrinsics",
     "randomize_visual_material",
 ]
+
+
+def randomize_camera_extrinsics(
+    env: EmbodiedEnv,
+    env_ids: Union[torch.Tensor, None],
+    entity_cfg: SceneEntityCfg,
+    pos_range: Optional[tuple[list[float], list[float]]] = None,
+    euler_range: Optional[tuple[list[float], list[float]]] = None,
+    eye_range: Optional[tuple[list[float], list[float]]] = None,
+    target_range: Optional[tuple[list[float], list[float]]] = None,
+    up_range: Optional[tuple[list[float], list[float]]] = None,
+) -> None:
+    """
+    Randomize camera extrinsic properties (position and orientation).
+
+    Behavior:
+    - If extrinsics config has a parent field (attach mode), pos_range/euler_range are used to perturb the initial pose (pos, quat),
+        and set_local_pose is called to attach the camera to the parent node. In this case, pose is related to parent.
+    - If extrinsics config uses eye/target/up (no parent), eye_range/target_range/up_range are used to perturb the initial eye, target, up vectors,
+        and look_at is called to set the camera orientation.
+
+    Args:
+        env: The environment instance.
+        env_ids: The environment IDs to apply the randomization.
+        entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
+        pos_range: Position perturbation range (attach mode).
+        euler_range: Euler angle perturbation range (attach mode).
+        eye_range: Eye position perturbation range (look_at mode).
+        target_range: Target position perturbation range (look_at mode).
+        up_range: Up vector perturbation range (look_at mode).
+    """
+    camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
+    num_instance = len(env_ids)
+
+    extrinsics = camera.cfg.extrinsics
+
+    if extrinsics.parent is not None:
+        # If extrinsics has a parent field, use pos/euler perturbation and attach camera to parent node
+        init_pos = getattr(extrinsics, "pos", [0.0, 0.0, 0.0])
+        init_quat = getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0])
+        new_pose = torch.tensor(
+            [init_pos + init_quat], dtype=torch.float32, device=env.device
+        ).repeat(num_instance, 1)
+        if pos_range:
+            random_value = sample_uniform(
+                lower=torch.tensor(pos_range[0]),
+                upper=torch.tensor(pos_range[1]),
+                size=(num_instance, 3),
+            )
+            new_pose[:, :3] += random_value
+        if euler_range:
+            # 1. quat -> euler
+            init_quat_np = (
+                torch.tensor(init_quat, dtype=torch.float32, device=env.device)
+                .unsqueeze_(0)
+                .repeat(num_instance, 1)
+            )
+            init_euler = euler_xyz_from_quat(init_quat_np)
+            # 2. Sample perturbation for euler angles
+            random_value = sample_uniform(
+                lower=torch.tensor(euler_range[0]),
+                upper=torch.tensor(euler_range[1]),
+                size=(num_instance, 3),
+            )
+            # 3. Add perturbation to each environment and convert back to quaternion
+            new_quat = quat_from_euler_xyz(init_euler + random_value)
+            new_pose[:, 3:7] = new_quat
+
+        camera.set_local_pose(new_pose, env_ids=env_ids)
+
+    elif extrinsics.eye is not None:
+        # If extrinsics uses eye/target/up, use perturbation for look_at mode
+        init_eye = (
+            torch.tensor(extrinsics.eye, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(num_instance, 1)
+        )
+        init_target = (
+            torch.tensor(extrinsics.target, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(num_instance, 1)
+        )
+        init_up = (
+            torch.tensor(extrinsics.up, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(num_instance, 1)
+        )
+
+        if eye_range:
+            eye_delta = sample_uniform(
+                lower=torch.tensor(eye_range[0]),
+                upper=torch.tensor(eye_range[1]),
+                size=(num_instance, 3),
+            )
+            new_eye = init_eye + eye_delta
+        else:
+            new_eye = init_eye
+
+        if target_range:
+            target_delta = sample_uniform(
+                lower=torch.tensor(target_range[0]),
+                upper=torch.tensor(target_range[1]),
+                size=(num_instance, 3),
+            )
+            new_target = init_target + target_delta
+        else:
+            new_target = init_target
+
+        if up_range:
+            up_delta = sample_uniform(
+                lower=torch.tensor(up_range[0]),
+                upper=torch.tensor(up_range[1]),
+                size=(num_instance, 3),
+            )
+            new_up = init_up + up_delta
+        else:
+            new_up = init_up
+
+        camera.look_at(new_eye, new_target, new_up, env_ids=env_ids)
+
+    else:
+        logger.log_error("Unsupported extrinsics format for camera randomization.")
 
 
 def randomize_light(

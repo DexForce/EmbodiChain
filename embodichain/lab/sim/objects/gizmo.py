@@ -40,7 +40,6 @@ from dexsim.types import (
     RigidBodyShape,
     PhysicalAttr,
 )
-from dexsim.render import GizmoController
 
 from embodichain.lab.sim.utility.gizmo_utils import create_gizmo_callback
 
@@ -331,7 +330,7 @@ class Gizmo:
                     new_qpos = new_qpos.unsqueeze(0)  # Make it (1, dof) for set_qpos
 
                 # Update robot joint positions
-                self.target.set_qpos(qpos=new_qpos, joint_ids=current_joint_ids)
+                self.target.set_qpos(qpos=new_qpos[0], joint_ids=current_joint_ids)
                 return True
             else:
                 logger.log_warning("IK solution not found")
@@ -422,7 +421,6 @@ class Gizmo:
         # Apply the visibility setting to the gizmo node
         if self._gizmo and hasattr(self._gizmo, "node"):
             self._gizmo.node.set_visible(self._is_visible)
-            self._gizmo.node.set_physical_visible(self._is_visible)
 
         return self._is_visible
 
@@ -438,7 +436,6 @@ class Gizmo:
         # Apply the visibility setting to the gizmo node
         if self._gizmo and hasattr(self._gizmo, "node"):
             self._gizmo.node.set_visible(self._is_visible)
-            self._gizmo.node.set_physical_visible(self._is_visible, self._is_visible)
 
     def is_visible(self) -> bool:
         """
