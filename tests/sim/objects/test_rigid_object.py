@@ -259,15 +259,15 @@ class BaseRigidObjectTest:
 
         # Set collision with color
         self.table.set_collision_visibility(
-            collision_visible=True,
+            visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
         )
 
         # Set collision visible, render invisible
-        self.table.set_collision_visibility(collision_visible=True)
+        self.table.set_collision_visibility(visible=True)
 
         # Set collision invisible, render visible
-        self.table.set_collision_visibility(collision_visible=False)
+        self.table.set_collision_visibility(visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

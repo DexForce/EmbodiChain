@@ -247,16 +247,16 @@ class BaseRobotTest:
 
     def test_set_collision_render_visibility(self):
         self.robot.set_collision_visibility(
-            collision_visible=True,
+            visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
             control_part="left_arm",
         )
         self.robot.set_collision_visibility(
-            collision_visible=True,
+            visible=True,
             control_part="left_arm",
         )
         self.robot.set_collision_visibility(
-            collision_visible=False,
+            visible=False,
             control_part="left_arm",
         )
 

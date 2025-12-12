@@ -669,14 +669,14 @@ class Robot(Articulation):
 
     def set_collision_visibility(
         self,
-        collision_visible: bool = True,
+        visible: bool = True,
         control_part: Optional[str] = None,
         rgba: Optional[Sequence[float]] = None,
     ):
         """set collision of the robot or a specific control part.
 
         Args:
-            collision_visible (bool, optional): is collision body visible. Defaults to True.
+            visible (bool, optional): is collision body visible. Defaults to True.
             control_part (Optional[str], optional): control part to set visibility. Defaults to None. If None, all links are set.
             rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
@@ -694,7 +694,7 @@ class Robot(Articulation):
         link_names = self.get_control_part_link_names(name=control_part)
 
         # create collision visible node if not exist
-        if collision_visible:
+        if visible:
             for i, env_idx in enumerate(self._all_indices):
                 for link_name in link_names:
                     if self._has_collision_visible_node_dict[link_name] is False:
@@ -706,9 +706,7 @@ class Robot(Articulation):
         # set visibility
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
-                self._entities[env_idx].set_physical_visible(
-                    collision_visible, link_name
-                )
+                self._entities[env_idx].set_physical_visible(visible, link_name)
 
     def set_visibility(
         self, visible: bool = True, control_part: Optional[str] = None

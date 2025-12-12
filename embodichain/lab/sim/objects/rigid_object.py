@@ -653,13 +653,13 @@ class RigidObject(BatchEntity):
 
     def set_collision_visibility(
         self,
-        collision_visible: bool = True,
+        visible: bool = True,
         rgba: Optional[Sequence[float]] = None,
     ):
         """set collion render visibility
 
         Args:
-            collision_visible (bool, optional): is collision body visible. Defaults to True.
+            visible (bool, optional): is collision body visible. Defaults to True.
             rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
@@ -667,7 +667,7 @@ class RigidObject(BatchEntity):
             logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
 
         # create collision visible node if not exist
-        if collision_visible:
+        if visible:
             if not self._has_collision_visible_node:
                 for i, env_idx in enumerate(self._all_indices):
                     self._entities[env_idx].create_physical_visible_node(
@@ -684,7 +684,7 @@ class RigidObject(BatchEntity):
 
         # create collision visible node if not exist
         for i, env_idx in enumerate(self._all_indices):
-            self._entities[env_idx].set_physical_visible(collision_visible)
+            self._entities[env_idx].set_physical_visible(visible)
 
     def set_visibility(self, visible: bool = True) -> None:
         """Set the visibility of the rigid object.

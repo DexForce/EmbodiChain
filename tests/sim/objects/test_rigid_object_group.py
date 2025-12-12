@@ -110,10 +110,10 @@ class BaseRigidObjectGroupTest:
     def test_set_collision_render_visibility(self):
         """Test setting collision and render visibility of the duck object."""
         # Set collision visible, render invisible
-        self.obj_group.set_collision_visibility(collision_visible=True)
+        self.obj_group.set_collision_visibility(visible=True)
 
         # Set collision invisible, render visible
-        self.obj_group.set_collision_visibility(collision_visible=False)
+        self.obj_group.set_collision_visibility(visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

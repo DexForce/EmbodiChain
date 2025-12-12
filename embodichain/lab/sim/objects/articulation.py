@@ -1542,14 +1542,14 @@ class Articulation(BatchEntity):
 
     def set_collision_visibility(
         self,
-        collision_visible: bool = True,
+        visible: bool = True,
         link_names: Optional[List[str]] = None,
         rgba: Optional[Sequence[float]] = None,
     ):
         """set collision
 
         Args:
-            collision_visible (bool, optional): is collision body visible. Defaults to True.
+            visible (bool, optional): is collision body visible. Defaults to True.
             link_names (Optional[List[str]], optional): links to set visibility. Defaults to None.
             rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
@@ -1567,7 +1567,7 @@ class Articulation(BatchEntity):
         link_names = self.link_names if link_names is None else link_names
 
         # create collision visible node if not exist
-        if collision_visible:
+        if visible:
             for i, env_idx in enumerate(self._all_indices):
                 for link_name in link_names:
                     if self._has_collision_visible_node_dict[link_name] is False:
@@ -1579,9 +1579,7 @@ class Articulation(BatchEntity):
         # set visibility
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
-                self._entities[env_idx].set_physical_visible(
-                    collision_visible, link_name
-                )
+                self._entities[env_idx].set_physical_visible(visible, link_name)
 
     def destroy(self) -> None:
         env = self._world.get_env()
