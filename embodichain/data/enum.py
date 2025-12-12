@@ -14,7 +14,22 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from enum import Enum
+from enum import Enum, IntEnum
+
+
+class SemanticMask(IntEnum):
+    """
+    SemanticMask is an enumeration representing different semantic regions in an image or scene.
+
+    Attributes:
+        BACKGROUND (int): Represents the background region (value: 0).
+        FOREGROUND (int): Represents the foreground objects (value: 1).
+        ROBOT (int): Represents the robot region (value: 2).
+    """
+
+    BACKGROUND = 0
+    FOREGROUND = 1
+    ROBOT = 2
 
 
 class EndEffector(Enum):
