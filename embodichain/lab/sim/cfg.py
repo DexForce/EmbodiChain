@@ -953,7 +953,7 @@ class ArticulationCfg(ObjectBaseCfg):
     build_pk_chain: bool = True
     """Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation."""
 
-    compute_uv: bool = True
+    compute_uv: bool = False
     """Whether to compute the UV mapping for the articulation link.
     
     Currently, the uv mapping is computed for each link with projection uv mapping method.
