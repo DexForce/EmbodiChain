@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
-from typing import TYPE_CHECKING, Literal, Union, Optional, Dict
+from typing import TYPE_CHECKING, Literal, Union, Dict
 
 from embodichain.lab.sim.objects import Light, RigidObject, Articulation
 from embodichain.lab.sim.sensors import Camera, StereoCamera
@@ -55,11 +55,11 @@ def randomize_camera_extrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    pos_range: Optional[tuple[list[float], list[float]]] = None,
-    euler_range: Optional[tuple[list[float], list[float]]] = None,
-    eye_range: Optional[tuple[list[float], list[float]]] = None,
-    target_range: Optional[tuple[list[float], list[float]]] = None,
-    up_range: Optional[tuple[list[float], list[float]]] = None,
+    pos_range: tuple[list[float], list[float]] | None = None,
+    euler_range: tuple[list[float], list[float]] | None = None,
+    eye_range: tuple[list[float], list[float]] | None = None,
+    target_range: tuple[list[float], list[float]] | None = None,
+    up_range: tuple[list[float], list[float]] | None = None,
 ) -> None:
     """
     Randomize camera extrinsic properties (position and orientation).
@@ -177,9 +177,9 @@ def randomize_light(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    position_range: Optional[tuple[list[float], list[float]]] = None,
-    color_range: Optional[tuple[list[float], list[float]]] = None,
-    intensity_range: Optional[tuple[float, float]] = None,
+    position_range: tuple[list[float], list[float]] | None = None,
+    color_range: tuple[list[float], list[float]] | None = None,
+    intensity_range: tuple[float, float] | None = None,
 ) -> None:
     """Randomize light properties by adding, scaling, or setting random values.
 
@@ -205,9 +205,9 @@ def randomize_light(
         env (EmbodiedEnv): The environment instance.
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        position_range (Optional[tuple[list[float], list[float]]]): The range for the position randomization.
-        color_range (Optional[tuple[list[float], list[float]]]): The range for the color randomization.
-        intensity_range (Optional[tuple[float, float]]): The range for the intensity randomization.
+        position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
+        color_range (tuple[list[float], list[float]] | None): The range for the color randomization.
+        intensity_range (tuple[float, float] | None): The range for the intensity randomization.
     """
 
     light: Light = env.sim.get_light(entity_cfg.uid)
@@ -259,10 +259,10 @@ def randomize_camera_intrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    focal_x_range: Optional[tuple[float, float]] = None,
-    focal_y_range: Optional[tuple[float, float]] = None,
-    cx_range: Optional[tuple[float, float]] = None,
-    cy_range: Optional[tuple[float, float]] = None,
+    focal_x_range: tuple[float, float] | None = None,
+    focal_y_range: tuple[float, float] | None = None,
+    cx_range: tuple[float, float] | None = None,
+    cy_range: tuple[float, float] | None = None,
 ) -> None:
     """Randomize camera intrinsic properties by adding, scaling, or setting random values.
 
@@ -289,10 +289,10 @@ def randomize_camera_intrinsics(
         env (EmbodiedEnv): The environment instance.
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        focal_x_range (Optional[tuple[float, float]]): The range for the focal length x randomization.
-        focal_y_range (Optional[tuple[float, float]]): The range for the focal length y randomization.
-        cx_range (Optional[tuple[float, float]]): The range for the principal point x randomization.
-        cy_range (Optional[tuple[float, float]]): The range for the principal point y randomization.
+        focal_x_range (tuple[float, float] | None): The range for the focal length x randomization.
+        focal_y_range (tuple[float, float] | None): The range for the focal length y randomization.
+        cx_range (tuple[float, float] | None): The range for the principal point x randomization.
+        cy_range (tuple[float, float] | None): The range for the principal point y randomization.
     """
 
     camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
@@ -500,11 +500,11 @@ class randomize_visual_material(Functor):
         env_ids: Union[torch.Tensor, None],
         entity_cfg: SceneEntityCfg,
         random_texture_prob: float = 0.5,
-        texture_path: Optional[str] = None,
-        base_color_range: Optional[tuple[list[float], list[float]]] = None,
-        metallic_range: Optional[tuple[float, float]] = None,
-        roughness_range: Optional[tuple[float, float]] = None,
-        ior_range: Optional[tuple[float, float]] = None,
+        texture_path: str | None = None,
+        base_color_range: tuple[list[float], list[float]] | None = None,
+        metallic_range: tuple[float, float] | None = None,
+        roughness_range: tuple[float, float] | None = None,
+        ior_range: tuple[float, float] | None = None,
     ):
         from embodichain.lab.sim.utility import is_rt_enabled
 

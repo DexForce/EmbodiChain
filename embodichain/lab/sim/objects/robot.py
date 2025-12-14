@@ -17,7 +17,7 @@
 import torch
 import numpy as np
 
-from typing import List, Dict, Optional, Tuple, Union, Sequence
+from typing import List, Dict, Tuple, Union, Sequence
 from dataclasses import dataclass, field
 
 from dexsim.engine import Articulation as _Articulation
@@ -90,17 +90,17 @@ class Robot(Articulation):
         )
 
     @property
-    def control_parts(self) -> Union[Dict[str, List[str]], None]:
+    def control_parts(self) -> Dict[str, List[str]] | None:
         """Get the control parts of the robot."""
         return self.cfg.control_parts
 
     def get_joint_ids(
-        self, name: Optional[str] = None, remove_mimic: bool = False
+        self, name: str | None = None, remove_mimic: bool = False
     ) -> List[int]:
         """Get the joint ids of the robot for a specific control part.
 
         Args:
-            name (str, optional): The name of the control part to get the joint ids for. If None, the default part is used.
+            name (str | None): The name of the control part to get the joint ids for. If None, the default part is used.
             remove_mimic (bool, optional): If True, mimic joints will be excluded from the returned joint ids. Defaults to False.
 
         Returns:
@@ -141,25 +141,25 @@ class Robot(Articulation):
 
     def compute_fk(
         self,
-        qpos: Optional[Union[torch.tensor, np.ndarray]],
-        name: Optional[str] = None,
-        link_names: Optional[List[str]] = None,
-        end_link_name: Optional[str] = None,
-        root_link_name: Optional[str] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        qpos: torch.Tensor | np.ndarray | None,
+        name: str | None = None,
+        link_names: List[str] | None = None,
+        end_link_name: str | None = None,
+        root_link_name: str | None = None,
+        env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
     ) -> torch.Tensor:
         """Compute the forward kinematics of the robot given joint positions and optionally a specific part name.
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (Optional[Union[torch.tensor, np.ndarray]]): Joint positions of the robot, (n_envs, num_joints).
-            name (str, optional): The name of the control part to compute the FK for. If None, the default part is used.
-            link_names (List[str], optional): The names of the links to compute the FK for. If None, all links are used.
-            end_link_name (str, optional): The name of the end link to compute the FK for. If None, the default end link is used.
-            root_link_name (str, optional): The name of the root link to compute the FK for. If None, the default root link is used.
-            env_ids (Sequence[int], optional): The environment ids to compute the FK for. If None, all environments are used.
-            to_matrix (bool, optional): If True, returns the transformation in the form of a 4x4 matrix.
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, num_joints).
+            name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
+            link_names (List[str] | None): The names of the links to compute the FK for. If None, all links are used.
+            end_link_name (str | None): The name of the end link to compute the FK for. If None, the default end link is used.
+            root_link_name (str | None): The name of the root link to compute the FK for. If None, the default root link is used.
+            env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
+            to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
             torch.Tensor: The forward kinematics result with shape (n_envs, 7) or (n_envs, 4, 4) if `to_matrix` is True.
@@ -215,25 +215,25 @@ class Robot(Articulation):
 
     def compute_ik(
         self,
-        pose: Union[torch.Tensor, np.ndarray],
-        joint_seed: Optional[Union[torch.Tensor, np.ndarray]] = None,
-        name: Optional[str] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        pose: torch.Tensor | np.ndarray,
+        joint_seed: torch.Tensor | np.ndarray | None = None,
+        name: str | None = None,
+        env_ids: Sequence[int] | None = None,
         return_all_solutions: bool = False,
-    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor] | None:
         """Compute the inverse kinematics of the robot given joint positions and optionally a specific part name.
         The input pose should be in the local arena frame.
 
         Args:
             pose (torch.Tensor): The end effector pose of the robot, (n_envs, 7) or (n_envs, 4, 4).
-            joint_seed (torch.Tensor, optional): The joint positions to use as a seed for the IK computation, (n_envs, dof).
+            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, dof).
                 If None, the zero joint positions will be used as the seed.
-            name (str, optional): The name of the control part to compute the IK for. If None, the default part is used.
-            env_ids (Optional[Sequence[int]]): Environment indices to apply the positions. Defaults to all environments.
-            return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.
+            name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
+            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
+            return_all_solutions (bool): Whether to return all IK solutions or just the best one. Defaults to False.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: The success Tensor with shape (n_envs, ) and qpos Tensor with shape (n_envs, max_results, dof).
+            Tuple[torch.Tensor, torch.Tensor] | None: The success Tensor with shape (n_envs, ) and qpos Tensor with shape (n_envs, max_results, dof), or None if solver not found.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -302,19 +302,19 @@ class Robot(Articulation):
 
     def compute_batch_fk(
         self,
-        qpos: torch.tensor,
+        qpos: torch.Tensor,
         name: str,
-        env_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
     ):
         """Compute the forward kinematics of the robot given joint positions and optionally a specific part name.
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (Optional[Union[torch.tensor, np.ndarray]]): Joint positions of the robot, (n_envs, n_batch, num_joints).
-            name (str, optional): The name of the control part to compute the FK for. If None, the default part is used.
-            env_ids (Sequence[int], optional): The environment ids to compute the FK for. If None, all environments are used.
-            to_matrix (bool, optional): If True, returns the transformation in the form of a 4x4 matrix.
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, n_batch, num_joints).
+            name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
+            env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
+            to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
             torch.Tensor: The forward kinematics result with shape (n_envs, batch, 7) or (n_envs, batch, 4, 4) if `to_matrix` is True.
@@ -367,19 +367,19 @@ class Robot(Articulation):
 
     def compute_batch_ik(
         self,
-        pose: Union[torch.Tensor, np.ndarray],
-        joint_seed: Optional[Union[torch.Tensor, np.ndarray]],
+        pose: torch.Tensor | np.ndarray,
+        joint_seed: torch.Tensor | np.ndarray | None,
         name: str,
-        env_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
     ):
         """Compute the inverse kinematics of the robot given joint positions and optionally a specific part name.
         The input pose should be in the local arena frame.
 
         Args:
             pose (torch.Tensor): The end effector pose of the robot, (n_envs, n_batch, 7) or (n_envs, n_batch, 4, 4).
-            joint_seed (torch.Tensor, optional): The joint positions to use as a seed for the IK computation, (n_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
-            name (str): The name of the control part to compute the IK for. If None, the default part is used.
-            env_ids (Optional[Sequence[int]]): Environment indices to apply the positions. Defaults to all environments.
+            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
+            name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
+            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
@@ -542,14 +542,14 @@ class Robot(Articulation):
                         solver_cfg.joint_names = self.cfg.control_parts[part_name]
                     self._solvers[name] = solver_cfg.init_solver(device=self.device)
 
-    def get_solver(self, name: Optional[str] = None) -> Optional[BaseSolver]:
+    def get_solver(self, name: str | None = None) -> BaseSolver | None:
         """Get the kinematic solver for a specific control part.
 
         Args:
-            name (str, optional): The name of the control part to get the solver for. If None, the default part is used.
+            name (str | None): The name of the control part to get the solver for. If None, the default part is used.
 
         Returns:
-            Optional[BaseSolver]: The kinematic solver for the specified control part, or None if not found.
+            BaseSolver | None: The kinematic solver for the specified control part, or None if not found.
         """
 
         if not self._solvers:
@@ -562,16 +562,15 @@ class Robot(Articulation):
 
     def get_control_part_base_pose(
         self,
-        name: Optional[str] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        name: str | None = None,
+        env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
     ) -> torch.Tensor:
         """Retrieves the base pose of the control part for a specified robot.
 
         Args:
-            name (Optional[str]): The name of the control part the solver adhere to. If None, the default solver is used.
-            env_ids (Optional[Sequence[int]]): A sequence of environment IDs to specify the environments.
-                                                If None, all indices are used.
+            name (str | None): The name of the control part the solver adhere to. If None, the default solver is used.
+            env_ids (Sequence[int] | None): A sequence of environment IDs to specify the environments. If None, all indices are used.
             to_matrix (bool): If True, returns the pose in the form of a 4x4 matrix.
 
         Returns:

@@ -17,7 +17,7 @@
 import os
 import torch
 import numpy as np
-from typing import List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import List, Tuple, Union, TYPE_CHECKING
 from embodichain.utils import logger
 
 from embodichain.lab.sim.utility.import_utils import (
@@ -60,17 +60,17 @@ class PinkSolverCfg(SolverCfg):
     )
 
     # Path to the mesh files associated with the robot. These files are also loaded by Pinocchio's `robot_wrapper.BuildFromURDF`.
-    mesh_path: Optional[str] = None
+    mesh_path: str | None = None
 
     # A list of tasks for the Pink IK controller. These tasks are controllable by the env action.
     # These tasks can be used to control the pose of a frame or the angles of joints.
     # For more details, visit: https://github.com/stephane-caron/pink
-    variable_input_tasks: List["pink.tasks.FrameTask"] = None
+    variable_input_tasks: list["pink.tasks.FrameTask"] | None = None
 
     # A list of tasks for the Pink IK controller. These tasks are fixed and not controllable by the env action.
     # These tasks can be used to fix the pose of a frame or the angles of joints to a desired configuration.
     # For more details, visit: https://github.com/stephane-caron/pink
-    fixed_input_tasks: List["pink.tasks.FrameTask"] = None
+    fixed_input_tasks: list["pink.tasks.FrameTask"] | None = None
 
     # Show warning if IK solver fails to find a solution.
     show_ik_warnings: bool = True
@@ -240,16 +240,16 @@ class PinkSolver(BaseSolver):
 
     def get_ik(
         self,
-        target_xpos: Optional[Union[torch.Tensor, np.ndarray]],
-        qpos_seed: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        target_xpos: torch.Tensor | np.ndarray | None,
+        qpos_seed: torch.Tensor | np.ndarray | None = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute target joint positions using inverse kinematics.
 
         Args:
-            target_pose (Optional[Union[torch.Tensor, np.ndarray]]): Target end-effector pose
-            qpos_seed (Optional[Union[torch.Tensor, np.ndarray]]): Seed joint positions
+            target_pose (torch.Tensor | np.ndarray | None): Target end-effector pose
+            qpos_seed (torch.Tensor | np.ndarray | None): Seed joint positions
             return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.
             **kwargs: Additional keyword arguments for future extensions.
 
@@ -360,13 +360,13 @@ class PinkSolver(BaseSolver):
 
     def _get_fk(
         self,
-        qpos: Optional[Union[torch.Tensor, np.ndarray]],
+        qpos: torch.Tensor | np.ndarray | None,
         **kwargs,
     ) -> torch.tensor:
         """Compute the forward kinematics for the robot given joint positions.
 
         Args:
-            qpos (torch.Tensor or np.ndarray): Joint positions, shape should be (nq,).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions, shape should be (nq,).
             **kwargs: Additional keyword arguments (not used).
 
         Returns:

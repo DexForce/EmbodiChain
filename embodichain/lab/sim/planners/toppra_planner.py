@@ -19,7 +19,7 @@ from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import BasePlanner
 
-from typing import TYPE_CHECKING, Union, Optional, Tuple
+from typing import TYPE_CHECKING, Union, Tuple
 
 try:
     import toppra as ta

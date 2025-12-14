@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING, Literal, Union, Optional, List
+from typing import TYPE_CHECKING, Literal, Union, List
 
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 def get_random_pose(
     init_pos: torch.Tensor,
     init_rot: torch.Tensor,
-    position_range: Optional[tuple[list[float], list[float]]] = None,
-    rotation_range: Optional[tuple[list[float], list[float]]] = None,
+    position_range: tuple[list[float], list[float]] | None = None,
+    rotation_range: tuple[list[float], list[float]] | None = None,
     relative_position: bool = True,
     relative_rotation: bool = False,
 ) -> torch.Tensor:
@@ -42,8 +42,8 @@ def get_random_pose(
     Args:
         init_pos (torch.Tensor): The initial position tensor of shape (num_instance, 3).
         init_rot (torch.Tensor): The initial rotation tensor of shape (num_instance, 3, 3).
-        position_range (Optional[tuple[list[float], list[float]]]): The range for the position randomization.
-        rotation_range (Optional[tuple[list[float], list[float]]]): The range for the rotation randomization.
+        position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
+        rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
             The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
         relative_position (bool): Whether to randomize the position relative to the initial position. Default is True.
         relative_rotation (bool): Whether to randomize the rotation relative to the initial rotation. Default is False.
@@ -103,8 +103,8 @@ def randomize_rigid_object_pose(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    position_range: Optional[tuple[list[float], list[float]]] = None,
-    rotation_range: Optional[tuple[list[float], list[float]]] = None,
+    position_range: tuple[list[float], list[float]] | None = None,
+    rotation_range: tuple[list[float], list[float]] | None = None,
     relative_position: bool = True,
     relative_rotation: bool = False,
 ) -> None:
@@ -114,8 +114,8 @@ def randomize_rigid_object_pose(
         env (EmbodiedEnv): The environment instance.
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        position_range (Optional[tuple[list[float], list[float]]]): The range for the position randomization.
-        rotation_range (Optional[tuple[list[float], list[float]]]): The range for the rotation randomization.
+        position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
+        rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
             The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
         relative_position (bool): Whether to randomize the position relative to the object's initial position. Default is True.
         relative_rotation (bool): Whether to randomize the rotation relative to the object's initial rotation. Default is False.
@@ -157,8 +157,8 @@ def randomize_robot_eef_pose(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    position_range: Optional[tuple[list[float], list[float]]] = None,
-    rotation_range: Optional[tuple[list[float], list[float]]] = None,
+    position_range: tuple[list[float], list[float]] | None = None,
+    rotation_range: tuple[list[float], list[float]] | None = None,
 ) -> None:
     """Randomize the initial end-effector pose of a robot in the environment.
 
@@ -171,8 +171,8 @@ def randomize_robot_eef_pose(
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         robot_name (str): The name of the robot.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        position_range (Optional[tuple[list[float], list[float]]]): The range for the position randomization.
-        rotation_range (Optional[tuple[list[float], list[float]]]): The range for the rotation randomization.
+        position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
+        rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
             The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
     """
 
@@ -220,9 +220,9 @@ def randomize_robot_qpos(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    qpos_range: Optional[tuple[list[float], list[float]]] = None,
+    qpos_range: tuple[list[float], list[float]] | None = None,
     relative_qpos: bool = True,
-    joint_ids: Optional[List[int]] = None,
+    joint_ids: List[int] | None = None,
 ) -> None:
     """Randomize the initial joint positions of a robot in the environment.
 
@@ -230,9 +230,9 @@ def randomize_robot_qpos(
         env (EmbodiedEnv): The environment instance.
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        qpos_range (Optional[tuple[list[float], list[float]]]): The range for the joint position randomization.
+        qpos_range (tuple[list[float], list[float]] | None): The range for the joint position randomization.
         relative_qpos (bool): Whether to randomize the joint positions relative to the current joint positions. Default is True.
-        joint_ids (Optional[List[int]]): The list of joint IDs to randomize. If None, all joints will be randomized.
+        joint_ids (List[int] | None): The list of joint IDs to randomize. If None, all joints will be randomized.
     """
     if qpos_range is None:
         return

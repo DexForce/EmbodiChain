@@ -22,7 +22,7 @@ import warnings
 import torch
 import numpy as np
 import torch.nn.functional
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 
 def look_at_to_pose(
@@ -914,8 +914,8 @@ def is_identity_pose(pos: torch.tensor, rot: torch.tensor) -> bool:
 def combine_frame_transforms(
     t01: torch.Tensor,
     q01: torch.Tensor,
-    t12: Optional[torch.Tensor] = None,
-    q12: Optional[torch.Tensor] = None,
+    t12: torch.Tensor | None = None,
+    q12: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Combine transformations between two reference frames into a stationary frame.
 

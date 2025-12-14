@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Union, TYPE_CHECKING, Any
+from typing import List, Dict, Union, TYPE_CHECKING, Any
 from dataclasses import MISSING
 from embodichain.utils import configclass, is_configclass, logger
 
@@ -62,7 +62,7 @@ class ShapeCfg:
     shape_type: str = MISSING
     """Type of the shape. Must be specified in subclasses."""
 
-    visual_material: Optional[VisualMaterialCfg] = None
+    visual_material: VisualMaterialCfg | None = None
     """Configuration parameters for the visual material of the shape. Defaults to None."""
 
     @classmethod

@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple, Callable, Optional
+from typing import Dict, Any, Tuple, Callable
 import time
 import numpy as np
 import torch

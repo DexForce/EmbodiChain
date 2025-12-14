@@ -23,7 +23,7 @@ import numpy as np
 import warp as wp
 import dexsim.render as dr
 
-from typing import Dict, Tuple, List, Optional, Sequence
+from typing import Dict, Tuple, List, Sequence
 
 from dexsim.utility import inv_transform
 from embodichain.lab.sim.sensors import Camera, CameraCfg
@@ -466,18 +466,16 @@ class StereoCamera(Camera):
     def set_intrinsics(
         self,
         intrinsics: torch.Tensor,
-        right_intrinsics: Optional[torch.Tensor] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        right_intrinsics: torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """
         Set the camera intrinsics for both left and right cameras.
 
         Args:
             intrinsics (torch.Tensor): The intrinsics for the left camera with shape (4,) / (3, 3) or (B, 4) / (B, 3, 3).
-            right_intrinsics (Optional[torch.Tensor], optional): The intrinsics for the right camera with shape 4,) / (3, 3) or (B, 4) / (B, 3, 3).
-                If None, use the same intrinsics as the left camera. Defaults to None.
-            env_ids (Optional[Sequence[int]], optional): The environment ids to set the intrinsics. If None, set for all environments.
-                Defaults to None.
+            right_intrinsics (torch.Tensor | None): The intrinsics for the right camera with shape (4,) / (3, 3) or (B, 4) / (B, 3, 3). If None, use the same intrinsics as the left camera.
+            env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
 

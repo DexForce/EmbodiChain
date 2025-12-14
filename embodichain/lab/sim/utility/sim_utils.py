@@ -18,7 +18,7 @@ import os
 import dexsim
 import open3d as o3d
 
-from typing import List, Union, Optional
+from typing import List, Union
 
 from dexsim.types import DriveType, ArticulationFlag, LoadOption, RigidBodyShape
 from dexsim.engine import Articulation
@@ -186,7 +186,7 @@ def create_sphere(
 
 
 def load_mesh_objects_from_cfg(
-    cfg: RigidObjectCfg, env_list: List[Arena], cache_dir: Optional[str] = None
+    cfg: RigidObjectCfg, env_list: List[Arena], cache_dir: str | None = None
 ) -> List[MeshObject]:
     """Load mesh objects from configuration.
 
@@ -194,7 +194,7 @@ def load_mesh_objects_from_cfg(
         cfg (RigidObjectCfg): Configuration for the rigid object.
         env_list (List[Arena]): List of arenas to load the objects into.
 
-        cache_dir (Optional[str], optional): Directory for caching convex decomposition files. Defaults to None
+    cache_dir (str | None, optional): Directory for caching convex decomposition files. Defaults to None
     Returns:
         List[MeshObject]: List of loaded mesh objects.
     """

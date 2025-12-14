@@ -16,7 +16,7 @@
 
 import torch
 import numpy as np
-from typing import List, Optional, Dict, Any, Union, TYPE_CHECKING, Tuple
+from typing import List, Dict, Any, Union, TYPE_CHECKING, Tuple
 from abc import abstractmethod, ABCMeta
 
 from embodichain.utils import configclass, logger
@@ -34,10 +34,10 @@ class SolverCfg:
     class_type: str = "BaseSolver"
     """The class type of the solver to be used."""
 
-    urdf_path: Optional[str] = None
+    urdf_path: str | None = None
     """The file path to the URDF model of the robot."""
 
-    joint_names: Optional[list[str]] = None
+    joint_names: list[str] | None = None
     """List of joint names for the solver.
     
     If None, all joints in the URDF will be used.
@@ -65,7 +65,7 @@ class SolverCfg:
     This represents the position and orientation of the tool in the robot's end-effector frame.
     """
 
-    ik_nearest_weight: Optional[List[float]] = None
+    ik_nearest_weight: List[float] | None = None
     """Weights for the inverse kinematics nearest calculation.
     
     The weights influence how the solver prioritizes closeness to the seed position
@@ -166,7 +166,7 @@ class BaseSolver(metaclass=ABCMeta):
             )
 
     def set_ik_nearest_weight(
-        self, ik_weight: np.ndarray, joint_ids: np.ndarray = None
+        self, ik_weight: np.ndarray, joint_ids: np.ndarray | None = None
     ) -> bool:
         r"""Sets the inverse kinematics nearest weight.
 
@@ -299,8 +299,8 @@ class BaseSolver(metaclass=ABCMeta):
     def get_ik(
         self,
         target_pose: torch.Tensor,
-        joint_seed: Optional[torch.Tensor] = None,
-        num_samples: Optional[int] = None,
+        joint_seed: torch.Tensor | None = None,
+        num_samples: int | None = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         r"""Computes the inverse kinematics for a given target pose.
@@ -311,8 +311,8 @@ class BaseSolver(metaclass=ABCMeta):
 
         Args:
             target_pose (torch.Tensor): The target pose represented as a 4x4 transformation matrix.
-            joint_seed (Optional[torch.Tensor]): The initial joint positions used as a seed.
-            num_samples (Optional[int]): The number of random joint seeds to generate.
+            joint_seed (torch.Tensor | None): The initial joint positions used as a seed.
+            num_samples (int | None): The number of random joint seeds to generate.
             **kwargs: Additional keyword arguments for customization.
 
         Returns:
@@ -372,17 +372,15 @@ class BaseSolver(metaclass=ABCMeta):
     def get_jacobian(
         self,
         qpos: torch.Tensor,
-        locations: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        locations: torch.Tensor | np.ndarray | None = None,
         jac_type: str = "full",
     ) -> torch.Tensor:
         r"""Compute the Jacobian matrix for the given joint positions.
 
         Args:
             qpos (torch.Tensor): The joint positions. Shape: (dof,) or (batch_size, dof).
-            locations (Optional[torch.Tensor]): The offset points (relative to the end-effector coordinate system).
-                                                Shape: (batch_size, 3) or (3,) for a single offset.
-            jac_type (str, optional): 'full', 'trans', or 'rot' for full, translational, or rotational Jacobian.
-                                    Defaults to 'full'.
+            locations (torch.Tensor | np.ndarray | None): The offset points (relative to the end-effector coordinate system). Shape: (batch_size, 3) or (3,) for a single offset.
+            jac_type (str): 'full', 'trans', or 'rot' for full, translational, or rotational Jacobian. Defaults to 'full'.
 
         Returns:
             torch.Tensor: The Jacobian matrix. Shape:

@@ -18,7 +18,7 @@ import torch
 import numpy as np
 from embodichain.lab.sim.utility.io_utils import suppress_stdout_stderr
 
-from typing import Optional, Union, Tuple, Any, List, TYPE_CHECKING
+from typing import Union, Tuple, Optional, Any, List, TYPE_CHECKING
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
@@ -42,7 +42,7 @@ def create_pk_chain(
     Args:
         urdf_path (str): Path to the URDF file.
         end_link_name (str): Name of the end-effector link.
-        root_link_name (Optional[str]): Name of the root link. If None, the chain starts from the base.
+    root_link_name (str | None): Name of the root link. If None, the chain starts from the base.
         device (torch.device): The device to which the chain will be moved.
         is_serial (bool): Whether the chain is serial or not.
 
@@ -61,7 +61,7 @@ def create_pk_serial_chain(
     urdf_path: str = None,
     device: torch.device = None,
     end_link_name: str = None,
-    root_link_name: Optional[Union[str, None]] = None,
+    root_link_name: str | None = None,
     chain: Optional["pk.SerialChain"] = None,
     **kwargs,
 ) -> "pk.SerialChain":
@@ -71,7 +71,7 @@ def create_pk_serial_chain(
     Args:
         urdf_path (str): Path to the URDF file.
         end_link_name (str): Name of the end-effector link.
-        root_link_name (Optional[str]): Name of the root link. If None, the chain starts from the base.
+    root_link_name (str | None): Name of the root link. If None, the chain starts from the base.
         device (torch.device): The device to which the chain will be moved.
         is_serial (bool): Whether the chain is serial or not.
 

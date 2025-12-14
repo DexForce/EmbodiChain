@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import List, Optional, Sequence
+from typing import List, Sequence
 from dexsim.render import Light as _Light
 from embodichain.lab.sim.cfg import LightCfg
 from embodichain.lab.sim.common import BatchEntity
@@ -27,7 +27,7 @@ class Light(BatchEntity):
         super().__init__(cfg, entities, device)
 
     def set_color(
-        self, colors: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, colors: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set color for one or more lights.
 
@@ -35,14 +35,14 @@ class Light(BatchEntity):
             colors (torch.Tensor): Tensor of shape (M, 3) or (3,), representing RGB values.
                 - If shape is (3,), the same color is applied to all targeted instances.
                 - If shape is (M, 3), M must match the number of targeted instances.
-            env_ids (Optional[Sequence[int]]): Indices of instances to set. If None:
+            env_ids (Sequence[int] | None): Indices of instances to set. If None:
                 - For colors.shape == (3,), applies to all instances.
                 - For colors.shape == (M, 3), M must equal num_instances, applies per-instance.
         """
         self._apply_vector3(colors, env_ids, "set_color")
 
     def set_intensity(
-        self, intensities: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, intensities: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set intensity for one or more lights.
 
@@ -50,14 +50,14 @@ class Light(BatchEntity):
             intensities (torch.Tensor): Tensor of shape (M,), (1,), or scalar (0-dim).
                 - If scalar or shape (1,), the same intensity is applied to all targeted instances.
                 - If shape (M,), M must match the number of targeted instances.
-            env_ids (Optional[Sequence[int]]): Indices of instances to set. If None:
+            env_ids (Sequence[int] | None): Indices of instances to set. If None:
                 - For scalar/shape (1,), applies to all instances.
                 - For shape (M,), M must equal num_instances, applies per-instance.
         """
         self._apply_scalar(intensities, env_ids, "set_intensity")
 
     def set_falloff(
-        self, falloffs: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, falloffs: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set falloff (radius) for one or more lights.
 
@@ -65,7 +65,7 @@ class Light(BatchEntity):
             falloffs (torch.Tensor): Tensor of shape (M,), (1,), or scalar (0-dim).
                 - If scalar or shape (1,), the same falloff is applied to all targeted instances.
                 - If shape (M,), M must match the number of targeted instances.
-            env_ids (Optional[Sequence[int]]): Indices of instances to set. If None:
+            env_ids (Sequence[int] | None): Indices of instances to set. If None:
                 - For scalar/shape (1,), applies to all instances.
                 - For shape (M,), M must equal num_instances, applies per-instance.
         """
@@ -74,7 +74,7 @@ class Light(BatchEntity):
     def set_local_pose(
         self,
         pose: torch.Tensor,
-        env_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
     ) -> None:
         """Set local pose (translation) for one or more lights.
@@ -83,7 +83,7 @@ class Light(BatchEntity):
             pose (torch.Tensor):
                 - If to_matrix=False: shape (3,) or (M, 3), representing (x, y, z).
                 - If to_matrix=True: shape (4, 4) or (M, 4, 4); translation extracted automatically.
-            env_ids (Optional[Sequence[int]]): Indices to set. If None:
+            env_ids (Sequence[int] | None): Indices to set. If None:
                 - For vector input (3,) broadcast to all, or (M,3) with M == num_instances.
                 - For matrix input (4,4) broadcast to all, or (M,4,4) with M == num_instances.
             to_matrix (bool): Interpret `pose` as full 4x4 matrix if True, else as vector(s).
@@ -157,12 +157,13 @@ class Light(BatchEntity):
     def _apply_vector3(
         self,
         tensor: torch.Tensor,
-        env_ids: Optional[Sequence[int]],
+        env_ids: Sequence[int] | None,
         setter_name: str,
     ) -> None:
         """
         Generic helper for 3-element vectors (color, location).
         Expects tensor shape: (3,), or (M,3) with M == num_instances or M == len(env_ids).
+        env_ids: Sequence[int] | None
         """
         # Validate tensor type
         if not torch.is_tensor(tensor):
@@ -221,12 +222,13 @@ class Light(BatchEntity):
     def _apply_scalar(
         self,
         tensor: torch.Tensor,
-        env_ids: Optional[Sequence[int]],
+        env_ids: Sequence[int] | None,
         setter_name: str,
     ) -> None:
         """
         Generic helper for scalar floats (intensity, falloff).
         Accepts tensor shape: () (0-dim), (1,), or (M,) with M == num_instances or M == len(env_ids).
+        env_ids: Sequence[int] | None
         """
         if not torch.is_tensor(tensor):
             logger.log_error(
@@ -273,7 +275,7 @@ class Light(BatchEntity):
             f"(expected scalar, (1,), ({self.num_instances},) or ({len(all_ids)},))."
         )
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: LightCfg
         self.set_color(torch.as_tensor(self.cfg.color), env_ids=env_ids)
         self.set_intensity(torch.as_tensor(self.cfg.intensity), env_ids=env_ids)

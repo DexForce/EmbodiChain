@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
-from typing import Optional, Union, Tuple, Any, Literal, TYPE_CHECKING
+from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
 from scipy.spatial.transform import Rotation
 
 from embodichain.utils import configclass, logger
@@ -55,7 +55,7 @@ class DifferentialSolverCfg(SolverCfg):
     ik_method: Literal["pinv", "svd", "trans", "dls"] = "pinv"
 
     # Parameters for the inverse-kinematics method.
-    ik_params: Optional[dict] = None
+    ik_params: dict | None = None
 
     def __post_init__(self):
         # Default parameters for different inverse kinematics approaches
@@ -142,11 +142,11 @@ class DifferentialSolver(BaseSolver):
         else:
             return 7  # (x, y, z, qw, qx, qy, qz)
 
-    def reset(self, env_ids: Optional[torch.Tensor] = None):
+    def reset(self, env_ids: torch.Tensor | None = None):
         """Reset the internal buffers for the specified environments.
 
         Args:
-            env_ids (Optional[torch.Tensor]): The environment indices to reset. If None, reset all.
+            env_ids (torch.Tensor | None): The environment indices to reset. If None, reset all.
         """
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, device=self.device)
@@ -158,15 +158,15 @@ class DifferentialSolver(BaseSolver):
     def set_command(
         self,
         command: torch.Tensor,
-        ee_pos: Optional[torch.Tensor] = None,
-        ee_quat: Optional[torch.Tensor] = None,
+        ee_pos: torch.Tensor | None = None,
+        ee_quat: torch.Tensor | None = None,
     ) -> bool:
         """Set the target end-effector pose command.
 
         Args:
             command (torch.Tensor): The command tensor.
-            ee_pos (Optional[torch.Tensor]): Current end-effector position (for relative mode).
-            ee_quat (Optional[torch.Tensor]): Current end-effector quaternion (for relative mode).
+            ee_pos (torch.Tensor | None): Current end-effector position (for relative mode).
+            ee_quat (torch.Tensor | None): Current end-effector quaternion (for relative mode).
 
         Returns:
             bool: True if the command was set successfully, False otherwise.

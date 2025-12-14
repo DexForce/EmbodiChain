@@ -20,7 +20,7 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Optional, Sequence, Tuple, Any, List
+from typing import Dict, Union, Sequence, Tuple, Any, List
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -253,7 +253,7 @@ class EmbodiedEnv(BaseEnv):
         return self.affordance_datas.get(key, default)
 
     def reset(
-        self, seed: Optional[int] = None, options: Optional[Dict] = None
+        self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
         obs, info = super().reset(seed=seed, options=options)
 
@@ -297,7 +297,7 @@ class EmbodiedEnv(BaseEnv):
                 self.event_manager.apply(mode="interval")
 
     def _initialize_episode(
-        self, env_ids: Optional[Sequence[int]] = None, **kwargs
+        self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
@@ -439,20 +439,20 @@ class EmbodiedEnv(BaseEnv):
             plt.imshow(view)
             plt.savefig(f"sensor_data_{data_type}.png")
 
-    def create_demo_action_list(self, *args, **kwargs) -> Optional[Sequence[EnvAction]]:
+    def create_demo_action_list(self, *args, **kwargs) -> Sequence[EnvAction] | None:
         """Create a demonstration action list for the environment.
 
         This function should be implemented in subclasses to generate a sequence of actions
         that demonstrate a specific task or behavior within the environment.
 
         Returns:
-            Optional[Sequence[EnvAction]]: A list of actions if a demonstration is available, otherwise None.
+            Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.
         """
         raise NotImplementedError(
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def to_dataset(self, id: str, save_path: str = None) -> Optional[str]:
+    def to_dataset(self, id: str, save_path: str = None) -> str | None:
         """Convert the recorded episode data to a dataset format.
 
         Args:
@@ -460,7 +460,7 @@ class EmbodiedEnv(BaseEnv):
             save_path (str, optional): Path to save the dataset. If None, use config or default.
 
         Returns:
-            Optional[str]: The path to the saved dataset, or None if failed.
+            str | None: The path to the saved dataset, or None if failed.
         """
         raise NotImplementedError(
             "The method 'to_dataset' will be implemented in the near future."

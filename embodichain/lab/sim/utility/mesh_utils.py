@@ -21,7 +21,7 @@ import open3d as o3d
 import trimesh
 import dexsim
 
-from typing import Tuple, List, Dict, Any, Optional, Union
+from typing import Tuple, List, Dict, Any, Union
 
 from embodichain.utils import logger
 
@@ -29,9 +29,9 @@ from embodichain.utils import logger
 def export_articulation_mesh(
     articulation: Union[dexsim.engine.Articulation, list],
     output_path: str = "./articulation.obj",
-    link_names: Optional[Union[List[str], Dict[Any, List[str]]]] = None,
-    base_xpos: Optional[np.ndarray] = None,
-    base_link_name: Optional[str] = None,
+    link_names: Union[List[str], Dict[Any, List[str]]] | None = None,
+    base_xpos: np.ndarray | None = None,
+    base_link_name: str | None = None,
     **kwargs: Any,
 ) -> o3d.geometry.TriangleMesh:
     r"""Export a combined mesh from all links of one or more articulations to a mesh file format.
@@ -45,11 +45,11 @@ def export_articulation_mesh(
         articulation (dexsim.engine.Articulation or list): The articulation object or list of articulations.
         output_path (str): The output file path including the file name and extension.
                            Supported extensions: .obj, .ply, .stl, .glb, .gltf.
-        link_names (list[str] or dict[Any, list[str]], optional):
+        link_names (list[str] or dict[Any, list[str]] | None):
             Specify which links to export. If None, export all links.
-        base_xpos (np.ndarray, optional): 4x4 homogeneous transformation matrix.
+        base_xpos (np.ndarray | None): 4x4 homogeneous transformation matrix.
             All meshes will be transformed into this base pose coordinate system.
-        base_link_name (str, optional): If specified, use the pose of this link as the base pose.
+        base_link_name (str | None): If specified, use the pose of this link as the base pose.
             The link will be searched from all link_names of all articulations.
 
     Returns:

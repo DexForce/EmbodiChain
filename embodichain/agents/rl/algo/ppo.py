@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
-from typing import Dict, Any, Tuple, Callable, Optional
+from typing import Dict, Any, Tuple, Callable
 
 from embodichain.agents.rl.utils import AlgorithmCfg
 from embodichain.agents.rl.buffer import RolloutBuffer
@@ -41,7 +41,7 @@ class PPO(BaseAlgorithm):
         self.policy = policy
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
-        self.buffer: Optional[RolloutBuffer] = None
+        self.buffer: RolloutBuffer | None = None
         # no per-rollout aggregation for dense logging
 
     def _compute_gae(
@@ -76,7 +76,7 @@ class PPO(BaseAlgorithm):
         policy,
         obs: torch.Tensor,
         num_steps: int,
-        on_step_callback: Optional[Callable] = None,
+        on_step_callback: Callable | None = None,
     ) -> Dict[str, Any]:
         """Collect a rollout. Algorithm controls the data collection process."""
         if self.buffer is None:
