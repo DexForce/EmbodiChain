@@ -379,15 +379,18 @@ class randomize_visual_material(Functor):
         if self.entity_cfg.uid == "default_plane":
             pass
         else:
-            self.entity: Union[RigidObject, Articulation] = env.sim.get_asset(
-                self.entity_cfg.uid
-            )
-
-            if not isinstance(self.entity, (RigidObject, Articulation)):
-                raise ValueError(
-                    f"Randomization functor 'randomize_visual_material' not supported for asset: '{self.entity_cfg.uid}'"
-                    f" with type: '{type(self.entity)}'."
+            if self.entity_cfg.uid not in env.sim.asset_uids:
+                self.entity = None
+            else:
+                self.entity: Union[RigidObject, Articulation] = env.sim.get_asset(
+                    self.entity_cfg.uid
                 )
+
+                if not isinstance(self.entity, (RigidObject, Articulation)):
+                    raise ValueError(
+                        f"Randomization functor 'randomize_visual_material' not supported for asset: '{self.entity_cfg.uid}'"
+                        f" with type: '{type(self.entity)}'."
+                    )
 
         # TODO: Maybe need to consider two cases:
         # 1. the texture folder is very large, and we don't want to load all the textures into memory.
@@ -483,9 +486,7 @@ class randomize_visual_material(Functor):
                 getattr(mat_inst, f"set_{key}")(value[idx].item())
 
         # randomize texture or base color based on the probability.
-        if random_texture_prob <= 0.0 or len(self.textures) == 0:
-            return
-        if random.random() < random_texture_prob:
+        if random.random() < random_texture_prob and len(self.textures) != 0:
             self._randomize_texture(mat_inst)
         else:
             # set a random base color instead.
@@ -506,6 +507,9 @@ class randomize_visual_material(Functor):
         ior_range: Optional[tuple[float, float]] = None,
     ):
         from embodichain.lab.sim.utility import is_rt_enabled
+
+        if self.entity_cfg.uid != "default_plane" and self.entity is None:
+            return
 
         # resolve environment ids
         if env_ids is None:
