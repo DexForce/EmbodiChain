@@ -116,6 +116,7 @@ def compute_semantic_mask(
     Returns:
         A tensor of shape (num_envs, height, width) representing the semantic mask.
     """
+    from embodichain.data.enum import SemanticMask
 
     sensor: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     if sensor.cfg.enable_mask is False:
@@ -160,7 +161,19 @@ def compute_semantic_mask(
 
     background_mask = ~(robot_mask | foreground_mask).squeeze_(-1)
 
-    return torch.stack([robot_mask, background_mask, foreground_mask], dim=-1)
+    masks = [None, None, None]
+    masks_ids = [member.value for member in SemanticMask]
+    assert len(masks) == len(
+        masks_ids
+    ), "Different length of mask slots and SemanticMask Enum {}.".format(masks_ids)
+    mask_id_to_label = {
+        SemanticMask.BACKGROUND.value: background_mask,
+        SemanticMask.FOREGROUND.value: foreground_mask,
+        SemanticMask.ROBOT.value: robot_mask,
+    }
+    for mask_id in masks_ids:
+        masks[mask_id] = mask_id_to_label[mask_id]
+    return torch.stack(masks, dim=-1)
 
 
 class compute_exteroception(Functor):

@@ -14,31 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from ..common import BatchEntity
-from .rigid_object import RigidObject, RigidBodyData, RigidObjectCfg
-from .rigid_object_group import (
-    RigidObjectGroup,
-    RigidBodyGroupData,
-    RigidObjectGroupCfg,
-)
-from .soft_object import SoftObject, SoftBodyData, SoftObjectCfg
-from .articulation import Articulation, ArticulationData, ArticulationCfg
-from .robot import Robot, RobotCfg
-from .light import Light, LightCfg
-from .gizmo import Gizmo
-
-
-from dexsim.engine import RenderBody
+import dexsim
 import numpy as np
 
+from dexsim.engine import RenderBody
 
-def set_projective_uv(self: RenderBody, proj_direct: np.ndarray = None):
+
+def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -> None:
     """Set projective uv mapping to render body.
 
     Args:
-        proj_direct (np.ndarray, optional). UV project direction. Default to be None, using svd.
+        proj_direct: UV project direction. Default to be None, using svd.
     """
-    import numpy as np
     import open3d as o3d
     from dexsim.kit.meshproc import get_mesh_auto_uv
 
@@ -72,5 +59,7 @@ def set_projective_uv(self: RenderBody, proj_direct: np.ndarray = None):
         start_idx += n_vert_list[i]
 
 
-# bind this method to dexsim.engine.RenderBody
-RenderBody.set_projective_uv = set_projective_uv
+def init_dynamic_pybind() -> None:
+    """Initialize dynamic pybind interface."""
+
+    RenderBody.set_projective_uv = set_projective_uv
