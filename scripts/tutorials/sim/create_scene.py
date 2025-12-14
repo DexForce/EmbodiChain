@@ -87,9 +87,7 @@ def main():
             init_pos=[0.0, 0.0, 1.0],
         )
     )
-    from IPython import embed
 
-    embed()
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")
