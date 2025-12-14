@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
-from typing import TYPE_CHECKING, Literal, Union, Optional, List, Dict, Sequence
+from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
 
 from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
 from embodichain.lab.sim.sensors import Camera, StereoCamera
@@ -388,7 +388,7 @@ class compute_exteroception(Functor):
         return points_2d
 
     def _get_gripper_ratio(
-        self, control_part: str, gripper_qpos: Optional[torch.Tensor] = None
+        self, control_part: str, gripper_qpos: torch.Tensor | None = None
     ):
         robot: Robot = self._env.robot
         gripper_max_limit = robot.body_data.qpos_limits[
@@ -402,11 +402,11 @@ class compute_exteroception(Functor):
 
     def _get_robot_exteroception(
         self,
-        control_part: Optional[str] = None,
+        control_part: str | None = None,
         x_interval: float = 0.02,
         y_interval: float = 0.02,
         kpnts_number: int = 12,
-        offset: Optional[Union[List, torch.Tensor]] = None,
+        offset: list | torch.Tensor | None = None,
         follow_eef: bool = False,
     ) -> torch.Tensor:
         """Get the robot exteroception poses.
@@ -468,7 +468,7 @@ class compute_exteroception(Functor):
         y_interval: float = 0.02,
         kpnts_number: int = 12,
         is_arena_coord: bool = False,
-        follow_eef: Optional[str] = None,
+        follow_eef: str | None = None,
     ) -> torch.Tensor:
         """Get the rigid object exteroception poses.
 

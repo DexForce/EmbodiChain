@@ -21,7 +21,7 @@ import torch
 import dexsim
 import numpy as np
 
-from typing import Optional, Dict, Union
+from typing import Dict, Union
 from functools import cached_property
 
 from dexsim.engine import MaterialInst, Material
@@ -227,7 +227,7 @@ class VisualMaterialInst:
         logger.log_error("Unimplemented: set_emissive_intensity")
 
     def set_base_color_texture(
-        self, texture_path: str = None, texture_data: Optional[torch.Tensor] = None
+        self, texture_path: str = None, texture_data: torch.Tensor | None = None
     ) -> None:
         """Set base color texture from file path or texture data.
 
@@ -257,7 +257,7 @@ class VisualMaterialInst:
             inst.set_base_color_map(color_texture)
 
     def set_metallic_texture(
-        self, texture_path: str = None, texture_data: Optional[torch.Tensor] = None
+        self, texture_path: str = None, texture_data: torch.Tensor | None = None
     ) -> None:
         """Set metallic texture from file path or texture data.
 
@@ -287,7 +287,7 @@ class VisualMaterialInst:
             inst.set_metallic_map(metallic_texture)
 
     def set_roughness_texture(
-        self, texture_path: str = None, texture_data: Optional[torch.Tensor] = None
+        self, texture_path: str = None, texture_data: torch.Tensor | None = None
     ) -> None:
         """Set roughness texture from file path or texture data.
 
@@ -317,7 +317,7 @@ class VisualMaterialInst:
             inst.set_roughness_map(roughness_texture)
 
     def set_normal_texture(
-        self, texture_path: str = None, texture_data: Optional[torch.Tensor] = None
+        self, texture_path: str = None, texture_data: torch.Tensor | None = None
     ) -> None:
         """Set normal texture from file path or texture data.
 
@@ -347,7 +347,7 @@ class VisualMaterialInst:
             inst.set_normal_map(normal_texture)
 
     def set_ao_texture(
-        self, texture_path: str = None, texture_data: Optional[torch.Tensor] = None
+        self, texture_path: str = None, texture_data: torch.Tensor | None = None
     ) -> None:
         """Set ambient occlusion texture from file path or texture data.
 

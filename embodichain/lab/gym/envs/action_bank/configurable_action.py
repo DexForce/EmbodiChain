@@ -21,7 +21,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 from copy import deepcopy
-from typing import Dict, Tuple, Union, List, Callable, Any, Optional
+from typing import Dict, Tuple, Union, List, Callable, Any
 from tqdm import tqdm
 from functools import partial
 

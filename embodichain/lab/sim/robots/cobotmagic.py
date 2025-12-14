@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Any, Union
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -36,8 +36,8 @@ from embodichain.utils import logger
 @configclass
 class CobotMagicCfg(RobotCfg):
     urdf_cfg: URDFCfg = None
-    control_parts: Optional[Dict[str, List[str]]] = None
-    solver_cfg: Optional[Dict[str, "SolverCfg"]] = None
+    control_parts: Dict[str, List[str]] | None = None
+    solver_cfg: Dict[str, "SolverCfg"] | None = None
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:

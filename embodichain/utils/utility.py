@@ -27,7 +27,7 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from functools import wraps
-from typing import Dict, List, Tuple, Optional, Callable, Any
+from typing import Dict, List, Tuple, Callable, Any
 
 from embodichain.utils.string import callable_to_string
 
@@ -263,13 +263,13 @@ def reset_all_seeds(seed: int = 0):
 
 
 def do_process_decorator(
-    pre_process: Optional[bool] = True, post_process: Optional[bool] = True
+    pre_process: bool | None = True, post_process: bool | None = True
 ):
     """A decorator to decorate :meth:`inference`. Usage and example is comming soon.
 
     Args:
-        pre_process (Optional[bool], optional): whether do pre-process. Defaults to True.
-        post_process (Optional[bool], optional): whether do post-process. Defaults to True.
+        pre_process (bool | None, optional): whether do pre-process. Defaults to True.
+        post_process (bool | None, optional): whether do post-process. Defaults to True.
     """
 
     def inner_decorator(func: Callable):

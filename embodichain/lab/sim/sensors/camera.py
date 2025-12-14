@@ -23,7 +23,7 @@ import dexsim.render as dr
 import warp as wp
 
 from functools import cached_property
-from typing import Union, Tuple, Optional, Sequence, List
+from typing import Union, Tuple, Sequence, List
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
@@ -45,9 +45,9 @@ class CameraCfg(SensorCfg):
         Otherwise, the position and orientation will be set to the defaults.
         """
 
-        eye: Union[Tuple[float, float, float], None] = None
-        target: Union[Tuple[float, float, float], None] = None
-        up: Union[Tuple[float, float, float], None] = None
+        eye: Tuple[float, float, float] | None = None
+        target: Tuple[float, float, float] | None = None
+        up: Tuple[float, float, float] | None = None
         """Alternative way to specify the camera extrinsics using eye, target, and up vectors."""
 
         @property
@@ -354,7 +354,7 @@ class Camera(BaseSensor):
             entity.attach_node(parent)
 
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set the local pose of the camera.
 
@@ -362,7 +362,7 @@ class Camera(BaseSensor):
 
         Args:
             pose (torch.Tensor): The local pose to set, should be a 4x4 transformation matrix.
-            env_ids (Optional[Sequence[int]]): The environment IDs to set the pose for. If None, set for all environments.
+            env_ids (Sequence[int] | None): The environment IDs to set the pose for. If None, set for all environments.
         """
         if env_ids is None:
             local_env_ids = range(len(self._entities))
@@ -435,16 +435,16 @@ class Camera(BaseSensor):
         self,
         eye: torch.Tensor,
         target: torch.Tensor,
-        up: Optional[torch.Tensor] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        up: torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set the camera to look at a target point.
 
         Args:
             eye (torch.Tensor): The position of the camera (eye) with shape (N, 3).
             target (torch.Tensor): The point the camera should look at (target) with shape (N, 3).
-            up (Optional[torch.Tensor]): The up direction vector. If None, defaults to [0, 0, 1].
-            env_ids (Optional[Sequence[int]]): The environment IDs to set the look at for. If None, set for all environments.
+            up (torch.Tensor | None): The up direction vector. If None, defaults to [0, 0, 1].
+            env_ids (Sequence[int] | None): The environment IDs to set the look at for. If None, set for all environments.
         """
         if up is None:
             up = torch.tensor([[0.0, 0.0, 1.0]]).repeat(eye.shape[0], 1)
@@ -458,15 +458,14 @@ class Camera(BaseSensor):
     def set_intrinsics(
         self,
         intrinsics: torch.Tensor,
-        env_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """
         Set the camera intrinsics for both left and right cameras.
 
         Args:
             intrinsics (torch.Tensor): The intrinsics for the left camera with shape (4,) / (3, 3) or (N, 4) / (N, 3, 3).
-            env_ids (Optional[Sequence[int]], optional): The environment ids to set the intrinsics.
-                If None, set for all environments. Defaults to None.
+            env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
 
@@ -503,7 +502,7 @@ class Camera(BaseSensor):
 
         return torch.stack(intrinsics, dim=0).to(self.device)
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg
 
         if self.cfg.extrinsics.eye is not None:

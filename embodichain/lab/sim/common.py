@@ -20,8 +20,7 @@ import torch
 
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import List, TypeVar, Sequence, Optional
-from functools import cached_property
+from typing import List, TypeVar, Sequence
 
 from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.utils import logger
@@ -43,7 +42,7 @@ class BatchEntity(ABC):
 
     """
 
-    uid: Optional[str] = None
+    uid: str | None = None
     cfg: ObjectBaseCfg = None
     _entities: List[T] = None
     device: torch.device = None
@@ -79,7 +78,7 @@ class BatchEntity(ABC):
 
     @abstractmethod
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         pass
 
@@ -92,11 +91,11 @@ class BatchEntity(ABC):
         return self.get_local_pose(to_matrix=False)
 
     @abstractmethod
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Reset the entity to its initial state.
 
         Args:
-            env_ids (Optional[Sequence[int]]): The environment IDs to reset. If None, reset all environments.
+            env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
         """
         pass
 

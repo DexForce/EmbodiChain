@@ -16,7 +16,7 @@
 
 import torch
 
-from typing import Optional, Union, Tuple, List, TYPE_CHECKING
+from typing import Union, Tuple, List, TYPE_CHECKING
 from dataclasses import MISSING
 from copy import deepcopy
 
@@ -68,7 +68,7 @@ class PytorchSolverCfg(SolverCfg):
     A higher number of samples increases the chances of finding a valid solution
     """
 
-    ik_nearest_weight: Optional[List[float]] = None
+    ik_nearest_weight: list[float] | None = None
     """Weights for the inverse kinematics nearest calculation.
     
     The weights influence how the solver prioritizes closeness to the seed position
@@ -389,11 +389,11 @@ class PytorchSolver(BaseSolver):
     def get_ik(
         self,
         target_xpos: torch.Tensor,
-        qpos_seed: torch.Tensor = None,
-        num_samples: int = None,
+        qpos_seed: torch.Tensor | None = None,
+        num_samples: int | None = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Computes the inverse kinematics for given target poses.
 
         This function generates random joint configurations within the specified limits,
@@ -403,18 +403,18 @@ class PytorchSolver(BaseSolver):
         Args:
             target_xpos (torch.Tensor): A tensor representing the target positions. It can be of shape
                                          (batch_size, 3) for multiple positions or (3,) for a single position.
-            qpos_seed (torch.Tensor, optional): Initial joint positions used as seed for IK solving.
-                                                Can be:
-                                                - 1D tensor of shape (dof,): Single seed for all target positions
-                                                - 2D tensor of shape (batch_size, dof): Individual seed per position
-                                                If None, defaults to zero configuration. Defaults to None.
-            num_samples (int, optional): The number of random samples to generate. Must be positive.
-                                         Defaults to None.
+            qpos_seed (torch.Tensor | None): Initial joint positions used as seed for IK solving.
+                                            Can be:
+                                            - 1D tensor of shape (dof,): Single seed for all target positions
+                                            - 2D tensor of shape (batch_size, dof): Individual seed per position
+                                            If None, defaults to zero configuration. Defaults to None.
+            num_samples (int | None): The number of random samples to generate. Must be positive.
+                                     Defaults to None.
             return_all_solutions (bool, optional): If True, returns all valid solutions found.
             **kwargs: Additional arguments for future extensions.
 
         Returns:
-            Tuple[List[bool], torch.Tensor]: A tuple containing:
+            tuple[list[bool], torch.Tensor]: A tuple containing:
                 - A tensor of booleans indicating whether valid solutions were found for each target pose. (Shape: (batch_size,))
                 - A tensor of shape (batch_size, 1, dof) containing joint positions for
                   each target pose, or an empty tensor if no valid solutions were found.

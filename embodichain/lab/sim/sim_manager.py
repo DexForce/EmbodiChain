@@ -25,7 +25,7 @@ from tqdm import tqdm
 from pathlib import Path
 from copy import deepcopy
 from functools import cached_property
-from typing import List, Union, Optional, Dict, Tuple, Union, Sequence
+from typing import List, Union, Dict, Union, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -411,11 +411,11 @@ class SimulationManager:
                 "This interface is only valid when Ray Tracing rendering backend is enabled."
             )
 
-    def update(self, physics_dt: Optional[float] = None, step: int = 10) -> None:
+    def update(self, physics_dt: float | None = None, step: int = 10) -> None:
         """Update the physics.
 
         Args:
-            physics_dt (Optional[float], optional): the time step for physics simulation. Defaults to None.
+            physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
         if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
@@ -501,14 +501,14 @@ class SimulationManager:
         self._world.close_window()
         self.is_window_opened = False
 
-    def build_multiple_arenas(self, num: int, space: Optional[float] = None) -> None:
+    def build_multiple_arenas(self, num: int, space: float | None = None) -> None:
         """Build multiple arenas in a grid pattern.
 
         This interface is used for vectorized simulation.
 
         Args:
             num (int): number of arenas to build.
-            space (float, optional): The distance between each arena. Defaults to the arena_space in sim_config.
+            space (float | None, optional): The distance between each arena. Defaults to the arena_space in sim_config.
         """
 
         if space is None:
@@ -543,13 +543,13 @@ class SimulationManager:
         self._env.set_IBL(ibl_path)
 
     def set_emission_light(
-        self, color: Optional[Sequence[float]] = None, intensity: Optional[float] = None
+        self, color: Sequence[float] | None = None, intensity: float | None = None
     ) -> None:
         """Set environment emission light.
 
         Args:
-            color (Sequence[float]): color of the light.
-            intensity (float): intensity of the light.
+            color (Sequence[float] | None): color of the light.
+            intensity (float | None): intensity of the light.
         """
         if color is None:
             self._env.set_env_light_emission(color)
@@ -609,15 +609,15 @@ class SimulationManager:
         self._texture_cache[key] = texture
 
     def get_texture_cache(
-        self, key: Optional[str] = None
-    ) -> Optional[Union[torch.Tensor, List[torch.Tensor]]]:
+        self, key: str | None = None
+    ) -> torch.Tensor | list[torch.Tensor] | None:
         """Get the texture from the global texture cache.
 
         Args:
-            key (str, optional): The key of the texture. If None, return None. Defaults to None.
+            key (str | None, optional): The key of the texture. If None, return None. Defaults to None.
 
         Returns:
-            Optional[Union[torch.Tensor, List[torch.Tensor]]]: The texture if found, otherwise None.
+            torch.Tensor | list[torch.Tensor] | None: The texture if found, otherwise None.
         """
         if key is None:
             return self._texture_cache
@@ -629,7 +629,7 @@ class SimulationManager:
 
     def get_asset(
         self, uid: str
-    ) -> Optional[Union[Light, BaseSensor, Robot, RigidObject, Articulation]]:
+    ) -> Light | BaseSensor | Robot | RigidObject | Articulation | None:
         """Get an asset by its UID.
 
         The asset can be a light, sensor, robot, rigid object or articulation.
@@ -697,7 +697,7 @@ class SimulationManager:
 
         return batch_lights
 
-    def get_light(self, uid: str) -> Optional[Light]:
+    def get_light(self, uid: str) -> Light | None:
         """Get a light by its UID.
 
         Args:
@@ -780,14 +780,14 @@ class SimulationManager:
         self._soft_objects[uid] = soft_obj
         return soft_obj
 
-    def get_rigid_object(self, uid: str) -> Optional[RigidObject]:
+    def get_rigid_object(self, uid: str) -> RigidObject | None:
         """Get a rigid object by its unique ID.
 
         Args:
             uid (str): The unique ID of the rigid object.
 
         Returns:
-            Optional[RigidObject]: The rigid object instance if found, otherwise None.
+            RigidObject | None: The rigid object instance if found, otherwise None.
         """
         if uid not in self._rigid_objects:
             logger.log_warning(f"Rigid object {uid} not found.")
@@ -844,14 +844,14 @@ class SimulationManager:
 
         return rigid_obj_group
 
-    def get_rigid_object_group(self, uid: str) -> Optional[RigidObjectGroup]:
+    def get_rigid_object_group(self, uid: str) -> RigidObjectGroup | None:
         """Get a rigid object group by its unique ID.
 
         Args:
             uid (str): The unique ID of the rigid object group.
 
         Returns:
-            Optional[RigidObjectGroup]: The rigid object group instance if found, otherwise None.
+            RigidObjectGroup | None: The rigid object group instance if found, otherwise None.
         """
         if uid not in self._rigid_object_groups:
             logger.log_warning(f"Rigid object group {uid} not found.")
@@ -903,14 +903,14 @@ class SimulationManager:
 
         return articulation
 
-    def get_articulation(self, uid: str) -> Optional[Articulation]:
+    def get_articulation(self, uid: str) -> Articulation | None:
         """Get an articulation by its unique ID.
 
         Args:
             uid (str): The unique ID of the articulation.
 
         Returns:
-            Optional[Articulation]: The articulation instance if found, otherwise None.
+            Articulation | None: The articulation instance if found, otherwise None.
         """
         if uid not in self._articulations:
             logger.log_warning(f"Articulation {uid} not found.")
@@ -925,14 +925,14 @@ class SimulationManager:
         """
         return list(self._articulations.keys())
 
-    def add_robot(self, cfg: RobotCfg) -> Optional[Robot]:
+    def add_robot(self, cfg: RobotCfg) -> Robot | None:
         """Add a Robot to the scene.
 
         Args:
             cfg (RobotCfg): Configuration for the robot.
 
         Returns:
-            Optional[Robot]: The added robot instance handle, or None if failed.
+            Robot | None: The added robot instance handle, or None if failed.
         """
 
         uid = cfg.uid
@@ -965,14 +965,14 @@ class SimulationManager:
 
         return robot
 
-    def get_robot(self, uid: str) -> Optional[Robot]:
+    def get_robot(self, uid: str) -> Robot | None:
         """Get a Robot by its unique ID.
 
         Args:
             uid (str): The unique ID of the robot.
 
         Returns:
-            Optional[Robot]: The robot instance if found, otherwise None.
+            Robot | None: The robot instance if found, otherwise None.
         """
         if uid not in self._robots:
             logger.log_warning(f"Robot {uid} not found.")
@@ -989,13 +989,13 @@ class SimulationManager:
         return list(self._robots.keys())
 
     def enable_gizmo(
-        self, uid: str, control_part: Optional[str] = None, gizmo_cfg: object = None
+        self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
     ) -> None:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
             uid (str): UID of the object to attach gizmo to (searches in robots, rigid_objects, sensors, etc.)
-            control_part (Optional[str], optional): Control part name for robots. Defaults to "arm".
+            control_part (str | None, optional): Control part name for robots. Defaults to "arm".
             gizmo_cfg (object, optional): Gizmo configuration object. Defaults to None.
         """
         # Create gizmo key combining uid and control_part
@@ -1050,12 +1050,12 @@ class SimulationManager:
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
 
-    def disable_gizmo(self, uid: str, control_part: Optional[str] = None) -> None:
+    def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
         """Disable and remove gizmo for a robot.
 
         Args:
             uid (str): Object UID to disable gizmo for
-            control_part (Optional[str], optional): Control part name for robots. Defaults to None.
+            control_part (str | None, optional): Control part name for robots. Defaults to None.
         """
         # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
@@ -1087,12 +1087,12 @@ class SimulationManager:
                 f"Failed to disable gizmo for '{uid}' with control_part '{control_part}': {e}"
             )
 
-    def get_gizmo(self, uid: str, control_part: Optional[str] = None) -> object:
+    def get_gizmo(self, uid: str, control_part: str | None = None) -> object:
         """Get gizmo instance for a robot.
 
         Args:
             uid (str): Object UID
-            control_part (Optional[str], optional): Control part name for robots. Defaults to None.
+            control_part (str | None, optional): Control part name for robots. Defaults to None.
 
         Returns:
             object: Gizmo instance if found, None otherwise.
@@ -1101,12 +1101,12 @@ class SimulationManager:
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
         return self._gizmos.get(gizmo_key, None)
 
-    def has_gizmo(self, uid: str, control_part: Optional[str] = None) -> bool:
+    def has_gizmo(self, uid: str, control_part: str | None = None) -> bool:
         """Check if a gizmo exists for the given UID and control part.
 
         Args:
             uid (str): Object UID to check
-            control_part (Optional[str], optional): Control part name for robots. Defaults to None.
+            control_part (str | None, optional): Control part name for robots. Defaults to None.
 
         Returns:
             bool: True if gizmo exists, False otherwise.
@@ -1139,7 +1139,7 @@ class SimulationManager:
                     logger.log_error(f"Error updating gizmo '{gizmo_key}': {e}")
 
     def toggle_gizmo_visibility(
-        self, uid: str, control_part: Optional[str] = None
+        self, uid: str, control_part: str | None = None
     ) -> bool:
         """
         Toggle the visibility of a gizmo by uid and optional control_part.
@@ -1151,7 +1151,7 @@ class SimulationManager:
         return None
 
     def set_gizmo_visibility(
-        self, uid: str, visible: bool, control_part: Optional[str] = None
+        self, uid: str, visible: bool, control_part: str | None = None
     ) -> None:
         """
         Set the visibility of a gizmo by uid and optional control_part.
@@ -1191,7 +1191,7 @@ class SimulationManager:
 
         return sensor
 
-    def get_sensor(self, uid: str) -> Optional[BaseSensor]:
+    def get_sensor(self, uid: str) -> BaseSensor | None:
         """Get a sensor by its UID.
 
         Args:
@@ -1420,11 +1420,11 @@ class SimulationManager:
         self._visual_materials = {}
         self._env.clean_materials()
 
-    def reset_objects_state(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset_objects_state(self, env_ids: Sequence[int] | None = None) -> None:
         """Reset the state of all objects in the scene.
 
         Args:
-            env_ids: The environment IDs to reset. If None, reset all environments.
+            env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
         """
         for robot in self._robots.values():
             robot.reset(env_ids)

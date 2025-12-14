@@ -17,7 +17,7 @@
 import torch
 import numpy as np
 from copy import deepcopy
-from typing import Dict, Tuple, Union, List, Any, Optional, Callable
+from typing import Dict, List
 from embodichain.lab.gym.envs.action_bank.configurable_action import (
     ActionBank,
     tag_node,
@@ -44,7 +44,7 @@ class PourWaterActionBank(ActionBank):
     @resolve_env_params
     def generate_left_arm_aim_qpos(
         env,
-        valid_funcs_name_kwargs_proc: Optional[List] = None,
+        valid_funcs_name_kwargs_proc: List | None = None,
     ):
         # FIXME FIXME FIXME FIXME
         logger.log_warning(
@@ -69,7 +69,7 @@ class PourWaterActionBank(ActionBank):
     # DONE: valid & process qpos & fk
     def generate_right_arm_aim_qpos(
         env,
-        valid_funcs_name_kwargs_proc: Optional[List] = None,
+        valid_funcs_name_kwargs_proc: list | None = None,
     ):
         # FIXME FIXME FIXME FIXME
         logger.log_warning(
