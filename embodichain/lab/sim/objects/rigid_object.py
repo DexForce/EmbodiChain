@@ -61,7 +61,7 @@ class RigidBodyData:
 
         # get gpu indices for the entities.
         self.gpu_indices = torch.as_tensor(
-            [entity.get_gpu_index() for entity in self.entities],
+            [np.int32(entity.get_gpu_index()) for entity in self.entities],
             dtype=torch.int32,
             device=self.device,
         )

@@ -86,7 +86,7 @@ class RandomReachEnv(BaseEnv):
             cfg=RigidObjectCfg(
                 uid="cube",
                 shape=CubeCfg(size=[size, size, size]),
-                attrs=RigidBodyAttributesCfg(enable_collision=False),
+                attrs=RigidBodyAttributesCfg(enable_collision=True),
                 init_pos=(0.0, 0.0, 0.5),
                 body_type="kinematic",
             ),

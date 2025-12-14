@@ -969,6 +969,7 @@ class Articulation(BatchEntity):
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set = self.body_data._qpos[local_env_ids]
             qpos_set[:, local_joint_ids] = qpos
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qpos_set,
                 gpu_indices=indices,
