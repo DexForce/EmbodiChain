@@ -65,7 +65,8 @@ class SoftBodyData:
         self.num_instances = len(entities)
 
         softbodies = [
-            self.entities[i].get_physical_body() for i in range(self.num_instances)
+            np.int32(self.entities[i].get_physical_body())
+            for i in range(self.num_instances)
         ]
         self.n_collision_vertices = softbodies[0].get_num_vertices()
         self.n_sim_vertices = softbodies[0].get_num_sim_vertices()

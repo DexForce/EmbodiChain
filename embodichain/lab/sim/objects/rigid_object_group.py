@@ -59,7 +59,10 @@ class RigidBodyGroupData:
 
         # get gpu indices for the rigid bodies with shape of (num_instances, num_objects)
         self.gpu_indices = torch.as_tensor(
-            [[entity.get_gpu_index() for entity in instance] for instance in entities],
+            [
+                [np.int32(entity.get_gpu_index()) for entity in instance]
+                for instance in entities
+            ],
             dtype=torch.int32,
             device=self.device,
         )
