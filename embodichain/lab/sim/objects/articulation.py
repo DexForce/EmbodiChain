@@ -1304,13 +1304,13 @@ class Articulation(BatchEntity):
 
     def compute_fk(
         self,
-        qpos: torch.tensor | np.ndarray | None,
+        qpos: torch.Tensor | np.ndarray | None,
         link_names: str | list[str] | tuple[str] | None = None,
         end_link_name: str | None = None,
         root_link_name: str | None = None,
         to_dict: bool = False,
         **kwargs,
-    ) -> Union[torch.tensor, dict[str, "pk.Transform3d"]]:
+    ) -> Union[torch.Tensor, dict[str, "pk.Transform3d"]]:
         """Compute the forward kinematics (FK) for the given joint positions.
 
         Args:

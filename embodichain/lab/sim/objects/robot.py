@@ -141,7 +141,7 @@ class Robot(Articulation):
 
     def compute_fk(
         self,
-        qpos: torch.tensor | np.ndarray | None,
+        qpos: torch.Tensor | np.ndarray | None,
         name: str | None = None,
         link_names: List[str] | None = None,
         end_link_name: str | None = None,
@@ -153,7 +153,7 @@ class Robot(Articulation):
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (torch.tensor | np.ndarray | None): Joint positions of the robot, (n_envs, num_joints).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, num_joints).
             name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
             link_names (List[str] | None): The names of the links to compute the FK for. If None, all links are used.
             end_link_name (str | None): The name of the end link to compute the FK for. If None, the default end link is used.
@@ -302,7 +302,7 @@ class Robot(Articulation):
 
     def compute_batch_fk(
         self,
-        qpos: torch.tensor,
+        qpos: torch.Tensor,
         name: str,
         env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
@@ -311,7 +311,7 @@ class Robot(Articulation):
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (torch.tensor | np.ndarray | None): Joint positions of the robot, (n_envs, n_batch, num_joints).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, n_batch, num_joints).
             name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
             env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.

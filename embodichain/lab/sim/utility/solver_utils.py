@@ -18,7 +18,7 @@ import torch
 import numpy as np
 from embodichain.lab.sim.utility.io_utils import suppress_stdout_stderr
 
-from typing import Union, Tuple, Any, List, TYPE_CHECKING
+from typing import Union, Tuple, Optional, Any, List, TYPE_CHECKING
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
@@ -62,7 +62,7 @@ def create_pk_serial_chain(
     device: torch.device = None,
     end_link_name: str = None,
     root_link_name: str | None = None,
-    chain: "pk.SerialChain" | None = None,
+    chain: Optional["pk.SerialChain"] = None,
     **kwargs,
 ) -> "pk.SerialChain":
     """
