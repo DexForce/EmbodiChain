@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 
 from scipy.spatial.transform import Rotation as R
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Union, Tuple
 
 from embodichain.toolkits.urdf_assembly.logging_utils import (
     URDFAssemblyLogger,
@@ -64,10 +64,10 @@ class SensorAttachment:
     sensor_urdf: str  # Path to the sensor's URDF file
     parent_component: str  # Name of the component to which the sensor is attached
     parent_link: str  # Specific link name within the parent component for attachment
-    transform: Optional[np.ndarray] = (
-        None  # Optional 4x4 transformation matrix for sensor positioning
+    transform: np.ndarray | None = (
+        None  # 4x4 transformation matrix for sensor positioning, or None
     )
-    sensor_type: Optional[str] = None  # Optional sensor type field
+    sensor_type: str | None = None  # Sensor type field, or None
 
 
 class URDFSensorManager:
@@ -91,10 +91,10 @@ class URDFSensorManager:
         ],
         parent_component: str,
         parent_link: str,
-        transform: Optional[np.ndarray] = None,
-        sensor_type: Optional[str] = None,
-        extract_links: Optional[List[str]] = None,
-        extract_joints: Optional[List[str]] = None,
+        transform: np.ndarray | None = None,
+        sensor_type: str | None = None,
+        extract_links: list[str] | None = None,
+        extract_joints: list[str] | None = None,
     ) -> bool:
         r"""Attach a sensor to a specific component and link with multiple input format support.
 
@@ -179,7 +179,7 @@ class URDFSensorManager:
         sensor_source,
         parent_component: str,
         parent_link: str,
-        transform: Optional[np.ndarray],
+        transform: np.ndarray | None,
     ) -> bool:
         r"""Validate input parameters for sensor attachment.
 
@@ -241,10 +241,10 @@ class URDFSensorManager:
     def _process_sensor_source(
         self,
         sensor_source,
-        extract_links: Optional[List[str]],
-        extract_joints: Optional[List[str]],
+        extract_links: list[str] | None,
+        extract_joints: list[str] | None,
         sensor_name: str,
-    ) -> Optional[Tuple[List[ET.Element], List[ET.Element], str]]:
+    ) -> tuple[list[ET.Element], list[ET.Element], str] | None:
         r"""Process sensor source based on input type and extract relevant elements.
 
         Args:
@@ -290,9 +290,9 @@ class URDFSensorManager:
     def _process_urdf_file_source(
         self,
         file_path: str,
-        extract_links: Optional[List[str]],
-        extract_joints: Optional[List[str]],
-    ) -> Optional[Tuple[List[ET.Element], List[ET.Element], str]]:
+        extract_links: list[str] | None,
+        extract_joints: list[str] | None,
+    ) -> tuple[list[ET.Element], list[ET.Element], str] | None:
         r"""Process URDF file source and extract specified elements.
 
         Args:
@@ -321,10 +321,10 @@ class URDFSensorManager:
     def _process_urdf_element_source(
         self,
         urdf_element: ET.Element,
-        extract_links: Optional[List[str]],
-        extract_joints: Optional[List[str]],
+        extract_links: list[str] | None,
+        extract_joints: list[str] | None,
         sensor_name: str,
-    ) -> Tuple[List[ET.Element], List[ET.Element], str]:
+    ) -> tuple[list[ET.Element], list[ET.Element], str]:
         r"""Process pre-loaded URDF element source.
 
         Args:
@@ -344,7 +344,7 @@ class URDFSensorManager:
 
     def _process_config_dict_source(
         self, config: Dict, sensor_name: str
-    ) -> Tuple[List[ET.Element], List[ET.Element], str]:
+    ) -> tuple[list[ET.Element], list[ET.Element], str]:
         r"""Process configuration dictionary source and create URDF elements.
 
         Args:
@@ -361,8 +361,8 @@ class URDFSensorManager:
         return links, joints, generated_path
 
     def _process_element_tuple_source(
-        self, element_tuple: Tuple, sensor_name: str
-    ) -> Optional[Tuple[List[ET.Element], List[ET.Element], str]]:
+        self, element_tuple: tuple, sensor_name: str
+    ) -> tuple[list[ET.Element], list[ET.Element], str] | None:
         r"""Process direct element tuple source.
 
         Args:
@@ -397,9 +397,9 @@ class URDFSensorManager:
     def _extract_elements_from_urdf(
         self,
         urdf_element: ET.Element,
-        extract_links: Optional[List[str]] = None,
-        extract_joints: Optional[List[str]] = None,
-    ) -> Tuple[List[ET.Element], List[ET.Element]]:
+        extract_links: list[str] | None = None,
+        extract_joints: list[str] | None = None,
+    ) -> tuple[list[ET.Element], list[ET.Element]]:
         r"""Extract specified links and joints from URDF element.
 
         Args:
@@ -443,7 +443,7 @@ class URDFSensorManager:
         return links, joints
 
     def _validate_sensor_elements(
-        self, sensor_links: List[ET.Element], sensor_joints: List[ET.Element]
+        self, sensor_links: list[ET.Element], sensor_joints: list[ET.Element]
     ) -> bool:
         r"""Validate extracted sensor elements for completeness and consistency.
 
@@ -526,10 +526,10 @@ class URDFSensorManager:
 
     def _process_and_rename_sensor_elements(
         self,
-        sensor_links: List[ET.Element],
-        sensor_joints: List[ET.Element],
+        sensor_links: list[ET.Element],
+        sensor_joints: list[ET.Element],
         sensor_name: str,
-    ) -> Optional[Tuple[List[ET.Element], List[ET.Element]]]:
+    ) -> tuple[list[ET.Element], list[ET.Element]] | None:
         r"""Process and rename sensor link and joint elements to avoid name conflicts.
 
         Args:

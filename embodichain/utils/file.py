@@ -17,20 +17,20 @@
 import os
 import re
 
-from typing import Optional, List
+from typing import List
 
 
 def get_all_files_in_directory(
     directory: str,
-    exts: Optional[List[str]] = None,
-    patterns: Optional[List[str]] = None,
+    exts: List[str] | None = None,
+    patterns: List[str] | None = None,
 ) -> List[str]:
     """Get all files in a directory with optional filtering by extensions or regex patterns.
 
     Args:
         directory (str): The directory to search for files.
-        exts (Optional[List[str]]): List of file extensions to filter by. If None, all files are returned.
-        patterns (Optional[List[str]]): List of regex patterns to match file names. If None, no pattern matching is applied.
+        exts (List[str] | None): List of file extensions to filter by. If None, all files are returned.
+        patterns (List[str] | None): List of regex patterns to match file names. If None, no pattern matching is applied.
 
     Returns:
         List[str]: List of file paths in the directory matching the specified extensions or patterns.

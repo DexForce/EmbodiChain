@@ -20,7 +20,7 @@ import numpy as np
 from functools import cached_property
 
 from dataclasses import dataclass
-from typing import List, Sequence, Optional, Union
+from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
 from dexsim.engine import PhysicsScene
@@ -189,9 +189,9 @@ class SoftObject(BatchEntity):
         self.set_collision_filter(collision_filter_data)
 
     def set_collision_filter(
-        self, filter_data: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
-        """set collision filter data for the rigid object.
+        """Set collision filter data for the rigid object.
 
         Args:
             filter_data (torch.Tensor): [N, 4] of int.
@@ -199,7 +199,7 @@ class SoftObject(BatchEntity):
                 If 2nd element is 0, the object will collision with all other objects in world.
                 3rd and 4th elements are not used currently.
 
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used. Defaults to None.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -215,22 +215,22 @@ class SoftObject(BatchEntity):
             )
 
     @property
-    def body_data(self) -> Optional[SoftBodyData]:
+    def body_data(self) -> SoftBodyData | None:
         """Get the soft body data manager for this rigid object.
 
         Returns:
-            SoftBodyData: The rigid body data manager.
+            SoftBodyData | None: The rigid body data manager.
         """
         return self._data
 
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set local pose of the rigid object.
 
         Args:
             pose (torch.Tensor): The local pose of the rigid object with shape (N, 7) or (N, 4, 4).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -339,7 +339,7 @@ class SoftObject(BatchEntity):
         """
         raise NotImplementedError("Getting local pose for SoftObject is not supported.")
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 

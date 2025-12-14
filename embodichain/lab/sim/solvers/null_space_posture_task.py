@@ -16,7 +16,7 @@
 
 
 import numpy as np
-from typing import List, Optional, Union, TYPE_CHECKING
+from typing import List, Union, TYPE_CHECKING
 from embodichain.utils import logger
 
 try:
@@ -103,8 +103,8 @@ class NullSpacePostureTask(Task):
         cost: float,
         lm_damping: float = 0.0,
         gain: float = 1.0,
-        controlled_frames: Optional[List[str]] = None,
-        controlled_joints: Optional[List[str]] = None,
+        controlled_frames: list[str] | None = None,
+        controlled_joints: list[str] | None = None,
     ) -> None:
         r"""Initialize the null space posture task.
 

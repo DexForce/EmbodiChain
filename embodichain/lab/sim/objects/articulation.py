@@ -20,7 +20,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import List, Sequence, Optional, Dict, Union, Tuple
+from typing import List, Sequence, Dict, Union, Tuple
 
 from dexsim.engine import Articulation as _Articulation
 from dexsim.types import (
@@ -670,20 +670,20 @@ class Articulation(BatchEntity):
         return torch.cat((body_pose, body_vel), dim=-1)
 
     @property
-    def mimic_ids(self) -> List[Optional[int]]:
+    def mimic_ids(self) -> List[int | None]:
         """Get the mimic joint ids for the articulation.
 
         Returns:
-            List[Optional[int]]: The mimic joint ids.
+            List[int | None]: The mimic joint ids.
         """
         return self._mimic_info.mimic_id.tolist()
 
     @property
-    def mimic_parents(self) -> List[Optional[int]]:
+    def mimic_parents(self) -> List[int | None]:
         """Get the mimic joint parent ids for the articulation.
 
         Returns:
-            List[Optional[int]]: The mimic joint parent ids.
+            List[int | None]: The mimic joint parent ids.
         """
         return self._mimic_info.mimic_parent.tolist()
 
@@ -715,7 +715,7 @@ class Articulation(BatchEntity):
         self.set_collision_filter(collision_filter_data)
 
     def set_collision_filter(
-        self, filter_data: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """set collision filter data for the rigid object.
 
@@ -725,7 +725,7 @@ class Articulation(BatchEntity):
                 If 2nd element is 0, the object will collision with all other objects in world.
                 3rd and 4th elements are not used currently.
 
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used. Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -739,13 +739,13 @@ class Articulation(BatchEntity):
             self._entities[env_idx].set_collision_filter_data(filter_data_np[i])
 
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set local pose of the articulation.
 
         Args:
             pose (torch.Tensor): The local pose of the articulation with shape (N, 7) or (N, 4, 4).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -848,13 +848,13 @@ class Articulation(BatchEntity):
         return verts, faces
 
     def get_link_pose(
-        self, link_name: str, env_ids: Optional[Sequence[int]] = None, to_matrix=False
+        self, link_name: str, env_ids: Sequence[int] | None = None, to_matrix=False
     ) -> torch.Tensor:
         """Get the pose of a specific link in the articulation.
 
         Args:
             link_name (str): The name of the link.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
             to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
 
         Returns:
@@ -889,16 +889,16 @@ class Articulation(BatchEntity):
     def set_qpos(
         self,
         qpos: torch.Tensor,
-        joint_ids: Optional[Sequence[int]] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
         target: bool = True,
     ) -> None:
         """Set the joint positions (qpos) or target positions for the articulation.
 
         Args:
             qpos (torch.Tensor): Joint positions with shape (N, dof), where N is the number of environments.
-            joint_ids (Optional[Sequence[int]], optional): Joint indices to apply the positions. If None, applies to all joints.
-            env_ids (Optional[Sequence[int]]): Environment indices to apply the positions. Defaults to all environments.
+            joint_ids (Sequence[int] | None, optional): Joint indices to apply the positions. If None, applies to all joints.
+            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
             target (bool): If True, sets target positions for simulation. If False, updates current positions directly.
 
         Raises:
@@ -986,16 +986,16 @@ class Articulation(BatchEntity):
     def set_qvel(
         self,
         qvel: torch.Tensor,
-        joint_ids: Optional[Sequence[int]] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
         target: bool = True,
     ) -> None:
         """Set the velocities (qvel) or target velocities of the articulation.
 
         Args:
             qvel (torch.Tensor): The velocities with shape (N, dof).
-            joint_ids (Optional[Sequence[int]], optional): Joint indices to apply the velocities. If None, applies to all joints.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. Defaults to all indices.
+            joint_ids (Sequence[int] | None, optional): Joint indices to apply the velocities. If None, applies to all joints.
+            env_ids (Sequence[int] | None, optional): Environment indices. Defaults to all indices.
             If True, sets target positions for simulation. If False, updates current positions directly.
 
         Raises:
@@ -1041,15 +1041,15 @@ class Articulation(BatchEntity):
     def set_qf(
         self,
         qf: torch.Tensor,
-        joint_ids: Optional[Sequence[int]] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set the generalized efforts (qf) of the articulation.
 
         Args:
             qf (torch.Tensor): The generalized efforts with shape (N, dof).
-            joint_ids (Optional[Sequence[int]], optional): Joint indices to apply the efforts. If None, applies to all joints.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. Defaults to all indices.
+            joint_ids (Sequence[int] | None, optional): Joint indices to apply the efforts. If None, applies to all joints.
+            env_ids (Sequence[int] | None, optional): Environment indices. Defaults to all indices.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -1080,14 +1080,14 @@ class Articulation(BatchEntity):
 
     def set_drive(
         self,
-        stiffness: Optional[torch.Tensor] = None,
-        damping: Optional[torch.Tensor] = None,
-        max_effort: Optional[torch.Tensor] = None,
-        max_velocity: Optional[torch.Tensor] = None,
-        friction: Optional[torch.Tensor] = None,
+        stiffness: torch.Tensor | None = None,
+        damping: torch.Tensor | None = None,
+        max_effort: torch.Tensor | None = None,
+        max_velocity: torch.Tensor | None = None,
+        friction: torch.Tensor | None = None,
         drive_type: str = "force",
-        joint_ids: Optional[Sequence[int]] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set the drive properties for the articulation.
 
@@ -1098,8 +1098,8 @@ class Articulation(BatchEntity):
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
             drive_type (str, optional): The type of drive to apply. Defaults to "force".
-            joint_ids (Optional[Sequence[int]], optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
-            env_ids (Optional[Sequence[int]], optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
+            joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
+            env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         local_joint_ids = np.arange(self.dof) if joint_ids is None else joint_ids
@@ -1135,11 +1135,11 @@ class Articulation(BatchEntity):
             device=self.device,
         )
 
-    def clear_dynamics(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the articulation.
 
         Args:
-            env_ids (Optional[Sequence[int]]): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if self.device.type == "cpu":
@@ -1205,7 +1205,7 @@ class Articulation(BatchEntity):
             device=self.device,
         )
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
@@ -1304,10 +1304,10 @@ class Articulation(BatchEntity):
 
     def compute_fk(
         self,
-        qpos: Optional[Union[torch.tensor, np.ndarray]],
-        link_names: Optional[Union[str, list[str], tuple[str]]] = None,
-        end_link_name: Optional[str] = None,
-        root_link_name: Optional[str] = None,
+        qpos: torch.tensor | np.ndarray | None,
+        link_names: str | list[str] | tuple[str] | None = None,
+        end_link_name: str | None = None,
+        root_link_name: str | None = None,
         to_dict: bool = False,
         **kwargs,
     ) -> Union[torch.tensor, dict[str, "pk.Transform3d"]]:
@@ -1406,10 +1406,10 @@ class Articulation(BatchEntity):
 
     def compute_jacobian(
         self,
-        qpos: Optional[Union[torch.Tensor, np.ndarray]],
+        qpos: torch.Tensor | np.ndarray | None,
         end_link_name: str = None,
         root_link_name: str = None,
-        locations: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        locations: torch.Tensor | np.ndarray | None = None,
         jac_type: str = "full",
     ) -> torch.Tensor:
         """Compute the Jacobian matrix for the given joint positions using the pk_serial_chain.
@@ -1482,15 +1482,15 @@ class Articulation(BatchEntity):
     def set_visual_material(
         self,
         mat: VisualMaterial,
-        env_ids: Optional[Sequence[int]] = None,
-        link_names: Optional[List[str]] = None,
+        env_ids: Sequence[int] | None = None,
+        link_names: List[str] | None = None,
     ) -> None:
         """Set visual material for the rigid object.
 
         Args:
             mat (VisualMaterial): The material to set.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
-            link_names (Optional[List[str]], optional): List of link names to apply the material to. If None, applies to all links.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+            link_names (List[str] | None, optional): List of link names to apply the material to. If None, applies to all links.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         link_names = self.link_names if link_names is None else link_names
@@ -1505,14 +1505,14 @@ class Articulation(BatchEntity):
 
     def get_visual_material_inst(
         self,
-        env_ids: Optional[Sequence[int]] = None,
-        link_names: Optional[List[str]] = None,
+        env_ids: Sequence[int] | None = None,
+        link_names: List[str] | None = None,
     ) -> List[Dict[str, VisualMaterialInst]]:
         """Get visual material instances for the rigid object.
 
         Args:
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
-            link_names (Optional[List[str]], optional): List of link names to filter materials. If None, returns materials for all links.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+            link_names (List[str] | None, optional): List of link names to filter materials. If None, returns materials for all links.
         Returns:
             List[Dict[str, VisualMaterialInst]]: A list where each element corresponds to an environment and contains a dictionary mapping link names to their VisualMaterialInst.
         """

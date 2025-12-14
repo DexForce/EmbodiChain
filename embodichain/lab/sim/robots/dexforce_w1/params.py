@@ -16,7 +16,7 @@
 
 import torch
 import numpy as np
-from typing import Optional
+
 from dataclasses import dataclass, field
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1HandBrand,
@@ -257,7 +257,7 @@ class W1ArmKineParams:
         return inst
 
     def to_torch(
-        self, device: Optional[torch.device] = None, dtype: torch.dtype = torch.float32
+        self, device: torch.device | None = None, dtype: torch.dtype = torch.float32
     ) -> dict:
         dev = torch.device("cpu") if device is None else device
         return {

@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 import logging
-from typing import Optional
 
 __all__ = ["URDFAssemblyLogger"]
 
@@ -70,7 +69,7 @@ class URDFAssemblyLogger:
     _initialized = False
 
     @classmethod
-    def get_logger(cls, name: Optional[str] = None) -> logging.Logger:
+    def get_logger(cls, name: str | None = None) -> logging.Logger:
         r"""Get or create a URDF assembly-specific logger
 
         Args:
