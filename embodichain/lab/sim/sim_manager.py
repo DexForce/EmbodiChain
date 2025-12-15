@@ -201,8 +201,6 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        self._default_resources = SimResources()
-
         # set unique material path to accelerate material creation.
         # TODO: This will be removed.
         if self.sim_config.enable_rt is False:
@@ -235,14 +233,55 @@ class SimulationManager:
         # The structure is keys to the loaded texture data. The keys represent the texture group.
         self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
 
-        # TODO: maybe need to add some interface to interact with background and layouts.
-        # background and layouts are 3d assets that can has only render body for visualization.
+        self._init_sim_resources()
 
         self._create_default_plane()
         self.set_default_background()
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
+
+    @property
+    def num_envs(self) -> int:
+        """Get the number of arenas in the simulation.
+
+        Returns:
+            int: number of arenas.
+        """
+        return len(self._arenas) if len(self._arenas) > 0 else 1
+
+    @cached_property
+    def is_use_gpu_physics(self) -> bool:
+        """Check if the physics simulation is using GPU."""
+        world_config = dexsim.get_world_config()
+        return self.device.type == "cuda" and world_config.enable_gpu_sim
+
+    @property
+    def is_rt_enabled(self) -> bool:
+        """Check if Ray Tracing rendering backend is enabled."""
+        return self.sim_config.enable_rt
+
+    @property
+    def is_physics_manually_update(self) -> bool:
+        return self._world.is_physics_manually_update()
+
+    @property
+    def asset_uids(self) -> List[str]:
+        """Get all assets uid in the simulation.
+
+        The assets include lights, sensors, robots, rigid objects and articulations.
+
+        Returns:
+            List[str]: list of all assets uid.
+        """
+        uid_list = ["default_plane"]
+        uid_list.extend(list(self._lights.keys()))
+        uid_list.extend(list(self._sensors.keys()))
+        uid_list.extend(list(self._robots.keys()))
+        uid_list.extend(list(self._rigid_objects.keys()))
+        uid_list.extend(list(self._rigid_object_groups.keys()))
+        uid_list.extend(list(self._articulations.keys()))
+        return uid_list
 
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
@@ -295,47 +334,9 @@ class SimulationManager:
         """
         return self._default_resources
 
-    @property
-    def num_envs(self) -> int:
-        """Get the number of arenas in the simulation.
-
-        Returns:
-            int: number of arenas.
-        """
-        return len(self._arenas) if len(self._arenas) > 0 else 1
-
-    @cached_property
-    def is_use_gpu_physics(self) -> bool:
-        """Check if the physics simulation is using GPU."""
-        world_config = dexsim.get_world_config()
-        return self.device.type == "cuda" and world_config.enable_gpu_sim
-
-    @property
-    def is_rt_enabled(self) -> bool:
-        """Check if Ray Tracing rendering backend is enabled."""
-        return self.sim_config.enable_rt
-
-    @property
-    def is_physics_manually_update(self) -> bool:
-        return self._world.is_physics_manually_update()
-
-    @property
-    def asset_uids(self) -> List[str]:
-        """Get all assets uid in the simulation.
-
-        The assets include lights, sensors, robots, rigid objects and articulations.
-
-        Returns:
-            List[str]: list of all assets uid.
-        """
-        uid_list = ["default_plane"]
-        uid_list.extend(list(self._lights.keys()))
-        uid_list.extend(list(self._sensors.keys()))
-        uid_list.extend(list(self._robots.keys()))
-        uid_list.extend(list(self._rigid_objects.keys()))
-        uid_list.extend(list(self._rigid_object_groups.keys()))
-        uid_list.extend(list(self._articulations.keys()))
-        return uid_list
+    def _init_sim_resources(self) -> None:
+        """Initialize the default simulation resources."""
+        self._default_resources = SimResources()
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
