@@ -19,7 +19,7 @@ import dexsim
 import numpy as np
 
 from dataclasses import dataclass
-from typing import List, Sequence, Optional, Union
+from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
@@ -177,7 +177,7 @@ class RigidObject(BatchEntity):
         )
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
-        self._data: Optional[RigidBodyData] = None
+        self._data: RigidBodyData | None = None
         if self.is_static is False:
             self._data = RigidBodyData(entities=entities, ps=self._ps, device=device)
 
@@ -207,7 +207,7 @@ class RigidObject(BatchEntity):
         )
 
     @property
-    def body_data(self) -> Optional[RigidBodyData]:
+    def body_data(self) -> RigidBodyData | None:
         """Get the rigid body data manager for this rigid object.
 
         Returns:
@@ -269,7 +269,7 @@ class RigidObject(BatchEntity):
         self.set_collision_filter(collision_filter_data)
 
     def set_collision_filter(
-        self, filter_data: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """set collision filter data for the rigid object.
 
@@ -279,7 +279,7 @@ class RigidObject(BatchEntity):
                 If 2nd element is 0, the object will collision with all other objects in world.
                 3rd and 4th elements are not used currently.
 
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used. Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -295,13 +295,13 @@ class RigidObject(BatchEntity):
             )
 
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set local pose of the rigid object.
 
         Args:
             pose (torch.Tensor): The local pose of the rigid object with shape (N, 7) or (N, 4, 4).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -398,10 +398,10 @@ class RigidObject(BatchEntity):
 
     def add_force_torque(
         self,
-        force: Optional[torch.Tensor] = None,
-        torque: Optional[torch.Tensor] = None,
-        pos: Optional[torch.Tensor] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        force: torch.Tensor | None = None,
+        torque: torch.Tensor | None = None,
+        pos: torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Add force and/or torque to the rigid object.
 
@@ -412,10 +412,10 @@ class RigidObject(BatchEntity):
             - if not `pos` is specified, the force and torque are applied at the center of mass of the rigid body.
 
         Args:
-            force (Optional[torch.Tensor] = None): The force to add with shape (N, 3). Defaults to None.
-            torque (Optional[torch.Tensor], optional): The torque to add with shape (N, 3). Defaults to None.
-            pos (Optional[torch.Tensor], optional): The position to apply the force at with shape (N, 3). Defaults to None.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            force (torch.Tensor | None = None): The force to add with shape (N, 3). Defaults to None.
+            torque (torch.Tensor | None, optional): The torque to add with shape (N, 3). Defaults to None.
+            pos (torch.Tensor | None, optional): The position to apply the force at with shape (N, 3). Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         if force is None and torque is None:
             logger.log_warning(
@@ -466,13 +466,13 @@ class RigidObject(BatchEntity):
     def set_attrs(
         self,
         attrs: Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]],
-        env_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set physical attributes for the rigid object.
 
         Args:
             attrs (Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]]): The physical attributes to set.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -490,13 +490,13 @@ class RigidObject(BatchEntity):
                 self._entities[env_idx].set_physical_attr(attrs[i].attr())
 
     def set_visual_material(
-        self, mat: VisualMaterial, env_ids: Optional[Sequence[int]] = None
+        self, mat: VisualMaterial, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set visual material for the rigid object.
 
         Args:
             mat (VisualMaterial): The material to set.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -506,12 +506,12 @@ class RigidObject(BatchEntity):
             self._visual_material[env_idx] = mat_inst
 
     def get_visual_material_inst(
-        self, env_ids: Optional[Sequence[int]] = None
+        self, env_ids: Sequence[int] | None = None
     ) -> List[VisualMaterialInst]:
         """Get material instances for the rigid object.
 
         Args:
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
 
         Returns:
             List[MaterialInst]: List of material instances.
@@ -536,12 +536,12 @@ class RigidObject(BatchEntity):
             entity.set_material(mat_insts[i].mat)
             self._visual_material[i] = mat_insts[i]
 
-    def get_body_scale(self, env_ids: Optional[Sequence[int]] = None) -> torch.Tensor:
+    def get_body_scale(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """
         Retrieve the body scale for specified environment instances.
 
         Args:
-            env_ids (Optional[Sequence[int]]): A sequence of environment instance IDs.
+            env_ids (Sequence[int] | None): A sequence of environment instance IDs.
                 If None, retrieves the body scale for all instances.
 
         Returns:
@@ -556,13 +556,13 @@ class RigidObject(BatchEntity):
         )
 
     def set_body_scale(
-        self, scale: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, scale: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set the scale of the rigid body.
 
         Args:
             scale (torch.Tensor): The scale to set with shape (N, 3).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -578,12 +578,12 @@ class RigidObject(BatchEntity):
         else:
             logger.log_error(f"Setting body scale on GPU is not supported yet.")
 
-    def get_vertices(self, env_ids: Optional[Sequence[int]] = None) -> torch.Tensor:
+    def get_vertices(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """
         Retrieve the vertices of the rigid objects.
 
         Args:
-            env_ids (Optional[Sequence[int]]): A sequence of environment IDs for which to retrieve vertices.
+            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve vertices.
                                                 If None, retrieves vertices for all instances.
 
         Returns:
@@ -610,11 +610,11 @@ class RigidObject(BatchEntity):
             device=self.device,
         )
 
-    def clear_dynamics(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
 
         Args:
-            env_ids (Optional[Sequence[int]]): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         if self.is_non_dynamic:
             return
@@ -654,13 +654,13 @@ class RigidObject(BatchEntity):
     def set_physical_visible(
         self,
         visible: bool = True,
-        rgba: Optional[Sequence[float]] = None,
+        rgba: Sequence[float] | None = None,
     ):
         """set collion render visibility
 
         Args:
             visible (bool, optional): is collision body visible. Defaults to True.
-            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+            rgba (Sequence[float] | None, optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
         if len(rgba) != 4:
@@ -695,7 +695,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             self._entities[env_idx].set_visible(visible)
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
         self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
