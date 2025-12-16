@@ -510,13 +510,13 @@ class RigidObjectGroup(BatchEntity):
     def set_physical_visible(
         self,
         visible: bool = True,
-        rgba: Optional[Sequence[float]] = None,
+        rgba: Sequence[float] | None = None,
     ):
         """set collion render visibility
 
         Args:
             visible (bool, optional): is collision body visible. Defaults to True.
-            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+            rgba (Sequence[float] | None, optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
         if len(rgba) != 4:
