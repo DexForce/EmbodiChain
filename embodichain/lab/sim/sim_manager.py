@@ -280,6 +280,7 @@ class SimulationManager:
         uid_list.extend(list(self._robots.keys()))
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
+        uid_list.extend(list(self._soft_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -795,6 +796,20 @@ class SimulationManager:
             return None
         return self._rigid_objects[uid]
 
+    def get_soft_object(self, uid: str) -> SoftObject | None:
+        """Get a soft object by its unique ID.
+
+        Args:
+            uid (str): The unique ID of the soft object.
+
+        Returns:
+            SoftObject | None: The soft object instance if found, otherwise None.
+        """
+        if uid not in self._soft_objects:
+            logger.log_warning(f"Soft object {uid} not found.")
+            return None
+        return self._soft_objects[uid]
+
     def get_rigid_object_uid_list(self) -> List[str]:
         """Get current rigid body uid list
 
@@ -802,6 +817,14 @@ class SimulationManager:
             List[str]: list of rigid body uid.
         """
         return list(self._rigid_objects.keys())
+
+    def get_soft_object_uid_list(self) -> List[str]:
+        """Get current soft body uid list
+
+        Returns:
+            List[str]: list of soft body uid.
+        """
+        return list(self._soft_objects.keys())
 
     def add_rigid_object_group(self, cfg: RigidObjectGroupCfg) -> RigidObjectGroup:
         """Add a rigid object group to the scene.
