@@ -102,19 +102,9 @@ def get_version():
     return version
 
 
-def get_dev_version():
-    import datetime
-    from datetime import date
-
-    today = date.today()
-    now = datetime.datetime.now()
-    timing = f"{now.hour:02d}{now.minute:02d}"
-    return get_version() + f".dev{today.year}{today.month}{today.day}{timing}"
-
-
 def main():
     # Extract version
-    version = get_dev_version()
+    version = get_version()
 
     data_files = []
     data_files += get_data_files_of_a_directory("embodichain", ignore_py=False)
