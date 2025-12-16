@@ -184,12 +184,6 @@ class BaseArticulationTest:
         all_link_names = self.art.link_names
         self.art.set_physical_visible(visible=True, link_names=all_link_names[:3])
 
-    def test_set_visible(self):
-        self.art.set_visible(visible=True)
-        self.art.set_visible(visible=False)
-        all_link_names = self.art.link_names
-        self.art.set_visible(visible=True, link_names=all_link_names[:3])
-
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

@@ -708,20 +708,5 @@ class Robot(Articulation):
             for link_name in link_names:
                 self._entities[env_idx].set_physical_visible(visible, link_name)
 
-    def set_visible(
-        self, visible: bool = True, control_part: Optional[str] = None
-    ) -> None:
-        """Set the visibility of the robot or a specific control part.
-
-        Args:
-            visible (bool, optional): Whether the robot or control part is visible. Defaults to True.
-            control_part (Optional[str], optional): The name of the control part to set visibility for. If None, all links are set. Defaults to None.
-        """
-        link_names = self.get_control_part_link_names(name=control_part)
-
-        for i, env_idx in enumerate(self._all_indices):
-            for link_name in link_names:
-                self._entities[env_idx].set_visible(visible, link_name)
-
     def destroy(self) -> None:
         return super().destroy()

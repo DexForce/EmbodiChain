@@ -260,18 +260,6 @@ class BaseRobotTest:
             control_part="left_arm",
         )
 
-    def test_set_visible(self):
-        # Set collision visible, render invisible
-        self.robot.set_visible(visible=True)
-
-        # Set collision invisible, render visible
-        self.robot.set_visible(visible=False)
-
-        self.robot.set_visible(
-            visible=False,
-            control_part="left_arm",
-        )
-
 
 class TestRobotCPU(BaseRobotTest):
     def setup_method(self):
