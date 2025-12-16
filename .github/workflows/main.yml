@@ -52,6 +52,7 @@ jobs:
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           echo "Start Building docs..."
+          pip uninstall pymeshlab
           pip install pymeshlab==2023.12.post3
           make html
       - name: Upload docs artifact
@@ -77,6 +78,7 @@ jobs:
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
+          pip uninstall pymeshlab
           pip install pymeshlab==2023.12.post3
           pytest tests
 
