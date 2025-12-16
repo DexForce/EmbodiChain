@@ -17,7 +17,7 @@ import types
 from collections.abc import Callable, Mapping, Iterable, Sized
 from copy import deepcopy
 from dataclasses import MISSING, Field, dataclass, field, replace
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar
 from .string import callable_to_string, string_to_callable
 
 
@@ -545,7 +545,7 @@ def _process_mutable_types(cls):
             setattr(cls, key, value)
 
 
-def _skippable_class_member(key: str, value: Any, hints: Optional[dict] = None) -> bool:
+def _skippable_class_member(key: str, value: Any, hints: dict | None = None) -> bool:
     """Check if the class member should be skipped in configclass processing.
 
     The following members are skipped:

@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from functools import reduce
-from typing import Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Iterable, List, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn

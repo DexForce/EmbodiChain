@@ -19,7 +19,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Optional, Any
+from typing import Sequence, Union, Dict, Literal, List, Any
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -403,7 +403,7 @@ class ObjectBaseCfg:
     init_rot: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Euler angles (in degree) of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0)."""
 
-    init_local_pose: Optional[np.ndarray] = None
+    init_local_pose: np.ndarray | None = None
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
     @classmethod
@@ -554,7 +554,7 @@ class RigidObjectGroupCfg:
     body_type: Literal["dynamic", "kinematic"] = "dynamic"
     """Body type for all rigid objects in the group. """
 
-    folder_path: Optional[str] = None
+    folder_path: str | None = None
     """Path to the folder containing the rigid object assets.
     
     This is used to initialize multiple rigid object configurations from a folder.
@@ -641,10 +641,10 @@ class URDFCfg:
     base_link_name: str = "base_link"
     """Name of the base link in the assembled robot."""
 
-    fpath: Optional[str] = None
+    fpath: str | None = None
     """Full output file path for the assembled URDF. If specified, overrides fname and fpath_prefix."""
 
-    fname: Optional[str] = None
+    fname: str | None = None
     """Name used for output file and directory. If not specified, auto-generated from component names."""
 
     fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
@@ -652,10 +652,10 @@ class URDFCfg:
 
     def __init__(
         self,
-        components: Optional[List[Dict[str, Union[str, np.ndarray]]]] = None,
-        sensors: Optional[Dict[str, Dict[str, Union[str, np.ndarray]]]] = None,
-        fpath: Optional[str] = None,
-        fname: Optional[str] = None,
+        components: list[dict[str, str | np.ndarray]] | None = None,
+        sensors: dict[str, dict[str, str | np.ndarray]] | None = None,
+        fpath: str | None = None,
+        fname: str | None = None,
         fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled",
         use_signature_check: bool = True,
         base_link_name: str = "base_link",
@@ -664,14 +664,14 @@ class URDFCfg:
         Initialize URDFCfg with optional list of components and output path settings.
 
         Args:
-            components (Optional[List[Dict]]): List of component configurations. Each dict should contain:
+            components (list[dict[str, str | np.ndarray]] | None): List of component configurations. Each dict should contain:
                 - 'component_type' (str): The type/name of the component (e.g., 'chassis', 'arm', 'hand').
                 - 'urdf_path' (str): Path to the component's URDF file.
-                - 'transform' (Optional[np.ndarray]): 4x4 transformation matrix (optional).
+                - 'transform' (np.ndarray | None): 4x4 transformation matrix (optional).
                 - Additional params can be included as extra keys.
-            sensors (Optional[Dict]): Sensor configurations for the robot.
-            fpath (Optional[str]): Full output file path for the assembled URDF. If specified, overrides fname and fpath_prefix.
-            fname (Optional[str]): Name used for output file and directory. If not specified, auto-generated from component names.
+            sensors (dict[str, dict[str, str | np.ndarray]] | None): Sensor configurations for the robot.
+            fpath (str | None): Full output file path for the assembled URDF. If specified, overrides fname and fpath_prefix.
+            fname (str | None): Name used for output file and directory. If not specified, auto-generated from component names.
             fpath_prefix (str): Output directory prefix for the assembled URDF file.
             use_signature_check (bool): Whether to use signature check when merging URDFs.
             base_link_name (str): Name of the base link in the assembled robot.
@@ -763,7 +763,7 @@ class URDFCfg:
         self,
         component_type: str,
         urdf_path: str,
-        transform: Optional[np.ndarray] = None,
+        transform: np.ndarray | None = None,
         **params,
     ) -> URDFCfg:
         """Add a robot component to the assembly configuration.
@@ -772,7 +772,7 @@ class URDFCfg:
             component_type (str): The type/name of the component. Should be one of SUPPORTED_COMPONENTS
                 (e.g., 'chassis', 'torso', 'head', 'left_arm', 'right_hand', 'arm', 'hand', etc.).
             urdf_path (str): Path to the component's URDF file.
-            transform (Optional[np.ndarray]): 4x4 transformation matrix for the component in the robot frame (default: None).
+            transform (np.ndarray | None): 4x4 transformation matrix for the component in the robot frame (default: None).
             **params: Additional keyword parameters for the component (e.g., color, material, etc.).
 
         Returns:
@@ -983,7 +983,7 @@ class RobotCfg(ArticulationCfg):
             After initialization of robot, the names will be expanded to a list of full joint names.
     """
 
-    urdf_cfg: Optional[URDFCfg] = None
+    urdf_cfg: URDFCfg | None = None
     """URDF assembly configuration which allows for assembling a robot from multiple URDF components.
     """
 

@@ -17,7 +17,7 @@
 import os
 import torch
 import numpy as np
-from typing import Optional, Union, Tuple, Any, List, TYPE_CHECKING
+from typing import Union, Tuple, Any, List, TYPE_CHECKING
 from itertools import product
 from copy import deepcopy
 
@@ -372,23 +372,23 @@ class PinocchioSolver(BaseSolver):
 
     def get_ik(
         self,
-        target_xpos: Optional[Union[torch.Tensor, np.ndarray]],
-        qpos_seed: np.ndarray = None,
-        qvel_seed: np.ndarray = None,
+        target_xpos: torch.Tensor | np.ndarray | None,
+        qpos_seed: np.ndarray | None = None,
+        qvel_seed: np.ndarray | None = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[bool, np.ndarray]:
+    ) -> tuple[bool, np.ndarray]:
         """Solve inverse kinematics (IK) for the robot to achieve the specified end-effector pose.
 
         Args:
-            target_xpos (torch.Tensor or np.ndarray): Desired end-effector pose as a (4, 4) homogeneous transformation matrix.
-            qpos_seed (np.ndarray, optional): Initial joint positions used as the seed for optimization. If None, uses zero configuration.
-            qvel_seed (np.ndarray, optional): Initial joint velocities (not used in current implementation).
+            target_xpos (torch.Tensor | np.ndarray | None): Desired end-effector pose as a (4, 4) homogeneous transformation matrix.
+            qpos_seed (np.ndarray | None): Initial joint positions used as the seed for optimization. If None, uses zero configuration.
+            qvel_seed (np.ndarray | None): Initial joint velocities (not used in current implementation).
             return_all_solutions (bool, optional): If True, return all valid IK solutions found; otherwise, return only the best solution. Default is False.
             **kwargs: Additional keyword arguments for future extensions.
 
         Returns:
-            Tuple[bool, np.ndarray]:
+            tuple[bool, np.ndarray]:
                 - success (bool or torch.BoolTensor): True if a valid solution is found, False otherwise.
                 - qpos (np.ndarray or torch.Tensor): Joint positions that achieve the target pose. If no solution, returns the seed joint positions.
         """
@@ -573,13 +573,13 @@ class PinocchioSolver(BaseSolver):
 
     def _get_fk(
         self,
-        qpos: Optional[Union[torch.Tensor, np.ndarray]],
+        qpos: torch.Tensor | np.ndarray | None,
         **kwargs,
     ) -> np.ndarray:
         """Compute the forward kinematics for the robot given joint positions.
 
         Args:
-            qpos (torch.Tensor or np.ndarray): Joint positions, shape should be (nq,).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions, shape should be (nq,).
             **kwargs: Additional keyword arguments (not used).
 
         Returns:

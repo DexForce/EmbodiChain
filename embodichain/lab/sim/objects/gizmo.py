@@ -21,7 +21,7 @@ Gizmo: A reusable controller for interactive manipulation of simulation elements
 import numpy as np
 import torch
 import dexsim
-from typing import Callable, Optional
+from typing import Callable
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim.common import BatchEntity
@@ -109,8 +109,8 @@ class Gizmo:
     def __init__(
         self,
         target: BatchEntity,
-        cfg: Optional[GizmoCfg] = None,
-        control_part: Optional[str] = "arm",
+        cfg: GizmoCfg | None = None,
+        control_part: str | None = "arm",
     ):
         """
         Args:

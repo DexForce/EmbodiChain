@@ -19,7 +19,7 @@ import dexsim
 import numpy as np
 
 from dataclasses import dataclass
-from typing import List, Sequence, Optional, Union
+from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
@@ -270,7 +270,7 @@ class RigidObjectGroup(BatchEntity):
         self.set_collision_filter(collision_filter_data)
 
     def set_collision_filter(
-        self, filter_data: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """set collision filter data for the rigid object group.
 
@@ -280,7 +280,7 @@ class RigidObjectGroup(BatchEntity):
                 If 2nd element is 0, the object will collision with all other objects in world.
                 3rd and 4th elements are not used currently.
 
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used. Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -297,16 +297,16 @@ class RigidObjectGroup(BatchEntity):
     def set_local_pose(
         self,
         pose: torch.Tensor,
-        env_ids: Optional[Sequence[int]] = None,
-        obj_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
+        obj_ids: Sequence[int] | None = None,
     ) -> None:
         """Set local pose of the rigid object group.
 
         Args:
             pose (torch.Tensor): The local pose of the rigid object group with shape (num_instances, num_objects, 7) or
                 (num_instances, num_objects, 4, 4).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
-            obj_ids (Optional[Sequence[int]], optional): Object indices within the group. If None, all objects are set. Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+            obj_ids (Sequence[int] | None, optional): Object indices within the group. If None, all objects are set. Defaults to None.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         local_obj_ids = self._all_obj_indices if obj_ids is None else obj_ids
@@ -405,11 +405,11 @@ class RigidObjectGroup(BatchEntity):
             device=self.device,
         )
 
-    def clear_dynamics(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
 
         Args:
-            env_ids (Optional[Sequence[int]]): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         if self.is_non_dynamic:
             return
@@ -450,13 +450,13 @@ class RigidObjectGroup(BatchEntity):
             )
 
     def set_visual_material(
-        self, mat: VisualMaterial, env_ids: Optional[Sequence[int]] = None
+        self, mat: VisualMaterial, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set visual material for the rigid object group.
 
         Args:
             mat (VisualMaterial): The material to set.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -469,7 +469,7 @@ class RigidObjectGroup(BatchEntity):
         # If needed, we should create a visual material dict to store the material instances, and
         # implement a get_visual_material method to retrieve the material instances.
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 

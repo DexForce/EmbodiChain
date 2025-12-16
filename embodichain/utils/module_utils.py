@@ -15,12 +15,12 @@
 # ----------------------------------------------------------------------------
 
 import importlib
-from typing import List, Union, Optional, Callable, Any
+from typing import List, Union, Callable, Any
 
 
 def find_function_from_modules(
     function_name: str, modules: List[Union[str, Any]], raise_if_not_found: bool = True
-) -> Optional[Callable]:
+) -> Callable | None:
     """
     Find a function from multiple Python modules.
 
@@ -30,7 +30,7 @@ def find_function_from_modules(
         raise_if_not_found (bool): Whether to raise an exception if function is not found
 
     Returns:
-        Optional[Callable]: The function if found, None otherwise
+        Callable | None: The function if found, None otherwise
 
     Raises:
         AttributeError: If function is not found and raise_if_not_found is True
@@ -62,7 +62,7 @@ def find_function_from_modules(
 
 def find_class_from_modules(
     class_name: str, modules: List[Union[str, Any]], raise_if_not_found: bool = True
-) -> Optional[type]:
+) -> type | None:
     """
     Find a class from multiple Python modules.
 
@@ -72,7 +72,7 @@ def find_class_from_modules(
         raise_if_not_found (bool): Whether to raise an exception if class is not found
 
     Returns:
-        Optional[type]: The class if found, None otherwise
+        type | None: The class if found, None otherwise
 
     Raises:
         AttributeError: If class is not found and raise_if_not_found is True

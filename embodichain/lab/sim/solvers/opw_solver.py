@@ -17,7 +17,7 @@
 import torch
 import numpy as np
 from itertools import product
-from typing import Optional, Union, Tuple, Any, Literal, TYPE_CHECKING
+from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
 from scipy.spatial.transform import Rotation
 
 from embodichain.utils import configclass, logger
@@ -76,7 +76,7 @@ class OPWSolverCfg(SolverCfg):
     has_parallelogram = False
 
     # Parameters for the inverse-kinematics method.
-    ik_params: Optional[dict] = None
+    ik_params: dict | None = None
 
     def init_solver(
         self, device: torch.device = torch.device("cpu"), **kwargs

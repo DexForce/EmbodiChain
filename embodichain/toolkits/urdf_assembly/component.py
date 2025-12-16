@@ -19,7 +19,7 @@ import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
 import xml.etree.ElementTree as ET
-from typing import Dict, Optional
+from typing import Dict
 
 from embodichain.toolkits.urdf_assembly.logging_utils import (
     URDFAssemblyLogger,
@@ -64,7 +64,7 @@ class URDFComponent:
         "base_link"  # Default link name for attachment (usually the first link)
     )
     params: Dict = None  # Component-specific parameters (e.g., wheel_type for chassis)
-    transform: Optional[np.ndarray] = (
+    transform: np.ndarray | None = (
         None  # Optional 4x4 transformation matrix for positioning
     )
 
