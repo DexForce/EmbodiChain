@@ -52,7 +52,7 @@ jobs:
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           echo "Start Building docs..."
-          export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/pymeshlab/lib:$LD_LIBRARY_PATH
+          pip install pymeshlab==2023.12.post3
           make html
       - name: Upload docs artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -77,7 +77,7 @@ jobs:
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
-          export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/pymeshlab/lib:$LD_LIBRARY_PATH
+          pip install pymeshlab==2023.12.post3
           pytest tests
 
   publish:
