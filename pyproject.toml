@@ -26,7 +26,7 @@ dynamic = ["version"]
 # Core install dependencies (kept from requirements.txt). Some VCS links are
 # specified using PEP 508 direct references where present.
 dependencies = [
-  "dexsim_engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.3.7-cp310-cp310-manylinux_2_31_x86_64.whl",
+  "dexsim_engine",
   "setuptools>=78.1.1",
   "gymnasium==0.29.1",
   "casadi==3.7.1",
