@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import sys
+import argparse
 from os import path as osp
 from pathlib import Path
 
@@ -94,30 +95,47 @@ def get_data_files_of_a_directory(source_dir, target_dir=None, ignore_py=False):
     return filelist
 
 
-# Extract version
-here = osp.abspath(osp.dirname(__file__))
-version = None
-with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
-    full_version = f.read().strip()
-    version = ".".join(full_version.split(".")[:3])
+def get_version():
+    with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
+        full_version = f.read().strip()
+        version = ".".join(full_version.split(".")[:3])
+    return version
 
-ignore_py = sys.argv[1] == "bdist_nuitka" if len(sys.argv) > 1 else False
-data_files = []
-data_files += get_data_files_of_a_directory("embodichain", ignore_py=ignore_py)
 
-cmdclass = {"clean": CleanCommand}
-if BuildExtension is not None:
-    cmdclass["build_ext"] = BuildExtension.with_options(no_python_abi_suffix=True)
+def get_dev_version():
+    import datetime
+    from datetime import date
 
-setup(
-    name="embodichain",
-    version=version,
-    url="https://github.com/DexForce/EmbodiChain",
-    author="EmbodiChain Developers",
-    description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
-    packages=find_packages(exclude=["docs"]),
-    data_files=data_files,
-    entry_points={},
-    cmdclass=cmdclass,
-    include_package_data=True,
-)
+    today = date.today()
+    now = datetime.datetime.now()
+    timing = f"{now.hour:02d}{now.minute:02d}"
+    return get_version() + f".dev{today.year}{today.month}{today.day}{timing}"
+
+
+def main():
+    # Extract version
+    version = get_dev_version()
+
+    data_files = []
+    data_files += get_data_files_of_a_directory("embodichain", ignore_py=False)
+
+    cmdclass = {"clean": CleanCommand}
+    if BuildExtension is not None:
+        cmdclass["build_ext"] = BuildExtension.with_options(no_python_abi_suffix=True)
+
+    setup(
+        name="embodichain",
+        version=version,
+        url="https://github.com/DexForce/EmbodiChain",
+        author="EmbodiChain Developers",
+        description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
+        packages=find_packages(exclude=["docs"]),
+        data_files=data_files,
+        entry_points={},
+        cmdclass=cmdclass,
+        include_package_data=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

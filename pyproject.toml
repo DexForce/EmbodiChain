@@ -4,7 +4,7 @@
 # is still executed during build. This is a minimal, non-opinionated pyproject
 # that modernizes the package while preserving the custom extension build steps.
 requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
 
 # Note:
@@ -17,12 +17,11 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [project]
 name = "embodichain"
-version = "0.0.1"
 description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
 authors = [ { name = "EmbodiChain Developers" } ]
 requires-python = ">=3.10"
-
+dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt). Some VCS links are
 # specified using PEP 508 direct references where present.
@@ -52,6 +51,9 @@ dependencies = [
   "fvcore",
   "h5py",
 ]
+
+[tool.setuptools.dynamic]
+version = { file = ["VERSION"] }
 
 [tool.setuptools.packages.find]
 where = ["."]
