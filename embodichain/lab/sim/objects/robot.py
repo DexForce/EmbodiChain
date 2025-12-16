@@ -586,11 +586,11 @@ class Robot(Articulation):
             link_name=root_link_name, env_ids=local_env_ids, to_matrix=to_matrix
         )
 
-    def get_control_part_link_names(self, name: Optional[str] = None) -> List[str]:
+    def get_control_part_link_names(self, name: str | None = None) -> List[str]:
         """Get the link names of the control part.
 
         Args:
-            name (Optional[str]): The name of the control part. If None, return all link names.
+            name (str | None): The name of the control part. If None, return all link names.
         Returns:
             List[str]: link names of the control part.
         """
@@ -669,15 +669,15 @@ class Robot(Articulation):
     def set_physical_visible(
         self,
         visible: bool = True,
-        control_part: Optional[str] = None,
-        rgba: Optional[Sequence[float]] = None,
+        control_part: str | None = None,
+        rgba: Sequence[float] | None = None,
     ):
         """set collision of the robot or a specific control part.
 
         Args:
             visible (bool, optional): is collision body visible. Defaults to True.
-            control_part (Optional[str], optional): control part to set visibility. Defaults to None. If None, all links are set.
-            rgba (Optional[Sequence[float]], optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+            control_part (str | None, optional): control part to set visibility. Defaults to None. If None, all links are set.
+            rgba (Sequence[float] | None, optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
         """
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
         if len(rgba) != 4:
