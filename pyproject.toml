@@ -4,7 +4,7 @@
 # is still executed during build. This is a minimal, non-opinionated pyproject
 # that modernizes the package while preserving the custom extension build steps.
 requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
 
 # Note:
@@ -17,17 +17,16 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [project]
 name = "embodichain"
-version = "0.0.1"
 description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
 authors = [ { name = "EmbodiChain Developers" } ]
 requires-python = ">=3.10"
-
+dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt). Some VCS links are
 # specified using PEP 508 direct references where present.
 dependencies = [
-  "dexsim_engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.3.7-cp310-cp310-manylinux_2_31_x86_64.whl",
+  "dexsim_engine",
   "setuptools>=78.1.1",
   "gymnasium==0.29.1",
   "casadi==3.7.1",
@@ -45,13 +44,15 @@ dependencies = [
   "transformers>=4.53.0",
   "diffusers>=0.32.1",
   "deepspeed>=0.16.2",
-  "cvxpy==1.4.0",
   "ortools",
   "prettytable",
   "black==24.3.0",
   "fvcore",
   "h5py",
 ]
+
+[tool.setuptools.dynamic]
+version = { file = ["VERSION"] }
 
 [tool.setuptools.packages.find]
 where = ["."]

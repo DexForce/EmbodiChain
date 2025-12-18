@@ -373,7 +373,7 @@ class SimulationManager:
         rigid_body_num = (
             0
             if self._get_non_static_rigid_obj_num() == 0
-            else len(self._ps.gpu_rigid_indices)
+            else len(self._ps.get_gpu_rigid_indices())
         )
         self._rigid_body_pose = torch.zeros(
             (rigid_body_num, 7), dtype=torch.float32, device=self.device
@@ -383,7 +383,7 @@ class SimulationManager:
         articulation_num = (
             0
             if len(self._articulations) == 0 and len(self._robots) == 0
-            else len(self._ps.gpu_articulation_indices)
+            else len(self._ps.get_gpu_articulation_indices())
         )
         max_link_count = self._ps.gpu_get_articulation_max_link_count()
         self._link_pose = torch.zeros(
@@ -452,14 +452,14 @@ class SimulationManager:
             if len(self._rigid_body_pose) > 0:
                 self._ps.gpu_fetch_rigid_body_data(
                     data=CudaArray(self._rigid_body_pose),
-                    gpu_indices=self._ps.gpu_rigid_indices,
+                    gpu_indices=self._ps.get_gpu_rigid_indices(),
                     data_type=RigidBodyGPUAPIReadType.POSE,
                 )
 
             if len(self._link_pose) > 0:
                 self._ps.gpu_fetch_link_data(
                     data=CudaArray(self._link_pose),
-                    gpu_indices=self._ps.gpu_articulation_indices,
+                    gpu_indices=self._ps.get_gpu_articulation_indices(),
                     data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
                 )
 
