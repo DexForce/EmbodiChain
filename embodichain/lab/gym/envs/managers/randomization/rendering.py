@@ -106,7 +106,7 @@ def randomize_camera_extrinsics(
                 .unsqueeze_(0)
                 .repeat(num_instance, 1)
             )
-            init_euler = euler_xyz_from_quat(init_quat_np)
+            init_euler = torch.stack(euler_xyz_from_quat(init_quat_np), dim=1)
             # 2. Sample perturbation for euler angles
             random_value = sample_uniform(
                 lower=torch.tensor(euler_range[0]),
@@ -114,7 +114,8 @@ def randomize_camera_extrinsics(
                 size=(num_instance, 3),
             )
             # 3. Add perturbation to each environment and convert back to quaternion
-            new_quat = quat_from_euler_xyz(init_euler + random_value)
+            roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
+            new_quat = quat_from_euler_xyz(roll, pitch, yaw)
             new_pose[:, 3:7] = new_quat
 
         camera.set_local_pose(new_pose, env_ids=env_ids)
