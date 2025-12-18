@@ -126,6 +126,13 @@ def main():
         include_package_data=True,
     )
 
+    # Copy VERSION file into the package directory for wheel/sdist
+    src_version = os.path.join(THIS_DIR, "VERSION")
+    dst_version = os.path.join(THIS_DIR, "embodichain", "VERSION")
+    if os.path.exists(src_version):
+        shutil.copyfile(src_version, dst_version)
+        logger.info(f"Copied VERSION to {dst_version}")
+
 
 if __name__ == "__main__":
     main()
