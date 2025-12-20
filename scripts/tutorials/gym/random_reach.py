@@ -47,7 +47,7 @@ class RandomReachEnv(BaseEnv):
     ):
         env_cfg = EnvCfg(
             sim_cfg=SimulationManagerCfg(
-                headless=headless, arena_space=2.0, sim_device=device, enable_rt=False
+                headless=headless, arena_space=2.0, sim_device=device
             ),
             num_envs=num_envs,
         )
