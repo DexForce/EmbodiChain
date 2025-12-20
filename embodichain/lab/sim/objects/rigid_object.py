@@ -200,6 +200,10 @@ class RigidObject(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        if cfg.attrs.enable_collision is False:
+            flag = torch.zeros(len(entities), dtype=torch.bool)
+            self.enable_collision(flag)
+
         # reserve flag for collision visible node existence
         self._has_collision_visible_node = False
 
@@ -613,6 +617,26 @@ class RigidObject(BatchEntity):
             dtype=torch.int32,
             device=self.device,
         )
+
+    def enable_collision(
+        self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Enable or disable collision for the rigid bodies.
+
+        Args:
+            enable (torch.Tensor): A tensor of shape (N,) representing whether to enable collision for each rigid body.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(enable):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match enable length {len(enable)}."
+            )
+
+        enable_list = enable.tolist()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].enable_collision(bool(enable_list[i]))
 
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
