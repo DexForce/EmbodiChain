@@ -176,9 +176,7 @@ class RigidObject(BatchEntity):
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
 
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data: RigidBodyData | None = None
@@ -200,6 +198,8 @@ class RigidObject(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        # TODO: Must be called after setting all attributes.
+        # May be improved in the future.
         if cfg.attrs.enable_collision is False:
             flag = torch.zeros(len(entities), dtype=torch.bool)
             self.enable_collision(flag)

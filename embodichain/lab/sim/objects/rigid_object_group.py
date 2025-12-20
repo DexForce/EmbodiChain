@@ -187,12 +187,10 @@ class RigidObjectGroup(BatchEntity):
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
 
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
         self._all_obj_indices = torch.arange(
-            len(entities[0]), dtype=torch.int32, device=device
-        )
+            len(entities[0]), dtype=torch.int32
+        ).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data = RigidBodyGroupData(entities=entities, ps=self._ps, device=device)

@@ -511,9 +511,7 @@ class Articulation(BatchEntity):
         self.device = device
 
         # Store all indices for batch operations
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         if device.type == "cuda":
             self._world.update(0.001)
@@ -799,6 +797,7 @@ class Articulation(BatchEntity):
             # we should keep `pose_` life cycle to the end of the function.
             pose_ = torch.cat((quat, xyz), dim=-1)
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_root_data(
                 data=pose_,
                 gpu_indices=indices,
@@ -978,6 +977,7 @@ class Articulation(BatchEntity):
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set = self.body_data._qpos[local_env_ids]
             qpos_set[:, local_joint_ids] = qpos
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qpos_set,
                 gpu_indices=indices,
@@ -1041,6 +1041,7 @@ class Articulation(BatchEntity):
                 self.body_data.qvel
                 qvel_set = self.body_data._qvel[local_env_ids]
                 qvel_set[:, joint_ids] = qvel
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qvel_set,
                 gpu_indices=indices,
@@ -1081,6 +1082,7 @@ class Articulation(BatchEntity):
                 self.body_data.qf
                 qf_set = self.body_data._qf[local_env_ids]
                 qf_set[:, joint_ids] = qf
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qf_set,
                 gpu_indices=indices,
@@ -1161,11 +1163,13 @@ class Articulation(BatchEntity):
                 (len(local_env_ids), self.dof), dtype=torch.float32, device=self.device
             )
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=zeros,
                 gpu_indices=indices,
                 data_type=ArticulationGPUAPIWriteType.JOINT_VELOCITY,
             )
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=zeros,
                 gpu_indices=indices,

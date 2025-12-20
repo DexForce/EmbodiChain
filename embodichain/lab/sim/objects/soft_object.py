@@ -165,9 +165,7 @@ class SoftObject(BatchEntity):
     ) -> None:
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         self._data = SoftBodyData(entities=entities, ps=self._ps, device=device)
 
