@@ -362,6 +362,7 @@ class RigidObjectGroup(BatchEntity):
             indices = self.body_data.gpu_indices[local_env_ids][
                 :, local_obj_ids
             ].flatten()
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=pose.clone(),
                 gpu_indices=indices,
@@ -433,6 +434,7 @@ class RigidObjectGroup(BatchEntity):
                 device=self.device,
             )
             indices = self.body_data.gpu_indices[local_env_ids].flatten()
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=zeros,
                 gpu_indices=indices,
