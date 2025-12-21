@@ -350,6 +350,7 @@ class RigidObject(BatchEntity):
             # we should keep `pose_` life cycle to the end of the function.
             pose = torch.cat((quat, xyz), dim=-1)
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=pose.clone(),
                 gpu_indices=indices,
@@ -458,6 +459,7 @@ class RigidObject(BatchEntity):
 
         else:
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             if force is not None:
                 self._ps.gpu_apply_rigid_body_data(
                     data=force,
@@ -658,6 +660,7 @@ class RigidObject(BatchEntity):
                 (len(local_env_ids), 3), dtype=torch.float32, device=self.device
             )
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=zeros,
                 gpu_indices=indices,
