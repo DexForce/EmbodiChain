@@ -25,10 +25,10 @@ __all__ = ["StackBlocksTwoEnv"]
 
 
 @register_env("StackBlocksTwo-v1", max_episode_steps=600)
-class StackBlocksTwoEnv(EmbodiedEnv): 
+class StackBlocksTwoEnv(EmbodiedEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
         super().__init__(cfg, **kwargs)
-        
+
         action_config = kwargs.get("action_config", None)
         if action_config is not None:
             self.action_config = action_config
@@ -40,7 +40,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         The task is successful if:
         1. Block2 is stacked on top of Block1
         2. Both blocks haven't fallen over
-        3. Both grippers are open 
+        3. Both grippers are open
 
         Args:
             **kwargs: Additional arguments for task-specific success criteria.
@@ -61,32 +61,39 @@ class StackBlocksTwoEnv(EmbodiedEnv):
 
         # Extract positions
         block1_pos = block1_pose[:, :3, 3]  # (num_envs, 3)
-        block2_pos = block2_pose[:, :3, 3]  
+        block2_pos = block2_pose[:, :3, 3]
 
         # Check if blocks haven't fallen
         block1_fallen = self._is_fall(block1_pose)
         block2_fallen = self._is_fall(block2_pose)
 
         # Block2 should be on top of block1
-        expected_block2_pos = torch.stack([
-            block1_pos[:, 0],  
-            block1_pos[:, 1],  
-            block1_pos[:, 2] + 0.05  # block1 z + block height
-        ], dim=1)
+        expected_block2_pos = torch.stack(
+            [
+                block1_pos[:, 0],
+                block1_pos[:, 1],
+                block1_pos[:, 2] + 0.05,  # block1 z + block height
+            ],
+            dim=1,
+        )
 
         # Tolerance
-        eps = torch.tensor([0.025, 0.025, 0.012], dtype=torch.float32, device=self.device)
-        
+        eps = torch.tensor(
+            [0.025, 0.025, 0.012], dtype=torch.float32, device=self.device
+        )
+
         # Check if block2 is within tolerance of expected position
         position_diff = torch.abs(block2_pos - expected_block2_pos)  # (num_envs, 3)
-        within_tolerance = torch.all(position_diff < eps.unsqueeze(0), dim=1)  # (num_envs,)
+        within_tolerance = torch.all(
+            position_diff < eps.unsqueeze(0), dim=1
+        )  # (num_envs,)
 
         # RoboTwin check if grippers are open
         # This requires checking robot gripper state, which may need to be implemented
-                
+
         # Task succeeds if blocks are stacked correctly and haven't fallen
         success = within_tolerance & ~block1_fallen & ~block2_fallen
-        
+
         return success
 
     def _is_fall(self, pose: torch.Tensor) -> torch.Tensor:
@@ -103,4 +110,3 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         # Compute angle and check if fallen
         angle = torch.arccos(dot_product)
         return angle >= torch.pi / 4
-
