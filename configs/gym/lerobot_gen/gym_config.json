@@ -1,0 +1,105 @@
+{
+    "id": "LerobotGen",
+    "max_episodes": 5,
+    "env": {
+        "observations": {
+            "norm_robot_eef_joint": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [0, 1, 2, 3, 4, 5]
+                }
+            }
+        },
+        "dataset": {
+            "robot_meta": {
+                "robot_type": "fanuac_r2000ic165f",
+                "arm_dofs": 6,
+                "control_freq": 25,
+                "control_parts": ["arm"],
+                "observation": {
+                    "vision": {
+                        "camera_1": ["mask"]
+                    },
+                    "states": ["qpos"],
+                    "exteroception": ["camera_1"]
+                },
+                "action": "qpos",
+                "min_len_steps": 5
+            },
+            "instruction": {
+                "lang": "Pick item."
+            }
+        }
+    },
+    "robot": {
+        "uid": "fanuac_r2000ic165f",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "Fanuc/R_2000iC_165F/R_2000iC_165F.urdf",
+                    "transform": [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0]
+                    ]
+                }
+            ]
+        },
+        "init_pos": [0.0, 0.0, 0.0],
+        "init_qpos": [0, 0, 0, 0, -1.570796327, 0],
+        "drive_pros": {
+            "drive_type": "force",
+            "stiffness": 10000.0,
+            "damping": 1000.0,
+            "max_effort": 100000.0
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "control_parts": {
+            "arm": ["Joint[1-6]"]
+        }
+    },
+    "sensor": [        
+        {
+            "uid": "camera_1",
+            "sensor_type": "Camera",
+            "width": 640,
+            "height": 480,
+            "enable_mask": true,
+            "enable_depth": true,
+            "intrinsics": [453.851402686215, 453.8347628855552, 469.827725021235, 258.6656181845155],
+            "extrinsics": {
+                "eye": [2.0, 2.0, 2.5],
+                "target": [0.0, 0.0, 0.5],
+                "up": [0.0, 0.0, 1.0]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [2, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    }
+}
