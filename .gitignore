@@ -195,3 +195,5 @@ wandb/
 
 # vscode settings
 .vscode/
+
+embodichain/VERSION

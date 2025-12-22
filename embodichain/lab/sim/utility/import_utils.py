@@ -33,7 +33,7 @@ def lazy_import_pytorch_kinematics():
         return pk
     except ImportError as e:
         logger.log_warning(
-            "pytorch_kinematics not installed. Install with `pip install pytorch_kinematics==0.7.5`"
+            "pytorch_kinematics not installed. Install with `pip install pytorch_kinematics==0.7.6`"
         )
         raise e
 
