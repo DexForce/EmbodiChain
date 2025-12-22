@@ -131,6 +131,8 @@ class EmbodiedEnv(BaseEnv):
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
         self.action_bank = None
+        self.dataset = None  # LeRobotDataset instance for data management
+        self.data_handler = None  # LerobotDataHandler instance for data conversion
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -171,8 +173,10 @@ class EmbodiedEnv(BaseEnv):
             self.metadata["dataset"] = self.cfg.dataset
             self.episode_obs_list = []
             self.episode_action_list = []
-
             self.curr_episode = 0
+
+            # Initialize LeRobotDataset if dataset config is provided
+            self._initialize_lerobot_dataset()
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -197,6 +201,68 @@ class EmbodiedEnv(BaseEnv):
                             f"Filtering out visual randomization functor: {attr.func.__name__}"
                         )
                         setattr(self.cfg.events, attr_name, None)
+
+    def _initialize_lerobot_dataset(self) -> None:
+        """Initialize LeRobotDataset for episode recording.
+
+        This method creates a LeRobotDataset instance that will be used throughout
+        the environment's lifetime for recording and managing episode data.
+        """
+        try:
+            from lerobot.datasets.lerobot_dataset import LeRobotDataset
+            from embodichain.data.handler.lerobot_data_handler import LerobotDataHandler
+        except ImportError as e:
+            logger.log_warning(
+                f"Failed to import LeRobot dependencies: {e}. "
+                "Dataset recording will be disabled. Install with: pip install lerobot"
+            )
+            return
+
+        # Get dataset configuration
+        dataset_cfg = self.cfg.dataset
+        repo_id = dataset_cfg.get("repo_id", "embodichain/default_dataset")
+        fps = dataset_cfg.get("fps", 30)
+        use_videos = dataset_cfg.get("use_videos", True)
+        image_writer_threads = dataset_cfg.get("image_writer_threads", 4)
+        image_writer_processes = dataset_cfg.get("image_writer_processes", 0)
+
+        # Create handler instance (reusable for all episodes)
+        self.data_handler = LerobotDataHandler(self)
+
+        # Build features using handler
+        features = self.data_handler._build_lerobot_features(use_videos=use_videos)
+
+        # Get robot type
+        robot_type = self.metadata["dataset"]["robot_meta"].get("robot_type", "unknown")
+
+        # Check if dataset already exists
+        from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
+        from pathlib import Path
+
+        if HF_LEROBOT_HOME is not None:
+            dataset_path = Path(HF_LEROBOT_HOME) / repo_id
+        else:
+            dataset_path = Path.home() / ".cache" / "huggingface" / "lerobot" / repo_id
+
+        try:
+            if dataset_path.exists():
+                logger.log_info(f"Loading existing LeRobot dataset from {dataset_path}")
+                self.dataset = LeRobotDataset(repo_id=repo_id)
+            else:
+                logger.log_info(f"Creating new LeRobot dataset at {dataset_path}")
+                self.dataset = LeRobotDataset.create(
+                    repo_id=repo_id,
+                    robot_type=robot_type,
+                    fps=fps,
+                    features=features,
+                    use_videos=use_videos,
+                    image_writer_threads=image_writer_threads,
+                    image_writer_processes=image_writer_processes,
+                )
+            logger.log_info(f"LeRobotDataset initialized successfully: {repo_id}")
+        except Exception as e:
+            logger.log_error(f"Failed to initialize LeRobotDataset: {e}")
+            self.dataset = None
 
     def _init_action_bank(
         self, action_bank_cls: ActionBank, action_config: Dict[str, Any]
@@ -452,24 +518,11 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def to_dataset(
-        self,
-        repo_id: str,
-        fps: int = 30,
-        use_videos: bool = True,
-        push_to_hub: bool = False,
-        image_writer_threads: int = 4,
-        image_writer_processes: int = 0,
-    ) -> str | None:
+    def to_dataset(self, push_to_hub: bool = False) -> str | None:
         """Convert the recorded episode data to LeRobot dataset format.
 
         Args:
-            repo_id (str): Repository ID for LeRobot dataset (e.g., "username/dataset_name").
-            fps (int): Frames per second for video encoding. Defaults to 30.
-            use_videos (bool): Whether to encode images as videos. Defaults to True.
             push_to_hub (bool): Whether to push to Hugging Face Hub. Defaults to False.
-            image_writer_threads (int): Number of threads for image writing. Defaults to 4.
-            image_writer_processes (int): Number of processes for image writing. Defaults to 0.
 
         Returns:
             str | None: The path to the saved dataset, or None if failed.
@@ -488,23 +541,21 @@ class EmbodiedEnv(BaseEnv):
             )
             return None
 
-        try:
-            # Import the handler - use try-except to catch import errors
-            from embodichain.data.handler.lerobot_data_handler import (
-                save_to_lerobot_format,
-            )
-        except ImportError as e:
-            logger.log_error(f"Failed to import lerobot_data_handler: {e}")
+        # Check if dataset was initialized
+        if self.dataset is None:
             logger.log_error(
-                "Make sure all dependencies are installed: pip install lerobot"
+                "LeRobotDataset not initialized. Make sure dataset configuration is properly set."
             )
-            return None
-        except Exception as e:
-            logger.log_error(f"Unexpected error importing lerobot_data_handler: {e}")
             return None
 
-        # Prepare obs_list and action_list
-        # Remove the last observation as it doesn't have a corresponding action
+        # Check if data handler was initialized
+        if self.data_handler is None:
+            logger.log_error(
+                "Data handler not initialized. Make sure dataset configuration is properly set."
+            )
+            return None
+
+        # Prepare obs_list and action_list (remove last obs as it has no corresponding action)
         obs_list = (
             self.episode_obs_list[:-1]
             if len(self.episode_obs_list) > len(self.episode_action_list)
@@ -512,30 +563,73 @@ class EmbodiedEnv(BaseEnv):
         )
         action_list = self.episode_action_list
 
-        logger.log_info(
-            f"Saving episode with {len(obs_list)} frames to LeRobot format..."
-        )
+        logger.log_info(f"Saving episode with {len(obs_list)} frames...")
 
-        # Save to LeRobot format
-        dataset_path = save_to_lerobot_format(
-            env=self,
-            obs_list=obs_list,
-            action_list=action_list,
-            repo_id=repo_id,
-            fps=fps,
-            use_videos=use_videos,
-            push_to_hub=push_to_hub,
-            image_writer_threads=image_writer_threads,
-            image_writer_processes=image_writer_processes,
-        )
+        # Get task instruction
+        task = self.metadata["dataset"]["instruction"].get("lang", "unknown_task")
 
-        if dataset_path:
+        # Add frames to dataset
+        for obs, action in zip(obs_list, action_list):
+            frame = self.data_handler._convert_frame_to_lerobot(obs, action, task)
+            self.dataset.add_frame(frame)
+
+        # Save episode
+        self.dataset.save_episode()
+
+        # Optionally push to hub
+        if push_to_hub:
             logger.log_info(
-                f"Successfully saved episode {self.curr_episode} to {dataset_path}"
+                f"Pushing dataset to Hugging Face Hub: {self.dataset.repo_id}"
             )
-            self.curr_episode += 1
+            self.dataset.push_to_hub(
+                tags=[self.dataset.meta.info.get("robot_type", "unknown"), "imitation"],
+                private=False,
+                push_videos=True,
+                license="apache-2.0",
+            )
+
+        dataset_path = str(self.dataset.root)
+        logger.log_info(
+            f"Successfully saved episode {self.curr_episode} to {dataset_path}"
+        )
+        self.curr_episode += 1
 
         return dataset_path
+
+    def update_dataset_info(self, updates: dict) -> bool:
+        """Update the LeRobot dataset's meta.info with custom key-value pairs.
+
+        Args:
+            updates (dict): Dictionary of key-value pairs to add or update in meta.info.
+
+        Returns:
+            bool: True if successful, False otherwise.
+
+        Example:
+            >>> env.update_dataset_info({
+            ...     "author": "DexForce",
+            ...     "date_collected": "2025-12-22",
+            ...     "custom_key": "custom_value"
+            ... })
+        """
+        if self.dataset is None:
+            logger.log_error(
+                "LeRobotDataset not initialized. Cannot update dataset info."
+            )
+            return False
+
+        try:
+            from lerobot.datasets.utils import write_info
+
+            self.dataset.meta.info.update(updates)
+            write_info(self.dataset.meta.info, self.dataset.meta.root)
+            logger.log_info(
+                f"Successfully updated dataset info with keys: {list(updates.keys())}"
+            )
+            return True
+        except Exception as e:
+            logger.log_error(f"Failed to update dataset info: {e}")
+            return False
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         """Determine if the task is successfully completed. This is mainly used in the data generation process
