@@ -170,6 +170,31 @@ class EmbodiedEnv(BaseEnv):
         # TODO: A workaround for handling dataset saving, which need history data of obs-action pairs.
         # We may improve this by implementing a data manager to handle data saving and online streaming.
         if self.cfg.dataset is not None:
+            robot_type = self.cfg.dataset.get("robot_meta", {}).get(
+                "robot_type", "robot"
+            )
+            scene_type = self.cfg.dataset.get("extra", {}).get("scene_type", "scene")
+            task_description = self.cfg.dataset.get("extra", {}).get(
+                "task_description", "task"
+            )
+
+            task_description = str(task_description).lower().replace(" ", "_")
+
+            lerobot_data_path = os.path.join(os.getcwd(), "outputs")
+
+            # Auto-increment id until the repo_id subdirectory does not exist
+            base_id = int(self.cfg.dataset.get("id", "1"))
+            while True:
+                dataset_id = f"{base_id:03d}"
+                repo_id = f"{scene_type}_{robot_type}_{task_description}_{dataset_id}"
+                repo_path = os.path.join(lerobot_data_path, repo_id)
+                if not os.path.exists(repo_path):
+                    break
+                base_id += 1
+            self.cfg.dataset["repo_id"] = repo_id
+            self.cfg.dataset["id"] = dataset_id
+            self.cfg.dataset["lerobot_data_path"] = str(lerobot_data_path)
+
             self.metadata["dataset"] = self.cfg.dataset
             self.episode_obs_list = []
             self.episode_action_list = []
@@ -232,33 +257,24 @@ class EmbodiedEnv(BaseEnv):
         # Build features using handler
         features = self.data_handler._build_lerobot_features(use_videos=use_videos)
 
-        # Get robot type
         robot_type = self.metadata["dataset"]["robot_meta"].get("robot_type", "unknown")
 
-        # Check if dataset already exists
-        from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
-        from pathlib import Path
-
-        if HF_LEROBOT_HOME is not None:
-            dataset_path = Path(HF_LEROBOT_HOME) / repo_id
-        else:
-            dataset_path = Path.home() / ".cache" / "huggingface" / "lerobot" / repo_id
+        lerobot_data_path = self.cfg.dataset.get("lerobot_data_path")
+        repo_id = self.cfg.dataset.get("repo_id")
+        dataset_dir = os.path.join(lerobot_data_path, repo_id)
 
         try:
-            if dataset_path.exists():
-                logger.log_info(f"Loading existing LeRobot dataset from {dataset_path}")
-                self.dataset = LeRobotDataset(repo_id=repo_id)
-            else:
-                logger.log_info(f"Creating new LeRobot dataset at {dataset_path}")
-                self.dataset = LeRobotDataset.create(
-                    repo_id=repo_id,
-                    robot_type=robot_type,
-                    fps=fps,
-                    features=features,
-                    use_videos=use_videos,
-                    image_writer_threads=image_writer_threads,
-                    image_writer_processes=image_writer_processes,
-                )
+            logger.log_info(f"Creating new LeRobot dataset at {dataset_dir}")
+            self.dataset = LeRobotDataset.create(
+                repo_id=repo_id,
+                robot_type=robot_type,
+                fps=fps,
+                features=features,
+                use_videos=use_videos,
+                image_writer_threads=image_writer_threads,
+                image_writer_processes=image_writer_processes,
+                root=str(dataset_dir),
+            )
             logger.log_info(f"LeRobotDataset initialized successfully: {repo_id}")
         except Exception as e:
             logger.log_error(f"Failed to initialize LeRobotDataset: {e}")
@@ -574,6 +590,17 @@ class EmbodiedEnv(BaseEnv):
             self.dataset.add_frame(frame)
 
         # Save episode
+        extra_info = self.cfg.dataset.get("extra", {})
+        total_frames = self.dataset.meta.info.get("total_frames", 0)
+        fps = self.dataset.meta.info.get("fps", 30)
+        total_time = total_frames / fps if fps > 0 else 0
+
+        extra_info = self.cfg.dataset.get("extra", {})
+        extra_info["total_time"] = total_time
+        extra_info["data_type"] = "sim"
+
+        self.update_dataset_info({"extra": extra_info})
+
         self.dataset.save_episode()
 
         # Optionally push to hub
@@ -619,10 +646,7 @@ class EmbodiedEnv(BaseEnv):
             return False
 
         try:
-            from lerobot.datasets.utils import write_info
-
             self.dataset.meta.info.update(updates)
-            write_info(self.dataset.meta.info, self.dataset.meta.root)
             logger.log_info(
                 f"Successfully updated dataset info with keys: {list(updates.keys())}"
             )

@@ -277,6 +277,10 @@
             },
             "instruction": {
                 "lang": "Pour water from bottle to cup"
+            },
+            "extra": {
+                "scene_type": "Commercial",
+                "task_description": "Pour water"
             }
         }
     },
