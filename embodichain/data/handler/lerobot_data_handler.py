@@ -278,7 +278,6 @@ def save_to_lerobot_format(
     obs_list: List[Dict[str, Any]],
     action_list: List[Dict[str, Any]],
     repo_id: str,
-    fps: int = 30,
     use_videos: bool = True,
     push_to_hub: bool = False,
     image_writer_threads: int = 4,
@@ -292,7 +291,6 @@ def save_to_lerobot_format(
         obs_list (List[Dict]): List of observation dicts (without last obs).
         action_list (List[Dict]): List of action dicts.
         repo_id (str): Repository ID for LeRobot dataset (e.g., "username/dataset_name").
-        fps (int): Frames per second. Defaults to 30.
         use_videos (bool): Whether to encode images as videos. Defaults to True.
         push_to_hub (bool): Whether to push to Hugging Face Hub. Defaults to False.
         image_writer_threads (int): Number of threads for image writing. Defaults to 4.
@@ -307,7 +305,6 @@ def save_to_lerobot_format(
         ...     obs_list=env.episode_obs_list[:-1],
         ...     action_list=env.episode_action_list,
         ...     repo_id="my_username/my_robot_dataset",
-        ...     fps=30,
         ...     use_videos=True,
         ...     push_to_hub=False,
         ... )
@@ -331,6 +328,7 @@ def save_to_lerobot_format(
 
         # Get robot type
         robot_type = env.metadata["dataset"]["robot_meta"].get("robot_type", "unknown")
+        fps = env.metadata["dataset"]["robot_meta"].get("control_freq", 30)
 
         # Get or create dataset
         if HF_LEROBOT_HOME is not None:

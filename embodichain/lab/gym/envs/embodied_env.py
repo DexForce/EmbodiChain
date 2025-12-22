@@ -455,7 +455,6 @@ class EmbodiedEnv(BaseEnv):
     def to_dataset(
         self,
         repo_id: str,
-        fps: int = 30,
         use_videos: bool = True,
         push_to_hub: bool = False,
         image_writer_threads: int = 4,
@@ -465,7 +464,6 @@ class EmbodiedEnv(BaseEnv):
 
         Args:
             repo_id (str): Repository ID for LeRobot dataset (e.g., "username/dataset_name").
-            fps (int): Frames per second for video encoding. Defaults to 30.
             use_videos (bool): Whether to encode images as videos. Defaults to True.
             push_to_hub (bool): Whether to push to Hugging Face Hub. Defaults to False.
             image_writer_threads (int): Number of threads for image writing. Defaults to 4.
@@ -522,7 +520,6 @@ class EmbodiedEnv(BaseEnv):
             obs_list=obs_list,
             action_list=action_list,
             repo_id=repo_id,
-            fps=fps,
             use_videos=use_videos,
             push_to_hub=push_to_hub,
             image_writer_threads=image_writer_threads,

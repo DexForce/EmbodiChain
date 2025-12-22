@@ -51,6 +51,11 @@ dependencies = [
   "h5py",
 ]
 
+[project.optional-dependencies]
+lerobot = [
+  "lerobot==0.4.2"
+]
+
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }
 
