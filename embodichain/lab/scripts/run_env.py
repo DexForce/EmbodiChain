@@ -85,7 +85,7 @@ def generate_function(
     valid = True
     while True:
         _, _ = env.reset()
-        
+
         ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)

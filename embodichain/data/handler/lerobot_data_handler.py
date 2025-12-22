@@ -1,4 +1,3 @@
-
 from typing import Dict, Any, List, Union, Optional
 from copy import deepcopy
 from pathlib import Path
@@ -23,13 +22,7 @@ from embodichain.data.enum import (
 from tqdm import tqdm
 
 # Optional LeRobot imports (for convert to lerobot format functionality)
-try:
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
-    HAS_LEROBOT = True
-except ImportError:
-    LeRobotDataset = None
-    HF_LEROBOT_HOME = None
-    HAS_LEROBOT = False
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
 
 
 class LerobotDataHandler:
@@ -51,7 +44,6 @@ class LerobotDataHandler:
         robot_meta_config[Modality.ACTIONS.value] = SUPPORTED_ACTION_TYPES
 
         self.compression_opts = compression_opts
-
 
     def extract_to_lerobot(
         self,
@@ -78,16 +70,13 @@ class LerobotDataHandler:
         Returns:
             LeRobotDataset: The created LeRobot dataset instance.
         """
-        if not HAS_LEROBOT:
-            raise ImportError(
-                "LeRobot not installed. Please install it with: pip install lerobot"
-            )
-
         # Build features dict from environment metadata
         features = self._build_lerobot_features(use_videos=use_videos)
 
         # Get robot type
-        robot_type = self.env.metadata["dataset"]["robot_meta"].get("robot_type", "unknown")
+        robot_type = self.env.metadata["dataset"]["robot_meta"].get(
+            "robot_type", "unknown"
+        )
 
         # Create LeRobot dataset
         dataset = LeRobotDataset.create(
@@ -132,8 +121,8 @@ class LerobotDataHandler:
 
             # Get image shape from sensor
             img_shape = (
-                sensor.camera_cfg.height,
-                sensor.camera_cfg.width,
+                sensor.cfg.height,
+                sensor.cfg.width,
                 3,
             )
 
@@ -209,25 +198,32 @@ class LerobotDataHandler:
                     color_img = color_data.squeeze(0)[:, :, :3].cpu().numpy()
                 else:
                     color_img = np.array(color_data).squeeze(0)[:, :, :3]
-                
+
                 # Ensure uint8 format (0-255 range)
                 if color_img.dtype == np.float32 or color_img.dtype == np.float64:
                     color_img = (color_img * 255).astype(np.uint8)
-                
+
                 frame[camera_name] = color_img
-                
+
                 # Process right camera image if stereo
                 if is_stereo:
                     color_right_data = obs["sensor"][camera_name]["color_right"]
                     if isinstance(color_right_data, torch.Tensor):
-                        color_right_img = color_right_data.squeeze(0)[:, :, :3].cpu().numpy()
+                        color_right_img = (
+                            color_right_data.squeeze(0)[:, :, :3].cpu().numpy()
+                        )
                     else:
-                        color_right_img = np.array(color_right_data).squeeze(0)[:, :, :3]
-                    
+                        color_right_img = np.array(color_right_data).squeeze(0)[
+                            :, :, :3
+                        ]
+
                     # Ensure uint8 format
-                    if color_right_img.dtype == np.float32 or color_right_img.dtype == np.float64:
+                    if (
+                        color_right_img.dtype == np.float32
+                        or color_right_img.dtype == np.float64
+                    ):
                         color_right_img = (color_right_img * 255).astype(np.uint8)
-                    
+
                     frame[get_right_name(camera_name)] = color_right_img
 
         # Add state (proprio)
@@ -254,7 +250,7 @@ class LerobotDataHandler:
         # Add actions
         robot = self.env.robot
         arm_dofs = robot_meta_config.get("arm_dofs", 7)
-        
+
         # Handle different action types
         if isinstance(action, torch.Tensor):
             action_data = action[0, :arm_dofs].cpu().numpy()
@@ -271,10 +267,11 @@ class LerobotDataHandler:
         else:
             # Fallback: try to convert to numpy
             action_data = np.array(action)[0, :arm_dofs]
-        
+
         frame["action"] = action_data
 
         return frame
+
 
 def save_to_lerobot_format(
     env: EmbodiedEnv,
@@ -315,11 +312,6 @@ def save_to_lerobot_format(
         ...     push_to_hub=False,
         ... )
     """
-    if not HAS_LEROBOT:
-        logger.log_error(
-            "LeRobot not installed. Please install it with: pip install lerobot"
-        )
-        return None
 
     if len(obs_list) == 0 or len(action_list) == 0:
         logger.log_error("obs_list and action_list cannot be empty")
@@ -333,20 +325,20 @@ def save_to_lerobot_format(
 
     try:
         extractor = LerobotDataHandler(env)
-        
+
         # Build features
         features = extractor._build_lerobot_features(use_videos=use_videos)
-        
+
         # Get robot type
         robot_type = env.metadata["dataset"]["robot_meta"].get("robot_type", "unknown")
-        
+
         # Get or create dataset
         if HF_LEROBOT_HOME is not None:
             dataset_path = Path(HF_LEROBOT_HOME) / repo_id
         else:
             # Fallback to default path
             dataset_path = Path.home() / ".cache" / "huggingface" / "lerobot" / repo_id
-        
+
         # Check if dataset already exists
         if dataset_path.exists():
             logger.log_info(f"Loading existing LeRobot dataset from {dataset_path}")

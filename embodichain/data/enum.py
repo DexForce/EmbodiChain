@@ -62,6 +62,7 @@ class Hints(Enum):
     )
     ARM = (ControlParts.LEFT_ARM.value, ControlParts.RIGHT_ARM.value)
 
+
 class Modality(Enum):
     STATES = "states"
     STATE_INDICATOR = "state_indicator"
@@ -86,6 +87,7 @@ class ActionMode(Enum):
     ABSOLUTE = ""
     RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
 
+
 SUPPORTED_PROPRIO_TYPES = [
     ControlParts.LEFT_ARM.value + EefType.POSE.value,
     ControlParts.RIGHT_ARM.value + EefType.POSE.value,
@@ -100,6 +102,7 @@ SUPPORTED_ACTION_TYPES = SUPPORTED_PROPRIO_TYPES + [
     ControlParts.LEFT_ARM.value + ActionMode.RELATIVE.value + JointType.QPOS.value,
     ControlParts.RIGHT_ARM.value + ActionMode.RELATIVE.value + JointType.QPOS.value,
 ]
+
 
 class HandQposNormalizer:
     """

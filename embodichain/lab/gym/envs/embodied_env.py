@@ -483,7 +483,9 @@ class EmbodiedEnv(BaseEnv):
             return None
 
         if len(self.episode_obs_list) == 0:
-            logger.log_error("No episode data to save. Episode observation list is empty.")
+            logger.log_error(
+                "No episode data to save. Episode observation list is empty."
+            )
             return None
 
         try:
@@ -493,7 +495,9 @@ class EmbodiedEnv(BaseEnv):
             )
         except ImportError as e:
             logger.log_error(f"Failed to import lerobot_data_handler: {e}")
-            logger.log_error("Make sure all dependencies are installed: pip install lerobot")
+            logger.log_error(
+                "Make sure all dependencies are installed: pip install lerobot"
+            )
             return None
         except Exception as e:
             logger.log_error(f"Unexpected error importing lerobot_data_handler: {e}")
@@ -501,10 +505,16 @@ class EmbodiedEnv(BaseEnv):
 
         # Prepare obs_list and action_list
         # Remove the last observation as it doesn't have a corresponding action
-        obs_list = self.episode_obs_list[:-1] if len(self.episode_obs_list) > len(self.episode_action_list) else self.episode_obs_list
+        obs_list = (
+            self.episode_obs_list[:-1]
+            if len(self.episode_obs_list) > len(self.episode_action_list)
+            else self.episode_obs_list
+        )
         action_list = self.episode_action_list
 
-        logger.log_info(f"Saving episode with {len(obs_list)} frames to LeRobot format...")
+        logger.log_info(
+            f"Saving episode with {len(obs_list)} frames to LeRobot format..."
+        )
 
         # Save to LeRobot format
         dataset_path = save_to_lerobot_format(

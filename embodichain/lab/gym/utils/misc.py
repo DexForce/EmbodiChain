@@ -1372,12 +1372,13 @@ def data_key_to_control_part(robot, control_parts, data_key: str) -> str | None:
 def is_stereocam(sensor) -> bool:
     """
     Check if a sensor is a StereoCamera (binocular camera).
-    
+
     Args:
         sensor: The sensor instance to check.
-        
+
     Returns:
         bool: True if the sensor is a StereoCamera, False otherwise.
     """
     from embodichain.lab.sim.sensors import StereoCamera
+
     return isinstance(sensor, StereoCamera)
