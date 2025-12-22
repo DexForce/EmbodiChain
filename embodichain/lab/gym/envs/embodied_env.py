@@ -178,22 +178,27 @@ class EmbodiedEnv(BaseEnv):
                 "task_description", "task"
             )
 
+            robot_type = str(robot_type).lower().replace(" ", "_")
             task_description = str(task_description).lower().replace(" ", "_")
 
-            lerobot_data_path = os.path.join(os.getcwd(), "outputs")
+            lerobot_data_root = self.cfg.dataset.get("save_path", None)
+            if lerobot_data_root is None:
+                from lerobot.utils.constants import HF_LEROBOT_HOME
+
+                lerobot_data_root = HF_LEROBOT_HOME
 
             # Auto-increment id until the repo_id subdirectory does not exist
             base_id = int(self.cfg.dataset.get("id", "1"))
             while True:
                 dataset_id = f"{base_id:03d}"
                 repo_id = f"{scene_type}_{robot_type}_{task_description}_{dataset_id}"
-                repo_path = os.path.join(lerobot_data_path, repo_id)
+                repo_path = os.path.join(lerobot_data_root, repo_id)
                 if not os.path.exists(repo_path):
                     break
                 base_id += 1
             self.cfg.dataset["repo_id"] = repo_id
             self.cfg.dataset["id"] = dataset_id
-            self.cfg.dataset["lerobot_data_path"] = str(lerobot_data_path)
+            self.cfg.dataset["lerobot_data_root"] = str(lerobot_data_root)
 
             self.metadata["dataset"] = self.cfg.dataset
             self.episode_obs_list = []
@@ -245,7 +250,6 @@ class EmbodiedEnv(BaseEnv):
 
         # Get dataset configuration
         dataset_cfg = self.cfg.dataset
-        repo_id = dataset_cfg.get("repo_id", "embodichain/default_dataset")
         fps = dataset_cfg["robot_meta"].get("control_freq", 30)
         use_videos = dataset_cfg.get("use_videos", True)
         image_writer_threads = dataset_cfg.get("image_writer_threads", 4)
@@ -259,9 +263,14 @@ class EmbodiedEnv(BaseEnv):
 
         robot_type = self.metadata["dataset"]["robot_meta"].get("robot_type", "unknown")
 
-        lerobot_data_path = self.cfg.dataset.get("lerobot_data_path")
+        lerobot_data_root = self.cfg.dataset.get("lerobot_data_root")
         repo_id = self.cfg.dataset.get("repo_id")
-        dataset_dir = os.path.join(lerobot_data_path, repo_id)
+        dataset_dir = os.path.join(lerobot_data_root, repo_id)
+
+        # User can override repo_id from dataset config
+        default_repo_id = dataset_cfg.get("repo_id", None)
+        if default_repo_id:
+            repo_id = default_repo_id
 
         try:
             logger.log_info(f"Creating new LeRobot dataset at {dataset_dir}")
@@ -591,7 +600,7 @@ class EmbodiedEnv(BaseEnv):
 
         # Save episode
         extra_info = self.cfg.dataset.get("extra", {})
-        total_frames = self.dataset.meta.info.get("total_frames", 0)
+        total_frames = self.dataset.meta.info.get("total_frames", 0) + len(obs_list)
         fps = self.dataset.meta.info.get("fps", 30)
         total_time = total_frames / fps if fps > 0 else 0
 
