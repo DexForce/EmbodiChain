@@ -20,6 +20,7 @@
                 "params": {
                     "entity_cfg": {"uid": "block_1"},
                     "position_range": [[-0.08, -0.08, 0.0], [0.08, 0.08, 0.0]],
+                    "rotation_range": [[0, 0, -0.75], [0, 0, 0.75]],
                     "relative_position": true                
                 }
             },
@@ -29,6 +30,7 @@
                 "params": {
                     "entity_cfg": {"uid": "block_2"},
                     "position_range": [[-0.08, -0.08, 0.0], [0.08, 0.08, 0.0]],
+                    "rotation_range": [[0, 0, -0.75], [0, 0, 0.75]],
                     "relative_position": true                
                 }
             },
