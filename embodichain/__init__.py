@@ -21,7 +21,7 @@ embodichain_dir = os.path.dirname(__file__)
 
 # Read version from VERSION file
 def _get_version():
-    version_file = os.path.join(os.path.dirname(embodichain_dir), "VERSION")
+    version_file = os.path.join(embodichain_dir, "VERSION")
     try:
         with open(version_file, "r") as f:
             return f.read().strip()

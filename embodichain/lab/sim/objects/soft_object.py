@@ -43,7 +43,7 @@ class SoftBodyData:
     """Data manager for soft body
 
     Note:
-        1. The pose data managed by dexsim is in the format of (qx, qy, qz, qw, x, y, z), but in EmbodySim, we use (x, y, z, qw, qx, qy, qz) format.
+        1. The pose data managed by dexsim is in the format of (qx, qy, qz, qw, x, y, z), but in EmbodiChain, we use (x, y, z, qw, qx, qy, qz) format.
     """
 
     def __init__(
@@ -165,13 +165,10 @@ class SoftObject(BatchEntity):
     ) -> None:
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         self._data = SoftBodyData(entities=entities, ps=self._ps, device=device)
 
-        # TODO: soft body physical attribute is already set in soft body creation(embodichain/lab/sim/utility/sim_utils.py load_soft_object_from_cfg)
         self._world.update(0.001)
 
         super().__init__(cfg=cfg, entities=entities, device=device)
