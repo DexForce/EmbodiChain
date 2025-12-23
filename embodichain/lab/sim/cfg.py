@@ -165,7 +165,6 @@ class RigidBodyAttributesCfg:
         attr.mass = self.mass
         attr.contact_offset = self.contact_offset
         attr.rest_offset = self.rest_offset
-        attr.enable_collision = self.enable_collision
         attr.dynamic_friction = self.dynamic_friction
         attr.static_friction = self.static_friction
         attr.angular_damping = self.angular_damping

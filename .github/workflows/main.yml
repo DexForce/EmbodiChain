@@ -25,7 +25,7 @@ jobs:
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
-      - name: (CI) Code Style check
+      - name: Code Style check
         run: |
           echo "Workspace: ${GITHUB_WORKSPACE}"
           ls
@@ -46,12 +46,14 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: (CI) Build docs
+      - name: Build docs
         run: |
-          pip install -e .
+          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           echo "Start Building docs..."
+          pip uninstall pymeshlab -y
+          pip install pymeshlab==2023.12.post3
           make html
       - name: Upload docs artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -71,11 +73,13 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: (CI) Run tests
+      - name: Run tests
         run: |
-          pip install -e .
+          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
+          pip uninstall pymeshlab -y
+          pip install pymeshlab==2023.12.post3
           pytest tests
 
   publish:
@@ -92,11 +96,49 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: (CI) Publish package
-        run: echo "start publish stage"
-      - name: (CI) Download docs artifact
+      - name: Download docs artifact
         uses: actions/download-artifact@v4
         with:
           name: github-pages
-      - name: (CI) Deploy GitHub Pages
+
+      - name: Deploy GitHub Pages
         uses: actions/deploy-pages@v4
+
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: Linux
+    permissions:
+      contents: write
+      id-token: write   # PyPI Trusted Publishing
+
+    container: *container_template
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   
+
+      - name: (Release) Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: (Release) Build sdist and wheel
+        run: |
+          python -m build --wheel
+
+      - name: (Release) Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: (Release) Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

@@ -60,10 +60,14 @@ class RigidBodyData:
         self.device = device
 
         # get gpu indices for the entities.
-        self.gpu_indices = torch.as_tensor(
-            [entity.get_gpu_index() for entity in self.entities],
-            dtype=torch.int32,
-            device=self.device,
+        self.gpu_indices = (
+            torch.as_tensor(
+                [entity.get_gpu_index() for entity in self.entities],
+                dtype=torch.int32,
+                device=self.device,
+            )
+            if self.device.type == "cuda"
+            else None
         )
 
         # Initialize rigid body data.
@@ -172,9 +176,7 @@ class RigidObject(BatchEntity):
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
 
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data: RigidBodyData | None = None
@@ -195,6 +197,12 @@ class RigidObject(BatchEntity):
 
         # set default collision filter
         self._set_default_collision_filter()
+
+        # TODO: Must be called after setting all attributes.
+        # May be improved in the future.
+        if cfg.attrs.enable_collision is False:
+            flag = torch.zeros(len(entities), dtype=torch.bool)
+            self.enable_collision(flag)
 
         # reserve flag for collision visible node existence
         self._has_collision_visible_node = False
@@ -342,6 +350,7 @@ class RigidObject(BatchEntity):
             # we should keep `pose_` life cycle to the end of the function.
             pose = torch.cat((quat, xyz), dim=-1)
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=pose.clone(),
                 gpu_indices=indices,
@@ -450,6 +459,7 @@ class RigidObject(BatchEntity):
 
         else:
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             if force is not None:
                 self._ps.gpu_apply_rigid_body_data(
                     data=force,
@@ -610,6 +620,26 @@ class RigidObject(BatchEntity):
             device=self.device,
         )
 
+    def enable_collision(
+        self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Enable or disable collision for the rigid bodies.
+
+        Args:
+            enable (torch.Tensor): A tensor of shape (N,) representing whether to enable collision for each rigid body.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(enable):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match enable length {len(enable)}."
+            )
+
+        enable_list = enable.tolist()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].enable_collision(bool(enable_list[i]))
+
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
 
@@ -630,6 +660,7 @@ class RigidObject(BatchEntity):
                 (len(local_env_ids), 3), dtype=torch.float32, device=self.device
             )
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=zeros,
                 gpu_indices=indices,

@@ -1,0 +1,32 @@
+# .github/release.yml
+
+changelog:
+  categories:
+    - title: "🚀 New Features"
+      labels:
+        - feature
+
+    - title: "🐛 Bug Fixes"
+      labels:
+        - bug
+
+    - title: "🔧 Improvements"
+      labels:
+        - refactor
+        - enhancement
+
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - breaking
+
+    - title: "📚 Documentation"
+      labels:
+        - docs
+
+    - title: "🛠 Internal / CI"
+      labels:
+        - ci
+
+  exclude:
+    labels:
+      - skip-release-notes

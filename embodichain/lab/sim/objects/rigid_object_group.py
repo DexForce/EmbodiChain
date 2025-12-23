@@ -58,10 +58,17 @@ class RigidBodyGroupData:
         self.device = device
 
         # get gpu indices for the rigid bodies with shape of (num_instances, num_objects)
-        self.gpu_indices = torch.as_tensor(
-            [[entity.get_gpu_index() for entity in instance] for instance in entities],
-            dtype=torch.int32,
-            device=self.device,
+        self.gpu_indices = (
+            torch.as_tensor(
+                [
+                    [entity.get_gpu_index() for entity in instance]
+                    for instance in entities
+                ],
+                dtype=torch.int32,
+                device=self.device,
+            )
+            if self.device.type == "cuda"
+            else None
         )
 
         # Initialize rigid body group data tensors. Shape of (num_instances, num_objects, data_dim)
@@ -180,12 +187,10 @@ class RigidObjectGroup(BatchEntity):
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
 
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
         self._all_obj_indices = torch.arange(
-            len(entities[0]), dtype=torch.int32, device=device
-        )
+            len(entities[0]), dtype=torch.int32
+        ).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data = RigidBodyGroupData(entities=entities, ps=self._ps, device=device)
@@ -357,6 +362,7 @@ class RigidObjectGroup(BatchEntity):
             indices = self.body_data.gpu_indices[local_env_ids][
                 :, local_obj_ids
             ].flatten()
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=pose.clone(),
                 gpu_indices=indices,
@@ -428,6 +434,7 @@ class RigidObjectGroup(BatchEntity):
                 device=self.device,
             )
             indices = self.body_data.gpu_indices[local_env_ids].flatten()
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=zeros,
                 gpu_indices=indices,
