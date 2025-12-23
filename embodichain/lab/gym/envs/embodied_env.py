@@ -676,3 +676,8 @@ class EmbodiedEnv(BaseEnv):
         """
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+    def close(self) -> None:
+        """Close the environment and release resources."""
+        self.sim.destroy()
+        self.dataset.finalize()
