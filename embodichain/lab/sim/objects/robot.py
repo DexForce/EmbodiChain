@@ -154,7 +154,7 @@ class Robot(Articulation):
             name (str | None): The name of the control part to get the qpos limits for.
             env_ids (Sequence[int] | None): The environment ids to get the qpos limits for. If None, all environments are used.
 
-         Returns:
+        Returns:
             torch.Tensor: Joint position limits with shape (N, dof, 2), where N is the number of environments.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -181,7 +181,7 @@ class Robot(Articulation):
             name (str | None): The name of the control part to get the qvel limits for.
             env_ids (Sequence[int] | None): The environment ids to get the qvel limits for. If None, all environments are used.
 
-         Returns:
+        Returns:
             torch.Tensor: Joint velocity limits with shape (N, dof, 2), where N is the number of environments.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -208,7 +208,7 @@ class Robot(Articulation):
             name (str | None): The name of the control part to get the qf limits for.
             env_ids (Sequence[int] | None): The environment ids to get the qf limits for. If None, all environments are used.
 
-         Returns:
+        Returns:
             torch.Tensor: Joint effort limits with shape (N, dof, 2), where N is the number of environments.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids

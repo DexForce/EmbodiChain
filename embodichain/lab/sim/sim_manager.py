@@ -75,7 +75,6 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
-from embodichain.data.dataset import SimResources
 from embodichain.utils import configclass, logger
 
 __all__ = [
@@ -331,16 +330,10 @@ class SimulationManager:
 
         return world_config
 
-    def get_default_resources(self) -> SimResources:
-        """Get the default resources instance.
-
-        Returns:
-            SimResources: The default resources path.
-        """
-        return self._default_resources
-
     def _init_sim_resources(self) -> None:
         """Initialize the default simulation resources."""
+        from embodichain.data.assets import SimResources
+
         self._default_resources = SimResources()
 
     def enable_physics(self, enable: bool) -> None:
