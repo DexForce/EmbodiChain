@@ -34,6 +34,104 @@
                     "relative_position": true                
                 }
             },
+            "prepare_extra_attr": {
+                "func": "prepare_extra_attr",
+                "mode": "reset",
+                "params": {
+                    "attrs": [
+                        {
+                            "name": "object_lengths",
+                            "mode": "callable",
+                            "entity_uids": "all_objects",
+                            "func_name": "compute_object_length",
+                            "func_kwargs": {
+                                "is_svd_frame": true,
+                                "sample_points": 5000
+                            }
+                        },
+                        {
+                            "name": "left_arm_base_pose",
+                            "mode": "callable",
+                            "entity_cfg": {
+                                "uid": "CobotMagic"
+                            },
+                            "func_name": "get_link_pose",
+                            "func_kwargs": {
+                                "link_name": "left_arm_base",
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "name": "right_arm_base_pose",
+                            "mode": "callable",
+                            "entity_cfg": {
+                                "uid": "CobotMagic"
+                            },
+                            "func_name": "get_link_pose",
+                            "func_kwargs": {
+                                "link_name": "right_arm_base",
+                                "to_matrix": true
+                            }
+                        }
+                    ]
+                }
+            },
+            "register_info_to_env": {
+                "func": "register_info_to_env",
+                "mode": "reset",
+                "params": {
+                    "registry": [
+                        {
+                            "entity_cfg": {
+                                "uid": "block_1"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "block_2"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "CobotMagic",
+                                "control_parts": ["left_arm"]
+                            },
+                            "attrs": ["left_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "block_1",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "CobotMagic",
+                                "control_parts": ["right_arm"]
+                            },
+                            "attrs": ["right_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "block_2",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
+                        }
+                    ],
+                    "registration": "affordance_datas",
+                    "sim_update": true
+                }
+            },
             "random_material": {
                 "func": "randomize_visual_material",
                 "mode": "interval",
@@ -71,6 +169,17 @@
                 "params": {
                     "entity_cfg": {"uid": "CobotMagic", "control_parts": ["left_arm", "right_arm"]},
                     "position_range":  [[-0.01, -0.01, -0.01], [0.01, 0.01, 0]]
+                }
+            },
+            "record_camera": {
+                "func": "record_camera_data",
+                "mode": "interval",
+                "interval_step": 1,
+                "params": {
+                    "name": "cam1",
+                    "resolution": [320, 240],
+                    "eye": [2, 0, 2],
+                    "target": [0.5, 0, 1]
                 }
             }
         },
@@ -117,6 +226,24 @@
                     "foreground_uids": ["block_1", "block_2"],
                     "is_right": true
                 }
+            },
+            "cam_left_semantic_mask": {
+                "func": "compute_semantic_mask",
+                "mode": "add",
+                "name": "sensor/cam_left_wrist/semantic_mask_l",
+                "params": {
+                    "entity_cfg": {"uid": "cam_left_wrist"},
+                    "foreground_uids": ["block_1", "block_2"]
+                }
+            },
+            "cam_right_semantic_mask": {
+                "func": "compute_semantic_mask",
+                "mode": "add",
+                "name": "sensor/cam_right_wrist/semantic_mask_l",
+                "params": {
+                    "entity_cfg": {"uid": "cam_right_wrist"},
+                    "foreground_uids": ["block_1", "block_2"]
+                }
             }
         },
         "dataset": {
@@ -149,6 +276,32 @@
                 "eye": [0.35368482807598, 0.014695524383058989, 1.4517046071614774],
                 "target": [0.7186357573287919, -0.054534732904795505, 0.5232553674540066],
                 "up": [0.9306678549330372, -0.0005600064212467153, 0.3658647703553347]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_right_wrist",
+            "width": 640,
+            "height": 480,
+            "enable_mask": true,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "extrinsics": {
+                "parent": "right_link6",
+                "pos": [-0.08, 0.0, 0.04],
+                "quat": [0.15304635, 0.69034543, -0.69034543, -0.15304635]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_left_wrist",
+            "width": 640,
+            "height": 480,
+            "enable_mask": true,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "extrinsics": {
+                "parent": "left_link6",
+                "pos": [-0.08, 0.0, 0.04],
+                "quat": [0.15304635, 0.69034543, -0.69034543, -0.15304635]
             }
         }
     ],
