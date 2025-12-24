@@ -75,7 +75,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
-from embodichain.data.assets import SimResources
+from embodichain.data.dataset import SimResources
 from embodichain.utils import configclass, logger
 
 __all__ = [
@@ -122,6 +122,9 @@ class SimulationManagerCfg:
     - RENDER_SHARE_ENGINE: The rendering thread shares the same thread with the simulation engine.
     - RENDER_SCENE_SHARE_ENGINE: The rendering thread and scene update thread share the same thread with the simulation engine.
     """
+
+    cpu_num: int = 1
+    """The number of CPU threads to use for the simulation engine."""
 
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
@@ -291,6 +294,7 @@ class SimulationManager:
         win_config = dexsim.WindowsConfig()
         win_config.width = sim_config.width
         win_config.height = sim_config.height
+        world_config.cpu_num = sim_config.cpu_num
         world_config.win_config = win_config
         world_config.open_windows = not sim_config.headless
         self.is_window_opened = not sim_config.headless
