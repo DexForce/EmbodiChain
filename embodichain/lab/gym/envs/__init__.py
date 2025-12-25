@@ -30,6 +30,9 @@ from embodichain.lab.gym.envs.tasks.tableware.stack_blocks_two import StackBlock
 from embodichain.lab.gym.envs.tasks.tableware.blocks_ranking_rgb import (
     BlocksRankingRGBEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.blocks_ranking_size import (
+    BlocksRankingSizeEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
