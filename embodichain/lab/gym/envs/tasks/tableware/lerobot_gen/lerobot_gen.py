@@ -74,15 +74,11 @@ class LerobotGenEnv(EmbodiedEnv):
         trajectory = self.trajectory_list[episode_id]
 
         # reset grasp object pose
-        # fix cannot detach bug
-        grasp_entity = grasp_object._entities[0]
-        grasp_entity.set_actor_type(ActorType.KINEMATIC)
-        if self._has_pick and not self._has_drop:
-            arena_root_node = self.sim.get_env().get_root_node()
-            grasp_entity.node.attach_node(arena_root_node)
 
         grasp_pose = self.grasp_list[episode_id]
         grasp_object = self.sim.get_rigid_object("grasp_object")
+        grasp_entity = grasp_object._entities[0]
+        grasp_entity.set_actor_type(ActorType.KINEMATIC)
         grasp_object_aabb = grasp_entity.get_aabb_attr()
         current_world_pose = grasp_entity.get_world_pose()
         z_shift = current_world_pose[2, 3] - grasp_object_aabb[5]
@@ -106,7 +102,8 @@ class LerobotGenEnv(EmbodiedEnv):
             .to("cpu")
             .numpy()
         )
-        grasp_entity = self.sim.get_rigid_object("grasp_object")._entities[0]
+        grasp_object = self.sim.get_rigid_object("grasp_object")
+        grasp_entity = grasp_object._entities[0]
         robot_entity = self.robot._entities[0]
 
         grasp_object_aabb = grasp_entity.get_aabb_attr()
@@ -115,21 +112,26 @@ class LerobotGenEnv(EmbodiedEnv):
         grasp_position[2] = grasp_object_aabb[5]  # to top surface
 
         obj_distance = np.linalg.norm(end_xpos[:3, 3] - grasp_position)
-        if obj_distance < 0.07 and not self._has_pick:
+        if obj_distance < 0.07 and not self._has_pick and not self._has_drop:
+            # object move with ee_link
             end_link_pose = robot_entity.get_link_pose("ee_link")
-            robot_entity.attach_node(
-                obj=grasp_entity.node,
-                link_name="ee_link",
-                relative_pose=inv_transform(end_link_pose) @ grasp_pose,
-            )
+            self.obj_relative_pose = inv_transform(end_link_pose) @ grasp_pose
             self._has_pick = True
 
         place_distance = np.linalg.norm(end_xpos[:3, 3] - np.array(PLACE_POSITION))
-        if place_distance < 0.1 and self._has_pick and not self._has_drop:
-            arena_root_node = self.sim.get_env().get_root_node()
-            grasp_entity.node.attach_node(arena_root_node)
-            grasp_entity.set_actor_type(ActorType.DYNAMIC)
+        if place_distance < 0.07 and self._has_pick:
+            self._has_pick = False
             self._has_drop = True
+
+        if self._has_pick:
+            end_link_pose = robot_entity.get_link_pose("ee_link")
+            grasp_obj_pose = end_link_pose @ self.obj_relative_pose
+            grasp_obj_pose_t = torch.tensor(
+                grasp_obj_pose[None, :, :],
+                device=self.robot.device,
+                dtype=torch.float32,
+            )
+            grasp_object.set_local_pose(grasp_obj_pose_t)
 
 
 def _bilinear_sample(
