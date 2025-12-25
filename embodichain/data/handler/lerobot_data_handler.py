@@ -97,64 +97,24 @@ class LerobotDataHandler:
 
     def _convert_frame_to_lerobot(
         self, obs: Dict[str, Any], action: Dict[str, Any], task: str
-    ) -> Dict:
+    ) -> List[Dict]:
         """
-        Convert a single frame to LeRobot format.
+        Convert frames from all environments to LeRobot format.
 
         Args:
-            obs (Dict): Observation dict from environment.
-            action (Dict): Action dict from environment.
+            obs (Dict): Observation dict from environment (batched).
+            action (Dict): Action dict from environment (batched).
             task (str): Task description.
 
         Returns:
-            Dict: Frame in LeRobot format.
+            List[Dict]: List of frames in LeRobot format, one per environment.
         """
-        frame = {"task": task}
         robot_meta_config = self.env.metadata["dataset"]["robot_meta"]
         extra_vision_config = robot_meta_config["observation"]["vision"]
-
-        # Add images
-        for camera_name in extra_vision_config.keys():
-            if camera_name in obs["sensor"]:
-                is_stereo = is_stereocam(self.env.get_sensor(camera_name))
-
-                # Process left/main camera image
-                color_data = obs["sensor"][camera_name]["color"]
-                if isinstance(color_data, torch.Tensor):
-                    color_img = color_data.squeeze(0)[:, :, :3].cpu().numpy()
-                else:
-                    color_img = np.array(color_data).squeeze(0)[:, :, :3]
-
-                # Ensure uint8 format (0-255 range)
-                if color_img.dtype == np.float32 or color_img.dtype == np.float64:
-                    color_img = (color_img * 255).astype(np.uint8)
-
-                frame[camera_name] = color_img
-
-                # Process right camera image if stereo
-                if is_stereo:
-                    color_right_data = obs["sensor"][camera_name]["color_right"]
-                    if isinstance(color_right_data, torch.Tensor):
-                        color_right_img = (
-                            color_right_data.squeeze(0)[:, :, :3].cpu().numpy()
-                        )
-                    else:
-                        color_right_img = np.array(color_right_data).squeeze(0)[
-                            :, :, :3
-                        ]
-
-                    # Ensure uint8 format
-                    if (
-                        color_right_img.dtype == np.float32
-                        or color_right_img.dtype == np.float64
-                    ):
-                        color_right_img = (color_right_img * 255).astype(np.uint8)
-
-                    frame[get_right_name(camera_name)] = color_right_img
-
-        # Add state (proprio)
-        state_list = []
         robot = self.env.robot
+        arm_dofs = robot_meta_config.get("arm_dofs", 7)
+
+        # Determine batch size from qpos
         qpos = obs["robot"][JointType.QPOS.value]
 
         for control_part in robot.control_parts:
@@ -164,31 +124,91 @@ class LerobotDataHandler:
                 qpos_data, control_part, robot=robot
             )
             state_list.append(qpos_data)
+        num_envs = qpos.shape[0]
 
-        if state_list:
-            frame["observation.state"] = np.concatenate(state_list)
+        frames = []
 
-        # Add actions
-        robot = self.env.robot
-        arm_dofs = robot_meta_config.get("arm_dofs", 7)
+        # Process each environment
+        for env_idx in range(num_envs):
+            frame = {"task": task}
 
-        # Handle different action types
-        if isinstance(action, torch.Tensor):
-            action_data = action[0, :arm_dofs].cpu().numpy()
-        elif isinstance(action, np.ndarray):
-            action_data = action[0, :arm_dofs]
-        elif isinstance(action, dict):
-            # If action is a dict, try to extract the actual action data
-            # This depends on your action dict structure
-            action_data = action.get("action", action.get("arm_action", action))
-            if isinstance(action_data, torch.Tensor):
-                action_data = action_data[0, :arm_dofs].cpu().numpy()
-            elif isinstance(action_data, np.ndarray):
-                action_data = action_data[0, :arm_dofs]
-        else:
-            # Fallback: try to convert to numpy
-            action_data = np.array(action)[0, :arm_dofs]
+            # Add images
+            for camera_name in extra_vision_config.keys():
+                if camera_name in obs["sensor"]:
+                    is_stereo = is_stereocam(self.env.get_sensor(camera_name))
 
-        frame["action"] = action_data
+                    # Process left/main camera image
+                    color_data = obs["sensor"][camera_name]["color"]
+                    if isinstance(color_data, torch.Tensor):
+                        color_img = color_data[env_idx][:, :, :3].cpu().numpy()
+                    else:
+                        color_img = np.array(color_data)[env_idx][:, :, :3]
 
-        return frame
+                    # Ensure uint8 format (0-255 range)
+                    if color_img.dtype == np.float32 or color_img.dtype == np.float64:
+                        color_img = (color_img * 255).astype(np.uint8)
+
+                    frame[camera_name] = color_img
+
+                    # Process right camera image if stereo
+                    if is_stereo:
+                        color_right_data = obs["sensor"][camera_name]["color_right"]
+                        if isinstance(color_right_data, torch.Tensor):
+                            color_right_img = (
+                                color_right_data[env_idx][:, :, :3].cpu().numpy()
+                            )
+                        else:
+                            color_right_img = np.array(color_right_data)[env_idx][
+                                :, :, :3
+                            ]
+
+                        # Ensure uint8 format
+                        if (
+                            color_right_img.dtype == np.float32
+                            or color_right_img.dtype == np.float64
+                        ):
+                            color_right_img = (color_right_img * 255).astype(np.uint8)
+
+                        frame[get_right_name(camera_name)] = color_right_img
+
+            # Add state (proprio)
+            state_list = []
+            for proprio_name in SUPPORTED_PROPRIO_TYPES:
+                part = data_key_to_control_part(
+                    robot=robot,
+                    control_parts=robot_meta_config.get("control_parts", []),
+                    data_key=proprio_name,
+                )
+                if part:
+                    indices = robot.get_joint_ids(part, remove_mimic=True)
+                    qpos_data = qpos[env_idx][indices].cpu().numpy()
+                    qpos_data = HandQposNormalizer.normalize_hand_qpos(
+                        qpos_data, part, robot=robot
+                    )
+                    state_list.append(qpos_data)
+
+            if state_list:
+                frame["observation.state"] = np.concatenate(state_list)
+
+            # Add actions
+            # Handle different action types
+            if isinstance(action, torch.Tensor):
+                action_data = action[env_idx, :arm_dofs].cpu().numpy()
+            elif isinstance(action, np.ndarray):
+                action_data = action[env_idx, :arm_dofs]
+            elif isinstance(action, dict):
+                # If action is a dict, try to extract the actual action data
+                action_data = action.get("action", action.get("arm_action", action))
+                if isinstance(action_data, torch.Tensor):
+                    action_data = action_data[env_idx, :arm_dofs].cpu().numpy()
+                elif isinstance(action_data, np.ndarray):
+                    action_data = action_data[env_idx, :arm_dofs]
+            else:
+                # Fallback: try to convert to numpy
+                action_data = np.array(action)[env_idx, :arm_dofs]
+
+            frame["action"] = action_data
+
+            frames.append(frame)
+
+        return frames

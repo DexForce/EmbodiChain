@@ -196,7 +196,8 @@
             }
         },
         "dataset": {
-            "save_path": "/root/workspace/datahub",
+            "format": "lerobot",
+            "save_path": "./",
             "extra": {
                 "scene_type": "commercial",
                 "task_description": "Pour water"

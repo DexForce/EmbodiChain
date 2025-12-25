@@ -93,12 +93,12 @@ def generate_function(
             if not valid:
                 break
 
-            if not debug_mode and env.is_task_success().item():
+            if not debug_mode:
                 dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
                 data_dict = env.to_dataset()
                 ret.append(data_dict)
 
-                # TODO: Add data saving and online data streaming logic here.
+            # TODO: Add data saving and online data streaming logic here.
 
             else:
                 log_warning(f"Task fail, Skip to next generation.")
@@ -191,8 +191,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.num_envs != 1:
-        log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+    # if args.num_envs != 1:
+    #     log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
 
     gym_config = load_json(args.gym_config)
     cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)
