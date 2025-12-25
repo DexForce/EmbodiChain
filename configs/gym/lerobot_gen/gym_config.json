@@ -1,6 +1,6 @@
 {
     "id": "LerobotGen",
-    "max_episodes": 5,
+    "max_episodes": 10,
     "env": {
         "events": {
             "random_light": {
@@ -37,6 +37,11 @@
             }
         },
         "dataset": {
+            "save_path": "/home/chenjian/.cache/huggingface/lerobot",
+            "extra": {
+                "scene_type": "industrial", 
+                "task_description": "Pick bottle in lab."
+            },
             "robot_meta": {
                 "robot_type": "ur10",
                 "arm_dofs": 6,
@@ -53,7 +58,7 @@
                 "min_len_steps": 5
             },
             "instruction": {
-                "lang": "Pick item."
+                "lang": "Pick bottle in lab."
             }
         }
     },
@@ -101,7 +106,7 @@
         },
         "solver_cfg": {
             "arm": {
-                "class_type": "PytorchSolver",
+                "class_type": "PinkSolver",
                 "end_link_name": "ee_link",
                 "root_link_name": "base_link",
                 "tcp": [

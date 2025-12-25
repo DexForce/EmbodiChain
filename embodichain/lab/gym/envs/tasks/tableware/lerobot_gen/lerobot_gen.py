@@ -32,7 +32,7 @@ from copy import deepcopy
 __all__ = ["LerobotGenEnv"]
 
 # TODO: move to cfg file
-RAW_DATA_DIR = "/home/chenjian/Downloads/sack_carton_raw_data_bk"
+RAW_DATA_DIR = "/root/workspace/cj/shadow_data/sack_carton_raw_data_bk"
 PLACE_POSITION = [0.0, 0.5, 0.2]
 
 
@@ -112,7 +112,7 @@ class LerobotGenEnv(EmbodiedEnv):
         grasp_position[2] = grasp_object_aabb[5]  # to top surface
 
         obj_distance = np.linalg.norm(end_xpos[:3, 3] - grasp_position)
-        if obj_distance < 0.07 and not self._has_pick and not self._has_drop:
+        if obj_distance < 0.06 and not self._has_pick and not self._has_drop:
             # object move with ee_link
             end_link_pose = robot_entity.get_link_pose("ee_link")
             self.obj_relative_pose = inv_transform(end_link_pose) @ grasp_pose
@@ -122,6 +122,7 @@ class LerobotGenEnv(EmbodiedEnv):
         if place_distance < 0.07 and self._has_pick:
             self._has_pick = False
             self._has_drop = True
+            grasp_entity.set_actor_type(ActorType.DYNAMIC)
 
         if self._has_pick:
             end_link_pose = robot_entity.get_link_pose("ee_link")
@@ -415,46 +416,59 @@ class ConvertToLeRobot:
 
         approch_poses = grasp_poses.clone()
         approch_poses[:, 2, 3] += 0.18  # TODO: Hard coded. Approch 10cm above
-        batch_init_qpos = self.init_qpos.unsqueeze(0).repeat(1, n_grasp, 1)
+        batch_init_qpos = self.init_qpos.repeat(n_grasp, 1)
 
         approach_place_poses = place_poses.clone()
         approach_place_poses[:, 2, 3] += 0.3
 
-        # get qpos
-        approach_success, approach_qpos = self.robot.compute_batch_ik(
-            pose=approch_poses[None, :, :, :], name="arm", joint_seed=batch_init_qpos
+        approach_success, approach_qpos = self.temp_compute_batch_ik(
+            approch_poses, batch_init_qpos
         )
-        grasp_success, grasp_qpos = self.robot.compute_batch_ik(
-            pose=grasp_poses[None, :, :, :], name="arm", joint_seed=approach_qpos
-        )
-
-        approach_place_success, approach_place_qpos = self.robot.compute_batch_ik(
-            pose=approach_place_poses[None, :, :, :],
-            name="arm",
-            joint_seed=approach_qpos,
+        grasp_success, grasp_qpos = self.temp_compute_batch_ik(
+            grasp_poses, approach_qpos
         )
 
-        place_success, place_qpos = self.robot.compute_batch_ik(
-            pose=place_poses[None, :, :, :], name="arm", joint_seed=approach_place_qpos
+        approach_place_success, approach_place_qpos = self.temp_compute_batch_ik(
+            approach_place_poses, approach_qpos
+        )
+
+        place_success, place_qpos = self.temp_compute_batch_ik(
+            place_poses, approach_place_qpos
         )
 
         # pack results
-        success = torch.logical_and(approach_success[0], grasp_success[0])
-        success = torch.logical_and(success, approach_place_success[0])
-        success = torch.logical_and(success, place_success[0])
+        success = torch.logical_and(approach_success, grasp_success)
+        success = torch.logical_and(success, approach_place_success)
+        success = torch.logical_and(success, place_success)
         success = torch.logical_and(success, valid_z_mask)
 
         waypoints = torch.concatenate(
             [
-                batch_init_qpos[:, :, None, :],
-                approach_qpos[:, :, None, :],
-                grasp_qpos[:, :, None, :],
-                approach_qpos[:, :, None, :],
-                approach_place_qpos[:, :, None, :],
-                place_qpos[:, :, None, :],
-                approach_place_qpos[:, :, None, :],
-                batch_init_qpos[:, :, None, :],
+                batch_init_qpos[:, None, :],
+                approach_qpos[:, None, :],
+                grasp_qpos[:, None, :],
+                approach_qpos[:, None, :],
+                approach_place_qpos[:, None, :],
+                place_qpos[:, None, :],
+                approach_place_qpos[:, None, :],
+                batch_init_qpos[:, None, :],
             ],
-            dim=2,
-        )[0]
+            dim=1,
+        )
         return success, waypoints
+
+    def temp_compute_batch_ik(self, xpos: torch.Tensor, joint_seed: torch.Tensor):
+        n_grasp = xpos.shape[0]
+        is_success = torch.zeros((n_grasp,), dtype=torch.bool, device=self.robot.device)
+        qpos = torch.zeros(
+            (n_grasp, self.robot.dof), dtype=torch.float32, device=self.robot.device
+        )
+        for i in range(n_grasp):
+            is_success_i, qpos_i = self.robot.compute_ik(
+                pose=xpos[i],
+                name="arm",
+                joint_seed=joint_seed[i],
+            )
+            is_success[i] = is_success_i
+            qpos[i] = qpos_i
+        return is_success, qpos
