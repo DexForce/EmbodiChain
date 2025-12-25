@@ -474,6 +474,12 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                     **event_params_modified["params"]["entity_cfg"]
                 )
                 event_params_modified["params"]["entity_cfg"] = entity_cfg
+            if "entity_cfgs" in event_params["params"]:
+                entity_cfgs = [
+                    SceneEntityCfg(**cfg)
+                    for cfg in event_params_modified["params"]["entity_cfgs"]
+                ]
+                event_params_modified["params"]["entity_cfgs"] = entity_cfgs
 
             # Find the function from multiple modules using the utility function
             event_func = find_function_from_modules(
