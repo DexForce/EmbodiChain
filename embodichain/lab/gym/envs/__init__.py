@@ -27,6 +27,9 @@ from embodichain.lab.gym.envs.tasks.tableware.pour_water.pour_water import (
 )
 from embodichain.lab.gym.envs.tasks.tableware.scoop_ice import ScoopIce
 from embodichain.lab.gym.envs.tasks.tableware.stack_blocks_two import StackBlocksTwoEnv
+from embodichain.lab.gym.envs.tasks.tableware.blocks_ranking_rgb import (
+    BlocksRankingRGBEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
