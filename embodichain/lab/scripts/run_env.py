@@ -93,10 +93,10 @@ def generate_function(
             if not valid:
                 break
 
-            # if not debug_mode and env.is_task_success().item():
-            #     dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
-            # data_dict = env.to_dataset()
-            # ret.append(data_dict)
+            if not debug_mode:
+                dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
+                data_dict = env.to_dataset()
+                ret.append(data_dict)
 
             # TODO: Add data saving and online data streaming logic here.
 

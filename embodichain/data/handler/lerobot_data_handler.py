@@ -123,13 +123,13 @@ class LerobotDataHandler:
         # Determine batch size from qpos
         qpos = obs["robot"][JointType.QPOS.value]
         num_envs = qpos.shape[0]
-        
+
         frames = []
-        
+
         # Process each environment
         for env_idx in range(num_envs):
             frame = {"task": task}
-            
+
             # Add images
             for camera_name in extra_vision_config.keys():
                 if camera_name in obs["sensor"]:
@@ -152,9 +152,13 @@ class LerobotDataHandler:
                     if is_stereo:
                         color_right_data = obs["sensor"][camera_name]["color_right"]
                         if isinstance(color_right_data, torch.Tensor):
-                            color_right_img = color_right_data[env_idx][:, :, :3].cpu().numpy()
+                            color_right_img = (
+                                color_right_data[env_idx][:, :, :3].cpu().numpy()
+                            )
                         else:
-                            color_right_img = np.array(color_right_data)[env_idx][:, :, :3]
+                            color_right_img = np.array(color_right_data)[env_idx][
+                                :, :, :3
+                            ]
 
                         # Ensure uint8 format
                         if (
@@ -202,7 +206,7 @@ class LerobotDataHandler:
                 action_data = np.array(action)[env_idx, :arm_dofs]
 
             frame["action"] = action_data
-            
+
             frames.append(frame)
 
         return frames

@@ -27,7 +27,7 @@
             }
         },
         "dataset": {
-            "save_path": "/root/workspace/datahub",
+            "save_path": "./",
             "extra": {
                 "scene_type": "commercial",
                 "task_description": "Simple reach"

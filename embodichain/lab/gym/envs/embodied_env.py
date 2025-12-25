@@ -620,7 +620,9 @@ class EmbodiedEnv(BaseEnv):
         )
         action_list = self.episode_action_list
 
-        logger.log_info(f"Saving {self.num_envs} episodes with {len(obs_list)} frames each...")
+        logger.log_info(
+            f"Saving {self.num_envs} episodes with {len(obs_list)} frames each..."
+        )
 
         # Get task instruction
         task = self.metadata["dataset"]["instruction"].get("lang", "unknown_task")
@@ -645,7 +647,7 @@ class EmbodiedEnv(BaseEnv):
 
             self.update_dataset_info({"extra": episode_extra_info})
             self.dataset.save_episode()
-            
+
             logger.log_info(
                 f"Saved episode {self.curr_episode} for environment {env_idx} with {len(obs_list)} frames"
             )
