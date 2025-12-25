@@ -40,7 +40,6 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         The task is successful if:
         1. Block2 is stacked on top of Block1
         2. Both blocks haven't fallen over
-        3. Both grippers are open
 
         Args:
             **kwargs: Additional arguments for task-specific success criteria.
@@ -87,9 +86,6 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         within_tolerance = torch.all(
             position_diff < eps.unsqueeze(0), dim=1
         )  # (num_envs,)
-
-        # RoboTwin check if grippers are open
-        # This requires checking robot gripper state, which may need to be implemented
 
         # Task succeeds if blocks are stacked correctly and haven't fallen
         success = within_tolerance & ~block1_fallen & ~block2_fallen
