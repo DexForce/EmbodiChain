@@ -241,6 +241,20 @@ class BaseRobotTest:
             len(right_eef_ids_without_mimic) == 6
         ), f"Expected 6 right eef joint IDs without mimic, got {len(right_eef_ids_without_mimic)}"
 
+    def test_setter_and_getter_with_control_part(self):
+        left_arm_qpos = self.robot.get_qpos(name="left_arm")
+        assert left_arm_qpos.shape == (10, 7)
+
+        left_qpos_limits = self.robot.get_qpos_limits(name="left_arm")
+        assert left_qpos_limits.shape == (10, 7, 2)
+
+        dummy_qpos = torch.randn(10, 7, device=self.sim.device)
+        # Clamp to limits
+        dummy_qpos = torch.max(
+            torch.min(dummy_qpos, left_qpos_limits[:, :, 1]), left_qpos_limits[:, :, 0]
+        )
+        self.robot.set_qpos(qpos=dummy_qpos, name="left_arm")
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

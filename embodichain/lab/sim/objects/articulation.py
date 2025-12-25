@@ -891,7 +891,11 @@ class Articulation(BatchEntity):
         return link_pose
 
     def get_qpos(self) -> torch.Tensor:
-        """Get the current positions (qpos) of the articulation."""
+        """Get the current positions (qpos) of the articulation.
+
+        Returns:
+            torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
+        """
         return self.body_data.qpos
 
     def set_qpos(
