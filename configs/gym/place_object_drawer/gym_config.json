@@ -80,8 +80,36 @@
                                 "compute_pose_object_to_arena": true,
                                 "to_matrix": true
                             }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "CobotMagic",
+                                "control_parts": ["left_arm"]
+                            },
+                            "attrs": ["left_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "object",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "CobotMagic",
+                                "control_parts": ["right_arm"]
+                            },
+                            "attrs": ["right_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "object",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
                         }
-                    ]
+                    ],
+                    "registration": "affordance_datas",
+                    "sim_update": true
                 }
             },
             "random_table_material": {
