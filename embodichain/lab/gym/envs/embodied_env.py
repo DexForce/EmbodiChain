@@ -301,7 +301,7 @@ class EmbodiedEnv(BaseEnv):
                 image_writer_threads=image_writer_threads,
                 image_writer_processes=image_writer_processes,
                 root=str(dataset_dir),
-                batch_encoding_size=20
+                batch_encoding_size=20,
             )
             logger.log_info(f"LeRobotDataset initialized successfully: {repo_id}")
         except Exception as e:
@@ -635,6 +635,9 @@ class EmbodiedEnv(BaseEnv):
         # Prepare extra info (same for all episodes)
         extra_info = self.cfg.dataset.get("extra", {})
         episode_extra_info = extra_info.copy()
+        # Initialize total_time if not exists, then add to it
+        if "total_time" not in episode_extra_info:
+            episode_extra_info["total_time"] = total_time
         episode_extra_info["total_time"] += total_time
         episode_extra_info["data_type"] = "sim"
         self.update_dataset_info({"extra": episode_extra_info})
