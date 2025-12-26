@@ -1009,6 +1009,8 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "fpath":
+                    setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)

@@ -43,11 +43,16 @@ class RandomReachEnv(BaseEnv):
         num_envs=1,
         headless=False,
         device="cpu",
+        gpu_id=0,
         **kwargs,
     ):
         env_cfg = EnvCfg(
             sim_cfg=SimulationManagerCfg(
-                headless=headless, arena_space=2.0, sim_device=device
+                headless=headless,
+                arena_space=2.0,
+                sim_device=device,
+                enable_rt=True,
+                gpu_id=gpu_id,
             ),
             num_envs=num_envs,
         )
@@ -92,6 +97,34 @@ class RandomReachEnv(BaseEnv):
             ),
         )
 
+    def _setup_sensors(self, **kwargs):
+        """Setup the sensors in the environment.
+
+        Returns:
+            Dict[str, BaseSensor]: A dictionary mapping sensor UIDs to sensor instances.
+        """
+
+        # TODO: support sensor attachment to the robot.
+
+        from embodichain.lab.sim.sensors import CameraCfg, Camera
+
+        sensors = {}
+        camera: Camera = self.sim.add_sensor(
+            sensor_cfg=CameraCfg(
+                width=640,
+                height=480,
+                intrinsics=[400, 400, 320, 240],
+                extrinsics=CameraCfg.ExtrinsicsCfg(
+                    eye=[0, 0, 3.0],
+                    target=[0, 0, 0],
+                ),
+                near=0.01,
+                far=10.0,
+            )
+        )
+        sensors[camera.uid] = camera
+        return sensors
+
     def _update_sim_state(self, **kwargs) -> None:
         pose = torch.eye(4, device=self.device)
         pose = pose.unsqueeze_(0).repeat(self.num_envs, 1, 1)
@@ -119,6 +152,9 @@ if __name__ == "__main__":
         "--num_envs", type=int, default=1, help="number of environments to run"
     )
     parser.add_argument(
+        "--gpu_id", type=int, default=0, help="GPU ID to run the environment on"
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="cpu",
@@ -132,11 +168,12 @@ if __name__ == "__main__":
         num_envs=args.num_envs,
         headless=args.headless,
         device=args.device,
+        gpu_id=args.gpu_id,
     )
 
-    for episode in range(10):
+    for episode in range(1000):
         print("Episode:", episode)
-        env.reset()
+        obs, info = env.reset()
         start_time = time.time()
         total_steps = 0
 
