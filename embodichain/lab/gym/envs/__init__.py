@@ -39,6 +39,9 @@ from embodichain.lab.gym.envs.tasks.tableware.place_object_drawer import (
 from embodichain.lab.gym.envs.tasks.tableware.organize_tableware import (
     OrganizeTablewareEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.stack_cups import (
+    StackCupsEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
