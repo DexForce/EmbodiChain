@@ -31,3 +31,5 @@ from embodichain.lab.gym.envs.tasks.tableware.scoop_ice import ScoopIce
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
 
 from embodichain.lab.gym.envs.tasks.special.parallel import ParallelRolloutEnv
+from embodichain.lab.gym.envs.tasks.special.simple_task_ur10_1 import SimpleTaskEnv_1
+from embodichain.lab.gym.envs.tasks.special.simple_task_ur10_2 import SimpleTaskEnv_2
