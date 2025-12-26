@@ -36,10 +36,10 @@ class OrganizeTablewareEnv(EmbodiedEnv):
         # Define target positions for different tableware types
         # Left side: fork, Right side: spoon
         self.fork_target_pos = torch.tensor(
-            [0.65, -0.1, 0.86], dtype=torch.float32, device=self.device
+            [0.725, -0.1, 0.86], dtype=torch.float32, device=self.device
         )
         self.spoon_target_pos = torch.tensor(
-            [0.85, -0.1, 0.86], dtype=torch.float32, device=self.device
+            [0.825, 0.1, 0.86], dtype=torch.float32, device=self.device
         )
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
@@ -48,6 +48,7 @@ class OrganizeTablewareEnv(EmbodiedEnv):
         The task is successful if:
         1. Fork is placed in the left target area
         2. Spoon is placed in the right target area
+        3. Both fork and spoon are oriented towards x-axis
 
         Args:
             **kwargs: Additional arguments for task-specific success criteria.
@@ -68,7 +69,7 @@ class OrganizeTablewareEnv(EmbodiedEnv):
 
         # Extract positions
         fork_pos = fork_pose[:, :3, 3]  # (num_envs, 3)
-        spoon_pos = spoon_pose[:, :3, 3]  # (num_envs, 3)
+        spoon_pos = spoon_pose[:, :3, 3] 
 
         # Tolerance for checking if objects are in target area
         xy_tolerance = torch.tensor(
@@ -92,7 +93,29 @@ class OrganizeTablewareEnv(EmbodiedEnv):
             spoon_xy_diff < xy_tolerance.unsqueeze(0), dim=1
         ) & (spoon_z_diff < z_tolerance)
 
-        # Both must be in their target areas
-        success = fork_in_target & spoon_in_target
+        # Check orientation: both fork and spoon should be oriented towards x-axis
+        fork_oriented = self._is_oriented_towards_x(fork_pose)
+        spoon_oriented = self._is_oriented_towards_x(spoon_pose)
+
+        # Both must be in their target areas and correctly oriented
+        success = fork_in_target & spoon_in_target & fork_oriented & spoon_oriented
 
         return success
+
+    def _is_oriented_towards_x(self, pose: torch.Tensor) -> torch.Tensor:
+        # Extract x-axis from rotation matrix (first column, first 3 elements)
+        pose_rx = pose[:, :3, 0]  # (num_envs, 3)
+        world_x_axis = torch.tensor([1, 0, 0], dtype=pose.dtype, device=pose.device)
+
+        # Compute dot product for each batch element
+        dot_product = torch.sum(pose_rx * world_x_axis, dim=-1)  # (num_envs,)
+
+        # Clamp to avoid numerical issues with arccos
+        dot_product = torch.clamp(dot_product, -1.0, 1.0)
+
+        # Compute angle between object x-axis and world x-axis
+        angle = torch.arccos(dot_product)
+
+        # Angle difference should be less than pi/6
+        orientation_tolerance = torch.pi / 6
+        return angle < orientation_tolerance
