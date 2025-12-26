@@ -304,7 +304,6 @@ class EmbodiedEnv(BaseEnv):
                 image_writer_threads=image_writer_threads,
                 image_writer_processes=image_writer_processes,
                 root=str(dataset_dir),
-                batch_encoding_size=self.num_envs,
             )
             logger.log_info(f"LeRobotDataset initialized successfully: {repo_id}")
         except Exception as e:
