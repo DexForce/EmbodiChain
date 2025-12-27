@@ -25,7 +25,6 @@ from embodichain.lab.sim.utility.workspace_analyzer import (
 
 # Setup simulation
 sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
-sim.build_multiple_arenas(1)
 
 # Add robot
 robot = sim.add_robot(DexforceW1Cfg.from_dict({
@@ -169,7 +168,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs import Visualization
 
 # Setup simulation
 sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
-sim.build_multiple_arenas(1)
 
 # Add robot
 robot = sim.add_robot(DexforceW1Cfg.from_dict({

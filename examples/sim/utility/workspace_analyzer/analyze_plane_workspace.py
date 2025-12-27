@@ -40,7 +40,6 @@ if __name__ == "__main__":
         headless=False, sim_device="cpu", width=1080, height=1080
     )
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     cfg = DexforceW1Cfg.from_dict(
