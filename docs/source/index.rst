@@ -34,12 +34,18 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 1
+   :caption: Features
+   :glob:
+
+   features/workspace_analyzer/index*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Resources
    :glob:
 
    resources/robot/index*
    resources/task/index*
-   resources/workspace_analyzer/index*
    resources/roadmap.md
 
 .. toctree::
