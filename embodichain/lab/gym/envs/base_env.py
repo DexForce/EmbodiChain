@@ -109,6 +109,7 @@ class BaseEnv(gym.Env):
             self.sim_cfg = SimulationManagerCfg(headless=True)
         else:
             self.sim_cfg = self.cfg.sim_cfg
+            self.sim_cfg.num_envs = self.num_envs
 
         if self.cfg.seed is not None:
             self.cfg.seed = set_seed(self.cfg.seed)
@@ -208,8 +209,6 @@ class BaseEnv(gym.Env):
         logger.log_info(
             f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
         )
-        if self.num_envs > 1:
-            self.sim.build_multiple_arenas(self.num_envs)
 
         self.robot = self._setup_robot(**kwargs)
         if self.robot is None:

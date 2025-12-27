@@ -35,7 +35,6 @@ def main():
     sim_device = "cpu"
     config = SimulationManagerCfg(headless=False, sim_device=sim_device)
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     # Load robot URDF file

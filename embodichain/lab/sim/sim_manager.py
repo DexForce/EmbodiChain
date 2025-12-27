@@ -125,6 +125,9 @@ class SimulationManagerCfg:
     cpu_num: int = 1
     """The number of CPU threads to use for the simulation engine."""
 
+    num_envs: int = 1
+    """The number of parallel environments (arenas) to simulate."""
+
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
@@ -242,6 +245,8 @@ class SimulationManager:
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
+
+        self._build_multiple_arenas(sim_config.num_envs)
 
     @property
     def num_envs(self) -> int:
@@ -500,7 +505,7 @@ class SimulationManager:
         self._world.close_window()
         self.is_window_opened = False
 
-    def build_multiple_arenas(self, num: int, space: float | None = None) -> None:
+    def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
         """Build multiple arenas in a grid pattern.
 
         This interface is used for vectorized simulation.

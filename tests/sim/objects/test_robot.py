@@ -52,9 +52,8 @@ CONTROL_PARTS = {
 class BaseRobotTest:
     def setup_simulation(self, sim_device):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=10)
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(10)  # NUM_ARENAS = 10
 
         cfg = DexforceW1Cfg.from_dict(
             {

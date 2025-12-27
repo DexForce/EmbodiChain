@@ -67,10 +67,6 @@ def main():
     sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
 
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
-
     # Get UR10 URDF path
     urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
 

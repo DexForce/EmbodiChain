@@ -103,12 +103,9 @@ def main():
         arena_space=3.0,
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
     )
     sim = SimulationManager(config)
-
-    # Build multiple environments if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs)
 
     # Create robot configuration
     robot = create_robot(sim)

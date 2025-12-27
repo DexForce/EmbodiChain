@@ -182,7 +182,7 @@ To start training, run:
 
 .. code-block:: bash
 
-   python embodichain/agents/rl/train.py --config configs/agents/rl/push_cube/train_config.json
+   python -m embodichain.agents.rl.train --config configs/agents/rl/push_cube/train_config.json
 
 Outputs
 -------

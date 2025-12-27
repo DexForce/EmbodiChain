@@ -27,10 +27,9 @@ class StereoCameraTest:
     def setup_simulation(self, sim_device, enable_rt):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt
+            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
         )
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(4)
         # Create batch of cameras
         cfg_dict = {
             "sensor_type": "StereoCamera",

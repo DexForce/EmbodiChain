@@ -40,6 +40,8 @@ class BaseSoftObjectTest:
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device="cuda",
             enable_rt=False,  # Enable ray tracing for better visuals
+            num_envs=4,
+            arena_space=3.0,
         )
 
         # Create the simulation instance
@@ -49,8 +51,7 @@ class BaseSoftObjectTest:
 
         # Enable manual physics update for precise control
         self.n_envs = 4
-        # Build multiple arenas if requested
-        self.sim.build_multiple_arenas(self.n_envs, space=3.0)
+
         # add softbody to the scene
         self.cow: SoftObject = self.sim.add_soft_object(
             cfg=SoftObjectCfg(

@@ -40,7 +40,6 @@ class BaseTestMotionGenerator(object):
     def setup_class(cls):
         cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
-        cls.robot_sim.build_multiple_arenas(1)
         cls.robot_sim.set_manual_update(False)
 
         cfg_dict = {

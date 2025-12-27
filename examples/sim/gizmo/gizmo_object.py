@@ -44,9 +44,6 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
     )
     parser.add_argument(
@@ -69,10 +66,6 @@ def main():
 
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
-
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Add two cubes to the scene
     cube1: RigidObject = sim.add_rigid_object(

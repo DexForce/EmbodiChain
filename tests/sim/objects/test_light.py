@@ -23,9 +23,8 @@ from embodichain.lab.sim.cfg import LightCfg
 class TestLight:
     def setup_method(self):
         # Setup SimulationManager
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=10)
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(10)
 
         # Create batch of lights
         cfg_dict = {

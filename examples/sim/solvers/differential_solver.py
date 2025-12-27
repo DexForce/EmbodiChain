@@ -34,10 +34,9 @@ def main(visualize: bool = True):
     sim_device = "cpu"
     num_envs = 9  # Number of parallel arenas/environments
     config = SimulationManagerCfg(
-        headless=False, sim_device=sim_device, arena_space=1.5
+        headless=False, sim_device=sim_device, arena_space=1.5, num_envs=num_envs
     )
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(num_envs)
     sim.set_manual_update(False)
 
     # Load robot URDF file

@@ -39,9 +39,8 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
 
-config = SimulationManagerCfg(headless=False, sim_device="cpu")
+config = SimulationManagerCfg(headless=False, sim_device="cpu", num_envs=2)
 sim = SimulationManager(config)
-sim.build_multiple_arenas(2)  # Supports parallel simulation in multiple arenas
 sim.set_manual_update(False)
 
 robot = sim.add_robot(cfg=CobotMagicCfg().from_dict({}))
