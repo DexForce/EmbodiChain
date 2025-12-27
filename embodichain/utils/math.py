@@ -18,10 +18,11 @@
 from __future__ import annotations
 
 import math
+import warnings
 import torch
 import numpy as np
 import torch.nn.functional
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 
 def look_at_to_pose(
@@ -394,10 +395,8 @@ def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
     Reference:
         https://github.com/facebookresearch/pytorch3d/blob/main/pytorch3d/transforms/rotation_conversions.py#L91-L99
     """
-    ret = torch.zeros_like(x)
-    positive_mask = x > 0
-    ret[positive_mask] = torch.sqrt(x[positive_mask])
-    return ret
+    # Use torch.where for vectorized operation instead of indexed assignment
+    return torch.where(x > 0, torch.sqrt(x), torch.zeros_like(x))
 
 
 @torch.jit.script
@@ -506,38 +505,6 @@ def trans_matrix_to_xyz_quat(matrix: torch.Tensor) -> torch.Tensor:
         dtype=matrix.dtype, device=matrix.device
     )
     return vec
-
-
-@torch.jit.script
-def quat_from_euler_xyz(
-    roll: torch.Tensor, pitch: torch.Tensor, yaw: torch.Tensor
-) -> torch.Tensor:
-    """Convert rotations given as Euler angles in radians to Quaternions.
-
-    Note:
-        The euler angles are assumed in XYZ convention.
-
-    Args:
-        roll: Rotation around x-axis (in radians). Shape is (N,).
-        pitch: Rotation around y-axis (in radians). Shape is (N,).
-        yaw: Rotation around z-axis (in radians). Shape is (N,).
-
-    Returns:
-        The quaternion in (w, x, y, z). Shape is (N, 4).
-    """
-    cy = torch.cos(yaw * 0.5)
-    sy = torch.sin(yaw * 0.5)
-    cr = torch.cos(roll * 0.5)
-    sr = torch.sin(roll * 0.5)
-    cp = torch.cos(pitch * 0.5)
-    sp = torch.sin(pitch * 0.5)
-    # compute quaternion
-    qw = cy * cr * cp + sy * sr * sp
-    qx = cy * sr * cp - sy * cr * sp
-    qy = cy * cr * sp + sy * sr * cp
-    qz = sy * cr * cp - cy * sr * sp
-
-    return torch.stack([qw, qx, qy, qz], dim=-1)
 
 
 def _axis_angle_rotation(
@@ -869,45 +836,6 @@ def quat_apply_yaw(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
     return quat_apply(quat_yaw, vec)
 
 
-def quat_rotate(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Rotate a vector by a quaternion along the last dimension of q and v.
-    .. deprecated v2.1.0:
-         This function will be removed in a future release in favor of the faster implementation :meth:`quat_apply`.
-
-    Args:
-        q: The quaternion in (w, x, y, z). Shape is (..., 4).
-        v: The vector in (x, y, z). Shape is (..., 3).
-
-    Returns:
-        The rotated vector in (x, y, z). Shape is (..., 3).
-    """
-    # deprecation
-    omni.log.warn(
-        "The function 'quat_rotate' will be deprecated in favor of the faster method 'quat_apply'."
-        " Please use 'quat_apply' instead...."
-    )
-    return quat_apply(q, v)
-
-
-def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Rotate a vector by the inverse of a quaternion along the last dimension of q and v.
-
-    .. deprecated v2.1.0:
-         This function will be removed in a future release in favor of the faster implementation :meth:`quat_apply_inverse`.
-    Args:
-        q: The quaternion in (w, x, y, z). Shape is (..., 4).
-        v: The vector in (x, y, z). Shape is (..., 3).
-
-    Returns:
-        The rotated vector in (x, y, z). Shape is (..., 3).
-    """
-    omni.log.warn(
-        "The function 'quat_rotate_inverse' will be deprecated in favor of the faster method 'quat_apply_inverse'."
-        " Please use 'quat_apply_inverse' instead...."
-    )
-    return quat_apply_inverse(q, v)
-
-
 @torch.jit.script
 def quat_error_magnitude(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Computes the rotation difference between two quaternions.
@@ -986,8 +914,8 @@ def is_identity_pose(pos: torch.tensor, rot: torch.tensor) -> bool:
 def combine_frame_transforms(
     t01: torch.Tensor,
     q01: torch.Tensor,
-    t12: Optional[torch.Tensor] = None,
-    q12: Optional[torch.Tensor] = None,
+    t12: torch.Tensor | None = None,
+    q12: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Combine transformations between two reference frames into a stationary frame.
 
@@ -1052,8 +980,8 @@ def rigid_body_twist_transform(
         - The transformed linear velocity in frame 1. Shape is (N, 3).
         - The transformed angular velocity in frame 1. Shape is (N, 3).
     """
-    w1 = quat_rotate_inverse(q01, w0)
-    v1 = quat_rotate_inverse(q01, v0 + torch.cross(w0, t01, dim=-1))
+    w1 = quat_apply_inverse(q01, w0)
+    v1 = quat_apply_inverse(q01, v0 + torch.cross(w0, t01, dim=-1))
     return v1, w1
 
 

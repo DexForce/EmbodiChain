@@ -17,12 +17,16 @@
 import os
 import torch
 import numpy as np
-from typing import List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import List, Tuple, Union, TYPE_CHECKING
 from embodichain.utils import logger
 
 from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pinocchio,
     lazy_import_pink,
+)
+from embodichain.lab.sim.utility.solver_utils import (
+    build_reduced_pinocchio_robot,
+    compute_pinocchio_fk,
 )
 
 from embodichain.utils import configclass, logger
@@ -56,17 +60,17 @@ class PinkSolverCfg(SolverCfg):
     )
 
     # Path to the mesh files associated with the robot. These files are also loaded by Pinocchio's `robot_wrapper.BuildFromURDF`.
-    mesh_path: Optional[str] = None
+    mesh_path: str | None = None
 
     # A list of tasks for the Pink IK controller. These tasks are controllable by the env action.
     # These tasks can be used to control the pose of a frame or the angles of joints.
     # For more details, visit: https://github.com/stephane-caron/pink
-    variable_input_tasks: List["pink.tasks.FrameTask"] = None
+    variable_input_tasks: list["pink.tasks.FrameTask"] | None = None
 
     # A list of tasks for the Pink IK controller. These tasks are fixed and not controllable by the env action.
     # These tasks can be used to fix the pose of a frame or the angles of joints to a desired configuration.
     # For more details, visit: https://github.com/stephane-caron/pink
-    fixed_input_tasks: List["pink.tasks.FrameTask"] = None
+    fixed_input_tasks: list["pink.tasks.FrameTask"] | None = None
 
     # Show warning if IK solver fails to find a solution.
     show_ik_warnings: bool = True
@@ -111,12 +115,7 @@ class PinkSolverCfg(SolverCfg):
         solver = PinkSolver(cfg=self, **kwargs)
 
         # Set the Tool Center Point (TCP) for the solver
-        if isinstance(self.tcp, torch.Tensor):
-            tcp = self.tcp.cpu().numpy()
-        else:
-            tcp = self.tcp
-
-        solver.set_tcp(tcp)
+        solver.set_tcp(self._get_tcp_as_numpy())
 
         return solver
 
@@ -162,7 +161,7 @@ class PinkSolver(BaseSolver):
         )  # Degrees of freedom of robot joints
 
         # Get reduced robot model
-        self.robot = self._get_reduce_robot()
+        self.robot = build_reduced_pinocchio_robot(self.entire_robot, self.joint_names)
 
         # Initialize Pink configuration
         self.pink_cfg = self.pink.configuration.Configuration(
@@ -207,26 +206,6 @@ class PinkSolver(BaseSolver):
             self.dexsim_to_pink_ordering = None
             self.pink_to_dexsim_ordering = None
 
-    def _get_reduce_robot(self) -> "pin.RobotWrapper":
-        """Build a reduced robot model by locking all joints except those in self.joint_names.
-
-        Returns:
-            pin.RobotWrapper: The reduced robot model with specified joints unlocked.
-        """
-        pink_joint_names = self.entire_robot.model.names.tolist()
-
-        # Lock all joints except those in self.joint_names and 'universe'
-        fixed_joint_names = [
-            name
-            for name in pink_joint_names
-            if name not in self.joint_names and name != "universe"
-        ]
-
-        reduced_robot = self.entire_robot.buildReducedRobot(
-            list_of_joints_to_lock=fixed_joint_names
-        )
-        return reduced_robot
-
     def reorder_array(
         self, input_array: List[float], reordering_array: List[int]
     ) -> List[float]:
@@ -261,16 +240,16 @@ class PinkSolver(BaseSolver):
 
     def get_ik(
         self,
-        target_xpos: Optional[Union[torch.Tensor, np.ndarray]],
-        qpos_seed: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        target_xpos: torch.Tensor | np.ndarray | None,
+        qpos_seed: torch.Tensor | np.ndarray | None = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute target joint positions using inverse kinematics.
 
         Args:
-            target_pose (Optional[Union[torch.Tensor, np.ndarray]]): Target end-effector pose
-            qpos_seed (Optional[Union[torch.Tensor, np.ndarray]]): Seed joint positions
+            target_pose (torch.Tensor | np.ndarray | None): Target end-effector pose
+            qpos_seed (torch.Tensor | np.ndarray | None): Seed joint positions
             return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.
             **kwargs: Additional keyword arguments for future extensions.
 
@@ -381,37 +360,19 @@ class PinkSolver(BaseSolver):
 
     def _get_fk(
         self,
-        qpos: Optional[Union[torch.Tensor, np.ndarray]],
+        qpos: torch.Tensor | np.ndarray | None,
         **kwargs,
     ) -> torch.tensor:
         """Compute the forward kinematics for the robot given joint positions.
 
         Args:
-            qpos (torch.Tensor or np.ndarray): Joint positions, shape should be (nq,).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions, shape should be (nq,).
             **kwargs: Additional keyword arguments (not used).
 
         Returns:
             torch.Tensor: The homogeneous transformation matrix (4x4) of the end-effector (after applying TCP).
         """
-        if isinstance(qpos, torch.Tensor):
-            qpos_np = qpos.detach().cpu().numpy()
-        else:
-            qpos_np = np.array(qpos)
-
-        qpos_np = np.squeeze(qpos_np)
-        if qpos_np.ndim != 1:
-            raise ValueError(f"qpos shape must be (nq,), but got {qpos_np.shape}")
-
-        self.pin.forwardKinematics(self.robot.model, self.robot.data, qpos_np)
-
-        # Retrieve the pose of the specified link
-        frame_index = self.robot.model.getFrameId(self.end_link_name)
-        joint_index = self.robot.model.frames[frame_index].parent
-        xpos_se3 = self.robot.data.oMi.tolist()[joint_index]
-
-        xpos = np.eye(4)
-        xpos[:3, :3] = xpos_se3.rotation
-        xpos[:3, 3] = xpos_se3.translation.T
-
-        result = np.dot(xpos, self.tcp_xpos)
+        result = compute_pinocchio_fk(
+            self.pin, self.robot, qpos, self.end_link_name, self.tcp_xpos
+        )
         return torch.from_numpy(result)

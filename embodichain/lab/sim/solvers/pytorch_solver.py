@@ -16,13 +16,14 @@
 
 import torch
 
-from typing import Optional, Union, Tuple, List, TYPE_CHECKING
+from typing import Union, Tuple, List, TYPE_CHECKING
 from dataclasses import MISSING
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.solvers.qpos_seed_sampler import QposSeedSampler
+from embodichain.lab.sim.utility.solver_utils import validate_iteration_params
 
 if TYPE_CHECKING:
     from typing import Self
@@ -67,7 +68,7 @@ class PytorchSolverCfg(SolverCfg):
     A higher number of samples increases the chances of finding a valid solution
     """
 
-    ik_nearest_weight: Optional[List[float]] = None
+    ik_nearest_weight: list[float] | None = None
     """Weights for the inverse kinematics nearest calculation.
     
     The weights influence how the solver prioritizes closeness to the seed position
@@ -90,11 +91,7 @@ class PytorchSolverCfg(SolverCfg):
         solver = PytorchSolver(cfg=self, device=device, **kwargs)
 
         # Set the Tool Center Point (TCP) for the solver
-        if isinstance(self.tcp, torch.Tensor):
-            tcp = self.tcp.cpu().numpy()
-        else:
-            tcp = self.tcp
-        solver.set_tcp(tcp)
+        solver.set_tcp(self._get_tcp_as_numpy())
 
         return solver
 
@@ -227,23 +224,9 @@ class PytorchSolver(BaseSolver):
             bool: True if all parameters are valid and set, False otherwise.
         """
         # Validate parameters
-        if pos_eps <= 0:
-            logger.log_warning("Pos epsilon must be positive.")
-            return False
-        if rot_eps <= 0:
-            logger.log_warning("Rot epsilon must be positive.")
-            return False
-        if max_iterations <= 0:
-            logger.log_warning("Max iterations must be positive.")
-            return False
-        if dt <= 0:
-            logger.log_warning("Time step must be positive.")
-            return False
-        if damp < 0:
-            logger.log_warning("Damping factor must be non-negative.")
-            return False
-        if num_samples <= 0:
-            logger.log_warning("Number of samples must be positive.")
+        if not validate_iteration_params(
+            pos_eps, rot_eps, max_iterations, dt, damp, num_samples
+        ):
             return False
 
         # Set parameters if all are valid
@@ -406,11 +389,11 @@ class PytorchSolver(BaseSolver):
     def get_ik(
         self,
         target_xpos: torch.Tensor,
-        qpos_seed: torch.Tensor = None,
-        num_samples: int = None,
+        qpos_seed: torch.Tensor | None = None,
+        num_samples: int | None = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Computes the inverse kinematics for given target poses.
 
         This function generates random joint configurations within the specified limits,
@@ -420,18 +403,18 @@ class PytorchSolver(BaseSolver):
         Args:
             target_xpos (torch.Tensor): A tensor representing the target positions. It can be of shape
                                          (batch_size, 3) for multiple positions or (3,) for a single position.
-            qpos_seed (torch.Tensor, optional): Initial joint positions used as seed for IK solving.
-                                                Can be:
-                                                - 1D tensor of shape (dof,): Single seed for all target positions
-                                                - 2D tensor of shape (batch_size, dof): Individual seed per position
-                                                If None, defaults to zero configuration. Defaults to None.
-            num_samples (int, optional): The number of random samples to generate. Must be positive.
-                                         Defaults to None.
+            qpos_seed (torch.Tensor | None): Initial joint positions used as seed for IK solving.
+                                            Can be:
+                                            - 1D tensor of shape (dof,): Single seed for all target positions
+                                            - 2D tensor of shape (batch_size, dof): Individual seed per position
+                                            If None, defaults to zero configuration. Defaults to None.
+            num_samples (int | None): The number of random samples to generate. Must be positive.
+                                     Defaults to None.
             return_all_solutions (bool, optional): If True, returns all valid solutions found.
             **kwargs: Additional arguments for future extensions.
 
         Returns:
-            Tuple[List[bool], torch.Tensor]: A tuple containing:
+            tuple[list[bool], torch.Tensor]: A tuple containing:
                 - A tensor of booleans indicating whether valid solutions were found for each target pose. (Shape: (batch_size,))
                 - A tensor of shape (batch_size, 1, dof) containing joint positions for
                   each target pose, or an empty tensor if no valid solutions were found.

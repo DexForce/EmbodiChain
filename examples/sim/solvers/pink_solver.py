@@ -149,9 +149,7 @@ def main():
         if ik_qpos.dim() == 3:
             robot.set_qpos(qpos=ik_qpos[0][0], joint_ids=robot.get_joint_ids(arm_name))
         else:
-            robot.set_qpos(
-                qpos=ik_qpos.unsqueeze(0), joint_ids=robot.get_joint_ids(arm_name)
-            )
+            robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
         # Visualize current pose
         ik_xpos = robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)

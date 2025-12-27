@@ -1,0 +1,144 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: &container_template
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3
+      volumes:
+        - "/cache:/cache"
+        - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
+        - "/usr/share/vulkan/implicit_layer.d:/usr/share/vulkan/implicit_layer.d"
+        - "/usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d"
+        - "/tmp/.X11-unix:/tmp/.X11-unix"
+        - "/dev/shm/shared:/dev/shm/shared"
+      options: --memory 100g --gpus device=1 --shm-size 53687091200
+    steps:
+      - uses: actions/checkout@v4
+      - name: Code Style check
+        run: |
+          echo "Workspace: ${GITHUB_WORKSPACE}"
+          ls
+          pip install black==24.3.0
+          black --check --diff --color ./
+          if [ $? -ne 0 ]; then
+            echo "Code style check failed, please run [black ./] before commit!"
+            exit 1
+          fi
+
+  build:
+    needs: lint
+    runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: *container_template
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docs
+        run: |
+          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -r docs/requirements.txt
+          cd ${GITHUB_WORKSPACE}/docs
+          echo "Start Building docs..."
+          pip uninstall pymeshlab -y
+          pip install pymeshlab==2023.12.post3
+          make html
+      - name: Upload docs artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with: 
+          path: ${{ github.workspace }}/docs/build/html
+          retention-days: 3
+
+  test:
+    if: github.event_name == 'pull_request'
+    needs: lint
+    runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: *container_template
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          echo "Unit test Start"
+          export HF_ENDPOINT=https://hf-mirror.com
+          pip uninstall pymeshlab -y
+          pip install pymeshlab==2023.12.post3
+          pytest tests
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: Linux
+    permissions:
+      pages: write
+      id-token: write 
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+    container: *container_template
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download docs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+
+      - name: Deploy GitHub Pages
+        uses: actions/deploy-pages@v4
+
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: Linux
+    permissions:
+      contents: write
+      id-token: write   # PyPI Trusted Publishing
+
+    container: *container_template
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   
+
+      - name: (Release) Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: (Release) Build sdist and wheel
+        run: |
+          python -m build --wheel
+
+      - name: (Release) Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: (Release) Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

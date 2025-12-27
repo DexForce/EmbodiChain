@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Callable
 import torch
 
 
@@ -42,7 +42,7 @@ class BaseAlgorithm:
         policy,
         obs: torch.Tensor,
         num_steps: int,
-        on_step_callback: Optional[Callable] = None,
+        on_step_callback: Callable | None = None,
     ) -> Dict[str, Any]:
         """Collect trajectories and return logging info (e.g., reward components)."""
         raise NotImplementedError

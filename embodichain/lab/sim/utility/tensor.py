@@ -17,13 +17,13 @@
 import torch
 import numpy as np
 
-from typing import Union, Optional
+from typing import Union
 
 
 def to_tensor(
     arr: Union[torch.Tensor, np.ndarray, list],
     dtype: torch.dtype = torch.float32,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
 ) -> torch.Tensor:
     """Convert input to torch.Tensor with specified dtype and device.
 

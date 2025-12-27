@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
-from typing import TYPE_CHECKING, Literal, Union, Optional, List, Dict, Sequence
+from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
 
 from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
 from embodichain.lab.sim.sensors import Camera, StereoCamera
@@ -40,6 +40,9 @@ def get_rigid_object_pose(
 ) -> torch.Tensor:
     """Get the world poses of the rigid objects in the environment.
 
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
     Args:
         env: The environment instance.
         obs: The observation dictionary.
@@ -48,6 +51,9 @@ def get_rigid_object_pose(
     Returns:
         A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
     """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return torch.zeros((env.num_envs, 4, 4), dtype=torch.float32)
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
@@ -110,6 +116,7 @@ def compute_semantic_mask(
     Returns:
         A tensor of shape (num_envs, height, width) representing the semantic mask.
     """
+    from embodichain.data.enum import SemanticMask
 
     sensor: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     if sensor.cfg.enable_mask is False:
@@ -130,7 +137,10 @@ def compute_semantic_mask(
 
     robot_mask = (mask_exp == robot_uids_exp).any(-1).squeeze_(-1)
 
-    foreground_assets = [env.sim.get_asset(uid) for uid in foreground_uids]
+    asset_uids = env.sim.asset_uids
+    foreground_assets = [
+        env.sim.get_asset(uid) for uid in foreground_uids if uid in asset_uids
+    ]
 
     # cat assets uid (num_envs, n) into dim 1
     foreground_uids = torch.cat(
@@ -151,7 +161,19 @@ def compute_semantic_mask(
 
     background_mask = ~(robot_mask | foreground_mask).squeeze_(-1)
 
-    return torch.stack([robot_mask, background_mask, foreground_mask], dim=-1)
+    masks = [None, None, None]
+    masks_ids = [member.value for member in SemanticMask]
+    assert len(masks) == len(
+        masks_ids
+    ), "Different length of mask slots and SemanticMask Enum {}.".format(masks_ids)
+    mask_id_to_label = {
+        SemanticMask.BACKGROUND.value: background_mask,
+        SemanticMask.FOREGROUND.value: foreground_mask,
+        SemanticMask.ROBOT.value: robot_mask,
+    }
+    for mask_id in masks_ids:
+        masks[mask_id] = mask_id_to_label[mask_id]
+    return torch.stack(masks, dim=-1)
 
 
 class compute_exteroception(Functor):
@@ -366,7 +388,7 @@ class compute_exteroception(Functor):
         return points_2d
 
     def _get_gripper_ratio(
-        self, control_part: str, gripper_qpos: Optional[torch.Tensor] = None
+        self, control_part: str, gripper_qpos: torch.Tensor | None = None
     ):
         robot: Robot = self._env.robot
         gripper_max_limit = robot.body_data.qpos_limits[
@@ -380,11 +402,11 @@ class compute_exteroception(Functor):
 
     def _get_robot_exteroception(
         self,
-        control_part: Optional[str] = None,
+        control_part: str | None = None,
         x_interval: float = 0.02,
         y_interval: float = 0.02,
         kpnts_number: int = 12,
-        offset: Optional[Union[List, torch.Tensor]] = None,
+        offset: list | torch.Tensor | None = None,
         follow_eef: bool = False,
     ) -> torch.Tensor:
         """Get the robot exteroception poses.
@@ -446,7 +468,7 @@ class compute_exteroception(Functor):
         y_interval: float = 0.02,
         kpnts_number: int = 12,
         is_arena_coord: bool = False,
-        follow_eef: Optional[str] = None,
+        follow_eef: str | None = None,
     ) -> torch.Tensor:
         """Get the rigid object exteroception poses.
 

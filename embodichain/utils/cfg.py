@@ -22,7 +22,7 @@ import logging
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 from fvcore.common.config import BASE_KEY
 from fvcore.common.config import CfgNode as _CfgNode
@@ -38,17 +38,17 @@ logger.setLevel(logging.INFO)
 
 def _flatten_dict(
     src: Dict,
-    prefix: Optional[str] = prefix,
-    sep: Optional[str] = sep,
-    dct: Optional[Dict] = {},
+    prefix: str | None = prefix,
+    sep: str | None = sep,
+    dct: Dict | None = {},
 ) -> Dict:
     """Traverse a dictionary and return all keys including nested ones.
 
     Args:
         src (Dict): an instance of :class:`Dict`.
-        prefix (Optional[str], optional): [description]. Defaults to prefix.
-        sep (Optional[str], optional): [description]. Defaults to sep.
-        dct (Optional[Dict], optional): [description]. Defaults to {}.
+    prefix (str | None, optional): [description]. Defaults to prefix.
+    sep (str | None, optional): [description]. Defaults to sep.
+    dct (Dict | None, optional): [description]. Defaults to {}.
 
     Returns:
         Dict: flatten dictionary with all keys.
@@ -151,9 +151,9 @@ class CfgNode(_CfgNode):
     @classmethod
     def load_cfg_from_file(
         cls,
-        filename_or_str_content: Union[str, Path],
+        filename_or_str_content: str | Path,
         new_allowed: bool = True,
-        root_path: str = None,
+        root_path: str | None = None,
     ) -> CfgNode:
         """load configration from a yaml file.
         Modified from function load_yaml_with_base() of fvcore.common.config.CfgNode.
@@ -289,11 +289,11 @@ class CfgNode(_CfgNode):
     def depth(self):
         return _dict_depth(self)
 
-    def unvisited_keys(self, inverse: Optional[bool] = False) -> List[str]:
+    def unvisited_keys(self, inverse: bool | None = False) -> List[str]:
         """Return all unvisited keys.
 
         Args:
-            inverse (Optional[bool], optional): return all visited keys if `inverse` is True. Defaults to False.
+            inverse (bool | None, optional): return all visited keys if `inverse` is True. Defaults to False.
 
         Returns:
             List[str]: list of all unvisited/visited keys.

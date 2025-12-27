@@ -92,7 +92,6 @@ class BaseSoftObjectTest:
         self.sim.destroy()
 
 
-@pytest.mark.skip(reason="Skipping SoftObject test now")
 class TestSoftObjectCUDA(BaseSoftObjectTest):
     def setup_method(self):
         self.setup_simulation()

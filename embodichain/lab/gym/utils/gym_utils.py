@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import dexsim
 
-from typing import Dict, Any, List, Tuple, Union, Sequence, Optional
+from typing import Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
 
@@ -124,7 +124,7 @@ def batch(*args: Tuple[Union[np.ndarray, Dict]]):
     return tuple(x)
 
 
-def to_tensor(array: Array, device: Optional[Device] = None):
+def to_tensor(array: Array, device: Device | None = None):
     """
     Maps any given sequence to a torch tensor on the CPU/GPU. If physx gpu is not enabled then we use CPU, otherwise GPU, unless specified
     by the device argument

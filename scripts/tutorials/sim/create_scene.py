@@ -24,8 +24,9 @@ import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from dexsim.utility.path import get_resources_data_path
 
 
 def main():

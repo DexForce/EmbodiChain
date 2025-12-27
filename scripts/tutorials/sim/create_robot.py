@@ -46,7 +46,7 @@ def main():
         description="Create and simulate a robot in SimulationManager"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of environments to simulate"
+        "--num_envs", type=int, default=4, help="Number of environments to simulate"
     )
     parser.add_argument(
         "--device",

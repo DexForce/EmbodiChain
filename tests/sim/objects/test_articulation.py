@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import ArticulationCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
 
-ART_PATH = "AiLiMu_BoxDrawer/AiLiMu_BoxDrawer.urdf"
+ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
 
 
@@ -174,6 +174,15 @@ class BaseArticulationTest:
         assert (
             self.art.uid not in self.sim.asset_uids
         ), "FAIL: Articulation UID still present after removal"
+
+    def test_set_physical_visible(self):
+        self.art.set_physical_visible(
+            visible=True,
+            rgba=(0.1, 0.1, 0.9, 0.4),
+        )
+        self.art.set_physical_visible(visible=False)
+        all_link_names = self.art.link_names
+        self.art.set_physical_visible(visible=True, link_names=all_link_names[:3])
 
     def teardown_method(self):
         """Clean up resources after each test method."""

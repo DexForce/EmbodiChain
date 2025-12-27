@@ -16,7 +16,7 @@
 import numpy as np
 
 from copy import deepcopy
-from typing import List, Union, Optional
+from typing import List
 
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.misc import validation_with_process_from_name
@@ -33,7 +33,7 @@ def generate_affordance_from_src(
     env,
     src_key: str,
     dst_key: str,
-    valid_funcs_name_kwargs_proc: Optional[List] = None,
+    valid_funcs_name_kwargs_proc: list | None = None,
     to_array: bool = True,
 ) -> bool:
     """Generate a new affordance entry in env.affordance_datas by applying a validation and processing
@@ -43,7 +43,7 @@ def generate_affordance_from_src(
         env: The environment object containing affordance data.
         src_key (str): The key of the source affordance in env.affordance_datas.
         dst_key (str): The key to store the generated affordance in env.affordance_datas.
-        valid_funcs_name_kwargs_proc (Optional[List]): A list of validation or processing functions (with kwargs)
+        valid_funcs_name_kwargs_proc (list | None): A list of validation or processing functions (with kwargs)
             to apply to the source affordance. Defaults to an empty list.
         to_array (bool): Whether to convert the result to a numpy array before storing. Defaults to True.
 

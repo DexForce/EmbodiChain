@@ -28,7 +28,7 @@ from functools import partial, wraps, lru_cache
 from collections import OrderedDict
 from importlib import import_module
 from scipy.spatial.transform import Rotation as R
-from typing import Any, Dict, List, Tuple, Union, Sequence, Callable, Optional, Mapping
+from typing import Any, Dict, List, Tuple, Union, Sequence, Callable, Mapping
 
 import numpy as np
 
@@ -1063,7 +1063,7 @@ def validation_with_process_from_name(
     env,
     input: List[np.ndarray],
     valid_funcs_name_kwargs_proc: List[Dict[str, Any]],
-    module_names: Optional[List[str]] = None,
+    module_names: List[str] | None = None,
 ):
     """Apply a sequence of validation and processing functions (by name) to the input data.
 
@@ -1095,28 +1095,34 @@ def _get_valid_grasp(
     grasp_list: List[np.ndarray],
     valid_funcs_name_kwargs_proc: List[Union[str, Dict[str, Any]]],
 ) -> np.ndarray:
-    """TODO 懒狗了，总而言之言而总之就是一个函数，可以集成一堆validation function，检验grasp_pose是否valid，也可以再特定的alidatrion function后面跟一堆process
+    """
+    Validate a list of grasp poses using a sequence of validation and processing functions.
+
+    This function iterates through each grasp in `grasp_list`, applies a series of validation
+    and processing functions (specified in `valid_funcs_name_kwargs_proc`), and returns the first
+    grasp pose that passes all validations. If no valid grasp is found, returns None.
 
     Args:
-        env: TODO
-        grasp_list (List[np.ndarray]): TODO
-        validation_func_names_kwargs (Dict[str, dict]): TODO
-        validation_func_names_process (Optional[Dict[str, Dict[str, dict]]], optional): TODO. Defaults to None.
+        env: The environment object, used for method lookup and as context for validation functions.
+        grasp_list (List[np.ndarray]): List of grasp objects or poses to be validated.
+        valid_funcs_name_kwargs_proc (List[Union[str, Dict[str, Any]]]): List of validation function
+            specifications. Each item can be a function name (str) or a dict specifying the function
+            name, kwargs, and optional processing steps.
 
     Returns:
-        np.ndarray: TODO
+        np.ndarray or None: The first valid grasp pose, or None if none are valid.
     """
     valid_func_kwargs_proc = find_funcs_with_kwargs(
         valid_funcs_name_kwargs_proc, instances=[env], module_names=[__name__]
     )
 
     for grasp in grasp_list:
-        grasp_pose = grasp.pose  # TODO: be a func?
+        grasp_pose = grasp.pose  # TODO: Should this be a method?
         grasp_pose = validate_with_process(env, grasp_pose, valid_func_kwargs_proc)
-        # The loop is broken as ONE validation results is False
+        # Skip if any validation fails
         if grasp_pose is None:
             continue
-        # All validation results are True in the loop
+        # Return the first valid grasp pose
         else:
             return grasp_pose
     return None
@@ -1174,8 +1180,8 @@ def lru_cache_n(maxsize: int = 10, max_count: int = 2) -> Callable:
 
 def multi_output_factory_function(
     func_name: Union[str, Callable],
-    instances: Optional[List] = None,
-    module_names: Optional[List[str]] = None,
+    instances: List | None = None,
+    module_names: List[str] | None = None,
     output_num: int = 1,
 ) -> Callable:
     """
@@ -1332,7 +1338,7 @@ def get_fk_xpos(
 
 
 # FIXME: remove
-def data_key_to_control_part(robot, control_parts, data_key: str) -> Optional[str]:
+def data_key_to_control_part(robot, control_parts, data_key: str) -> str | None:
     # TODO: Temporary workaround, should be removed after refactoring data dict extractor.
     # @lru_cache(max_size=None) # NOTE: no way to pass a hashable parameter
     def is_eef_hand(robot, control_parts) -> bool:

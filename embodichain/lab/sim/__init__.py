@@ -16,4 +16,9 @@
 
 from .material import VisualMaterialCfg, VisualMaterial, VisualMaterialInst
 from .common import BatchEntity
+
 from .sim_manager import *
+
+from .utility.dynamic_pybind import init_dynamic_pybind
+
+init_dynamic_pybind()

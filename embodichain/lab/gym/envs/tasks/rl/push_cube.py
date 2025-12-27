@@ -16,7 +16,7 @@
 
 import torch
 import numpy as np
-from typing import Dict, Any, Optional, Sequence
+from typing import Dict, Any, Sequence
 from gymnasium import spaces
 
 from embodichain.lab.gym.utils.registration import register_env
@@ -101,7 +101,7 @@ class PushCubeEnv(EmbodiedEnv):
             )
 
     def _initialize_episode(
-        self, env_ids: Optional[Sequence[int]] = None, **kwargs
+        self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
         super()._initialize_episode(env_ids=env_ids, **kwargs)
         cube = self.sim.get_rigid_object("cube")

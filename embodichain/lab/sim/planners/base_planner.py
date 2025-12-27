@@ -16,7 +16,7 @@
 
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Tuple, Union
 import matplotlib.pyplot as plt
 
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
@@ -46,10 +46,10 @@ class BasePlanner(ABC):
         **kwargs,
     ) -> Tuple[
         bool,
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
         float,
     ]:
         r"""Execute trajectory planning.

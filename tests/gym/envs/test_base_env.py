@@ -170,6 +170,10 @@ class BaseEnvTest:
         ), "Expected 'cube_position' in the obs dict"
         assert obs.get("robot") is not None, "Expected 'robot' in the obs dict"
 
+    def teardown_method(self):
+        """Clean up resources after each test method."""
+        self.env.close()
+
 
 class TestBaseEnvCPU(BaseEnvTest):
     def setup_method(self):

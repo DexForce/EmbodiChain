@@ -20,7 +20,7 @@ import numpy as np
 import pickle
 
 from copy import deepcopy
-from typing import Optional, Sequence
+from typing import Sequence
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
@@ -134,7 +134,7 @@ class ScoopIce(EmbodiedEnv):
         return all_qpos
 
     def _initialize_episode(
-        self, env_ids: Optional[Sequence[int]] = None, **kwargs
+        self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
 
         left_arm_ids = self.robot.get_joint_ids(name="left_arm")

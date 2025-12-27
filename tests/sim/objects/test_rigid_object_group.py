@@ -107,6 +107,14 @@ class BaseRigidObjectGroupTest:
             self.obj_group.uid not in self.sim.asset_uids
         ), "Object group UID still present after removal"
 
+    def test_set_physical_visible(self):
+        self.obj_group.set_physical_visible(visible=True)
+        self.obj_group.set_physical_visible(visible=False)
+
+    def test_set_visible(self):
+        self.obj_group.set_visible(visible=True)
+        self.obj_group.set_visible(visible=False)
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

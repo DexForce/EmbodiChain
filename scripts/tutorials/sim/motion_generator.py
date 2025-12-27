@@ -72,7 +72,7 @@ def create_demo_trajectory(
     ]
 
 
-def main(interactive=False):
+def main():
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
@@ -82,46 +82,11 @@ def main(interactive=False):
     sim.set_manual_update(False)
 
     # Robot configuration
-    cfg_dict = {
-        "uid": "CobotMagic",
-        "init_pos": [0.0, 0.0, 0.7775],
-        "init_qpos": [
-            -0.3,
-            0.3,
-            1.0,
-            1.0,
-            -1.2,
-            -1.2,
-            0.0,
-            0.0,
-            0.6,
-            0.6,
-            0.0,
-            0.0,
-            0.05,
-            0.05,
-            0.05,
-            0.05,
-        ],
-        "solver_cfg": {
-            "left_arm": {
-                "class_type": "OPWSolver",
-                "end_link_name": "left_link6",
-                "root_link_name": "left_arm_base",
-                "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
-            },
-            "right_arm": {
-                "class_type": "OPWSolver",
-                "end_link_name": "right_link6",
-                "root_link_name": "right_arm_base",
-                "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
-            },
-        },
-    }
+    cfg_dict = {"uid": "CobotMagic"}
     robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
     arm_name = "left_arm"
 
-    # Generate trajectory points
+    # # Generate trajectory points
     qpos_list, xpos_list = create_demo_trajectory(robot, arm_name)
 
     # Initialize motion generator
@@ -150,12 +115,6 @@ def main(interactive=False):
         sample_num=20,
     )
     move_robot_along_trajectory(robot, arm_name, out_qpos_list)
-
-    if interactive:
-        # Enter IPython interactive shell if needed
-        from IPython import embed
-
-        embed()
 
 
 if __name__ == "__main__":

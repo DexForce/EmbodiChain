@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
-from typing import TYPE_CHECKING, Literal, Union, Optional, Dict
+from typing import TYPE_CHECKING, Literal, Union, Dict
 
 from embodichain.lab.sim.objects import Light, RigidObject, Articulation
 from embodichain.lab.sim.sensors import Camera, StereoCamera
@@ -31,7 +31,11 @@ from embodichain.lab.sim import (
     VisualMaterialCfg,
 )
 from embodichain.utils.string import resolve_matching_names
-from embodichain.utils.math import sample_uniform
+from embodichain.utils.math import (
+    sample_uniform,
+    quat_from_euler_xyz,
+    euler_xyz_from_quat,
+)
 from embodichain.utils import logger
 from embodichain.data import get_data_path
 
@@ -40,19 +44,143 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "randomize_camera_extrinsics",
     "randomize_light",
     "randomize_camera_intrinsics",
     "randomize_visual_material",
 ]
 
 
+def randomize_camera_extrinsics(
+    env: EmbodiedEnv,
+    env_ids: Union[torch.Tensor, None],
+    entity_cfg: SceneEntityCfg,
+    pos_range: tuple[list[float], list[float]] | None = None,
+    euler_range: tuple[list[float], list[float]] | None = None,
+    eye_range: tuple[list[float], list[float]] | None = None,
+    target_range: tuple[list[float], list[float]] | None = None,
+    up_range: tuple[list[float], list[float]] | None = None,
+) -> None:
+    """
+    Randomize camera extrinsic properties (position and orientation).
+
+    Behavior:
+    - If extrinsics config has a parent field (attach mode), pos_range/euler_range are used to perturb the initial pose (pos, quat),
+        and set_local_pose is called to attach the camera to the parent node. In this case, pose is related to parent.
+    - If extrinsics config uses eye/target/up (no parent), eye_range/target_range/up_range are used to perturb the initial eye, target, up vectors,
+        and look_at is called to set the camera orientation.
+
+    Args:
+        env: The environment instance.
+        env_ids: The environment IDs to apply the randomization.
+        entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
+        pos_range: Position perturbation range (attach mode).
+        euler_range: Euler angle perturbation range (attach mode).
+        eye_range: Eye position perturbation range (look_at mode).
+        target_range: Target position perturbation range (look_at mode).
+        up_range: Up vector perturbation range (look_at mode).
+    """
+    camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
+    num_instance = len(env_ids)
+
+    extrinsics = camera.cfg.extrinsics
+
+    if extrinsics.parent is not None:
+        # If extrinsics has a parent field, use pos/euler perturbation and attach camera to parent node
+        init_pos = getattr(extrinsics, "pos", [0.0, 0.0, 0.0])
+        init_quat = getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0])
+        new_pose = torch.tensor(
+            [init_pos + init_quat], dtype=torch.float32, device=env.device
+        ).repeat(num_instance, 1)
+        if pos_range:
+            random_value = sample_uniform(
+                lower=torch.tensor(pos_range[0]),
+                upper=torch.tensor(pos_range[1]),
+                size=(num_instance, 3),
+            )
+            new_pose[:, :3] += random_value
+        if euler_range:
+            # 1. quat -> euler
+            init_quat_np = (
+                torch.tensor(init_quat, dtype=torch.float32, device=env.device)
+                .unsqueeze_(0)
+                .repeat(num_instance, 1)
+            )
+            init_euler = torch.stack(euler_xyz_from_quat(init_quat_np), dim=1)
+            # 2. Sample perturbation for euler angles
+            random_value = sample_uniform(
+                lower=torch.tensor(euler_range[0]),
+                upper=torch.tensor(euler_range[1]),
+                size=(num_instance, 3),
+            )
+            # 3. Add perturbation to each environment and convert back to quaternion
+            roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
+            new_quat = quat_from_euler_xyz(roll, pitch, yaw)
+            new_pose[:, 3:7] = new_quat
+
+        camera.set_local_pose(new_pose, env_ids=env_ids)
+
+    elif extrinsics.eye is not None:
+        # If extrinsics uses eye/target/up, use perturbation for look_at mode
+        init_eye = (
+            torch.tensor(extrinsics.eye, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(num_instance, 1)
+        )
+        init_target = (
+            torch.tensor(extrinsics.target, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(num_instance, 1)
+        )
+        init_up = (
+            torch.tensor(extrinsics.up, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(num_instance, 1)
+        )
+
+        if eye_range:
+            eye_delta = sample_uniform(
+                lower=torch.tensor(eye_range[0]),
+                upper=torch.tensor(eye_range[1]),
+                size=(num_instance, 3),
+            )
+            new_eye = init_eye + eye_delta
+        else:
+            new_eye = init_eye
+
+        if target_range:
+            target_delta = sample_uniform(
+                lower=torch.tensor(target_range[0]),
+                upper=torch.tensor(target_range[1]),
+                size=(num_instance, 3),
+            )
+            new_target = init_target + target_delta
+        else:
+            new_target = init_target
+
+        if up_range:
+            up_delta = sample_uniform(
+                lower=torch.tensor(up_range[0]),
+                upper=torch.tensor(up_range[1]),
+                size=(num_instance, 3),
+            )
+            new_up = init_up + up_delta
+        else:
+            new_up = init_up
+
+        camera.look_at(new_eye, new_target, new_up, env_ids=env_ids)
+
+    else:
+        logger.log_error("Unsupported extrinsics format for camera randomization.")
+
+
 def randomize_light(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    position_range: Optional[tuple[list[float], list[float]]] = None,
-    color_range: Optional[tuple[list[float], list[float]]] = None,
-    intensity_range: Optional[tuple[float, float]] = None,
+    position_range: tuple[list[float], list[float]] | None = None,
+    color_range: tuple[list[float], list[float]] | None = None,
+    intensity_range: tuple[float, float] | None = None,
 ) -> None:
     """Randomize light properties by adding, scaling, or setting random values.
 
@@ -78,9 +206,9 @@ def randomize_light(
         env (EmbodiedEnv): The environment instance.
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        position_range (Optional[tuple[list[float], list[float]]]): The range for the position randomization.
-        color_range (Optional[tuple[list[float], list[float]]]): The range for the color randomization.
-        intensity_range (Optional[tuple[float, float]]): The range for the intensity randomization.
+        position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
+        color_range (tuple[list[float], list[float]] | None): The range for the color randomization.
+        intensity_range (tuple[float, float] | None): The range for the intensity randomization.
     """
 
     light: Light = env.sim.get_light(entity_cfg.uid)
@@ -132,10 +260,10 @@ def randomize_camera_intrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
     entity_cfg: SceneEntityCfg,
-    focal_x_range: Optional[tuple[float, float]] = None,
-    focal_y_range: Optional[tuple[float, float]] = None,
-    cx_range: Optional[tuple[float, float]] = None,
-    cy_range: Optional[tuple[float, float]] = None,
+    focal_x_range: tuple[float, float] | None = None,
+    focal_y_range: tuple[float, float] | None = None,
+    cx_range: tuple[float, float] | None = None,
+    cy_range: tuple[float, float] | None = None,
 ) -> None:
     """Randomize camera intrinsic properties by adding, scaling, or setting random values.
 
@@ -162,10 +290,10 @@ def randomize_camera_intrinsics(
         env (EmbodiedEnv): The environment instance.
         env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        focal_x_range (Optional[tuple[float, float]]): The range for the focal length x randomization.
-        focal_y_range (Optional[tuple[float, float]]): The range for the focal length y randomization.
-        cx_range (Optional[tuple[float, float]]): The range for the principal point x randomization.
-        cy_range (Optional[tuple[float, float]]): The range for the principal point y randomization.
+        focal_x_range (tuple[float, float] | None): The range for the focal length x randomization.
+        focal_y_range (tuple[float, float] | None): The range for the focal length y randomization.
+        cx_range (tuple[float, float] | None): The range for the principal point x randomization.
+        cy_range (tuple[float, float] | None): The range for the principal point y randomization.
     """
 
     camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
@@ -252,15 +380,18 @@ class randomize_visual_material(Functor):
         if self.entity_cfg.uid == "default_plane":
             pass
         else:
-            self.entity: Union[RigidObject, Articulation] = env.sim.get_asset(
-                self.entity_cfg.uid
-            )
-
-            if not isinstance(self.entity, (RigidObject, Articulation)):
-                raise ValueError(
-                    f"Randomization functor 'randomize_visual_material' not supported for asset: '{self.entity_cfg.uid}'"
-                    f" with type: '{type(self.entity)}'."
+            if self.entity_cfg.uid not in env.sim.asset_uids:
+                self.entity = None
+            else:
+                self.entity: Union[RigidObject, Articulation] = env.sim.get_asset(
+                    self.entity_cfg.uid
                 )
+
+                if not isinstance(self.entity, (RigidObject, Articulation)):
+                    raise ValueError(
+                        f"Randomization functor 'randomize_visual_material' not supported for asset: '{self.entity_cfg.uid}'"
+                        f" with type: '{type(self.entity)}'."
+                    )
 
         # TODO: Maybe need to consider two cases:
         # 1. the texture folder is very large, and we don't want to load all the textures into memory.
@@ -356,9 +487,7 @@ class randomize_visual_material(Functor):
                 getattr(mat_inst, f"set_{key}")(value[idx].item())
 
         # randomize texture or base color based on the probability.
-        if random_texture_prob <= 0.0 or len(self.textures) == 0:
-            return
-        if random.random() < random_texture_prob:
+        if random.random() < random_texture_prob and len(self.textures) != 0:
             self._randomize_texture(mat_inst)
         else:
             # set a random base color instead.
@@ -372,13 +501,16 @@ class randomize_visual_material(Functor):
         env_ids: Union[torch.Tensor, None],
         entity_cfg: SceneEntityCfg,
         random_texture_prob: float = 0.5,
-        texture_path: Optional[str] = None,
-        base_color_range: Optional[tuple[list[float], list[float]]] = None,
-        metallic_range: Optional[tuple[float, float]] = None,
-        roughness_range: Optional[tuple[float, float]] = None,
-        ior_range: Optional[tuple[float, float]] = None,
+        texture_path: str | None = None,
+        base_color_range: tuple[list[float], list[float]] | None = None,
+        metallic_range: tuple[float, float] | None = None,
+        roughness_range: tuple[float, float] | None = None,
+        ior_range: tuple[float, float] | None = None,
     ):
         from embodichain.lab.sim.utility import is_rt_enabled
+
+        if self.entity_cfg.uid != "default_plane" and self.entity is None:
+            return
 
         # resolve environment ids
         if env_ids is None:

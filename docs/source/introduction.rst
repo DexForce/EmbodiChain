@@ -9,7 +9,7 @@ EmbodiChain
 .. image:: ../../assets/imgs/teaser.jpg
    :alt: teaser
 
-📘 `Documentation <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/introduction>`_
+📘 `Documentation <https://dexforce.github.io/EmbodiChain/introduction.html>`_
 
 ---
 
@@ -36,9 +36,9 @@ Getting Started
 
 To get started with EmbodiChain, follow these steps:
 
-* `Installation Guide <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/quick_start/install>`_
-* `Quick Start Tutorial <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/tutorial/>`_
-* `API Reference <https://6921c7e19027fbac6753678c--astounding-horse-770602.netlify.app/api_reference/>`_
+* `Installation Guide <https://dexforce.github.io/EmbodiChain/quick_start/install.html>`_
+* `Quick Start Tutorial <https://dexforce.github.io/EmbodiChain/tutorial/index.html>`_
+* `API Reference <https://dexforce.github.io/EmbodiChain/api_reference/index.html>`_
 
 
 Citation

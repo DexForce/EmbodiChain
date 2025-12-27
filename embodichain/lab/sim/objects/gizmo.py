@@ -21,7 +21,7 @@ Gizmo: A reusable controller for interactive manipulation of simulation elements
 import numpy as np
 import torch
 import dexsim
-from typing import Callable, Optional
+from typing import Callable
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim.common import BatchEntity
@@ -40,7 +40,6 @@ from dexsim.types import (
     RigidBodyShape,
     PhysicalAttr,
 )
-from dexsim.engine import GizmoController
 
 from embodichain.lab.sim.utility.gizmo_utils import create_gizmo_callback
 
@@ -110,8 +109,8 @@ class Gizmo:
     def __init__(
         self,
         target: BatchEntity,
-        cfg: Optional[GizmoCfg] = None,
-        control_part: Optional[str] = "arm",
+        cfg: GizmoCfg | None = None,
+        control_part: str | None = "arm",
     ):
         """
         Args:
@@ -331,7 +330,7 @@ class Gizmo:
                     new_qpos = new_qpos.unsqueeze(0)  # Make it (1, dof) for set_qpos
 
                 # Update robot joint positions
-                self.target.set_qpos(qpos=new_qpos, joint_ids=current_joint_ids)
+                self.target.set_qpos(qpos=new_qpos[0], joint_ids=current_joint_ids)
                 return True
             else:
                 logger.log_warning("IK solution not found")
@@ -421,11 +420,11 @@ class Gizmo:
 
         # Apply the visibility setting to the gizmo node
         if self._gizmo and hasattr(self._gizmo, "node"):
-            self._gizmo.node.set_physical_visible(self._is_visible, self._is_visible)
+            self._gizmo.node.set_visible(self._is_visible)
 
         return self._is_visible
 
-    def set_visibility(self, visible: bool):
+    def set_visible(self, visible: bool):
         """
         Set the visibility of the gizmo.
 
@@ -436,7 +435,7 @@ class Gizmo:
 
         # Apply the visibility setting to the gizmo node
         if self._gizmo and hasattr(self._gizmo, "node"):
-            self._gizmo.node.set_physical_visible(self._is_visible, self._is_visible)
+            self._gizmo.node.set_visible(self._is_visible)
 
     def is_visible(self) -> bool:
         """
