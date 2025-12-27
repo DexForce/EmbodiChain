@@ -32,8 +32,6 @@ The first step is to configure the simulation environment. This is done using th
    :start-at: # Configure the simulation
    :end-at:     print("[INFO]: Scene setup complete!")
 
-If ``num_envs`` is greater than 1, :meth:`SimulationManager.build_multiple_arenas` should be used to create multiple simulation arenas.
-
 Adding a soft body to the scene
 -------------------------------
 

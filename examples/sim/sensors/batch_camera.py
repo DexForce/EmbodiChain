@@ -33,10 +33,13 @@ from embodichain.data import get_data_path
 
 def main(args):
     config = SimulationManagerCfg(
-        headless=True, sim_device=args.device, arena_space=2, enable_rt=args.enable_rt
+        headless=True,
+        sim_device=args.device,
+        num_envs=args.num_envs,
+        arena_space=2,
+        enable_rt=args.enable_rt,
     )
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(args.num_envs)
 
     rigid_obj: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
