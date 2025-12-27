@@ -268,14 +268,12 @@ class Camera(BaseSensor):
                 self._frame_buffer.apply()
             else:
                 self._frame_buffer.apply_frame()
-
+        
         self.cfg: CameraCfg
         # TODO: support fetch data from gpu buffer directly.
         if self.cfg.enable_color:
             if self.is_rt_enabled:
-                self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
-                    self.device
-                )
+                self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer()
             else:
                 data = self._frame_buffer.get_color_gpu_buffer().to(self.device)
                 self._update_buffer_impl(data, self._data_buffer["color"])
