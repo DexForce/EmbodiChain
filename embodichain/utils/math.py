@@ -1570,6 +1570,7 @@ def sample_uniform(
     lower: Union[torch.Tensor, float],
     upper: Union[torch.Tensor, float],
     size: Union[int, tuple[int, ...]],
+    device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
     """Sample uniformly within a range.
 
@@ -1586,7 +1587,7 @@ def sample_uniform(
     if isinstance(size, int):
         size = (size,)
     # return tensor
-    return torch.rand(*size, device=lower.device) * (upper - lower) + lower
+    return torch.rand(*size, device=device) * (upper - lower) + lower
 
 
 def sample_log_uniform(

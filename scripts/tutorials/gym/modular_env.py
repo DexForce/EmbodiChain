@@ -57,6 +57,17 @@ class ExampleEventCfg:
         },
     )
 
+    randomize_fork_mass: EventCfg = EventCfg(
+        func=rand.randomize_rigid_object_mass,
+        mode="reset",
+        params={
+            "entity_cfg": SceneEntityCfg(
+                uid="fork",
+            ),
+            "mass_range": (0.1, 2.0),
+        },
+    )
+
     randomize_light: EventCfg = EventCfg(
         func=rand.randomize_light,
         mode="interval",

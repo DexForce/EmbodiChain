@@ -601,6 +601,7 @@ def drop_rigid_object_group_sequentially(
             lower=range_low,
             upper=range_high,
             size=(num_instance, 3),
+            device=env.device,
         )
         drop_pose_i = drop_pose.unsqueeze(1)
         drop_pose_i[:, 0, :3] = drop_pos + random_offset
