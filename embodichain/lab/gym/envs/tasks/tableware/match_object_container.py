@@ -75,17 +75,15 @@ class MatchObjectContainerEnv(EmbodiedEnv):
         container_cube_pos = container_cube_pose[:, :3, 3]
         container_sphere_pos = container_sphere_pose[:, :3, 3]
 
-        container_cube_up = ~self._is_fall(container_cube_pose)
-        container_sphere_up = ~self._is_fall(container_sphere_pose)
+        container_cube_fallen = self._is_fall(container_cube_pose)
+        container_sphere_fallen = self._is_fall(container_sphere_pose)
 
         # Check if blocks are inside their matching containers
-        # Note: container_pos[:, 2] is the geometric center (center of mass) of the container
-        container_bottom_radius = 0.1067  # Bottom inner radius in meters
-        z_tolerance = 0.05  # Vertical tolerance for bottom check
-        container_height = 0.068  # Container height in meters
-        container_half_height = (
-            container_height / 2
-        )  # Half height for center-based calculation
+        # I got radius and height from the container_metal.obj file
+        container_bottom_radius = 0.1067  # Inner radius
+        z_tolerance = 0.05  # Vertical tolerance
+        container_height = 0.068  # Container height
+        container_half_height = container_height / 2
 
         # Check if blocks are in their matching containers
         cube_1_in_container = self._is_block_in_container(
@@ -123,8 +121,8 @@ class MatchObjectContainerEnv(EmbodiedEnv):
             & cube_2_in_container
             & sphere_1_in_container
             & sphere_2_in_container
-            & container_cube_up
-            & container_sphere_up
+            & ~container_cube_fallen
+            & ~container_sphere_fallen
         )
 
         return success

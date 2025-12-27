@@ -62,7 +62,7 @@ class StackCupsEnv(EmbodiedEnv):
         cup1_pos = cup1_pose[:, :3, 3]  # (num_envs, 3)
         cup2_pos = cup2_pose[:, :3, 3]  # (num_envs, 3)
 
-        # Check if cups haven't fallen (orientation check)
+        # Check if cups haven't fallen
         cup1_fallen = self._is_fall(cup1_pose)
         cup2_fallen = self._is_fall(cup2_pose)
 

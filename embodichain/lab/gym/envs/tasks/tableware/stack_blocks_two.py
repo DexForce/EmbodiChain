@@ -50,8 +50,8 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         try:
             block1 = self.sim.get_rigid_object("block_1")
             block2 = self.sim.get_rigid_object("block_2")
-        except:
-            logger.log_warning("Block1 or Block2 not found, returning False.")
+        except Exception as e:
+            logger.log_warning(f"Block1 or Block2 not found: {e}, returning False.")
             return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # Get poses
