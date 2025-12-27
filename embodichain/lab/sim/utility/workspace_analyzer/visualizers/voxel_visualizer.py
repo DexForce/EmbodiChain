@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Optional, Any, Dict
+from typing import Union, Any, Dict
 from pathlib import Path
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs import (
@@ -48,9 +48,9 @@ class VoxelVisualizer(BaseVisualizer):
         self,
         backend: str = "sim_manager",
         voxel_size: float = 0.01,
-        config: Optional[Dict[str, Any]] = None,
-        sim_manager: Optional[Any] = None,
-        control_part_name: Optional[str] = None,
+        config: Dict[str, Any] | None = None,
+        sim_manager: Any | None = None,
+        control_part_name: str | None = None,
     ):
         """Initialize the voxel visualizer.
 
@@ -70,7 +70,7 @@ class VoxelVisualizer(BaseVisualizer):
     def visualize(
         self,
         points: Union[torch.Tensor, np.ndarray],
-        colors: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        colors: Union[torch.Tensor, np.ndarray] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize points as a voxel grid.

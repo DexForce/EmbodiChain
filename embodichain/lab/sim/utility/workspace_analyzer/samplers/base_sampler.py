@@ -17,7 +17,7 @@
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
-from typing import Optional, Protocol, Union, TYPE_CHECKING
+from typing import Protocol, Union, TYPE_CHECKING
 
 from embodichain.utils import logger
 
@@ -72,7 +72,7 @@ class BaseSampler(ABC):
     def __init__(
         self,
         seed: int = 42,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ):
         """Initialize the base sampler.
 
@@ -90,7 +90,7 @@ class BaseSampler(ABC):
             torch.cuda.manual_seed(seed)
 
     def sample(
-        self, num_samples: int, bounds: Optional[Union[torch.Tensor, np.ndarray]] = None
+        self, num_samples: int, bounds: torch.Tensor | np.ndarray | None = None
     ) -> torch.Tensor:
         """Generate samples within the given bounds.
 

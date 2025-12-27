@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Optional, TYPE_CHECKING
+from typing import Union, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -49,7 +49,7 @@ class RandomSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ):
         """Initialize the random sampler.
 

@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 import torch
 
@@ -26,7 +26,7 @@ class BaseMetric(ABC):
     All metrics should inherit from this class and implement the compute method.
     """
 
-    def __init__(self, config: Optional[Any] = None):
+    def __init__(self, config: Any | None = None):
         """Initialize the metric.
 
         Args:
@@ -39,7 +39,7 @@ class BaseMetric(ABC):
     def compute(
         self,
         workspace_points: np.ndarray,
-        joint_configurations: Optional[np.ndarray] = None,
+        joint_configurations: np.ndarray | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Compute the metric.

@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from abc import ABC, abstractmethod
-from typing import Union, Optional
+from typing import Union
 import numpy as np
 import torch
 
@@ -70,10 +70,10 @@ class BaseConstraintChecker(ABC):
 
     def __init__(
         self,
-        min_bounds: Optional[np.ndarray] = None,
-        max_bounds: Optional[np.ndarray] = None,
+        min_bounds: np.ndarray | None = None,
+        max_bounds: np.ndarray | None = None,
         ground_height: float = 0.0,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ):
         """Initialize the constraint checker.
 

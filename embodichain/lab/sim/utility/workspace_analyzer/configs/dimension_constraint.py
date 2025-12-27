@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 import numpy as np
 
 
@@ -23,10 +23,10 @@ import numpy as np
 class DimensionConstraint:
     """Configuration for dimensional constraints in workspace analysis."""
 
-    min_bounds: Optional[np.ndarray] = None
+    min_bounds: np.ndarray | None = None
     """Minimum bounds for workspace [x_min, y_min, z_min] in meters."""
 
-    max_bounds: Optional[np.ndarray] = None
+    max_bounds: np.ndarray | None = None
     """Maximum bounds for workspace [x_max, y_max, z_max] in meters."""
 
     joint_limits_scale: float = 1.0

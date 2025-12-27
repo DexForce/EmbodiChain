@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 import numpy as np
 
 
@@ -57,7 +57,7 @@ class BaseCache(ABC):
         pass
 
     @abstractmethod
-    def get_all(self) -> Optional[List[np.ndarray]]:
+    def get_all(self) -> List[np.ndarray] | None:
         """Retrieve all cached poses.
 
         Returns:

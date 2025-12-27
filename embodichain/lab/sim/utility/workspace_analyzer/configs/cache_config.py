@@ -16,7 +16,6 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -26,7 +25,7 @@ class CacheConfig:
     enabled: bool = True
     """Whether to enable caching of analysis results."""
 
-    cache_dir: Optional[Path] = None
+    cache_dir: Path | None = None
     """Directory to store cache files. If None, uses default system cache directory."""
 
     use_hash: bool = True

@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Optional, Union, TYPE_CHECKING
+from typing import Union, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -52,8 +52,8 @@ class UniformSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        samples_per_dim: Optional[int] = None,
-        device: Optional[torch.device] = None,
+        samples_per_dim: int | None = None,
+        device: torch.device | None = None,
     ):
         """Initialize the uniform sampler.
 

@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Optional
+from typing import Union
 
 try:
     from scipy.stats import qmc
@@ -67,9 +67,9 @@ class LatinHypercubeSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         strength: int = 1,
-        optimization: Optional[str] = "random-cd",
+        optimization: str | None = "random-cd",
     ):
         """Initialize the Latin Hypercube sampler.
 

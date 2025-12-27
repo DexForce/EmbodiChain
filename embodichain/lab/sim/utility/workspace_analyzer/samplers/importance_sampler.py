@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Callable, Optional, Union, TYPE_CHECKING
+from typing import Callable, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -62,7 +62,7 @@ class ImportanceSampler(BaseSampler):
         self,
         weight_fn: Callable[[torch.Tensor], torch.Tensor],
         seed: int = 42,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         num_candidates: int = 10,
         method: str = "rejection",
     ):

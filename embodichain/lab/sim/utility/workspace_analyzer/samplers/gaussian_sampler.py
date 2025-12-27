@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Optional
+from typing import Union
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -58,8 +58,8 @@ class GaussianSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: Optional[torch.device] = None,
-        mean: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        device: torch.device | None = None,
+        mean: torch.Tensor | np.ndarray | None = None,
         std: Union[float, torch.Tensor, np.ndarray] = 0.3,
         clip_to_bounds: bool = True,
     ):

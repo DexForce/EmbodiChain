@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Optional, Literal
+from typing import Literal
 
 from embodichain.lab.sim.utility.workspace_analyzer.caches.base_cache import BaseCache
 from embodichain.lab.sim.utility.workspace_analyzer.caches.memory_cache import (
@@ -41,7 +41,7 @@ class CacheManager:
     @staticmethod
     def create_cache(
         cache_mode: Literal["memory", "disk"],
-        save_dir: Optional[str] = None,
+        save_dir: str | None = None,
         batch_size: int = 5000,
         save_threshold: int = 10000000,
         use_cached: bool = True,
@@ -79,7 +79,7 @@ class CacheManager:
             return MemoryCache(batch_size=batch_size, save_threshold=save_threshold)
 
     @staticmethod
-    def create_cache_from_config(config: CacheConfig) -> Optional[BaseCache]:
+    def create_cache_from_config(config: CacheConfig) -> BaseCache | None:
         """Create a cache instance from a CacheConfig object.
 
         Args:

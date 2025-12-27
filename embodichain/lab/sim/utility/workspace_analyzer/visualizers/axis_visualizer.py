@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Optional, Union, Dict, Any
+from typing import Union, Dict, Any
 from pathlib import Path
 
 try:
@@ -63,10 +63,10 @@ class AxisVisualizer(BaseVisualizer):
         backend: str = "sim_manager",
         axis_length: float = 0.15,
         axis_size: float = 0.005,
-        config: Optional[Dict[str, Any]] = None,
-        sim_manager: Optional[Any] = None,
-        control_part_name: Optional[str] = None,
-        reference_pose: Optional[Union[np.ndarray, torch.Tensor]] = None,
+        config: Dict[str, Any] | None = None,
+        sim_manager: Any | None = None,
+        control_part_name: str | None = None,
+        reference_pose: Union[np.ndarray, torch.Tensor] | None = None,
         arena_index: int = 0,
     ):
         """Initialize the axis visualizer.
@@ -93,7 +93,7 @@ class AxisVisualizer(BaseVisualizer):
     def visualize(
         self,
         poses: Union[torch.Tensor, np.ndarray],
-        colors: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        colors: Union[torch.Tensor, np.ndarray] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize coordinate axes at specified poses or points.

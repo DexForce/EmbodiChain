@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Union, List, Tuple, Optional
+from typing import Union, List, Tuple
 import numpy as np
 import torch
 
@@ -45,11 +45,11 @@ class WorkspaceConstraintChecker(BaseConstraintChecker):
 
     def __init__(
         self,
-        min_bounds: Optional[np.ndarray] = None,
-        max_bounds: Optional[np.ndarray] = None,
+        min_bounds: np.ndarray | None = None,
+        max_bounds: np.ndarray | None = None,
         ground_height: float = 0.0,
-        exclude_zones: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
-        device: Optional[torch.device] = None,
+        exclude_zones: List[Tuple[np.ndarray, np.ndarray]] | None = None,
+        device: torch.device | None = None,
     ):
         """Initialize the workspace constraint checker.
 
@@ -65,7 +65,7 @@ class WorkspaceConstraintChecker(BaseConstraintChecker):
 
     @classmethod
     def from_config(
-        cls, config: DimensionConstraint, device: Optional[torch.device] = None
+        cls, config: DimensionConstraint, device: torch.device | None = None
     ):
         """Create a constraint checker from a DimensionConstraint config (recommended approach).
 

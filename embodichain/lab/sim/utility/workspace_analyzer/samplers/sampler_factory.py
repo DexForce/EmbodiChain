@@ -14,8 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Dict, Type, Optional, Any, Union
+from __future__ import annotations
+from typing import Dict, Type, Any, Union
 from threading import Lock
+
 import torch
 import numpy as np
 
@@ -76,7 +78,7 @@ class SamplerFactory:
         >>> custom_sampler = factory.create_sampler("custom", seed=42)
     """
 
-    _instance: Optional["SamplerFactory"] = None
+    _instance: SamplerFactory | None = None
     _lock: Lock = Lock()
 
     def __new__(cls):
@@ -149,7 +151,7 @@ class SamplerFactory:
         logger.log_info(f"Registered sampler '{name}': {sampler_class.__name__}")
 
     def create_sampler(
-        self, strategy: Optional[SamplingStrategy | str] = None, **kwargs: Any
+        self, strategy: SamplingStrategy | str | None = None, **kwargs: Any
     ) -> BaseSampler:
         """Create a sampler instance based on the strategy.
 
@@ -248,7 +250,7 @@ class SamplerFactory:
 
 # Convenience function for creating samplers
 def create_sampler(
-    strategy: Optional[SamplingStrategy | str] = None, **kwargs: Any
+    strategy: SamplingStrategy | str | None = None, **kwargs: Any
 ) -> BaseSampler:
     """Convenience function to create a sampler.
 

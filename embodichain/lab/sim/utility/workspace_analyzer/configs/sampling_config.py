@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Callable
 
 
 class SamplingStrategy(Enum):
@@ -50,13 +50,13 @@ class SamplingConfig:
     seed: int = 42
     """Random seed for reproducibility."""
 
-    importance_weight_func: Optional[Callable] = None
+    importance_weight_func: Callable | None = None
     """Weight function for importance sampling (used with IMPORTANCE strategy)."""
 
-    gaussian_mean: Optional[float] = None
+    gaussian_mean: float | None = None
     """Mean for Gaussian sampling (used with GAUSSIAN strategy). If None, uses center of bounds."""
 
-    gaussian_std: Optional[float] = None
+    gaussian_std: float | None = None
     """Standard deviation for Gaussian sampling (used with GAUSSIAN strategy). If None, uses 1/6 of range."""
 
     # Sphere sampling parameters
@@ -69,10 +69,10 @@ class SamplingConfig:
     sphere_boundary_handling: str = "reject"
     """How to handle boundary violations for SPHERE strategy. Options: 'clip', 'reject', 'extend'."""
 
-    sphere_center: Optional[list] = None
+    sphere_center: list | None = None
     """Custom sphere center for SPHERE strategy (used when sphere_center_mode='custom')."""
 
-    sphere_radius: Optional[float] = None
+    sphere_radius: float | None = None
     """Custom sphere radius for SPHERE strategy (used when sphere_radius_mode='custom')."""
 
     def __post_init__(self):

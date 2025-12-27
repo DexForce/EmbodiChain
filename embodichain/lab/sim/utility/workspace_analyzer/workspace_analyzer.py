@@ -23,7 +23,7 @@ from enum import Enum
 from pathlib import Path
 from dataclasses import dataclass
 from contextlib import contextmanager
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Dict, Any
 import os
 import sys
 
@@ -94,35 +94,35 @@ class WorkspaceAnalyzerConfig:
 
     ik_samples_per_point: int = 1
     """For Cartesian mode: number of random joint seeds to try for each Cartesian point."""
-    reference_pose: Optional[Any] = None
+    reference_pose: Any | None = None
     """Optional reference pose (4x4 matrix) for IK target orientation. If None, uses current robot pose."""
-    control_part_name: Optional[str] = None
+    control_part_name: str | None = None
     """Name of the control part (e.g., 'left_arm', 'right_arm'). If None, uses the default solver or first available control part."""
 
     # Plane sampling parameters
     enable_plane_sampling: bool = False
     """Whether to enable plane sampling functionality (uses existing samplers directly)"""
 
-    plane_normal: Optional[torch.Tensor] = None
+    plane_normal: torch.Tensor | None = None
     """Normal vector of the plane for plane sampling [nx, ny, nz]"""
 
-    plane_point: Optional[torch.Tensor] = None
+    plane_point: torch.Tensor | None = None
     """A point on the plane for plane sampling [x, y, z]"""
 
-    plane_bounds: Optional[torch.Tensor] = None
+    plane_bounds: torch.Tensor | None = None
     """Bounds for 2D plane coordinates [[u_min, u_max], [v_min, v_max]]"""
 
     # Geometric constraint parameters for sampling
-    constraint_type: Optional[str] = None
+    constraint_type: str | None = None
     """Type of geometric constraint: 'box', 'sphere', None. If None, no constraint applied."""
 
-    constraint_bounds: Optional[torch.Tensor] = None
+    constraint_bounds: torch.Tensor | None = None
     """Bounds for constraint: For box: [[x_min, x_max], [y_min, y_max], ...]. For sphere: used to auto-calculate radius if sphere_radius is None."""
 
-    sphere_center: Optional[torch.Tensor] = None
+    sphere_center: torch.Tensor | None = None
     """Center point for sphere constraint [x, y, z, ...]. If None and constraint_type='sphere', calculated from constraint_bounds."""
 
-    sphere_radius: Optional[float] = None
+    sphere_radius: float | None = None
     """Radius for sphere constraint. If None and constraint_type='sphere', auto-calculated from constraint_bounds."""
 
     sphere_radius_mode: str = "inscribed"
@@ -160,8 +160,8 @@ class WorkspaceAnalyzer:
     def __init__(
         self,
         robot: Robot,
-        config: Optional[WorkspaceAnalyzerConfig] = None,
-        sim_manager: Optional[SimulationManager] = None,
+        config: WorkspaceAnalyzerConfig | None = None,
+        sim_manager: SimulationManager | None = None,
     ):
         """Initialize the workspace analyzer.
 
@@ -196,15 +196,13 @@ class WorkspaceAnalyzer:
         self.constraint_checker = self._create_constraint_checker()
 
         # Storage for analysis results
-        self.workspace_points: Optional[torch.Tensor] = None
-        self.joint_configurations: Optional[torch.Tensor] = None
+        self.workspace_points: torch.Tensor | None = None
+        self.joint_configurations: torch.Tensor | None = None
         self.metrics_results: Dict[str, Any] = {}
-        self.current_mode: Optional[AnalysisMode] = None
-        self.success_rates: Optional[torch.Tensor] = None
+        self.current_mode: AnalysisMode | None = None
+        self.success_rates: torch.Tensor | None = None
 
-    def _determine_control_part(
-        self, control_part_name: Optional[str]
-    ) -> Optional[str]:
+    def _determine_control_part(self, control_part_name: str | None) -> str | None:
         """Determine the control part name to use.
 
         Args:
@@ -568,7 +566,7 @@ class WorkspaceAnalyzer:
 
         pbar.set_postfix_str(stats, refresh=False)
 
-    def sample_joint_space(self, num_samples: Optional[int] = None) -> torch.Tensor:
+    def sample_joint_space(self, num_samples: int | None = None) -> torch.Tensor:
         """Sample joint configurations within joint limits.
 
         Args:
@@ -598,7 +596,7 @@ class WorkspaceAnalyzer:
         )
         return joint_samples
 
-    def sample_cartesian_space(self, num_samples: Optional[int] = None) -> torch.Tensor:
+    def sample_cartesian_space(self, num_samples: int | None = None) -> torch.Tensor:
         """Sample Cartesian positions within workspace bounds.
 
         Args:
@@ -651,10 +649,10 @@ class WorkspaceAnalyzer:
 
     def sample_plane(
         self,
-        num_samples: Optional[int] = None,
-        plane_normal: Optional[torch.Tensor] = None,
-        plane_point: Optional[torch.Tensor] = None,
-        plane_bounds: Optional[torch.Tensor] = None,
+        num_samples: int | None = None,
+        plane_normal: torch.Tensor | None = None,
+        plane_point: torch.Tensor | None = None,
+        plane_bounds: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Sample points on a specified plane using existing samplers (ultra-simplified version).
 
@@ -891,7 +889,7 @@ class WorkspaceAnalyzer:
         return self.sampler.sample(num_samples, bounds=plane_bounds)
 
     def compute_workspace_points(
-        self, joint_configs: torch.Tensor, batch_size: Optional[int] = None
+        self, joint_configs: torch.Tensor, batch_size: int | None = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute end-effector positions for given joint configurations.
 
@@ -987,7 +985,7 @@ class WorkspaceAnalyzer:
         return workspace_points, valid_configs
 
     def compute_reachability(
-        self, cartesian_points: torch.Tensor, batch_size: Optional[int] = None
+        self, cartesian_points: torch.Tensor, batch_size: int | None = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute reachability for Cartesian points using IK.
 
@@ -1251,7 +1249,7 @@ class WorkspaceAnalyzer:
 
     def analyze(
         self,
-        num_samples: Optional[int] = None,
+        num_samples: int | None = None,
         force_recompute: bool = False,
         visualize: bool = False,
     ) -> Dict[str, Any]:
@@ -1874,10 +1872,10 @@ class WorkspaceAnalyzer:
 
     def visualize(
         self,
-        vis_type: Optional[VisualizationType] = None,
+        vis_type: VisualizationType | str | None = None,
         show: bool = True,
-        save_path: Optional[str] = None,
-        backend: Optional[str] = None,
+        save_path: str | None = None,
+        backend: str | None = None,
     ) -> Any:
         """Visualize the workspace.
 
@@ -1996,7 +1994,7 @@ class WorkspaceAnalyzer:
 
         return vis_obj
 
-    def _load_from_cache(self) -> Optional[Dict[str, Any]]:
+    def _load_from_cache(self) -> dict[str, Any] | None:
         """Load analysis results from cache."""
         if self.cache is None:
             return None

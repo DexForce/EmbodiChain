@@ -17,7 +17,7 @@
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
-from typing import Optional, Protocol, Union, Dict, Any, Tuple
+from typing import Protocol, Union, Dict, Any, Tuple
 from pathlib import Path
 
 try:
@@ -56,7 +56,7 @@ class IVisualizer(Protocol):
     def visualize(
         self,
         points: Union[torch.Tensor, np.ndarray],
-        colors: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        colors: Union[torch.Tensor, np.ndarray] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize the workspace data.
@@ -100,9 +100,7 @@ class BaseVisualizer(ABC):
         config: Configuration dictionary for visualization parameters.
     """
 
-    def __init__(
-        self, backend: str = "open3d", config: Optional[Dict[str, Any]] = None
-    ):
+    def __init__(self, backend: str = "open3d", config: Dict[str, Any] | None = None):
         """Initialize the base visualizer.
 
         Args:
@@ -159,7 +157,7 @@ class BaseVisualizer(ABC):
     def visualize(
         self,
         points: Union[torch.Tensor, np.ndarray],
-        colors: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        colors: Union[torch.Tensor, np.ndarray] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize the workspace data.
@@ -246,8 +244,8 @@ class BaseVisualizer(ABC):
             raise ValueError("Points array is empty")
 
     def _validate_colors(
-        self, colors: Optional[np.ndarray], num_points: int
-    ) -> Optional[np.ndarray]:
+        self, colors: Union[torch.Tensor, np.ndarray] | None, num_points: int
+    ) -> Union[np.ndarray, None]:
         """Validate and normalize the colors array.
 
         Args:

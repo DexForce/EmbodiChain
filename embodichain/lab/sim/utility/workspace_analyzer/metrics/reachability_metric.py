@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 from embodichain.lab.sim.utility.workspace_analyzer.metrics.base_metric import (
     BaseMetric,
@@ -30,7 +30,7 @@ class ReachabilityMetric(BaseMetric):
     Computes reachable workspace volume and coverage statistics.
     """
 
-    def __init__(self, config: Optional[ReachabilityConfig] = None):
+    def __init__(self, config: ReachabilityConfig | None = None):
         """Initialize reachability metric.
 
         Args:
@@ -41,7 +41,7 @@ class ReachabilityMetric(BaseMetric):
     def compute(
         self,
         workspace_points: np.ndarray,
-        joint_configurations: Optional[np.ndarray] = None,
+        joint_configurations: np.ndarray | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Compute reachability metrics.

@@ -14,7 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Dict, Type, Optional, Any
+from __future__ import annotations
+from typing import Dict, Type, Any
 from threading import Lock
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs import (
@@ -77,7 +78,7 @@ class VisualizerFactory:
         >>> custom_viz = factory.create_visualizer("custom")
     """
 
-    _instance: Optional["VisualizerFactory"] = None
+    _instance: VisualizerFactory | None = None
     _lock: Lock = Lock()
 
     def __new__(cls):
@@ -151,7 +152,7 @@ class VisualizerFactory:
         logger.log_info(f"Registered visualizer '{name}': {visualizer_class.__name__}")
 
     def create_visualizer(
-        self, viz_type: Optional[VisualizationType | str] = None, **kwargs: Any
+        self, viz_type: VisualizationType | str | None = None, **kwargs: Any
     ) -> BaseVisualizer:
         """Create a visualizer instance based on the type.
 
@@ -252,7 +253,7 @@ class VisualizerFactory:
 
 # Convenience function for creating visualizers
 def create_visualizer(
-    viz_type: Optional[VisualizationType | str] = None, **kwargs: Any
+    viz_type: VisualizationType | str | None = None, **kwargs: Any
 ) -> BaseVisualizer:
     """Convenience function to create a visualizer.
 

@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import gc
-from typing import List, Optional
+from typing import List
 import numpy as np
 
 from embodichain.lab.sim.utility.workspace_analyzer.caches.base_cache import BaseCache
@@ -59,7 +59,7 @@ class MemoryCache(BaseCache):
         """Flush operation (no-op for memory cache, but triggers GC)."""
         gc.collect()
 
-    def get_all(self) -> Optional[List[np.ndarray]]:
+    def get_all(self) -> List[np.ndarray] | None:
         """Retrieve all cached poses.
 
         Returns:

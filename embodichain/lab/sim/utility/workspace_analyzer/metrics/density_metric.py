@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 from embodichain.lab.sim.utility.workspace_analyzer.metrics.base_metric import (
     BaseMetric,
@@ -30,7 +30,7 @@ class DensityMetric(BaseMetric):
     Computes point density and workspace distribution statistics.
     """
 
-    def __init__(self, config: Optional[DensityConfig] = None):
+    def __init__(self, config: DensityConfig | None = None):
         """Initialize density metric.
 
         Args:
@@ -41,7 +41,7 @@ class DensityMetric(BaseMetric):
     def compute(
         self,
         workspace_points: np.ndarray,
-        joint_configurations: Optional[np.ndarray] = None,
+        joint_configurations: np.ndarray | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Compute density metrics.

@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import Union, Optional
+from typing import Union
 
 try:
     from scipy.stats import qmc
@@ -65,7 +65,7 @@ class SobolSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         scramble: bool = True,
         skip: int = 0,
     ):

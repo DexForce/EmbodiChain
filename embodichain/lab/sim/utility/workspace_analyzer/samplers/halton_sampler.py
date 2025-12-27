@@ -16,7 +16,7 @@
 
 import numpy as np
 import torch
-from typing import List, Optional, Union, TYPE_CHECKING
+from typing import List, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.utility.workspace_analyzer.configs.sampling_config import (
     SamplingStrategy,
@@ -158,8 +158,8 @@ class HaltonSampler(BaseSampler):
     def __init__(
         self,
         seed: int = 42,
-        device: Optional[torch.device] = None,
-        bases: Optional[List[int]] = None,
+        device: torch.device | None = None,
+        bases: List[int] | None = None,
         skip: int = 0,
     ):
         """Initialize the Halton sampler.

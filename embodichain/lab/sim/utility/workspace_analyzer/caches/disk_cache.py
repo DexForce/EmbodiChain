@@ -16,7 +16,7 @@
 
 import gc
 import os
-from typing import List, Optional
+from typing import List
 import numpy as np
 from tqdm import tqdm
 
@@ -57,7 +57,7 @@ class DiskCache(BaseCache):
 
     def __init__(
         self,
-        save_dir: Optional[str] = None,
+        save_dir: str | None = None,
         batch_size: int = 5000,
         save_threshold: int = 10000000,
         use_cached: bool = True,
@@ -141,7 +141,7 @@ class DiskCache(BaseCache):
         if self._buffer:
             self._save_batch()
 
-    def get_all(self) -> Optional[List[np.ndarray]]:
+    def get_all(self) -> List[np.ndarray] | None:
         """Load and merge all batch files from disk.
 
         Returns:

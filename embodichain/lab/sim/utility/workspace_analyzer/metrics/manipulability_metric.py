@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 from embodichain.lab.sim.utility.workspace_analyzer.metrics.base_metric import (
     BaseMetric,
@@ -31,7 +31,7 @@ class ManipulabilityMetric(BaseMetric):
     Note: Full implementation requires robot Jacobian computation.
     """
 
-    def __init__(self, config: Optional[ManipulabilityConfig] = None):
+    def __init__(self, config: ManipulabilityConfig | None = None):
         """Initialize manipulability metric.
 
         Args:
@@ -42,8 +42,8 @@ class ManipulabilityMetric(BaseMetric):
     def compute(
         self,
         workspace_points: np.ndarray,
-        joint_configurations: Optional[np.ndarray] = None,
-        jacobians: Optional[np.ndarray] = None,
+        joint_configurations: np.ndarray | None = None,
+        jacobians: np.ndarray | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Compute manipulability metrics.
