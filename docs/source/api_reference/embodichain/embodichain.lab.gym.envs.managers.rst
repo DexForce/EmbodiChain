@@ -114,13 +114,19 @@ Randomization
 
     .. autosummary::
         
-        rendering
+        physics
+        visual
         spatial
 
-    Rendering 
+    Physics
+    ~~~~~~~~~~~~~~~~~~~~~~~
+    .. automodule:: embodichain.lab.gym.envs.managers.randomization.physics
+         :members:
+
+    Visual 
     ~~~~~~~~~~~~~~~~~~~~~~~
 
-    .. automodule:: embodichain.lab.gym.envs.managers.randomization.rendering
+    .. automodule:: embodichain.lab.gym.envs.managers.randomization.visual
          :members:
 
     Spatial 

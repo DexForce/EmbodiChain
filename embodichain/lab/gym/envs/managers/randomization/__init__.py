@@ -14,7 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .rendering import *
+from .physics import *
+from .visual import *
 from .spatial import *
 
 """
