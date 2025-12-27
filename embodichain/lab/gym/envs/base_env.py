@@ -109,6 +109,7 @@ class BaseEnv(gym.Env):
             self.sim_cfg = SimulationManagerCfg(headless=True)
         else:
             self.sim_cfg = self.cfg.sim_cfg
+            self.sim_cfg.num_envs = self.num_envs
 
         if self.cfg.seed is not None:
             self.cfg.seed = set_seed(self.cfg.seed)
