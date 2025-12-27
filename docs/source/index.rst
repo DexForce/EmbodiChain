@@ -34,6 +34,13 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 1
+   :caption: Features
+   :glob:
+
+   features/workspace_analyzer/index*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Resources
    :glob:
 

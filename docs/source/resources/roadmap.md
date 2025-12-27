@@ -20,7 +20,6 @@ Currently, EmbodiChain is under active development. Our plan for the feature roa
     - Motion Generation:
         - Add more advanced motion generation methods and examples.
     - Useful Tools:
-        - Add a robot workspace analysis tool for better visualization and sampling of robot accessible workspace.
         - We are working on USD support for EmbodiChain to enable better scene creation and asset management.
         - We will release a simple Real2Sim pipeline, which enables automatic task generation from real-world data.
     - Robots Integration:
