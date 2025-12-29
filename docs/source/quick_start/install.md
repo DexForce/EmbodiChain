@@ -14,6 +14,7 @@ The following minimum system requirements are recommended to run EmbodiChain rel
 
 - Python:
     - 3.10
+    - 3.11
 
 Notes:
 
