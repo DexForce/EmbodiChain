@@ -531,7 +531,7 @@ class RigidObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         masses = []
-        for i, env_idx in enumerate(local_env_ids):
+        for _, env_idx in enumerate(local_env_ids):
             mass = self._entities[env_idx].get_physical_body().get_mass()
             masses.append(mass)
 
