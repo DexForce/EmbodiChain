@@ -207,9 +207,8 @@ if __name__ == "__main__":
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cuda")
+    config = SimulationManagerCfg(headless=False, sim_device="cuda", num_envs=2)
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(2)
 
     config = {
         "init_pos": [0.0, 0.0, 1.0],

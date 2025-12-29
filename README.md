@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/github/license/DexForce/EmbodiChain)](LICENSE)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-docs-blue?logo=github&logoColor=white)](https://dexforce.github.io/EmbodiChain/introduction.html)
-[![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
+[![Python](https://img.shields.io/badge/python-3.10%20|%203.11-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
 [![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/DexForce/EmbodiChain/releases)
 
 ---
