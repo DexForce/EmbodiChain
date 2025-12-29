@@ -43,14 +43,6 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
-__all__ = [
-    "randomize_camera_extrinsics",
-    "randomize_light",
-    "randomize_camera_intrinsics",
-    "randomize_visual_material",
-]
-
-
 def randomize_camera_extrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],

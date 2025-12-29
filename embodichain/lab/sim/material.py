@@ -255,9 +255,6 @@ class VisualMaterialInst:
                 texture_data.cpu().numpy(), has_alpha=True
             )
             inst.set_base_color_map(color_texture)
-            import time
-
-            time.sleep(0.6)
 
     def set_metallic_texture(
         self, texture_path: str = None, texture_data: torch.Tensor | None = None
