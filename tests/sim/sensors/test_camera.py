@@ -143,9 +143,19 @@ class TestCameraRaster(CameraTest):
         self.setup_simulation("cpu", enable_rt=False)
 
 
+class TestCameraRaster(CameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=False)
+
+
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
         self.setup_simulation("cpu", enable_rt=True)
+
+
+class TestCameraFastRT(CameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=True)
 
 
 if __name__ == "__main__":

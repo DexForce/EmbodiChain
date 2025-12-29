@@ -195,7 +195,6 @@ class TestArticulationCPU(BaseArticulationTest):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestArticulationCUDA(BaseArticulationTest):
     def setup_method(self):
         self.setup_simulation("cuda")

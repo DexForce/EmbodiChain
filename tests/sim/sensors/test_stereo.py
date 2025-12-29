@@ -149,6 +149,16 @@ class TestStereoCameraRaster(StereoCameraTest):
         self.setup_simulation("cpu", enable_rt=False)
 
 
+class TestStereoCameraRaster(StereoCameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=False)
+
+
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
         self.setup_simulation("cpu", enable_rt=True)
+
+
+class TestStereoCameraFastRT(StereoCameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=True)

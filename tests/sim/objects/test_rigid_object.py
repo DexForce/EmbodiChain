@@ -277,7 +277,6 @@ class TestRigidObjectCPU(BaseRigidObjectTest):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidObjectCUDA(BaseRigidObjectTest):
     def setup_method(self):
         self.setup_simulation("cuda")

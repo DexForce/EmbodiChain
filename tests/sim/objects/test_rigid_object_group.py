@@ -127,7 +127,6 @@ class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):
 
 
 # TODO: Fix CUDA tests issue.
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidObjectGroupCUDA(BaseRigidObjectGroupTest):
     def setup_method(self):
         self.setup_simulation("cuda")
