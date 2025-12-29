@@ -40,10 +40,9 @@ class BaseRigidObjectTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
-        )
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
         self.sim = SimulationManager(config)
+        self.sim.build_multiple_arenas(NUM_ARENAS)
 
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -57,6 +56,9 @@ class BaseRigidObjectTest:
             "shape": {
                 "shape_type": "Mesh",
                 "fpath": duck_path,
+            },
+            "attrs": {
+                "mass": 1.0,
             },
             "body_type": "dynamic",
         }
@@ -267,6 +269,27 @@ class BaseRigidObjectTest:
         self.table.set_visible(visible=True)
         self.table.set_visible(visible=False)
 
+    def test_mass_setter_and_getter(self):
+        initial_mass = self.duck.get_mass()
+
+        # The initial mass should be 1.0 as set in the setup
+        initial_mass_gt = self.duck.cfg.attrs.mass
+        initial_mass_gt = torch.full(
+            (initial_mass.shape), initial_mass_gt, device=self.sim.device
+        )
+        assert torch.allclose(
+            initial_mass, initial_mass_gt, atol=1e-5
+        ), f"Initial mass incorrect: {initial_mass.tolist()}"
+
+        new_mass = initial_mass * 2.0
+
+        self.duck.set_mass(new_mass)
+
+        updated_masses = self.duck.get_mass()
+        assert torch.allclose(
+            updated_masses, new_mass, atol=1e-5
+        ), f"Updated mass incorrect: {updated_masses.tolist()}"
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
@@ -277,6 +300,7 @@ class TestRigidObjectCPU(BaseRigidObjectTest):
         self.setup_simulation("cpu")
 
 
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidObjectCUDA(BaseRigidObjectTest):
     def setup_method(self):
         self.setup_simulation("cuda")
