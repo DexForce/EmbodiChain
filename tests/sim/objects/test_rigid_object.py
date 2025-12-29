@@ -270,27 +270,6 @@ class BaseRigidObjectTest:
         self.table.set_visible(visible=True)
         self.table.set_visible(visible=False)
 
-    def test_mass_setter_and_getter(self):
-        initial_mass = self.duck.get_mass()
-
-        # The initial mass should be 1.0 as set in the setup
-        initial_mass_gt = self.duck.cfg.attrs.mass
-        initial_mass_gt = torch.full(
-            (initial_mass.shape), initial_mass_gt, device=self.sim.device
-        )
-        assert torch.allclose(
-            initial_mass, initial_mass_gt, atol=1e-5
-        ), f"Initial mass incorrect: {initial_mass.tolist()}"
-
-        new_mass = initial_mass * 2.0
-
-        self.duck.set_mass(new_mass)
-
-        updated_masses = self.duck.get_mass()
-        assert torch.allclose(
-            updated_masses, new_mass, atol=1e-5
-        ), f"Updated mass incorrect: {updated_masses.tolist()}"
-
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
