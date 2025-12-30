@@ -499,6 +499,44 @@ class RigidObject(BatchEntity):
             for i, env_idx in enumerate(local_env_ids):
                 self._entities[env_idx].set_physical_attr(attrs[i].attr())
 
+    def set_mass(
+        self, mass: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set mass for the rigid object.
+
+        Args:
+            mass (torch.Tensor): The mass to set with shape (N,).
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(mass):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
+            )
+
+        mass = mass.cpu().numpy()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].get_physical_body().set_mass(mass[i])
+
+    def get_mass(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get mass for the rigid object.
+
+        Args:
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+
+        Returns:
+            torch.Tensor: The mass of the rigid object with shape (N,).
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        masses = []
+        for _, env_idx in enumerate(local_env_ids):
+            mass = self._entities[env_idx].get_physical_body().get_mass()
+            masses.append(mass)
+
+        return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
+
     def set_visual_material(
         self, mat: VisualMaterial, env_ids: Sequence[int] | None = None
     ) -> None:
