@@ -42,7 +42,6 @@ class CobotMagicCfg(RobotCfg):
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:
-        from embodichain.lab.sim.solvers import merge_solver_cfg
 
         cfg = cls()
         default_cfgs = cls()._build_default_cfgs()
