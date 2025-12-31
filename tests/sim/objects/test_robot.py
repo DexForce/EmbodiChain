@@ -254,6 +254,35 @@ class BaseRobotTest:
         )
         self.robot.set_qpos(qpos=dummy_qpos, name="left_arm")
 
+    def test_robot_cfg_merge(self):
+        from copy import deepcopy
+        from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+        cfg = deepcopy(self.robot.cfg)
+
+        cfg_dict = {
+            "drive_pros": {
+                "max_effort": {
+                    "(RIGHT|LEFT)_[A-Z|_]+": 1.0,
+                },
+            },
+            "solver_cfg": {
+                "left_arm": {
+                    "tcp": np.eye(4),
+                }
+            },
+        }
+
+        cfg = merge_robot_cfg(cfg, cfg_dict)
+
+        assert (
+            cfg.drive_pros.max_effort["(RIGHT|LEFT)_[A-Z|_]+"] == 1.0
+        ), "Drive properties merge failed."
+
+        assert np.allclose(
+            cfg.solver_cfg["left_arm"].tcp, np.eye(4)
+        ), "Solver config merge failed."
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
