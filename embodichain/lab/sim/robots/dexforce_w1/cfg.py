@@ -39,6 +39,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RigidBodyAttributesCfg,
 )
+from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass, logger
 
@@ -62,7 +63,6 @@ class DexforceW1Cfg(RobotCfg):
         Returns:
             DexforceW1Cfg: An instance of DexforceW1Cfg with parameters set.
         """
-        from embodichain.lab.sim.solvers import merge_solver_cfg
 
         init_dict_m = init_dict.copy()
         version = init_dict_m.get("version", "v021")
@@ -82,30 +82,7 @@ class DexforceW1Cfg(RobotCfg):
         )
         cfg.solver_cfg = default_solver_cfg
 
-        # override default values with those provided in init_dict.
-        robot_cfg = RobotCfg.from_dict(init_dict_m)
-
-        # set attrs into cfg from the robot_cfg, but merge solver_cfg specially
-        for key, value in init_dict_m.items():
-            if key == "solver_cfg":
-                # merge provided solver_cfg values into default solver config
-                provided_solver_cfg = init_dict_m.get("solver_cfg")
-                if provided_solver_cfg:
-                    for part, item in provided_solver_cfg.items():
-                        if "class_type" in provided_solver_cfg[part]:
-                            cfg.solver_cfg[part] = robot_cfg.solver_cfg[part]
-                        else:
-                            try:
-                                merged = merge_solver_cfg(
-                                    cfg.solver_cfg, provided_solver_cfg
-                                )
-                                cfg.solver_cfg = merged
-                            except Exception:
-                                logger.log_error(
-                                    f"Failed to merge solver_cfg, using provided config outright."
-                                )
-            else:
-                setattr(cfg, key, getattr(robot_cfg, key))
+        cfg = merge_robot_cfg(cfg, init_dict_m)
 
         return cfg
 
@@ -377,6 +354,11 @@ if __name__ == "__main__":
             "uid": "dexforce_w1",
             "version": "v021",
             "arm_kind": "anthropomorphic",
+            "drive_pros": {
+                "max_effort": {
+                    "(RIGHT|LEFT)_[A-Z|_]+": 1,
+                },
+            },
         }
     )
 
