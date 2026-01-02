@@ -67,9 +67,9 @@ class Robot(Articulation):
         entities: List[_Articulation],
         device: torch.device = torch.device("cpu"),
     ) -> None:
-        super().__init__(cfg, entities, device)
 
-        self._solvers = {}
+        self._entities = entities
+        self.cfg = cfg
 
         # Initialize joint ids for control parts.
         self._joint_ids: Dict[str, List[int]] = {}
@@ -78,6 +78,10 @@ class Robot(Articulation):
 
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
+
+        super().__init__(cfg, entities, device)
+
+        self._solvers = {}
 
         if self.cfg.solver_cfg:
             self.init_solver(self.cfg.solver_cfg)
@@ -763,7 +767,10 @@ class Robot(Articulation):
             control_parts (Dict[str, List[str]]): A dictionary where keys are control part names and values are lists of
                 joint names or regular expressions that match joint names.
         """
-        joint_name_to_ids = {name: i for i, name in enumerate(self.joint_names)}
+        joint_name_to_ids = {
+            name: i
+            for i, name in enumerate(self._entities[0].get_actived_joint_names())
+        }
         for name, joint_names in control_parts.items():
             # convert joint_names which is a regular expression to a list of joint names
             joint_names_expanded = []
@@ -789,6 +796,65 @@ class Robot(Articulation):
 
         # Initialize control groups
         self._control_groups = self._extract_control_groups()
+
+    def _set_default_joint_drive(self) -> None:
+        """Set default joint drive parameters based on the configuration."""
+        import numbers
+        from embodichain.utils.string import resolve_matching_names_values
+
+        drive_props = [
+            ("damping", self.default_joint_damping),
+            ("stiffness", self.default_joint_stiffness),
+            ("max_effort", self.default_joint_max_effort),
+            ("max_velocity", self.default_joint_max_velocity),
+            ("friction", self.default_joint_friction),
+        ]
+
+        for prop_name, default_array in drive_props:
+            value = getattr(self.cfg.drive_pros, prop_name, None)
+            if value is None:
+                continue
+            if isinstance(value, numbers.Number):
+                default_array[:] = value
+            else:
+                try:
+                    if self.control_parts:
+                        # Extract control part and map the corresponding joint names
+                        value_copy = value.copy()
+                        for key in value.keys():
+                            if key in self.control_parts:
+                                joint_names = self.control_parts[key]
+                                value_copy.pop(key)
+                                for jn in joint_names:
+                                    value_copy[jn] = value[key]
+
+                    indices, _, values = resolve_matching_names_values(
+                        value_copy, self.joint_names
+                    )
+                    from IPython import embed
+
+                    embed()
+                    default_array[:, indices] = torch.as_tensor(
+                        values, dtype=torch.float32, device=self.device
+                    )
+                except Exception as e:
+                    logger.log_error(f"Failed to set {prop_name}: {e}")
+
+        drive_pros = self.cfg.drive_pros
+        if isinstance(drive_pros, dict):
+            drive_type = drive_pros.get("drive_type", None)
+        else:
+            drive_type = getattr(drive_pros, "drive_type", None)
+
+        # Apply drive parameters to all articulations in the batch
+        self.set_drive(
+            stiffness=self.default_joint_stiffness,
+            damping=self.default_joint_damping,
+            max_effort=self.default_joint_max_effort,
+            max_velocity=self.default_joint_max_velocity,
+            friction=self.default_joint_friction,
+            drive_type=drive_type,
+        )
 
     def init_solver(self, cfg: Union[SolverCfg, Dict[str, SolverCfg]]) -> None:
         """Initialize the kinematic solver for the robot.

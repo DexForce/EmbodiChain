@@ -221,8 +221,6 @@ class DexforceW1Cfg(RobotCfg):
             "min_position_iters": 32,
             "min_velocity_iters": 8,
             "drive_pros": drive_pros,
-            # TODO: we may use the some properties from URDF as default values
-            # eg. mass, friction, damping, etc.
             "attrs": RigidBodyAttributesCfg(
                 mass=1.0,
                 static_friction=0.95,

@@ -104,7 +104,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                                 f"Failed to merge solver_cfg, using provided config outright."
                             )
         elif key == "drive_pros":
-            # merge drive_pros
+            # merge joint drive properties
             user_drive_pros_dict = override_cfg_dict.get("drive_pros")
             if isinstance(user_drive_pros_dict, dict):
                 for prop, val in user_drive_pros_dict.items():
@@ -118,7 +118,19 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         # Overwrite if not both dicts
                         setattr(base_cfg.drive_pros, prop, val)
             else:
-                setattr(base_cfg, key, getattr(robot_cfg, key))
+                logger.log_warning(
+                    "drive_pros should be a dictionary. Skipping drive_pros merge."
+                )
+        elif key == "attrs":
+            # merge physics attributes
+            user_attrs_dict = override_cfg_dict.get("attrs")
+            if isinstance(user_attrs_dict, dict):
+                for attr_key, attr_val in user_attrs_dict.items():
+                    setattr(base_cfg.attrs, attr_key, attr_val)
+            else:
+                logger.log_warning(
+                    "attrs should be a dictionary. Skipping attrs merge."
+                )
         else:
             setattr(base_cfg, key, getattr(robot_cfg, key))
 
