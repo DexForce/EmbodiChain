@@ -199,9 +199,9 @@ class DexforceW1Cfg(RobotCfg):
             "max_effort": 1e3,
         }
 
-        DEFAULT_EEF_HAND_JOINT_NAMES = ["(RIGHT|LEFT)_[A-Z|_]+"]
+        DEFAULT_EEF_HAND_JOINT_NAMES = "(RIGHT|LEFT)_[A-Z|_]+"
 
-        DEFAULT_EEF_GRIPPER_JOINT_NAMES = ["(LEFT|RIGHT)_FINGER[1-2]"]
+        DEFAULT_EEF_GRIPPER_JOINT_NAMES = "(LEFT|RIGHT)_FINGER[1-2]"
 
         # Define common joint patterns
         ARM_JOINTS = "(RIGHT|LEFT)_J[0-9]"

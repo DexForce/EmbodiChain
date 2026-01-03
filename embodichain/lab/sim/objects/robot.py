@@ -186,7 +186,7 @@ class Robot(Articulation):
             env_ids (Sequence[int] | None): The environment ids to get the qvel limits for. If None, all environments are used.
 
         Returns:
-            torch.Tensor: Joint velocity limits with shape (N, dof, 2), where N is the number of environments.
+            torch.Tensor: Joint velocity limits with shape (N, dof), where N is the number of environments.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -199,7 +199,7 @@ class Robot(Articulation):
                     f"The control part '{name}' does not exist in the robot's control parts."
                 )
             part_joint_ids = self.get_joint_ids(name=name)
-            return qvel_limits[local_env_ids][:, part_joint_ids, :]
+            return qvel_limits[local_env_ids][:, part_joint_ids]
 
     def get_qf_limits(
         self, name: str | None = None, env_ids: Sequence[int] | None = None
@@ -213,7 +213,7 @@ class Robot(Articulation):
             env_ids (Sequence[int] | None): The environment ids to get the qf limits for. If None, all environments are used.
 
         Returns:
-            torch.Tensor: Joint effort limits with shape (N, dof, 2), where N is the number of environments.
+            torch.Tensor: Joint effort limits with shape (N, dof), where N is the number of environments.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -226,7 +226,7 @@ class Robot(Articulation):
                     f"The control part '{name}' does not exist in the robot's control parts."
                 )
             part_joint_ids = self.get_joint_ids(name=name)
-            return qf_limits[local_env_ids][:, part_joint_ids, :]
+            return qf_limits[local_env_ids][:, part_joint_ids]
 
     def get_proprioception(self) -> Dict[str, torch.Tensor]:
         """Gets robot proprioception information, primarily for agent state representation in robot learning scenarios.

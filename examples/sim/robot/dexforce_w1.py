@@ -28,7 +28,7 @@ from embodichain.lab.sim.robots import DexforceW1Cfg
 def main():
     np.set_printoptions(precision=5, suppress=True)
 
-    config = SimulationManagerCfg(headless=True)
+    config = SimulationManagerCfg()
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict(
@@ -53,6 +53,12 @@ def main():
                     },
                 ]
             },
+            "drive_pros": {
+                "max_effort": {
+                    "left_eef": 10.0,
+                    "right_eef": 10.0,
+                }
+            },
         }
     )
 
@@ -60,13 +66,9 @@ def main():
     sim.update(step=1)
     print("DexforceW1 with a user defined end-effector added to the simulation.")
 
-    while True:
-        try:
-            sim.update(step=1)
-        except KeyboardInterrupt:
-            break
+    from IPython import embed
 
-    sim.destroy()
+    embed()
 
 
 if __name__ == "__main__":
