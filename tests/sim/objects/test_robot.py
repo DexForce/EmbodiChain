@@ -263,7 +263,7 @@ class BaseRobotTest:
         cfg_dict = {
             "drive_pros": {
                 "max_effort": {
-                    "(RIGHT|LEFT)_[A-Z|_]+": 1.0,
+                    "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)": 1.0,
                 },
             },
             "solver_cfg": {
@@ -276,7 +276,10 @@ class BaseRobotTest:
         cfg = merge_robot_cfg(cfg, cfg_dict)
 
         assert (
-            cfg.drive_pros.max_effort["(RIGHT|LEFT)_[A-Z|_]+"] == 1.0
+            cfg.drive_pros.max_effort[
+                "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)"
+            ]
+            == 1.0
         ), "Drive properties merge failed."
 
         assert np.allclose(
