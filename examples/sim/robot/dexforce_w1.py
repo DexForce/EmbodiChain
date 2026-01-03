@@ -28,7 +28,7 @@ from embodichain.lab.sim.robots import DexforceW1Cfg
 def main():
     np.set_printoptions(precision=5, suppress=True)
 
-    config = SimulationManagerCfg()
+    config = SimulationManagerCfg(headless=True)
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict(

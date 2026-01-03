@@ -54,12 +54,12 @@ class DexforceW1Cfg(RobotCfg):
 
     @classmethod
     def from_dict(
-        cls, init_dict: typing.Dict[str, typing.Union[str, float, tuple]]
+        cls, init_dict: Dict[str, str | float | tuple | dict]
     ) -> DexforceW1Cfg:
         """Initialize DexforceW1Cfg from a dictionary.
 
         Args:
-            init_dict (Dict[str, Union[str, float, tuple]]): Dictionary of configuration parameters.
+            init_dict (Dict[str, str | float | tuple | dict): Dictionary of configuration parameters.
 
         Returns:
             DexforceW1Cfg: An instance of DexforceW1Cfg with parameters set.
@@ -289,6 +289,7 @@ class DexforceW1Cfg(RobotCfg):
         )
         cfg.version = DexforceW1Version(version)
         cfg.arm_kind = DexforceW1ArmKind(arm_kind)
+        cfg.with_default_eef = with_default_eef
 
         return cfg
 
@@ -375,11 +376,7 @@ if __name__ == "__main__":
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict(
-        {
-            "uid": "dexforce_w1",
-            "version": "v021",
-            "arm_kind": "anthropomorphic",
-        }
+        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
     )
 
     robot = sim.add_robot(cfg=cfg)
