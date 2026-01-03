@@ -131,6 +131,30 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."
                 )
+        elif key == "control_parts":
+            # merge control parts
+            user_control_parts_dict = override_cfg_dict.get("control_parts")
+            if isinstance(user_control_parts_dict, dict):
+                for part_key, part_val in user_control_parts_dict.items():
+                    base_cfg.control_parts[part_key] = part_val
+            else:
+                logger.log_warning(
+                    "control_parts should be a dictionary. Skipping control_parts merge."
+                )
+        elif key == "urdf_cfg":
+            # merge urdf components
+            user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
+            if isinstance(user_urdf_cfg, dict):
+                for component in user_urdf_cfg.get("components", []):
+                    base_cfg.urdf_cfg.add_component(
+                        component_type=component.get("component_type"),
+                        urdf_path=component.get("urdf_path"),
+                        transform=component.get("transform"),
+                    )
+            else:
+                logger.log_warning(
+                    "urdf_cfg should be a dictionary. Skipping urdf_cfg merge."
+                )
         else:
             setattr(base_cfg, key, getattr(robot_cfg, key))
 

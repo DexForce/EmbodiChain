@@ -818,22 +818,31 @@ class Robot(Articulation):
                 default_array[:] = value
             else:
                 try:
+                    control_part_dict = {}
+                    value_copy = value.copy()
                     if self.control_parts:
                         # Extract control part and map the corresponding joint names
-                        value_copy = value.copy()
                         for key in value.keys():
                             if key in self.control_parts:
-                                joint_names = self.control_parts[key]
-                                value_copy.pop(key)
-                                for jn in joint_names:
-                                    value_copy[jn] = value[key]
+                                control_part_dict[key] = value_copy.pop(key)
 
                     indices, _, values = resolve_matching_names_values(
                         value_copy, self.joint_names
                     )
-                    from IPython import embed
 
-                    embed()
+                    if self.control_parts:
+                        # Add control part joints to indices and values
+                        for part_name, part_value in control_part_dict.items():
+                            part_joint_names = self.control_parts[part_name]
+                            part_indices, _, part_values = (
+                                resolve_matching_names_values(
+                                    {jn: part_value for jn in part_joint_names},
+                                    self.joint_names,
+                                )
+                            )
+                            indices.extend(part_indices)
+                            values.extend(part_values)
+
                     default_array[:, indices] = torch.as_tensor(
                         values, dtype=torch.float32, device=self.device
                     )

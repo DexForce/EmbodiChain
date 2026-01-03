@@ -842,6 +842,9 @@ class URDFCfg:
                     logger.log_error(f"URDF path '{urdf_path}' does not exist.")
                     raise FileNotFoundError(f"URDF path '{urdf_path}' does not exist.")
 
+        if transform is None:
+            transform = np.eye(4)
+
         self.components[component_type] = {
             "urdf_path": urdf_path,
             "transform": np.array(transform),
@@ -1020,12 +1023,9 @@ class RobotCfg(ArticulationCfg):
     from embodichain.lab.sim.solvers import SolverCfg
 
     """Configuration for a robot asset in the simulation.
-
-    # TODO: solver and motion planner may not be configurable inside the robot.
-    # But currently we put them here and could be moved if necessary.
     """
 
-    control_parts: Union[Dict[str, List[str]], None] = None
+    control_parts: Dict[str, List[str]] | None = None
     """Control parts is the mapping from part name to joint names.
 
     For example, {'left_arm': ['joint1', 'joint2'], 'right_arm': ['joint3', 'joint4']}
@@ -1036,6 +1036,9 @@ class RobotCfg(ArticulationCfg):
             keys corresponding to the control parts name.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
+        - `Robot` is a derived class of `Articulation`, with contorl parts support. So the `drive_pros`
+            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
+            which will be orverridden if these joint names are already specified.
     """
 
     urdf_cfg: URDFCfg | None = None
