@@ -93,12 +93,14 @@ def generate_function(
             if not valid:
                 break
 
-            if not debug_mode:
+            if not debug_mode and env.is_task_success().item():
                 dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
-                data_dict = env.to_dataset()
+                data_dict = env.to_dataset(
+                    repo_id=dataset_id,
+                )
                 ret.append(data_dict)
 
-            # TODO: Add data saving and online data streaming logic here.
+                # TODO: Add data saving and online data streaming logic here.
 
             else:
                 log_warning(f"Task fail, Skip to next generation.")
@@ -119,7 +121,8 @@ def main(args, env, gym_config):
     log_info("Start offline data generation.", color="green")
     # TODO: Support multiple trajectories per episode generation.
     num_traj = 1
-    for i in range(gym_config["max_episodes"]):
+    # run env with maximum trajectory number
+    for i in range(env.n_trajectory):
         generate_function(
             env,
             num_traj,
@@ -191,8 +194,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # if args.num_envs != 1:
-    #     log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+    if args.num_envs != 1:
+        log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
 
     gym_config = load_json(args.gym_config)
     cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)
