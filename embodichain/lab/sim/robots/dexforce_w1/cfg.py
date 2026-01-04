@@ -39,6 +39,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RigidBodyAttributesCfg,
 )
+from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass, logger
 
@@ -62,7 +63,6 @@ class DexforceW1Cfg(RobotCfg):
         Returns:
             DexforceW1Cfg: An instance of DexforceW1Cfg with parameters set.
         """
-        from embodichain.lab.sim.solvers import merge_solver_cfg
 
         init_dict_m = init_dict.copy()
         version = init_dict_m.get("version", "v021")
@@ -82,30 +82,7 @@ class DexforceW1Cfg(RobotCfg):
         )
         cfg.solver_cfg = default_solver_cfg
 
-        # override default values with those provided in init_dict.
-        robot_cfg = RobotCfg.from_dict(init_dict_m)
-
-        # set attrs into cfg from the robot_cfg, but merge solver_cfg specially
-        for key, value in init_dict_m.items():
-            if key == "solver_cfg":
-                # merge provided solver_cfg values into default solver config
-                provided_solver_cfg = init_dict_m.get("solver_cfg")
-                if provided_solver_cfg:
-                    for part, item in provided_solver_cfg.items():
-                        if "class_type" in provided_solver_cfg[part]:
-                            cfg.solver_cfg[part] = robot_cfg.solver_cfg[part]
-                        else:
-                            try:
-                                merged = merge_solver_cfg(
-                                    cfg.solver_cfg, provided_solver_cfg
-                                )
-                                cfg.solver_cfg = merged
-                            except Exception:
-                                logger.log_error(
-                                    f"Failed to merge solver_cfg, using provided config outright."
-                                )
-            else:
-                setattr(cfg, key, getattr(robot_cfg, key))
+        cfg = merge_robot_cfg(cfg, init_dict_m)
 
         return cfg
 
@@ -129,6 +106,22 @@ class DexforceW1Cfg(RobotCfg):
                 arm_kind=DexforceW1ArmKind.INDUSTRIAL,
                 version=DexforceW1Version.V021,
             )
+            left_arm_tcp = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.15],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+            right_arm_tcp = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.15],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
         else:
             w1_left_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.LEFT,
@@ -139,6 +132,22 @@ class DexforceW1Cfg(RobotCfg):
                 arm_side=DexforceW1ArmSide.RIGHT,
                 arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
                 version=DexforceW1Version.V021,
+            )
+            left_arm_tcp = np.array(
+                [
+                    [-1.0, 0.0, 0.0, 0.012],
+                    [0.0, 0.0, 1.0, 0.0675],
+                    [0.0, 1.0, 0.0, 0.127],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+            right_arm_tcp = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.012],
+                    [0.0, 0.0, -1.0, -0.0675],
+                    [0.0, 1.0, 0.0, 0.127],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
             )
 
         return {
@@ -151,14 +160,7 @@ class DexforceW1Cfg(RobotCfg):
                 T_b_ob=w1_right_arm_params.T_b_ob,
                 link_lengths=w1_right_arm_params.link_lengths,
                 rotation_directions=w1_right_arm_params.rotation_directions,
-                tcp=np.array(
-                    [
-                        [1.0, 0.0, 0.0, 0.012],
-                        [0.0, 0.0, -1.0, -0.0675],
-                        [0.0, 1.0, 0.0, 0.127],
-                        [0.0, 0.0, 0.0, 1.0],
-                    ]
-                ),
+                tcp=right_arm_tcp,
             ),
             "left_arm": SRSSolverCfg(
                 end_link_name="left_ee",
@@ -169,14 +171,7 @@ class DexforceW1Cfg(RobotCfg):
                 T_b_ob=w1_left_arm_params.T_b_ob,
                 link_lengths=w1_left_arm_params.link_lengths,
                 rotation_directions=w1_left_arm_params.rotation_directions,
-                tcp=np.array(
-                    [
-                        [-1.0, 0.0, 0.0, 0.012],
-                        [0.0, 0.0, 1.0, 0.0675],
-                        [0.0, 1.0, 0.0, 0.127],
-                        [0.0, 0.0, 0.0, 1.0],
-                    ]
-                ),
+                tcp=left_arm_tcp,
             ),
         }
 
@@ -353,13 +348,17 @@ if __name__ == "__main__":
 
     config = SimulationManagerCfg(headless=True, sim_device="cpu")
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(1)
 
     cfg = DexforceW1Cfg.from_dict(
         {
             "uid": "dexforce_w1",
             "version": "v021",
             "arm_kind": "anthropomorphic",
+            "drive_pros": {
+                "max_effort": {
+                    "(RIGHT|LEFT)_[A-Z|_]+": 1,
+                },
+            },
         }
     )
 

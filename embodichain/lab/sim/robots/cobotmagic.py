@@ -28,6 +28,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import SolverCfg, OPWSolverCfg
+from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass
 from embodichain.utils import logger
@@ -41,36 +42,13 @@ class CobotMagicCfg(RobotCfg):
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:
-        from embodichain.lab.sim.solvers import merge_solver_cfg
 
         cfg = cls()
         default_cfgs = cls()._build_default_cfgs()
         for key, value in default_cfgs.items():
             setattr(cfg, key, value)
 
-        robot_cfg = RobotCfg.from_dict(init_dict)
-
-        # set attrs into cfg from the robot_cfg
-        for key, value in init_dict.items():
-            if key == "solver_cfg":
-                # merge provided solver_cfg values into default solver config
-                provided_solver_cfg = init_dict.get("solver_cfg")
-                if provided_solver_cfg:
-                    for part, item in provided_solver_cfg.items():
-                        if "class_type" in provided_solver_cfg[part]:
-                            cfg.solver_cfg[part] = robot_cfg.solver_cfg[part]
-                        else:
-                            try:
-                                merged = merge_solver_cfg(
-                                    cfg.solver_cfg, provided_solver_cfg
-                                )
-                                cfg.solver_cfg = merged
-                            except Exception:
-                                logger.log_error(
-                                    f"Failed to merge solver_cfg, using provided config outright."
-                                )
-            else:
-                setattr(cfg, key, getattr(robot_cfg, key))
+        cfg = merge_robot_cfg(cfg, init_dict)
 
         return cfg
 
@@ -207,9 +185,8 @@ if __name__ == "__main__":
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cuda")
+    config = SimulationManagerCfg(headless=False, sim_device="cuda", num_envs=2)
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(2)
 
     config = {
         "init_pos": [0.0, 0.0, 1.0],

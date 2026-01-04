@@ -52,9 +52,8 @@ CONTROL_PARTS = {
 class BaseRobotTest:
     def setup_simulation(self, sim_device):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=10)
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(10)  # NUM_ARENAS = 10
 
         cfg = DexforceW1Cfg.from_dict(
             {
@@ -254,6 +253,35 @@ class BaseRobotTest:
             torch.min(dummy_qpos, left_qpos_limits[:, :, 1]), left_qpos_limits[:, :, 0]
         )
         self.robot.set_qpos(qpos=dummy_qpos, name="left_arm")
+
+    def test_robot_cfg_merge(self):
+        from copy import deepcopy
+        from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+        cfg = deepcopy(self.robot.cfg)
+
+        cfg_dict = {
+            "drive_pros": {
+                "max_effort": {
+                    "(RIGHT|LEFT)_[A-Z|_]+": 1.0,
+                },
+            },
+            "solver_cfg": {
+                "left_arm": {
+                    "tcp": np.eye(4),
+                }
+            },
+        }
+
+        cfg = merge_robot_cfg(cfg, cfg_dict)
+
+        assert (
+            cfg.drive_pros.max_effort["(RIGHT|LEFT)_[A-Z|_]+"] == 1.0
+        ), "Drive properties merge failed."
+
+        assert np.allclose(
+            cfg.solver_cfg["left_arm"].tcp, np.eye(4)
+        ), "Solver config merge failed."
 
     def teardown_method(self):
         """Clean up resources after each test method."""

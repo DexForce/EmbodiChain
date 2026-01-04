@@ -33,10 +33,9 @@ class CameraTest:
     def setup_simulation(self, sim_device, enable_rt):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt
+            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
         )
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(NUM_ENVS)
         # Create batch of cameras
         cfg_dict = {
             "sensor_type": "Camera",
@@ -144,9 +143,19 @@ class TestCameraRaster(CameraTest):
         self.setup_simulation("cpu", enable_rt=False)
 
 
+class TestCameraRaster(CameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=False)
+
+
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
         self.setup_simulation("cpu", enable_rt=True)
+
+
+class TestCameraFastRT(CameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=True)
 
 
 if __name__ == "__main__":
