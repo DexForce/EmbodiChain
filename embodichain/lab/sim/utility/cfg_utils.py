@@ -135,6 +135,9 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge control parts
             user_control_parts_dict = override_cfg_dict.get("control_parts")
             if isinstance(user_control_parts_dict, dict):
+                # Initialize control_parts if it is None to avoid TypeError on item assignment
+                if base_cfg.control_parts is None:
+                    base_cfg.control_parts = {}
                 for part_key, part_val in user_control_parts_dict.items():
                     base_cfg.control_parts[part_key] = part_val
             else:
@@ -142,6 +145,12 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     "control_parts should be a dictionary. Skipping control_parts merge."
                 )
         elif key == "urdf_cfg":
+            if base_cfg.urdf_cfg is None:
+                logger.log_warning(
+                    f"There is no defined urdf_cfg in base robot cfg. Skipping urdf_cfg merge."
+                )
+                continue
+
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):

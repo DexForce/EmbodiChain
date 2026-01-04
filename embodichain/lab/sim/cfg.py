@@ -1036,9 +1036,9 @@ class RobotCfg(ArticulationCfg):
             keys corresponding to the control parts name.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
-        - `Robot` is a derived class of `Articulation`, with contorl parts support. So the `drive_pros`
+        - `Robot` is a derived class of `Articulation`, with control parts support. So the `drive_pros`
             in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
-            which will be orverridden if these joint names are already specified.
+            which will be overridden if these joint names are already specified.
     """
 
     urdf_cfg: URDFCfg | None = None
@@ -1068,6 +1068,8 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "fpath":
+                    setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)
