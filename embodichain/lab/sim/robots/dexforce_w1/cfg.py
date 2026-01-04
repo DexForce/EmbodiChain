@@ -50,15 +50,16 @@ class DexforceW1Cfg(RobotCfg):
 
     version: DexforceW1Version = DexforceW1Version.V021
     arm_kind: DexforceW1ArmKind = DexforceW1ArmKind.INDUSTRIAL
+    with_default_eef: bool = True
 
     @classmethod
     def from_dict(
-        cls, init_dict: typing.Dict[str, typing.Union[str, float, tuple]]
+        cls, init_dict: Dict[str, str | float | tuple | dict]
     ) -> DexforceW1Cfg:
         """Initialize DexforceW1Cfg from a dictionary.
 
         Args:
-            init_dict (Dict[str, Union[str, float, tuple]]): Dictionary of configuration parameters.
+            init_dict (Dict[str, str | float | tuple | dict): Dictionary of configuration parameters.
 
         Returns:
             DexforceW1Cfg: An instance of DexforceW1Cfg with parameters set.
@@ -67,13 +68,18 @@ class DexforceW1Cfg(RobotCfg):
         init_dict_m = init_dict.copy()
         version = init_dict_m.get("version", "v021")
         arm_kind = init_dict_m.get("arm_kind", "anthropomorphic")
+        with_default_eef = init_dict_m.get("with_default_eef", True)
         init_dict_m.pop("version", None)
         init_dict_m.pop("arm_kind", None)
+        init_dict_m.pop("with_default_eef", None)
+
         cfg: DexforceW1Cfg = cls()._build_default_cfg(
-            version=version, arm_kind=arm_kind
+            version=version, arm_kind=arm_kind, with_default_eef=with_default_eef
         )
 
-        default_physics_cfgs = cls()._build_default_physics_cfgs(arm_kind=arm_kind)
+        default_physics_cfgs = cls()._build_default_physics_cfgs(
+            arm_kind=arm_kind, with_default_eef=with_default_eef
+        )
         for key, value in default_physics_cfgs.items():
             setattr(cfg, key, value)
 
@@ -88,8 +94,6 @@ class DexforceW1Cfg(RobotCfg):
 
     @staticmethod
     def _build_default_solver_cfg(is_industrial: bool) -> SolverCfg:
-        # TODO: maybe change default solver for DexforceW1
-        from embodichain.lab.sim.solvers import PytorchSolverCfg
         from embodichain.lab.sim.solvers import SRSSolverCfg
         from embodichain.lab.sim.robots.dexforce_w1.params import (
             W1ArmKineParams,
@@ -176,53 +180,73 @@ class DexforceW1Cfg(RobotCfg):
         }
 
     @staticmethod
-    def _build_default_physics_cfgs(arm_kind: str) -> typing.Dict[str, typing.Any]:
+    def _build_default_physics_cfgs(
+        arm_kind: str, with_default_eef: bool = True
+    ) -> typing.Dict[str, typing.Any]:
         """Build default physics configurations for DexforceW1.
 
         Args:
             arm_kind: Type of arm, either "industrial" or "anthropomorphic"
+            with_default_eef: Whether to include default end-effector configurations
 
         Returns:
             Dictionary containing physics configuration parameters
         """
-        # Define common joint patterns
-        arm_joints = "(RIGHT|LEFT)_J[0-9]"
-        body_joints = "(ANKLE|KNEE|BUTTOCK|WAIST)"
+        # Define default joint drive parameters and corresponding joint name patterns
+        DEFAULT_EEF_JOINT_DRIVE_PARAMS = {
+            "stiffness": 1e2,
+            "damping": 1e1,
+            "max_effort": 1e3,
+        }
 
-        # Hand/gripper pattern differs by arm type
-        hand_pattern = (
-            "(LEFT|RIGHT)_FINGER[1-2]"
-            if arm_kind == "industrial"
-            else "(RIGHT|LEFT)_[A-Z|_]+"
+        DEFAULT_EEF_HAND_JOINT_NAMES = (
+            "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)"
         )
+
+        DEFAULT_EEF_GRIPPER_JOINT_NAMES = "(LEFT|RIGHT)_FINGER[1-2]"
+
+        # Define common joint patterns
+        ARM_JOINTS = "(RIGHT|LEFT)_J[0-9]"
+        BODY_JOINTS = "(ANKLE|KNEE|BUTTOCK|WAIST)"
 
         # Define physics parameters for different joint types
         joint_params = {
             "stiffness": {
-                arm_joints: 1e4,
-                hand_pattern: 1e2,
-                body_joints: 1e7,
+                ARM_JOINTS: 1e4,
+                BODY_JOINTS: 1e7,
             },
             "damping": {
-                arm_joints: 1e3,
-                hand_pattern: 1e1,
-                body_joints: 1e4,
+                ARM_JOINTS: 1e3,
+                BODY_JOINTS: 1e4,
             },
             "max_effort": {
-                arm_joints: 1e5,
-                hand_pattern: 1e3,
-                body_joints: 1e10,
+                ARM_JOINTS: 1e5,
+                BODY_JOINTS: 1e10,
             },
         }
 
         drive_pros = JointDrivePropertiesCfg(**joint_params)
 
+        if with_default_eef:
+            eef_joint_names = (
+                DEFAULT_EEF_HAND_JOINT_NAMES
+                if arm_kind == "anthropomorphic"
+                else DEFAULT_EEF_GRIPPER_JOINT_NAMES
+            )
+            drive_pros.stiffness.update(
+                {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["stiffness"]}
+            )
+            drive_pros.damping.update(
+                {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["damping"]}
+            )
+            drive_pros.max_effort.update(
+                {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["max_effort"]}
+            )
+
         return {
             "min_position_iters": 32,
             "min_velocity_iters": 8,
             "drive_pros": drive_pros,
-            # TODO: we may use the some properties from URDF as default values
-            # eg. mass, friction, damping, etc.
             "attrs": RigidBodyAttributesCfg(
                 mass=1.0,
                 static_friction=0.95,
@@ -238,7 +262,9 @@ class DexforceW1Cfg(RobotCfg):
 
     @staticmethod
     def _build_default_cfg(
-        version: str = "v021", arm_kind: str = "anthropomorphic"
+        version: str = "v021",
+        arm_kind: str = "anthropomorphic",
+        with_default_eef: bool = True,
     ) -> DexforceW1Cfg:
 
         if arm_kind == "industrial":
@@ -261,9 +287,11 @@ class DexforceW1Cfg(RobotCfg):
             arm_kind=DexforceW1ArmKind(arm_kind),
             hand_types=hand_types,
             hand_versions=hand_versions,
+            include_hand=with_default_eef,
         )
         cfg.version = DexforceW1Version(version)
         cfg.arm_kind = DexforceW1ArmKind(arm_kind)
+        cfg.with_default_eef = with_default_eef
 
         return cfg
 
@@ -350,16 +378,7 @@ if __name__ == "__main__":
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict(
-        {
-            "uid": "dexforce_w1",
-            "version": "v021",
-            "arm_kind": "anthropomorphic",
-            "drive_pros": {
-                "max_effort": {
-                    "(RIGHT|LEFT)_[A-Z|_]+": 1,
-                },
-            },
-        }
+        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
     )
 
     robot = sim.add_robot(cfg=cfg)

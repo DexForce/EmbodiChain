@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 import os
-from numpy import mat
 import torch
 import pytest
 

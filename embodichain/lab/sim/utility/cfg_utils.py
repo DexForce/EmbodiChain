@@ -104,7 +104,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                                 f"Failed to merge solver_cfg, using provided config outright."
                             )
         elif key == "drive_pros":
-            # merge drive_pros
+            # merge joint drive properties
             user_drive_pros_dict = override_cfg_dict.get("drive_pros")
             if isinstance(user_drive_pros_dict, dict):
                 for prop, val in user_drive_pros_dict.items():
@@ -118,7 +118,52 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         # Overwrite if not both dicts
                         setattr(base_cfg.drive_pros, prop, val)
             else:
-                setattr(base_cfg, key, getattr(robot_cfg, key))
+                logger.log_warning(
+                    "drive_pros should be a dictionary. Skipping drive_pros merge."
+                )
+        elif key == "attrs":
+            # merge physics attributes
+            user_attrs_dict = override_cfg_dict.get("attrs")
+            if isinstance(user_attrs_dict, dict):
+                for attr_key, attr_val in user_attrs_dict.items():
+                    setattr(base_cfg.attrs, attr_key, attr_val)
+            else:
+                logger.log_warning(
+                    "attrs should be a dictionary. Skipping attrs merge."
+                )
+        elif key == "control_parts":
+            # merge control parts
+            user_control_parts_dict = override_cfg_dict.get("control_parts")
+            if isinstance(user_control_parts_dict, dict):
+                # Initialize control_parts if it is None to avoid TypeError on item assignment
+                if base_cfg.control_parts is None:
+                    base_cfg.control_parts = {}
+                for part_key, part_val in user_control_parts_dict.items():
+                    base_cfg.control_parts[part_key] = part_val
+            else:
+                logger.log_warning(
+                    "control_parts should be a dictionary. Skipping control_parts merge."
+                )
+        elif key == "urdf_cfg":
+            if base_cfg.urdf_cfg is None:
+                logger.log_warning(
+                    f"There is no defined urdf_cfg in base robot cfg. Skipping urdf_cfg merge."
+                )
+                continue
+
+            # merge urdf components
+            user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
+            if isinstance(user_urdf_cfg, dict):
+                for component in user_urdf_cfg.get("components", []):
+                    base_cfg.urdf_cfg.add_component(
+                        component_type=component.get("component_type"),
+                        urdf_path=component.get("urdf_path"),
+                        transform=component.get("transform"),
+                    )
+            else:
+                logger.log_warning(
+                    "urdf_cfg should be a dictionary. Skipping urdf_cfg merge."
+                )
         else:
             setattr(base_cfg, key, getattr(robot_cfg, key))
 
