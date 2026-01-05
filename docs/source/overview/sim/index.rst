@@ -8,8 +8,7 @@ Overview of the Simulation Framework:
 - Components
   
   - Simulation Manager
-  - Simulation Object
-  - Material
+  - Simulation Assets
   - Virtual Sensor
   - Kinematics Solver
   - Motion Generation

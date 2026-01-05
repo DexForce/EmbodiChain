@@ -67,10 +67,10 @@ class VisualMaterialCfg:
 
     # Ray tracing specific properties
     ior: float = 1.5
-    """Index of refraction for ray tracing materials"""
+    """Index of refraction for PBR materials, only used in ray tracing."""
 
-    rt_material_type: str = "BRDF_GGX_SMITH"
-    """Ray tracing material type. Options: 'BRDF_GGX_SMITH', 'BTDF_GGX_SMITH', 'BSDF_GGX_SMITH'"""
+    material_type: str = "BRDF"
+    """Ray tracing material type. Options: 'BRDF', 'BTDF', 'BSDF'"""
 
     # Currently disabled properties
     # subsurface: float = 0.0  # Subsurface scattering factor
@@ -95,12 +95,24 @@ class VisualMaterial:
     """
 
     RT_MATERIAL_TYPES = [
-        "BRDF_GGX_SMITH",
-        "BTDF_GGX_SMITH",
-        "BSDF_GGX_SMITH",
+        "BRDF",
+        "BTDF",
+        "BSDF",
     ]
 
+    MAT_TYPE_MAPPING: Dict[str, str] = {
+        "BRDF": "BRDF_GGX_SMITH",
+        "BTDF": "BTDF_GGX_SMITH",
+        "BSDF": "BSDF_GGX_SMITH",
+    }
+
     def __init__(self, cfg: VisualMaterialCfg, mat: Material):
+        if cfg.material_type not in self.RT_MATERIAL_TYPES:
+            logger.log_error(
+                f"Invalid material_type '{cfg.material_type}'. "
+                f"Supported types: {self.RT_MATERIAL_TYPES}"
+            )
+
         self.uid = cfg.uid
         self.cfg = copy.deepcopy(cfg)
         self._mat = mat
@@ -132,7 +144,9 @@ class VisualMaterial:
 
         if self.is_rt_enabled:
             mat_inst.set_ior(cfg.ior)
-            mat_inst.mat.update_pbr_material_type(cfg.rt_material_type)
+            mat_inst.mat.update_pbr_material_type(
+                self.MAT_TYPE_MAPPING[cfg.material_type]
+            )
 
     def create_instance(self, uid: str) -> VisualMaterialInst:
         """Create a new material instance from this material template.

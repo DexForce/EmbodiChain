@@ -55,144 +55,53 @@ sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
 
-## Asset Management
+## Assets Management
 
-The manager provides methods to add and retrieve various simulation assets.
+The manager provides methods to add, retrieve and remove various simulation assets including:
+- Rigid Objects
+- Soft Objects
+- Articulations
+- Robots
+- Sensors
+- Lights
+- Materials
 
-### Robots
-
-Add robots using `RobotCfg`.
-
-```python
-from embodichain.lab.sim.cfg import RobotCfg
-
-robot_cfg = RobotCfg(uid="my_robot", ...)
-robot = sim.add_robot(robot_cfg)
-
-# Retrieve existing robot
-robot = sim.get_robot("my_robot")
-```
-
-### Rigid Objects
-
-Add rigid bodies (e.g., cubes, meshes) using `RigidObjectCfg`.
-
-```python
-from embodichain.lab.sim.cfg import RigidObjectCfg
-
-obj_cfg = RigidObjectCfg(uid="cube", ...)
-obj = sim.add_rigid_object(obj_cfg)
-```
-
-### Sensors
-
-Add sensors (e.g., Cameras) using `SensorCfg`.
-
-```python
-from embodichain.lab.sim.sensors import CameraCfg
-
-camera_cfg = CameraCfg(uid="cam1", ...)
-camera = sim.add_sensor(camera_cfg)
-```
-
-### Lights
-
-Add lights to the scene using `LightCfg`.
-
-```python
-from embodichain.lab.sim.cfg import LightCfg
-
-light_cfg = LightCfg(uid="sun", light_type="point", ...)
-light = sim.add_light(light_cfg)
-```
+For more details on simulation assets, please refer to their respective documentation pages.
 
 ## Simulation Loop
 
-The simulation loop typically involves stepping the physics and rendering the scene.
+### Manual Update mode
+
+In this mode, the physics simulation should be explicitly stepped by calling `update()` method, which provides precise control over the simulation timing. 
+
+The use case for manual update mode includes:
+- Data generation with openai gym environments, in which the observation and action must be synchronized with the physics simulation.
+- Applications that require precise dynamic control over the simulation timing.
 
 ```python
 while True:
-    # Step physics and render
-    sim.update()
-    
-    # Or step manually
-    # sim.step_physics()
-    # sim.render()
+    # Step physics simulation.
+    sim.update(step=1)
+
+    # Perform other tasks such as get data from the scene or apply sensor update.
 ```
+
+> The default mode is manual update mode. To switch to automatic update mode, call `set_manual_update(False)`. 
+
+### Automatic Update mode
+
+In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
+
+> When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
+
 
 ### Methods
 
-- **`update(physics_dt=None, step=1)`**: Steps the physics simulation and updates the rendering.
+- **`update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`enable_physics(enable: bool)`**: Enable or disable physics simulation.
 - **`set_manual_update(enable: bool)`**: Set manual update mode for physics.
 
-## Rendering
+### Related Tutorials
 
-- **`render_camera_group()`**: Renders all cameras in the scene.
-- **`open_window()`**: Opens the visualization window.
-- **`close_window()`**: Closes the visualization window.
-
-## Gizmos
-
-Gizmos allow interactive control of objects in the simulation window.
-
-```python
-# Enable gizmo for a robot
-sim.enable_gizmo(uid="my_robot", control_part="arm")
-
-# Toggle visibility
-sim.toggle_gizmo_visibility(uid="my_robot", control_part="arm")
-
-# Disable gizmo
-sim.disable_gizmo(uid="my_robot", control_part="arm")
-```
-
-## Example Usage
-
-Below is a complete example of setting up a simulation with a robot and a sensor.
-
-```python
-import argparse
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.sensors import CameraCfg
-from embodichain.lab.sim.cfg import RobotCfg, RigidObjectCfg
-from embodichain.lab.sim.shapes import CubeCfg
-
-# 1. Configure Simulation
-config = SimulationManagerCfg(
-    headless=False,
-    sim_device="cuda",
-    enable_rt=True,
-    physics_dt=0.01
-)
-sim = SimulationManager(config)
-
-# 2. Add a Robot
-# (Assuming robot_cfg is defined)
-# robot = sim.add_robot(robot_cfg)
-
-# 3. Add a Rigid Object
-cube_cfg = RigidObjectCfg(
-    uid="cube",
-    shape=CubeCfg(size=[0.05, 0.05, 0.05]),
-    init_pos=[1.0, 0.0, 0.5]
-)
-sim.add_rigid_object(cube_cfg)
-
-# 4. Add a Sensor
-camera_cfg = CameraCfg(
-    uid="camera",
-    width=640,
-    height=480,
-    # ... other params
-)
-camera = sim.add_sensor(camera_cfg)
-
-# 5. Run Simulation Loop
-while True:
-    sim.update()
-    
-    # Access sensor data
-    # data = camera.get_data()
-```
-```
+- [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
+- [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
