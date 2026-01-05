@@ -14,10 +14,13 @@ Overview of the Simulation Framework:
   - Kinematics Solver
   - Motion Generation
 
+Table of Contents
+=================
 
 .. toctree::
    :maxdepth: 1
    :glob:
-
+   
+   sim_manager.md
    solvers/index
    planners/index
