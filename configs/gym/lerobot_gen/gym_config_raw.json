@@ -1,0 +1,152 @@
+{
+    "id": "LerobotGenRaw",
+    "max_episodes": 10000,
+    "env": {
+        "events": {
+            "random_light": {
+                "func": "randomize_light",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "light_1"},
+                    "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
+                    "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
+                    "intensity_range": [50.0, 100.0]
+                }
+            },
+            "random_bottle_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "grasp_object"},
+                    "random_texture_prob": 0.5,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
+                }
+            }
+        },
+        "observations": {
+            "norm_robot_eef_joint": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [0, 1, 2, 3, 4, 5]
+                }
+            }
+        },
+        "dataset": {
+            "save_path": "/home/chenjian/.cache/huggingface/lerobot",
+            "extra": {
+                "scene_type": "industrial", 
+                "task_description": "Pick bottle in lab"
+            },
+            "robot_meta": {
+                "robot_type": "ur10",
+                "arm_dofs": 6,
+                "control_freq": 25,
+                "control_parts": ["arm"],
+                "observation": {
+                    "vision": {
+                        "camera_1": ["mask"]
+                    },
+                    "states": ["qpos"],
+                    "exteroception": ["camera_1"]
+                },
+                "action": "qpos",
+                "min_len_steps": 5
+            },
+            "instruction": {
+                "lang": "Pick bottle in lab"
+            }
+        }
+    },
+    "rigid_object": [
+        {
+            "uid":"grasp_object",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "ScannedBottle/jingtian_processed.ply"
+            },
+            "attrs" : {
+                "mass": 0.1,
+                "contact_offset": 0.005,
+                "rest_offset": 0.001,
+                "restitution": 0.01,
+                "min_position_iters": 32,
+                "min_velocity_iters":8
+            },
+            "body_type": "dynamic",
+            "init_pos": [10.0, 10.0, 1.0],
+            "max_convex_hull_num": 1
+        }
+    ],
+    "robot": {
+        "uid": "ur10",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": "/home/chenjian/Downloads/suctor_urdf/suctor.urdf"
+                }
+            ]
+        },
+        "init_pos": [0.0, 0.0, 0.0],
+        "init_qpos": [0, -1.570796327, -1.570796327, -1.570796327, 1.570796327, 0],
+        "drive_pros": {
+            "drive_type": "force",
+            "stiffness": 10000.0,
+            "damping": 1000.0,
+            "max_effort": 100000.0
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PinkSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.1],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "control_parts": {
+            "arm": ["JOINT[1-6]"]
+        }
+    },
+    "sensor": [        
+        {
+            "uid": "camera_1",
+            "sensor_type": "Camera",
+            "width": 640,
+            "height": 480,
+            "enable_mask": true,
+            "enable_depth": true,
+            "intrinsics": [453.851402686215, 453.8347628855552, 469.827725021235, 258.6656181845155],
+            "extrinsics": {
+                "eye": [1.5, 1.5, 2.0],
+                "target": [0.5, 0.5, 0.5],
+                "up": [0.0, 0.0, 1.0]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [2, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    }
+}

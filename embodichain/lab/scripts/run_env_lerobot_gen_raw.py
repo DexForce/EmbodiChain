@@ -56,8 +56,6 @@ def generate_and_execute_action_list(env, idx, debug_mode):
 
 def generate_function(
     env,
-    num_traj,
-    time_id: int = 0,
     save_path: str = "",
     save_video: bool = False,
     debug_mode: bool = False,
@@ -83,33 +81,18 @@ def generate_function(
     """
 
     valid = True
-    while True:
+    n_traj = len(env.trajectory_list)
+
+    for trajectory_idx in range(n_traj):
         _, _ = env.reset()
+        valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
 
-        ret = []
-        for trajectory_idx in range(num_traj):
-            valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
-
-            if not valid:
-                break
-
-            if not debug_mode:
-                dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
-                data_dict = env.to_dataset()
-                ret.append(data_dict)
-
-            # TODO: Add data saving and online data streaming logic here.
-
-            else:
-                log_warning(f"Task fail, Skip to next generation.")
-                valid = False
-                break
-
-        if valid:
+        if not valid:
             break
-        else:
-            log_warning("Reset valid flag to True.")
-            valid = True
+
+        if not debug_mode:
+            dataset_id = f"trajectory_{trajectory_idx}"
+            data_dict = env.to_dataset()
 
     return True
 
@@ -118,16 +101,12 @@ def main(args, env, gym_config):
 
     log_info("Start offline data generation.", color="green")
     # TODO: Support multiple trajectories per episode generation.
-    num_traj = 1
-    for i in range(gym_config["max_episodes"]):
-        generate_function(
-            env,
-            num_traj,
-            i,
-            save_path=args.save_path,
-            save_video=args.save_video,
-            debug_mode=args.debug_mode,
-        )
+    generate_function(
+        env,
+        save_path=args.save_path,
+        save_video=args.save_video,
+        debug_mode=args.debug_mode,
+    )
 
 
 if __name__ == "__main__":
