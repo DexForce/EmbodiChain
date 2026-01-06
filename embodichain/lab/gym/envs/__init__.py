@@ -33,4 +33,7 @@ from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
 from embodichain.lab.gym.envs.tasks.tableware.lerobot_gen.lerobot_gen import (
     LerobotGenEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.lerobot_gen.lerobot_gen_raw import (
+    LerobotGenRawEnv,
+)
 from embodichain.lab.gym.envs.tasks.special.parallel import ParallelRolloutEnv
