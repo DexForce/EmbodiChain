@@ -211,7 +211,7 @@ class EmbodiedEnv(BaseEnv):
         from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
         functors_to_remove = get_all_exported_items_from_module(
-            "embodichain.lab.gym.envs.managers.randomization.rendering"
+            "embodichain.lab.gym.envs.managers.randomization.visual"
         )
         if self.cfg.filter_visual_rand and self.cfg.events:
             # Iterate through all attributes of the events object

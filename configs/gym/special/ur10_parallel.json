@@ -1,6 +1,6 @@
 {   
     "id": "ParallelRollout-v1",
-    "max_episodes": 30,
+    "max_episodes": 24,
     "env": {
         "events": {
             "random_light": {
@@ -20,7 +20,7 @@
                 "interval_step": 50,
                 "params": {
                     "entity_cfg": {"uid": "table"},
-                    "random_texture_prob": 0.0,
+                    "random_texture_prob": 0.5,
                     "texture_path": "CocoBackground/coco",
                     "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }

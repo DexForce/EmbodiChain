@@ -83,10 +83,10 @@ def initialize_simulation(args) -> SimulationManager:
         sim_device=args.device,
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
+        arena_space=2.5,
     )
     sim = SimulationManager(config)
-
-    sim.build_multiple_arenas(args.num_envs, space=2.5)
 
     if args.enable_rt:
         light = sim.add_light(

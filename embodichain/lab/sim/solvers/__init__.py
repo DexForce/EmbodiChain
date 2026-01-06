@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base_solver import SolverCfg, BaseSolver, merge_solver_cfg
+from .base_solver import SolverCfg, BaseSolver
 from .pytorch_solver import PytorchSolverCfg, PytorchSolver
 from .pinocchio_solver import PinocchioSolverCfg, PinocchioSolver
 from .differential_solver import DifferentialSolverCfg, DifferentialSolver

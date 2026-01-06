@@ -70,6 +70,7 @@ def get_random_pose(
             lower=pos_low,
             upper=pos_high,
             size=(num_instance, 3),
+            device=init_pos.device,
         )
         if relative_position:
             random_value += init_pos
@@ -86,6 +87,7 @@ def get_random_pose(
                 lower=rot_low,
                 upper=rot_high,
                 size=(num_instance, 3),
+                device=init_pos.device,
             )
             * torch.pi
             / 180.0
@@ -252,6 +254,7 @@ def randomize_robot_qpos(
         lower=torch.tensor(qpos_range[0], device=env.device),
         upper=torch.tensor(qpos_range[1], device=env.device),
         size=(num_instance, len(joint_ids)),
+        device=env.device,
     )
 
     if relative_qpos:

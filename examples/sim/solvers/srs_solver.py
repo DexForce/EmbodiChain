@@ -38,7 +38,6 @@ def main():
         )
     )
 
-    sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     robot: Robot = sim.add_robot(cfg=DexforceW1Cfg.from_dict({"uid": "dexforce_w1"}))

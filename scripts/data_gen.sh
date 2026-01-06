@@ -9,7 +9,7 @@
 # totol_run should be around 320
 
 
-SYNC_LOOP_COUNT=46  # Set this to the number of parallel processes you want
+SYNC_LOOP_COUNT=60  # Set this to the number of parallel processes you want
 ASYNC_LOOP_COUNT=7   # Number of asynchronous runs per sync run
 
 

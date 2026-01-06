@@ -78,7 +78,6 @@ def main():
 
     # Initialize simulation
     sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
-    sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     # Robot configuration
