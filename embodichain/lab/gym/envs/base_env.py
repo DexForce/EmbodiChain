@@ -380,7 +380,7 @@ class BaseEnv(gym.Env):
         info.update(self.evaluate(**kwargs))
         return info
 
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> bool:
+    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         """Check if the episode is truncated.
 
         Args:
@@ -388,7 +388,7 @@ class BaseEnv(gym.Env):
             info: The info dictionary.
 
         Returns:
-            True if the episode is truncated, False otherwise.
+            A boolean tensor indicating truncation for each environment in the batch.
         """
         return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 

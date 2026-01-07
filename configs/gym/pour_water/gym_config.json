@@ -258,6 +258,7 @@
             }
         },
         "dataset": {
+            "save_path": "/home/dex/datasets/embodichain/outputs/data_example",
             "robot_meta": {
                 "robot_type": "CobotMagic",
                 "arm_dofs": 12,

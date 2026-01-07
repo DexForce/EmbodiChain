@@ -309,3 +309,37 @@ class SceneEntityCfg:
                 if isinstance(self.body_ids, int):
                     self.body_ids = [self.body_ids]
                 self.body_names = [entity.body_names[i] for i in self.body_ids]
+
+
+@configclass
+class DatasetCfg:
+    """Configuration for dataset manager.
+    
+    Attributes:
+        save_path: Root directory for saving datasets. If None, uses default location.
+        id: Dataset ID/version number. Auto-increments if directory exists.
+        robot_meta: Robot metadata configuration (robot type, control freq, etc.).
+        instruction: Task instruction configuration (lang, task description).
+        extra: Extra metadata (scene type, etc.).
+        use_videos: Whether to use video encoding for images. Defaults to True.
+        image_writer_threads: Number of threads for image writing. Defaults to 4.
+        image_writer_processes: Number of processes for image writing. Defaults to 0.
+        export_success_only: Whether to export only successful episodes. Defaults to False.
+    """
+    save_path: str | None = None
+    id: int = 0
+    robot_meta: dict[str, Any] = None
+    instruction: dict[str, Any] = None
+    extra: dict[str, Any] = None
+    use_videos: bool = True
+    image_writer_threads: int = 4
+    image_writer_processes: int = 0
+    export_success_only: bool = False
+    
+    def __post_init__(self):
+        if self.robot_meta is None:
+            self.robot_meta = {}
+        if self.instruction is None:
+            self.instruction = {"lang": "demo task"}
+        if self.extra is None:
+            self.extra = {"scene_type": "demo", "task_description": "demo"}

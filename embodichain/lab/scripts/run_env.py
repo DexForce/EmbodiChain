@@ -40,13 +40,15 @@ def generate_and_execute_action_list(env, idx, debug_mode):
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
-    for action in tqdm.tqdm(
+    for idx_action, action in enumerate(tqdm.tqdm(
         action_list, desc=f"Executing action list #{idx}", unit="step"
-    ):
+    )):
+        if idx_action == len(action_list) - 1:
+            log_info(f"Setting force_truncated before final step at action index: {idx_action}")
+            env.set_force_truncated(True)
+        
         # Step the environment with the current action
         obs, reward, terminated, truncated, info = env.step(action)
-
-        # TODO: May be add some functions for debug_mode
 
     # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
     # but truncation is useful to improve the generation efficiency.
@@ -84,22 +86,19 @@ def generate_function(
 
     valid = True
     while True:
-        _, _ = env.reset()
+        # _, _ = env.reset()
 
         ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
 
             if not valid:
+                _, _ = env.reset()
                 break
 
             if not debug_mode and env.is_task_success().item():
-                dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
-                data_dict = env.to_dataset()
-                ret.append(data_dict)
-
+                pass
                 # TODO: Add data saving and online data streaming logic here.
-
             else:
                 log_warning(f"Task fail, Skip to next generation.")
                 valid = False

@@ -20,7 +20,7 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Sequence, Tuple, Any, List
+from typing import Dict, Union, Sequence, Tuple, Any, List, Optional
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -42,6 +42,7 @@ from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
+    DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import configclass, logger
@@ -90,9 +91,10 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.managers.ObservationManager` class for more details.
     """
 
-    # TODO: This would be changed to a more generic data pipeline configuration.
-    dataset: Union[Dict[str, Any], None] = None
-    """Data pipeline configuration. Defaults to None.
+    dataset: Union[object, None] = None
+    """Dataset settings. Defaults to None, in which case no dataset collection is performed.
+
+    Please refer to the :class:`embodichain.lab.gym.managers.DatasetManager` class for more details.
     """
 
     # Some helper attributes
@@ -131,21 +133,7 @@ class EmbodiedEnv(BaseEnv):
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
         self.action_bank = None
-        self.dataset = None  # LeRobotDataset instance for data management
-        self.data_handler = None  # LerobotDataHandler instance for data conversion
-
-        # Check if lerobot is available and set default format accordingly
-        try:
-            import lerobot
-
-            self._default_dataset_format = "lerobot"
-        except ImportError:
-            self.cfg.dataset["format"] = "hdf5"
-            self._default_dataset_format = "hdf5"
-            logger.log_warning(
-                "LeRobot not available. Default dataset format set to 'hdf5'. "
-                "Install lerobot to enable lerobot format: pip install lerobot"
-            )
+        self._force_truncated: bool = False
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -179,23 +167,21 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.observations:
             self.observation_manager = ObservationManager(self.cfg.observations, self)
+        
+        # create dataset manager
+        if self.cfg.dataset:
+            from embodichain.lab.gym.envs.managers.cfg import DatasetCfg
+            
+            # Convert config dict to DatasetCfg if needed
+            if isinstance(self.cfg.dataset, dict):
+                dataset_cfg = DatasetCfg(**self.cfg.dataset)
+            else:
+                dataset_cfg = self.cfg.dataset
+            
+            self.dataset_manager = DatasetManager(dataset_cfg, self)
+            logger.log_info("DatasetManager initialized for episode recording")
 
-        # TODO: A workaround for handling dataset saving, which need history data of obs-action pairs.
-        # We may improve this by implementing a data manager to handle data saving and online streaming.
-        if self.cfg.dataset is not None:
-            # Get dataset format from dataset config, use instance default if not specified
-            dataset_format = self.cfg.dataset.get(
-                "format", self._default_dataset_format
-            )
-
-            self.metadata["dataset"] = self.cfg.dataset
-            self.episode_obs_list = []
-            self.episode_action_list = []
-            self.curr_episode = 0
-
-            # Initialize based on dataset format
-            if dataset_format == "lerobot":
-                self._initialize_lerobot_dataset()
+            self.metadata["dataset"] = dataset_cfg.__dict__
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -220,92 +206,6 @@ class EmbodiedEnv(BaseEnv):
                             f"Filtering out visual randomization functor: {attr.func.__name__}"
                         )
                         setattr(self.cfg.events, attr_name, None)
-
-    def _initialize_lerobot_dataset(self) -> None:
-        """Initialize LeRobotDataset for episode recording.
-
-        This method creates a LeRobotDataset instance that will be used throughout
-        the environment's lifetime for recording and managing episode data.
-        """
-        try:
-            from lerobot.datasets.lerobot_dataset import LeRobotDataset
-            from embodichain.data.handler.lerobot_data_handler import LerobotDataHandler
-        except ImportError as e:
-            logger.log_error(
-                f"Failed to import LeRobot dependencies: {e}. "
-                "Dataset recording will be disabled. Install with: pip install lerobot"
-            )
-            return
-
-        # Extract naming components from config
-        robot_type = self.cfg.dataset.get("robot_meta", {}).get("robot_type", "robot")
-        scene_type = self.cfg.dataset.get("extra", {}).get("scene_type", "scene")
-        task_description = self.cfg.dataset.get("extra", {}).get(
-            "task_description", "task"
-        )
-
-        robot_type = str(robot_type).lower().replace(" ", "_")
-        task_description = str(task_description).lower().replace(" ", "_")
-
-        # Determine lerobot data root directory
-        lerobot_data_root = self.cfg.dataset.get("save_path", None)
-        if lerobot_data_root is None:
-            try:
-                from lerobot.utils.constants import HF_LEROBOT_HOME
-
-                lerobot_data_root = HF_LEROBOT_HOME
-            except ImportError:
-                logger.log_error("LeRobot not installed.")
-                return
-
-        # Auto-increment id until the repo_id subdirectory does not exist
-        base_id = int(self.cfg.dataset.get("id", "0"))
-        while True:
-            dataset_id = f"{base_id:03d}"
-            repo_id = f"{scene_type}_{robot_type}_{task_description}_{dataset_id}"
-            repo_path = os.path.join(lerobot_data_root, repo_id)
-            if not os.path.exists(repo_path):
-                break
-            base_id += 1
-
-        # Store computed values back to config
-        self.cfg.dataset["repo_id"] = repo_id
-        self.cfg.dataset["id"] = dataset_id
-        self.cfg.dataset["lerobot_data_root"] = str(lerobot_data_root)
-
-        # Get dataset configuration
-        dataset_cfg = self.cfg.dataset
-        fps = dataset_cfg["robot_meta"].get("control_freq", 30)
-        use_videos = dataset_cfg.get("use_videos", True)
-        image_writer_threads = dataset_cfg.get("image_writer_threads", 4)
-        image_writer_processes = dataset_cfg.get("image_writer_processes", 0)
-
-        # Create handler instance (reusable for all episodes)
-        self.data_handler = LerobotDataHandler(self)
-
-        # Build features using handler
-        features = self.data_handler._build_lerobot_features(use_videos=use_videos)
-
-        robot_type = self.cfg.dataset.get("robot_meta", {}).get("robot_type", "robot")
-
-        dataset_dir = os.path.join(lerobot_data_root, repo_id)
-
-        try:
-            logger.log_info(f"Creating new LeRobot dataset at {dataset_dir}")
-            self.dataset = LeRobotDataset.create(
-                repo_id=repo_id,
-                robot_type=robot_type,
-                fps=fps,
-                features=features,
-                use_videos=use_videos,
-                image_writer_threads=image_writer_threads,
-                image_writer_processes=image_writer_processes,
-                root=str(dataset_dir),
-            )
-            logger.log_info(f"LeRobotDataset initialized successfully: {repo_id}")
-        except Exception as e:
-            logger.log_error(f"Failed to initialize LeRobotDataset: {e}")
-            self.dataset = None
 
     def _init_action_bank(
         self, action_bank_cls: ActionBank, action_config: Dict[str, Any]
@@ -361,26 +261,85 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
+    def set_force_truncated(self, value: bool = True):
+        """
+        Set force_truncated flag to trigger episode truncation.
+        """
+        self._force_truncated = value
+
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
         obs, info = super().reset(seed=seed, options=options)
-        if hasattr(self, "episode_obs_list"):
-            self.episode_obs_list = [obs]
-            self.episode_action_list = []
+        self._force_truncated: bool = False
+        
+        # Reset dataset manager if present
+        if hasattr(self, 'dataset_manager'):
+            reset_ids = options.get("reset_ids", None) if options else None
+            self.dataset_manager.reset(reset_ids)
 
         return obs, info
 
     def step(
         self, action: EnvAction, **kwargs
     ) -> Tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        # TODO: Maybe add action preprocessing manager and its functors.
-        obs, reward, done, truncated, info = super().step(action, **kwargs)
-        if hasattr(self, "episode_action_list"):
-            self.episode_obs_list.append(obs)
-            self.episode_action_list.append(action)
+        """Step the environment with the given action.
+        
+        Extends BaseEnv.step() to integrate with DatasetManager for automatic
+        data collection and saving. The key is to:
+        1. Record obs-action pairs as they happen
+        2. Detect episode completion
+        3. Auto-save episodes BEFORE reset
+        4. Then perform the actual reset
+        """
+        self._elapsed_steps += 1
 
-        return obs, reward, done, truncated, info
+        action = self._step_action(action=action)
+        self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
+        self._update_sim_state(**kwargs)
+
+        obs = self.get_obs(**kwargs)
+        info = self.get_info(**kwargs)
+        rewards = self.get_reward(obs=obs, action=action, info=info)
+
+        # Record step in dataset manager BEFORE checking termination
+        if hasattr(self, 'dataset_manager'):
+            self.dataset_manager.record_step(obs, action)
+
+        # Check termination conditions
+        terminateds = torch.logical_or(
+            info.get(
+                "success",
+                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            ),
+            info.get(
+                "fail", torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            ),
+        )
+        truncateds = self.check_truncated(obs=obs, info=info)
+        if self.cfg.ignore_terminations:
+            terminateds[:] = False
+
+        # Detect which environments need reset
+        dones = torch.logical_or(terminateds, truncateds)
+        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+        
+        # AUTO-SAVE: Trigger dataset manager to save completed episodes
+        if len(reset_env_ids) > 0 and hasattr(self, 'dataset_manager'):
+            logger.log_info(f"Calling dataset_manager.on_episode_end() for {reset_env_ids.cpu().tolist()}")
+            self.dataset_manager.on_episode_end(
+                reset_env_ids,
+                terminateds,
+                info
+            )
+        elif len(reset_env_ids) > 0:
+            logger.log_warning("Episode completed but no dataset_manager found!")
+        
+        # Now perform reset for completed environments
+        if len(reset_env_ids) > 0:
+            obs, _ = self.reset(options={"reset_ids": reset_env_ids})
+
+        return obs, rewards, terminateds, truncateds, info
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -558,137 +517,9 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def to_dataset(self, id: str = None) -> str | None:
-        """Convert the recorded episode data to dataset format.
-
-        This method can be overridden in subclasses to support different formats (e.g., hdf5).
-        The base class only supports LeRobot format.
-
-        Args:
-            id (str, optional): Unique identifier for the dataset (may be used by subclasses).
-
-        Returns:
-            str | None: The path to the saved dataset, or None if failed.
-        """
-        if not hasattr(self, "episode_obs_list") or not hasattr(
-            self, "episode_action_list"
-        ):
-            logger.log_error(
-                "Episode data not available. Make sure dataset configuration is set in the environment config."
-            )
-            return None
-
-        if len(self.episode_obs_list) == 0:
-            logger.log_error(
-                "No episode data to save. Episode observation list is empty."
-            )
-            return None
-
-        # Route to appropriate save method based on dataset format
-        dataset_format = self.cfg.dataset.get("format", self._default_dataset_format)
-        if dataset_format == "lerobot":
-            return self._to_lerobot_dataset()
-        else:
-            logger.log_error(f"Unsupported dataset format: {dataset_format}")
-            return None
-
-    def _to_lerobot_dataset(self) -> str | None:
-        """Convert the recorded episode data to LeRobot dataset format.
-
-        Returns:
-            str | None: The path to the saved dataset, or None if failed.
-        """
-        # Check if dataset was initialized
-        if self.dataset is None:
-            logger.log_error(
-                "LeRobotDataset not initialized. Make sure dataset configuration is properly set."
-            )
-            return None
-
-        # Check if data handler was initialized
-        if self.data_handler is None:
-            logger.log_error(
-                "Data handler not initialized. Make sure dataset configuration is properly set."
-            )
-            return None
-
-        # Prepare obs_list and action_list (remove last obs as it has no corresponding action)
-        obs_list = (
-            self.episode_obs_list[:-1]
-            if len(self.episode_obs_list) > len(self.episode_action_list)
-            else self.episode_obs_list
-        )
-        action_list = self.episode_action_list
-
-        logger.log_info(f"Saving {self.num_envs} episodes with {len(obs_list)} frames each...")
-
-        # Get task instruction
-        task = self.metadata["dataset"]["instruction"].get("lang", "unknown_task")
-
-        # Process each environment as a separate episode
-        for env_idx in range(self.num_envs):
-            # Add frames for this specific environment
-            for obs, action in zip(obs_list, action_list):
-                frames = self.data_handler._convert_frame_to_lerobot(obs, action, task)
-                # Only add the frame for this specific environment
-                self.dataset.add_frame(frames[env_idx])
-
-            # Save episode for this environment
-            extra_info = self.cfg.dataset.get("extra", {})
-            fps = self.dataset.meta.info.get("fps", 30)
-            total_time = len(obs_list) / fps if fps > 0 else 0
-
-            episode_extra_info = extra_info.copy()
-            episode_extra_info["total_time"] = total_time
-            episode_extra_info["data_type"] = "sim"
-            episode_extra_info["env_index"] = env_idx
-
-            self.update_dataset_info({"extra": episode_extra_info})
-            self.dataset.save_episode()
-            
-            logger.log_info(
-                f"Saved episode {self.curr_episode} for environment {env_idx} with {len(obs_list)} frames"
-            )
-            self.curr_episode += 1
-
-        dataset_path = str(self.dataset.root)
-
-        return dataset_path
-
-    def update_dataset_info(self, updates: dict) -> bool:
-        """Update the LeRobot dataset's meta.info with custom key-value pairs.
-
-        Args:
-            updates (dict): Dictionary of key-value pairs to add or update in meta.info.
-
-        Returns:
-            bool: True if successful, False otherwise.
-
-        Example:
-            >>> env.update_dataset_info({
-            ...     "author": "DexForce",
-            ...     "date_collected": "2025-12-22",
-            ...     "custom_key": "custom_value"
-            ... })
-        """
-        if self.dataset is None:
-            logger.log_error(
-                "LeRobotDataset not initialized. Cannot update dataset info."
-            )
-            return False
-
-        try:
-            self.dataset.meta.info.update(updates)
-            logger.log_info(
-                f"Successfully updated dataset info with keys: {list(updates.keys())}"
-            )
-            return True
-        except Exception as e:
-            logger.log_error(f"Failed to update dataset info: {e}")
-            return False
-
     def is_task_success(self, **kwargs) -> torch.Tensor:
-        """Determine if the task is successfully completed. This is mainly used in the data generation process
+        """
+        Determine if the task is successfully completed. This is mainly used in the data generation process
         of the imitation learning.
 
         Args:
@@ -699,12 +530,25 @@ class EmbodiedEnv(BaseEnv):
         """
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+    
+    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
+        """Check if the episode is truncated.
+
+        Args:
+            obs: The observation from the environment.
+            info: The info dictionary.
+
+        Returns:
+            A boolean tensor indicating truncation for each environment in the batch.
+        """
+        if self._force_truncated:
+            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        return super().check_truncated(obs, info)
 
     def close(self) -> None:
         """Close the environment and release resources."""
+        # Finalize dataset if present
+        if hasattr(self, 'dataset_manager'):
+            self.dataset_manager.finalize()
+        
         self.sim.destroy()
-
-        # Only finalize dataset if using lerobot format
-        dataset_format = self.cfg.dataset.get("format", self._default_dataset_format)
-        if dataset_format == "lerobot":
-            self.dataset.finalize()
