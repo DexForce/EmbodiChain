@@ -167,21 +167,9 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.observations:
             self.observation_manager = ObservationManager(self.cfg.observations, self)
-        
-        # create dataset manager
-        if self.cfg.dataset:
-            from embodichain.lab.gym.envs.managers.cfg import DatasetCfg
-            
-            # Convert config dict to DatasetCfg if needed
-            if isinstance(self.cfg.dataset, dict):
-                dataset_cfg = DatasetCfg(**self.cfg.dataset)
-            else:
-                dataset_cfg = self.cfg.dataset
-            
-            self.dataset_manager = DatasetManager(dataset_cfg, self)
-            logger.log_info("DatasetManager initialized for episode recording")
 
-            self.metadata["dataset"] = dataset_cfg.__dict__
+        if self.cfg.dataset:
+            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -272,19 +260,13 @@ class EmbodiedEnv(BaseEnv):
     ) -> Tuple[EnvObs, Dict]:
         obs, info = super().reset(seed=seed, options=options)
         self._force_truncated: bool = False
-        
-        # Reset dataset manager if present
-        if hasattr(self, 'dataset_manager'):
-            reset_ids = options.get("reset_ids", None) if options else None
-            self.dataset_manager.reset(reset_ids)
-
         return obs, info
 
     def step(
         self, action: EnvAction, **kwargs
     ) -> Tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Step the environment with the given action.
-        
+
         Extends BaseEnv.step() to integrate with DatasetManager for automatic
         data collection and saving. The key is to:
         1. Record obs-action pairs as they happen
@@ -301,10 +283,6 @@ class EmbodiedEnv(BaseEnv):
         obs = self.get_obs(**kwargs)
         info = self.get_info(**kwargs)
         rewards = self.get_reward(obs=obs, action=action, info=info)
-
-        # Record step in dataset manager BEFORE checking termination
-        if hasattr(self, 'dataset_manager'):
-            self.dataset_manager.record_step(obs, action)
 
         # Check termination conditions
         terminateds = torch.logical_or(
@@ -323,18 +301,20 @@ class EmbodiedEnv(BaseEnv):
         # Detect which environments need reset
         dones = torch.logical_or(terminateds, truncateds)
         reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
-        
-        # AUTO-SAVE: Trigger dataset manager to save completed episodes
-        if len(reset_env_ids) > 0 and hasattr(self, 'dataset_manager'):
-            logger.log_info(f"Calling dataset_manager.on_episode_end() for {reset_env_ids.cpu().tolist()}")
-            self.dataset_manager.on_episode_end(
-                reset_env_ids,
-                terminateds,
-                info
-            )
-        elif len(reset_env_ids) > 0:
-            logger.log_warning("Episode completed but no dataset_manager found!")
-        
+
+        # Call dataset manager with mode="save": it will record and auto-save if dones=True
+        if self.cfg.dataset:
+            if "save" in self.dataset_manager.available_modes:
+                self.dataset_manager.apply(
+                    mode="save",
+                    env_ids=None,
+                    obs=obs,
+                    action=action,
+                    dones=dones,
+                    terminateds=terminateds,
+                    info=info,
+                )
+
         # Now perform reset for completed environments
         if len(reset_env_ids) > 0:
             obs, _ = self.reset(options={"reset_ids": reset_env_ids})
@@ -530,7 +510,7 @@ class EmbodiedEnv(BaseEnv):
         """
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-    
+
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         """Check if the episode is truncated.
 
@@ -548,7 +528,7 @@ class EmbodiedEnv(BaseEnv):
     def close(self) -> None:
         """Close the environment and release resources."""
         # Finalize dataset if present
-        if hasattr(self, 'dataset_manager'):
+        if self.cfg.dataset:
             self.dataset_manager.finalize()
-        
+
         self.sim.destroy()

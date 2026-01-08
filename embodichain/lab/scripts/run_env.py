@@ -40,13 +40,15 @@ def generate_and_execute_action_list(env, idx, debug_mode):
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
-    for idx_action, action in enumerate(tqdm.tqdm(
-        action_list, desc=f"Executing action list #{idx}", unit="step"
-    )):
+    for idx_action, action in enumerate(
+        tqdm.tqdm(action_list, desc=f"Executing action list #{idx}", unit="step")
+    ):
         if idx_action == len(action_list) - 1:
-            log_info(f"Setting force_truncated before final step at action index: {idx_action}")
+            log_info(
+                f"Setting force_truncated before final step at action index: {idx_action}"
+            )
             env.set_force_truncated(True)
-        
+
         # Step the environment with the current action
         obs, reward, terminated, truncated, info = env.step(action)
 
