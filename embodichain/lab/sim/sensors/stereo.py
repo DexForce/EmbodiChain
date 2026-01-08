@@ -117,6 +117,10 @@ class PairCameraView:
         left_pose = self._left_view.get_local_pose()
         return left_pose @ inv_transform(self._left_to_center)
 
+    def get_world_pose(self) -> np.ndarray:
+        left_pose = self._left_view.get_world_pose()
+        return left_pose @ inv_transform(self._left_to_center)
+
     def get_node(self) -> dexsim.engine.Node:
         return self._left_view.get_node()
 

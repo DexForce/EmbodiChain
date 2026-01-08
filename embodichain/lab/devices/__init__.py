@@ -15,3 +15,9 @@
 # ----------------------------------------------------------------------------
 
 from .device import Device
+from .device_controller import DeviceController
+
+__all__ = [
+    "Device",
+    "DeviceController",
+]
