@@ -20,6 +20,7 @@ is demanded by more than one party. -->
 <!-- As you go through the list, delete the ones that are not applicable. -->
 
 - Bug fix (non-breaking change which fixes an issue)
+- Enhancement (non-breaking change which improves an existing functionality)
 - New feature (non-breaking change which adds functionality)
 - Breaking change (existing functionality will not work without user modification)
 - Documentation update
