@@ -262,7 +262,6 @@
                 "func": "LeRobotRecorder",
                 "mode": "save",
                 "params": {
-                    "save_path": "/home/dex/projects/yuanhaonan/embodichain/outputs/data_example",
                     "id": 0,
                     "robot_meta": {
                         "robot_type": "CobotMagic",

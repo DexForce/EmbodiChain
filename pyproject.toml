@@ -28,7 +28,7 @@ dynamic = ["version"]
 dependencies = [
   "dexsim_engine==0.3.8",
   "setuptools>=78.1.1",
-  "gymnasium==0.29.1",
+  "gymnasium>=0.29.1",
   "casadi==3.7.1",
   "pin==2.7.0",
   "toppra==0.6.3",

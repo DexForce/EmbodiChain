@@ -200,7 +200,6 @@
                 "func": "LeRobotRecorder",
                 "mode": "save",
                 "params": {
-                    "save_path": "/home/dex/projects/yuanhaonan/embodichain/outputs/data_example",
                     "id": 0,
                     "robot_meta": {
                         "robot_type": "CobotMagic",
@@ -209,9 +208,7 @@
                         "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
                         "observation": {
                             "vision": {
-                                "cam_high": ["mask"],
-                                "cam_right_wrist": ["mask"],
-                                "cam_left_wrist": ["mask"]
+                                "cam_high": ["mask"]
                             },
                             "states": ["qpos"],
                             "exteroception": ["cam_high", "cam_right_wrist", "cam_left_wrist"]

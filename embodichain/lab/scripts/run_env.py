@@ -34,7 +34,7 @@ from embodichain.utils.logger import log_warning, log_info, log_error
 
 def generate_and_execute_action_list(env, idx, debug_mode):
 
-    action_list = env.create_demo_action_list(action_sentence=idx)
+    action_list = env.get_wrapper_attr("create_demo_action_list")(action_sentence=idx)
 
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
@@ -47,7 +47,7 @@ def generate_and_execute_action_list(env, idx, debug_mode):
             log_info(
                 f"Setting force_truncated before final step at action index: {idx_action}"
             )
-            env.set_force_truncated(True)
+            env.get_wrapper_attr("set_force_truncated")(True)
 
         # Step the environment with the current action
         obs, reward, terminated, truncated, info = env.step(action)
@@ -98,7 +98,7 @@ def generate_function(
                 _, _ = env.reset()
                 break
 
-            if not debug_mode and env.is_task_success().item():
+            if not debug_mode and env.get_wrapper_attr("is_task_success")().item():
                 pass
                 # TODO: Add data saving and online data streaming logic here.
             else:

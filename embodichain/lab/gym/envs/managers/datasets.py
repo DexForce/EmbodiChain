@@ -25,6 +25,7 @@ import numpy as np
 import torch
 
 from embodichain.utils import logger
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.utils.utility import get_right_name
@@ -74,7 +75,9 @@ class LeRobotRecorder(Functor):
         params = cfg.params
 
         # Required parameters
-        self.lerobot_data_root = params.get("save_path", "/tmp/lerobot_data")
+        self.lerobot_data_root = params.get(
+            "save_path", EMBODICHAIN_DEFAULT_DATASET_ROOT
+        )
         self.repo_id = params.get(
             "id", 0
         )  # Can be int (version counter) or str (dataset name)
