@@ -91,11 +91,11 @@ def normalize_robot_joint_data(
     return data
 
 
-def get_sensor_pose_in_robot(
+def get_sensor_pose_in_robot_frame(
     env: EmbodiedEnv,
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
-    robot_uid: Optional[str] = None,
+    robot_uid: str | None = None,
 ) -> torch.Tensor:
     """Get the pose of a sensor in the robot's base coordinate frame.
 
@@ -114,7 +114,7 @@ def get_sensor_pose_in_robot(
     robot_pose_inv = torch.linalg.inv(robot_pose)
 
     # Get sensor pose in world frame
-    sensor: Union[Camera, StereoCamera] = env.sim.get_sensor_v2(entity_cfg.uid)
+    sensor: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     if sensor is None:
         logger.log_error(
             f"Sensor with UID '{entity_cfg.uid}' not found in the simulation."
@@ -128,9 +128,9 @@ def get_sensor_pose_in_robot(
     # Convert (num_envs, 4, 4) to (num_envs, 7): [x, y, z, qw, qx, qy, qz]
     xyz = cam_in_robot[:, :3, 3]
     quat = quat_from_matrix(cam_in_robot[:, :3, :3])
-    pose7 = torch.cat([xyz, quat], dim=-1)
+    pose = torch.cat([xyz, quat], dim=-1)
 
-    return pose7
+    return pose
 
 
 def get_sensor_intrinsics(
@@ -145,11 +145,13 @@ def get_sensor_intrinsics(
         env: The environment instance.
         obs: The observation dictionary.
         entity_cfg: The configuration of the sensor entity.
+        is_right: Whether to return the right camera intrinsics for stereo cameras.
+            Defaults to False (left camera). Ignored for monocular cameras.
 
     Returns:
         A tensor of shape (num_envs, 3, 3) representing the camera intrinsics.
     """
-    sensor = env.sim.get_sensor_v2(entity_cfg.uid)
+    sensor = env.sim.get_sensor(entity_cfg.uid)
     if sensor is None:
         logger.log_error(
             f"Sensor with UID '{entity_cfg.uid}' not found in the simulation."

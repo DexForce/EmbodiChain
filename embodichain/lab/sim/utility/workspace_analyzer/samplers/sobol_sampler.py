@@ -91,7 +91,7 @@ class SobolSampler(BaseSampler):
             )
 
     def sample(
-        self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
+        self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate Sobol sequence samples within the given bounds.
 

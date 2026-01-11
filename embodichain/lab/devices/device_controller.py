@@ -68,8 +68,8 @@ class DeviceController:
         if device is not None:
             self.add_device(device, device_name, set_active=True)
 
-        # Joint mapping state
-        self._joint_mapping: Dict[str, Dict[str, Any]] = {}
+        # Joint mapping state: maps device joint name -> robot joint index
+        self._joint_mapping: Dict[str, int] = {}
         self._mapping_initialized = False
 
         logger.log_info(f"Device Controller initialized for robot: {robot.uid}")

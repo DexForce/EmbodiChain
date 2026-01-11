@@ -60,7 +60,7 @@ class RandomSampler(BaseSampler):
         super().__init__(seed, device)
 
     def _sample_from_bounds(
-        self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
+        self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate random samples within the given bounds.
 
