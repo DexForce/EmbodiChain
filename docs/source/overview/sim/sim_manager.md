@@ -43,6 +43,21 @@ sim_config = SimulationManagerCfg(
 | `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
 | `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
 
+### Physics Configuration
+
+The `PhysicsCfg` class controls the global physics simulation parameters.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `gravity` | `np.ndarray` | `[0, 0, -9.81]` | Gravity vector for the simulation environment. |
+| `bounce_threshold` | `float` | `2.0` | The speed threshold below which collisions will not produce bounce effects. |
+| `enable_ccd` | `bool` | `False` | Enable continuous collision detection (CCD) for fast-moving objects. |
+| `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
+| `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
+
+For more parameters and details, refer to the [PhysicsCfg](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.PhysicsCfg) documentation.
+
+
 ## Initialization
 
 Initialize the manager with the configuration object:

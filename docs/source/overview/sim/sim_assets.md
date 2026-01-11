@@ -1,26 +1,10 @@
 # Simulation Assets
 
-Simulation assets in EmbodiChain are configured using Python dataclasses. This approach provides a structured and type-safe way to define properties for physics, materials, objects and sensors in the simulation environment.
+Simulation assets in EmbodiChain are configured using Python dataclasses. This approach provides a structured and type-safe way to define properties for physics, materials, objects and sensors in the simulation environment. 
 
-## Physics Configuration
+## Visual Materials
 
-The `PhysicsCfg` class controls the global physics simulation parameters.
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `gravity` | `np.ndarray` | `[0, 0, -9.81]` | Gravity vector for the simulation environment. |
-| `bounce_threshold` | `float` | `2.0` | The speed threshold below which collisions will not produce bounce effects. |
-| `enable_pcm` | `bool` | `True` | Enable persistent contact manifold (PCM) for improved collision handling. |
-| `enable_tgs` | `bool` | `True` | Enable temporal gauss-seidel (TGS) solver for better stability. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection (CCD) for fast-moving objects. |
-| `enable_enhanced_determinism` | `bool` | `False` | Enable enhanced determinism for consistent simulation results. |
-| `enable_friction_every_iteration` | `bool` | `True` | Enable friction calculations at every solver iteration. |
-| `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
-| `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
-
-## Materials
-
-### Visual Materials
+### Configuration
 
 The `VisualMaterialCfg` class defines the visual appearance of objects using Physically Based Rendering (PBR) properties.
 
@@ -38,13 +22,43 @@ The `VisualMaterialCfg` class defines the visual appearance of objects using Phy
 | `normal_texture` | `str` | `None` | Path to normal map. |
 | `ao_texture` | `str` | `None` | Path to ambient occlusion map. |
 | `ior` | `float` | `1.5` | Index of refraction for ray tracing materials. |
-| `material_type` | `str` | `"BRDF"` | material type. |
+
+### Visual Material and Visual Material Instance
+
+A visual material is defined using the `VisualMaterialCfg` class. It is actually a material template that can be used to create multiple instances with different parameters.
+
+A visual material instance is created from a visual material using the method `create_instance()`. User can set different properties for each instance. For details API usage, please refer to the [VisualMaterialInst](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.material.VisualMaterialInst) documentation.
+
+For batch simualtion scenarios, when user set a material to a object (eg, a rigid object), the material instance will be created for each simulation instance automatically. 
+
+### Code 
+
+```python
+# Create a visual material with base color white and low roughness.
+mat: VisualMaterial = sim.create_visual_material(
+    cfg=VisualMaterialCfg(
+        base_color=[1.0, 1.0, 1.0, 1.0],
+        roughness=0.05,
+    )
+)
+
+# Set the material to a rigid object.
+object: RigidObject
+object.set_visual_material(mat)
+
+# Get all material instances created for this object in the simulation. If `num_envs` is N, there will be N instances.
+mat_inst: List[VisualMaterialInst] = object.get_visual_material_inst()
+
+# We can then modify the properties of each material instance separately.
+mat_inst[0].set_base_color([1.0, 0.0, 0.0, 1.0])  
+```
+
 
 ## Objects
 
 All objects inherit from `ObjectBaseCfg`, which provides common properties.
 
-**Base Properties (`ObjectBaseCfg`)**
+**Base Properties**
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -85,6 +99,13 @@ The `RigidBodyAttributesCfg` class defines physical properties for rigid bodies.
 | `dynamic_friction` | `float` | `0.5` | Dynamic friction coefficient. |
 | `static_friction` | `float` | `0.5` | Static friction coefficient. |
 
+For Rigid Object tutorial, please refer to the [Create Scene](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html).
+
+## Rigid Object Groups
+
+`RigidObjectGroupCfg` allows initializing multiple rigid objects, potentially from a folder.
+
+
 ## Soft Object
 
 Configured via `SoftObjectCfg`.
@@ -123,6 +144,8 @@ Soft bodies require both voxelization and physical attributes.
 | `mass` | `float` | `-1.0` | Total mass. If negative, density is used. |
 | `density` | `float` | `1000.0` | Material density in kg/m^3. |
 
+For Soft Object tutorial, please refer to the [Soft Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html).
+
 
 ### Articulations & Robots
 
@@ -152,6 +175,4 @@ Configured via `MarkerCfg` for debugging and visualization.
 | `axis_len` | `float` | `0.005` | Length of axis arms. |
 | `line_color` | `list` | `[1, 1, 0, 1.0]` | RGBA color for lines. |
 
-### Rigid Object Groups
 
-`RigidObjectGroupCfg` allows initializing multiple rigid objects, potentially from a folder.
