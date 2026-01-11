@@ -55,8 +55,8 @@ class IVisualizer(Protocol):
 
     def visualize(
         self,
-        points: Union[torch.Tensor, np.ndarray],
-        colors: Union[torch.Tensor, np.ndarray] | None = None,
+        points: torch.Tensor | np.ndarray,
+        colors: torch.Tensor | np.ndarray | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize the workspace data.
@@ -156,8 +156,8 @@ class BaseVisualizer(ABC):
     @abstractmethod
     def visualize(
         self,
-        points: Union[torch.Tensor, np.ndarray],
-        colors: Union[torch.Tensor, np.ndarray] | None = None,
+        points: torch.Tensor | np.ndarray,
+        colors: torch.Tensor | np.ndarray | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize the workspace data.
@@ -215,7 +215,7 @@ class BaseVisualizer(ABC):
         """
         raise NotImplementedError("Subclasses must implement _save_impl method")
 
-    def _to_numpy(self, data: Union[torch.Tensor, np.ndarray]) -> np.ndarray:
+    def _to_numpy(self, data: torch.Tensor | np.ndarray) -> np.ndarray:
         """Convert data to numpy array.
 
         Args:
@@ -244,7 +244,7 @@ class BaseVisualizer(ABC):
             raise ValueError("Points array is empty")
 
     def _validate_colors(
-        self, colors: Union[torch.Tensor, np.ndarray] | None, num_points: int
+        self, colors: torch.Tensor | np.ndarray | None, num_points: int
     ) -> Union[np.ndarray, None]:
         """Validate and normalize the colors array.
 

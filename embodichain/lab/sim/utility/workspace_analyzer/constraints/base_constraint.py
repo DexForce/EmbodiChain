@@ -35,8 +35,8 @@ class IConstraintChecker:
     """
 
     def check_bounds(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Check if points are within bounds.
 
         Args:
@@ -48,8 +48,8 @@ class IConstraintChecker:
         ...
 
     def filter_points(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Filter points to keep only those satisfying all constraints.
 
         Args:
@@ -96,8 +96,8 @@ class BaseConstraintChecker(ABC):
                 )
 
     def check_bounds(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Check if points are within bounds.
 
         Args:
@@ -142,8 +142,8 @@ class BaseConstraintChecker(ABC):
         return valid
 
     def filter_points(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Filter points to keep only those satisfying all constraints.
 
         Args:
@@ -157,8 +157,8 @@ class BaseConstraintChecker(ABC):
 
     @abstractmethod
     def check_collision(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Check if points are collision-free (to be implemented by subclasses).
 
         Args:

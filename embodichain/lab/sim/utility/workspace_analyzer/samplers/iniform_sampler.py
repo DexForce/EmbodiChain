@@ -67,7 +67,7 @@ class UniformSampler(BaseSampler):
         self.samples_per_dim = samples_per_dim
 
     def _sample_from_bounds(
-        self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
+        self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate uniform grid samples within the given bounds.
 
