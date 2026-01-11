@@ -59,7 +59,7 @@ class SolverCfg:
     """
 
     # TODO: may be support pos and rot separately for easier manipulation.
-    tcp: Union[torch.Tensor, np.ndarray] = np.eye(4)
+    tcp: torch.Tensor | np.ndarray = np.eye(4)
     """The tool center point (TCP) position as a 4x4 homogeneous matrix.
 
     This represents the position and orientation of the tool in the robot's end-effector frame.

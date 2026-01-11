@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-# needed to import for allowing type-hinting: Union[torch.Tensor, np.ndarray]
+# needed to import for allowing type-hinting: torch.Tensor | np.ndarray
 from __future__ import annotations
 
 import math
@@ -280,8 +280,8 @@ def matrix_from_quat(quaternions: torch.Tensor) -> torch.Tensor:
 
 
 def convert_quat(
-    quat: Union[torch.Tensor, np.ndarray], to: Literal["xyzw", "wxyz"] = "xyzw"
-) -> Union[torch.Tensor, np.ndarray]:
+    quat: torch.Tensor | np.ndarray, to: Literal["xyzw", "wxyz"] = "xyzw"
+) -> torch.Tensor | np.ndarray:
     """Converts quaternion from one convention to another.
 
     The convention to convert TO is specified as an optional argument. If to == 'xyzw',

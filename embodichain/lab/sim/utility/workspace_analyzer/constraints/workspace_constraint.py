@@ -14,7 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Union, List, Tuple
 import numpy as np
 import torch
 
@@ -48,7 +47,7 @@ class WorkspaceConstraintChecker(BaseConstraintChecker):
         min_bounds: np.ndarray | None = None,
         max_bounds: np.ndarray | None = None,
         ground_height: float = 0.0,
-        exclude_zones: List[Tuple[np.ndarray, np.ndarray]] | None = None,
+        exclude_zones: list[tuple[np.ndarray, np.ndarray]] | None = None,
         device: torch.device | None = None,
     ):
         """Initialize the workspace constraint checker.
@@ -97,8 +96,8 @@ class WorkspaceConstraintChecker(BaseConstraintChecker):
         )
 
     def check_collision(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Check if points are not in excluded zones (collision checking).
 
         This method checks whether the robot end-effector positions would collide with
@@ -141,8 +140,8 @@ class WorkspaceConstraintChecker(BaseConstraintChecker):
         return valid
 
     def filter_points(
-        self, points: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
         """Filter points to keep only those satisfying all constraints.
 
         This is a comprehensive filtering method that checks both boundary constraints
