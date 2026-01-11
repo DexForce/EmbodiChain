@@ -135,7 +135,7 @@ class SimulationManagerCfg:
     """The time step for the physics simulation."""
 
     sim_device: Union[str, torch.device] = "cpu"
-    """The device for the simulation engine. Can be 'cpu', 'cuda', or a torch.device object."""
+    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
 
     physics_config: PhysicsCfg = field(default_factory=PhysicsCfg)
     """The physics configuration parameters."""
