@@ -98,7 +98,7 @@ class LatinHypercubeSampler(BaseSampler):
             self.optimization = None
 
     def sample(
-        self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
+        self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate Latin Hypercube samples within the given bounds.
 

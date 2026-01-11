@@ -95,6 +95,19 @@ class EmbodiedEnvCfg(EnvCfg):
     """Data pipeline configuration. Defaults to None.
     """
 
+    extensions: Union[Dict[str, Any], None] = None
+    """Extension parameters for task-specific configurations.
+    
+    This field can be used to pass additional parameters that are specific to certain environments
+    or tasks without modifying the base configuration class. For example:
+    - obs_mode: Observation mode (e.g., "state", "image")
+    - episode_length: Maximum episode length
+    - joint_limits: Joint limit constraints
+    - action_scale: Action scaling factor
+    - vr_joint_mapping: VR joint mapping for teleoperation
+    - control_frequency: Control frequency for VR teleoperation
+    """
+
     # Some helper attributes
     filter_visual_rand: bool = False
     """Whether to filter out visual randomization 
@@ -134,17 +147,9 @@ class EmbodiedEnv(BaseEnv):
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
-        defaults = {
-            "obs_mode": "state",
-            "episode_length": 50,
-            "joint_limits": 0.5,
-            "action_scale": 0.1,
-        }
-
-        for name, default in defaults.items():
-            value = extensions.get(name, getattr(cfg, name, default))
+        for name, value in extensions.items():
             setattr(cfg, name, value)
-            setattr(self, name, getattr(cfg, name))
+            setattr(self, name, value)
 
         super().__init__(cfg, **kwargs)
 

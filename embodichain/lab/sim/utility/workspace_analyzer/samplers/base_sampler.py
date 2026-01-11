@@ -35,7 +35,7 @@ class ISampler(Protocol):
     """
 
     def sample(
-        self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
+        self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate samples within the given bounds.
 
@@ -111,7 +111,7 @@ class BaseSampler(ABC):
 
     @abstractmethod
     def _sample_from_bounds(
-        self, bounds: Union[torch.Tensor, np.ndarray], num_samples: int
+        self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate samples within the given bounds.
 
@@ -140,7 +140,7 @@ class BaseSampler(ABC):
         """
         raise NotImplementedError("Subclasses must implement get_strategy_name method")
 
-    def _to_tensor(self, data: Union[torch.Tensor, np.ndarray]) -> torch.Tensor:
+    def _to_tensor(self, data: torch.Tensor | np.ndarray) -> torch.Tensor:
         """Convert data to torch.Tensor.
 
         Args:
@@ -164,7 +164,7 @@ class BaseSampler(ABC):
         """
         return data.detach().cpu().numpy()
 
-    def _validate_bounds(self, bounds: Union[torch.Tensor, np.ndarray]) -> torch.Tensor:
+    def _validate_bounds(self, bounds: torch.Tensor | np.ndarray) -> torch.Tensor:
         """Validate the bounds array and convert to tensor.
 
         Args:
