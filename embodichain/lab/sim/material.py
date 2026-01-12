@@ -116,6 +116,7 @@ class VisualMaterial:
         self.uid = cfg.uid
         self.cfg = copy.deepcopy(cfg)
         self._mat = mat
+        self._mat_inst_list: list[str] = []
 
         self._default_mat_inst = self.create_instance(self.uid)
 
@@ -126,6 +127,10 @@ class VisualMaterial:
     @property
     def mat(self) -> Material:
         return self._mat
+
+    @property
+    def inst(self) -> VisualMaterialInst:
+        return self._default_mat_inst
 
     def set_default_properties(
         self, mat_inst: VisualMaterialInst, cfg: VisualMaterialCfg
@@ -164,6 +169,7 @@ class VisualMaterial:
         # TODO: Support change default properties for material.
         # This will improve the instance creation efficiency.
         self.set_default_properties(inst, self.cfg)
+        self._mat_inst_list.append(uid)
         return inst
 
     def get_default_instance(self) -> VisualMaterialInst:
@@ -183,6 +189,8 @@ class VisualMaterial:
         Returns:
             VisualMaterialInst: The material instance.
         """
+        if uid not in self._mat_inst_list:
+            logger.log_error(f"Material instance with uid '{uid}' does not exist.")
         return VisualMaterialInst(uid, self._mat)
 
 
