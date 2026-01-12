@@ -200,7 +200,6 @@
                 "func": "LeRobotRecorder",
                 "mode": "save",
                 "params": {
-                    "id": 0,
                     "robot_meta": {
                         "robot_type": "CobotMagic",
                         "arm_dofs": 12,

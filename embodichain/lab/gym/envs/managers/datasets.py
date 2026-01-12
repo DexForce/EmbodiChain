@@ -59,7 +59,6 @@ class LeRobotRecorder(Functor):
         Args:
             cfg: Functor configuration containing params:
                 - save_path: Root directory for saving datasets
-                - id: Dataset identifier (repo_id)
                 - robot_meta: Robot metadata for dataset
                 - instruction: Optional task instruction
                 - extra: Optional extra metadata

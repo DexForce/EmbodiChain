@@ -32,7 +32,6 @@
                 "mode": "save",
                 "params": {
                     "save_path": "/home/dex/projects/yuanhaonan/embodichain/outputs/data_example",
-                    "id": 0,
                     "robot_meta": {
                         "robot_type": "UR10",
                         "arm_dofs": 6,
