@@ -28,7 +28,7 @@ dynamic = ["version"]
 dependencies = [
   "dexsim_engine==0.3.8",
   "setuptools>=78.1.1",
-  "gymnasium==0.29.1",
+  "gymnasium>=0.29.1",
   "casadi==3.7.1",
   "pin==2.7.0",
   "toppra==0.6.3",
@@ -38,7 +38,7 @@ dependencies = [
   "pytorch_kinematics==0.7.6",
   "polars==1.31.0",
   "PyYAML>=6.0",
-  "accelerate==1.2.1",
+  "accelerate>=1.10.0",
   "wandb==0.20.1",
   "tensorboard",
   "transformers>=4.53.0",
@@ -49,6 +49,11 @@ dependencies = [
   "black==24.3.0",
   "fvcore",
   "h5py",
+]
+
+[project.optional-dependencies]
+lerobot = [
+  "lerobot==0.4.2"
 ]
 
 [tool.setuptools.dynamic]

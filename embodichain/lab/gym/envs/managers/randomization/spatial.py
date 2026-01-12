@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING, Literal, Union, List
+from typing import TYPE_CHECKING, Union, List
 
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils.math import sample_uniform, matrix_from_euler
 from embodichain.utils import logger
 

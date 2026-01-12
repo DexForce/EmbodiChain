@@ -73,8 +73,8 @@ class SphereVisualizer(BaseVisualizer):
 
     def visualize(
         self,
-        points: Union[torch.Tensor, np.ndarray],
-        colors: Union[torch.Tensor, np.ndarray] | None = None,
+        points: torch.Tensor | np.ndarray,
+        colors: torch.Tensor | np.ndarray | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize points as spheres.

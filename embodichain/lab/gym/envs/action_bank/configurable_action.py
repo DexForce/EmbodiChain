@@ -616,9 +616,16 @@ class ActionBank:
             # TODO: Hard to get current qpos for multi-agent env
             current_qpos = env.robot.get_qpos()
             joint_ids = env.robot.get_joint_ids(name=get_control_part(env, executor))
-            if current_qpos.ndim == 2 and current_qpos.shape[0] == 1:
-                current_qpos = current_qpos[0]
-            current_qpos = current_qpos[joint_ids].cpu()
+
+            # Handle multi-environment case
+            if current_qpos.ndim == 2:
+                # current_qpos shape: [num_envs, num_joints]
+                # Take first environment and then select joints
+                current_qpos = current_qpos[0, joint_ids].cpu()
+            else:
+                # Single environment case
+                # current_qpos shape: [num_joints]
+                current_qpos = current_qpos[joint_ids].cpu()
 
             executor_qpos_dim = action_list[executor].shape[0]
 

@@ -92,8 +92,8 @@ class AxisVisualizer(BaseVisualizer):
 
     def visualize(
         self,
-        poses: Union[torch.Tensor, np.ndarray],
-        colors: Union[torch.Tensor, np.ndarray] | None = None,
+        poses: torch.Tensor | np.ndarray,
+        colors: torch.Tensor | np.ndarray | None = None,
         **kwargs: Any,
     ) -> Any:
         """Visualize coordinate axes at specified poses or points.

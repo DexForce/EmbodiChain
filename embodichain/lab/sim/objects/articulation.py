@@ -1432,7 +1432,7 @@ class Articulation(BatchEntity):
                                            Defaults to the last link in the chain.
             root_link_name (str, optional): The name of the root link for which the Jacobian is computed.
                                             Defaults to the first link in the chain.
-            locations (Union[torch.Tensor, np.ndarray], optional): Offset points relative to the end-effector
+            locations (torch.Tensor | np.ndarray, optional): Offset points relative to the end-effector
                                                                    frame for which the Jacobian is computed.
                                                                    Shape can be (batch_size, 3) or (3,) for a single offset.
                                                                    Defaults to None (origin of the end-effector frame).
