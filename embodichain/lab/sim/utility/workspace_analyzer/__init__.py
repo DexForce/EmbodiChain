@@ -54,7 +54,6 @@ from embodichain.lab.sim.utility.workspace_analyzer import visualizers
 from embodichain.lab.sim.utility.workspace_analyzer import metrics
 from embodichain.lab.sim.utility.workspace_analyzer import constraints
 
-
 __all__ = [
     "WorkspaceAnalyzer",
     "WorkspaceAnalyzerConfig",
