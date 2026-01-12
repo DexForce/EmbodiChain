@@ -1,0 +1,63 @@
+{
+  "id": "CartPoleRL",
+  "max_episodes": 2,
+  "env": {
+    "num_envs": 128,
+    "sim_steps_per_control": 4,
+    "events": {
+    },
+    "observations": {},
+    "extensions": {
+      "obs_mode": "state",
+      "action_scale": 0.1,
+      "episode_length": 100,
+      "slider_limit": 15,
+      "pole_limit": 6.283185307,
+      "veloctity_weight": 0.01
+    }
+  },
+  "robot": {
+    "uid": "Cart",
+    "urdf_cfg": {
+      "components": [
+        {
+          "component_type": "arm",
+          "urdf_path": "/home/chenjian/Downloads/cartpole/cartpole.urdf",
+          "transform": [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+          ]
+        }
+      ]
+    },
+    "init_pos": [0.0, 0.0, 0.0],
+    "init_rot": [0.0, 0.0, 0.0],
+    "init_qpos": [0.0, 0.6],
+    "drive_pros": {
+      "stiffness": {
+        "slider_to_cart": 1e2,
+        "cart_to_pole":1e-2
+      },
+      "damping": {
+        "slider_to_cart": 1e1,
+        "cart_to_pole":1e-3
+      },
+      "max_effort": {
+        "slider_to_cart": 1e3,
+        "cart_to_pole":1e-1
+      }
+    },
+    "control_parts": {
+      "arm": ["slider_to_cart"],
+      "hand": ["cart_to_pole"]
+    }
+  },
+  "sensor": [],
+  "light": {
+  },
+  "rigid_object": [],
+  "rigid_object_group": [],
+  "articulation": []
+}
