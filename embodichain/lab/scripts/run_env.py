@@ -40,8 +40,8 @@ def generate_and_execute_action_list(env, idx, debug_mode):
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
-    for idx_action, action in enumerate(
-        tqdm.tqdm(action_list, desc=f"Executing action list #{idx}", unit="step")
+    for action in tqdm.tqdm(
+        action_list, desc=f"Executing action list #{idx}", unit="step"
     ):
         # Step the environment with the current action
         # The environment will automatically detect truncation based on action_length
@@ -94,7 +94,7 @@ def generate_function(
 
             # Check task success for all environments
             if not debug_mode:
-                success = env.is_task_success()
+                success = env.get_wrapper_attr("is_task_success")()
                 # For multiple environments, check if all succeeded
                 all_success = (
                     success.all().item() if success.numel() > 1 else success.item()
