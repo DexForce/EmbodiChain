@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import sys
+import torch
+
 from copy import deepcopy
 from functools import partial
 from typing import TYPE_CHECKING, Dict, Type
@@ -106,6 +108,14 @@ class TimeLimitWrapper(gym.Wrapper):
     @property
     def base_env(self) -> BaseEnv:
         return self.env.unwrapped
+
+    @property
+    def device(self) -> torch.device:
+        return self.base_env.device
+
+    @property
+    def num_envs(self) -> int:
+        return self.base_env.num_envs
 
     def step(self, action):
         observation, reward, terminated, truncated, info = self.env.step(action)

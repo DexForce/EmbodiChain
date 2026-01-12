@@ -20,7 +20,7 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Sequence, Tuple, Any, List
+from typing import Dict, Union, Sequence, Tuple, Any, List, Optional
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -42,6 +42,7 @@ from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
+    DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import configclass, logger
@@ -90,9 +91,10 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.managers.ObservationManager` class for more details.
     """
 
-    # TODO: This would be changed to a more generic data pipeline configuration.
-    dataset: Union[Dict[str, Any], None] = None
-    """Data pipeline configuration. Defaults to None.
+    dataset: Union[object, None] = None
+    """Dataset settings. Defaults to None, in which case no dataset collection is performed.
+
+    Please refer to the :class:`embodichain.lab.gym.managers.DatasetManager` class for more details.
     """
 
     extensions: Union[Dict[str, Any], None] = None
@@ -144,6 +146,7 @@ class EmbodiedEnv(BaseEnv):
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
         self.action_bank = None
+        self._force_truncated: bool = False
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -170,14 +173,8 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.observations:
             self.observation_manager = ObservationManager(self.cfg.observations, self)
 
-        # TODO: A workaround for handling dataset saving, which need history data of obs-action pairs.
-        # We may improve this by implementing a data manager to handle data saving and online streaming.
-        if self.cfg.dataset is not None:
-            self.metadata["dataset"] = self.cfg.dataset
-            self.episode_obs_list = []
-            self.episode_action_list = []
-
-            self.curr_episode = 0
+        if self.cfg.dataset:
+            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -257,29 +254,77 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
+    def set_force_truncated(self, value: bool = True):
+        """
+        Set force_truncated flag to trigger episode truncation.
+        """
+        self._force_truncated = value
+
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
         obs, info = super().reset(seed=seed, options=options)
-
-        if hasattr(self, "episode_obs_list"):
-            self.episode_obs_list = [obs]
-            self.episode_action_list = []
-
+        self._force_truncated: bool = False
         return obs, info
 
     def step(
         self, action: EnvAction, **kwargs
     ) -> Tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        # TODO: Maybe add action preprocessing manager and its functors.
-        obs, reward, done, truncated, info = super().step(action, **kwargs)
+        """Step the environment with the given action.
 
-        if hasattr(self, "episode_action_list"):
+        Extends BaseEnv.step() to integrate with DatasetManager for automatic
+        data collection and saving. The key is to:
+        1. Record obs-action pairs as they happen
+        2. Detect episode completion
+        3. Auto-save episodes BEFORE reset
+        4. Then perform the actual reset
+        """
+        self._elapsed_steps += 1
 
-            self.episode_obs_list.append(obs)
-            self.episode_action_list.append(action)
+        action = self._step_action(action=action)
+        self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
+        self._update_sim_state(**kwargs)
 
-        return obs, reward, done, truncated, info
+        obs = self.get_obs(**kwargs)
+        info = self.get_info(**kwargs)
+        rewards = self.get_reward(obs=obs, action=action, info=info)
+
+        # Check termination conditions
+        terminateds = torch.logical_or(
+            info.get(
+                "success",
+                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            ),
+            info.get(
+                "fail", torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            ),
+        )
+        truncateds = self.check_truncated(obs=obs, info=info)
+        if self.cfg.ignore_terminations:
+            terminateds[:] = False
+
+        # Detect which environments need reset
+        dones = torch.logical_or(terminateds, truncateds)
+        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+
+        # Call dataset manager with mode="save": it will record and auto-save if dones=True
+        if self.cfg.dataset:
+            if "save" in self.dataset_manager.available_modes:
+                self.dataset_manager.apply(
+                    mode="save",
+                    env_ids=None,
+                    obs=obs,
+                    action=action,
+                    dones=dones,
+                    terminateds=terminateds,
+                    info=info,
+                )
+
+        # Now perform reset for completed environments
+        if len(reset_env_ids) > 0:
+            obs, _ = self.reset(options={"reset_ids": reset_env_ids})
+
+        return obs, rewards, terminateds, truncateds, info
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -457,22 +502,9 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def to_dataset(self, id: str, save_path: str = None) -> str | None:
-        """Convert the recorded episode data to a dataset format.
-
-        Args:
-            id (str): Unique identifier for the dataset.
-            save_path (str, optional): Path to save the dataset. If None, use config or default.
-
-        Returns:
-            str | None: The path to the saved dataset, or None if failed.
-        """
-        raise NotImplementedError(
-            "The method 'to_dataset' will be implemented in the near future."
-        )
-
     def is_task_success(self, **kwargs) -> torch.Tensor:
-        """Determine if the task is successfully completed. This is mainly used in the data generation process
+        """
+        Determine if the task is successfully completed. This is mainly used in the data generation process
         of the imitation learning.
 
         Args:
@@ -483,3 +515,25 @@ class EmbodiedEnv(BaseEnv):
         """
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
+        """Check if the episode is truncated.
+
+        Args:
+            obs: The observation from the environment.
+            info: The info dictionary.
+
+        Returns:
+            A boolean tensor indicating truncation for each environment in the batch.
+        """
+        if self._force_truncated:
+            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        return super().check_truncated(obs, info)
+
+    def close(self) -> None:
+        """Close the environment and release resources."""
+        # Finalize dataset if present
+        if self.cfg.dataset:
+            self.dataset_manager.finalize()
+
+        self.sim.destroy()

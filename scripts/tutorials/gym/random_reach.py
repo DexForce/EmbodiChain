@@ -144,7 +144,7 @@ if __name__ == "__main__":
             action = env.action_space.sample()
             action = torch.as_tensor(action, dtype=torch.float32, device=env.device)
 
-            init_pose = env.robot_init_qpos
+            init_pose = env.unwrapped.robot_init_qpos
             init_pose = (
                 torch.as_tensor(init_pose, dtype=torch.float32, device=env.device)
                 .unsqueeze_(0)

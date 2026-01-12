@@ -16,11 +16,9 @@
 
 from .base_constraint import BaseConstraintChecker, IConstraintChecker
 from .workspace_constraint import WorkspaceConstraintChecker
-from .circular_constraint import CircularConstraintChecker
 
 __all__ = [
     "BaseConstraintChecker",
     "IConstraintChecker",
     "WorkspaceConstraintChecker",
-    "CircularConstraintChecker",
 ]

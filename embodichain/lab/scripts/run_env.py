@@ -34,19 +34,23 @@ from embodichain.utils.logger import log_warning, log_info, log_error
 
 def generate_and_execute_action_list(env, idx, debug_mode):
 
-    action_list = env.create_demo_action_list(action_sentence=idx)
+    action_list = env.get_wrapper_attr("create_demo_action_list")(action_sentence=idx)
 
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
-    for action in tqdm.tqdm(
-        action_list, desc=f"Executing action list #{idx}", unit="step"
+    for idx_action, action in enumerate(
+        tqdm.tqdm(action_list, desc=f"Executing action list #{idx}", unit="step")
     ):
+        if idx_action == len(action_list) - 1:
+            log_info(
+                f"Setting force_truncated before final step at action index: {idx_action}"
+            )
+            env.get_wrapper_attr("set_force_truncated")(True)
+
         # Step the environment with the current action
         obs, reward, terminated, truncated, info = env.step(action)
-
-        # TODO: May be add some functions for debug_mode
 
     # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
     # but truncation is useful to improve the generation efficiency.
@@ -84,19 +88,19 @@ def generate_function(
 
     valid = True
     while True:
-        _, _ = env.reset()
+        # _, _ = env.reset()
 
+        ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
 
             if not valid:
+                _, _ = env.reset()
                 break
 
-            if not debug_mode and env.is_task_success().item():
+            if not debug_mode and env.get_wrapper_attr("is_task_success")().item():
                 pass
-
                 # TODO: Add data saving and online data streaming logic here.
-
             else:
                 log_warning(f"Task fail, Skip to next generation.")
                 valid = False
@@ -188,8 +192,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.num_envs != 1:
-        log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+    # if args.num_envs != 1:
+    #     log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
 
     gym_config = load_json(args.gym_config)
     cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)

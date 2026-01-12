@@ -136,7 +136,7 @@ class BaseEnvTest:
                     action, dtype=torch.float32, device=self.env.device
                 )
 
-                init_pose = self.env.robot_init_qpos
+                init_pose = self.env.get_wrapper_attr("robot_init_qpos")
                 init_pose = (
                     torch.as_tensor(
                         init_pose, dtype=torch.float32, device=self.env.device
