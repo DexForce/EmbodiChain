@@ -146,7 +146,8 @@ class EmbodiedEnv(BaseEnv):
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
         self.action_bank = None
-        self._force_truncated: bool = False
+        self.action_length: int = 0  # Set by create_demo_action_list
+        self._action_step_counter: int = 0  # Track steps within current action sequence
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -254,17 +255,11 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
-    def set_force_truncated(self, value: bool = True):
-        """
-        Set force_truncated flag to trigger episode truncation.
-        """
-        self._force_truncated = value
-
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
         obs, info = super().reset(seed=seed, options=options)
-        self._force_truncated: bool = False
+        self._action_step_counter = 0  # Reset action step counter
         return obs, info
 
     def step(
@@ -280,6 +275,7 @@ class EmbodiedEnv(BaseEnv):
         4. Then perform the actual reset
         """
         self._elapsed_steps += 1
+        self._action_step_counter += 1  # Increment action sequence counter
 
         action = self._step_action(action=action)
         self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
@@ -495,6 +491,14 @@ class EmbodiedEnv(BaseEnv):
         This function should be implemented in subclasses to generate a sequence of actions
         that demonstrate a specific task or behavior within the environment.
 
+        Important:
+            Subclasses MUST set `self.action_length` to the length of the returned action list.
+            This is used by the environment to automatically detect episode truncation.
+            Example:
+                action_list = [...]  # Generate actions
+                self.action_length = len(action_list)
+                return action_list
+
         Returns:
             Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.
         """
@@ -526,8 +530,10 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A boolean tensor indicating truncation for each environment in the batch.
         """
-        if self._force_truncated:
+        # Check if action sequence has reached its end
+        if self.action_length > 0 and self._action_step_counter >= self.action_length:
             return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
         return super().check_truncated(obs, info)
 
     def close(self) -> None:

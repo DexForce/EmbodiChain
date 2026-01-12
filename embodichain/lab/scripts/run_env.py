@@ -43,13 +43,8 @@ def generate_and_execute_action_list(env, idx, debug_mode):
     for idx_action, action in enumerate(
         tqdm.tqdm(action_list, desc=f"Executing action list #{idx}", unit="step")
     ):
-        if idx_action == len(action_list) - 1:
-            log_info(
-                f"Setting force_truncated before final step at action index: {idx_action}"
-            )
-            env.get_wrapper_attr("set_force_truncated")(True)
-
         # Step the environment with the current action
+        # The environment will automatically detect truncation based on action_length
         obs, reward, terminated, truncated, info = env.step(action)
 
     # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
@@ -87,9 +82,8 @@ def generate_function(
     """
 
     valid = True
+    _, _ = env.reset()
     while True:
-        # _, _ = env.reset()
-
         ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
@@ -98,13 +92,23 @@ def generate_function(
                 _, _ = env.reset()
                 break
 
-            if not debug_mode and env.get_wrapper_attr("is_task_success")().item():
-                pass
-                # TODO: Add data saving and online data streaming logic here.
+            # Check task success for all environments
+            if not debug_mode:
+                success = env.is_task_success()
+                # For multiple environments, check if all succeeded
+                all_success = (
+                    success.all().item() if success.numel() > 1 else success.item()
+                )
+                if all_success:
+                    pass
+                    # TODO: Add data saving and online data streaming logic here.
+                else:
+                    log_warning(f"Task fail, Skip to next generation.")
+                    valid = False
+                    break
             else:
-                log_warning(f"Task fail, Skip to next generation.")
-                valid = False
-                break
+                # In debug mode, skip success check
+                pass
 
         if valid:
             break

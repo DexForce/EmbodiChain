@@ -175,7 +175,7 @@ def compute_object_length(
         )
     pcs = rigid_object.get_vertices(env_ids)
     body_scale = rigid_object.get_body_scale(env_ids)
-    scaled_pcs = pcs * body_scale
+    scaled_pcs = pcs * body_scale.unsqueeze(1)
 
     if is_svd_frame:
         scaled_pcs = apply_svd_transfer_pcd(scaled_pcs, sample_points)

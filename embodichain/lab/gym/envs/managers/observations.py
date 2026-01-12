@@ -207,6 +207,10 @@ def compute_semantic_mask(
 
     robot_uids = env.robot.get_user_ids()
 
+    # Ensure mask is 3D (num_envs, H, W) by squeezing last dim if it's already 4D
+    # if mask.dim() == 4 and mask.shape[-1] == 1:
+    #     mask = mask.squeeze(-1)
+
     mask_exp = mask.unsqueeze(-1)
 
     robot_uids_exp = robot_uids.unsqueeze_(1).unsqueeze_(1)

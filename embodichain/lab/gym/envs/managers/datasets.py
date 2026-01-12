@@ -78,9 +78,6 @@ class LeRobotRecorder(Functor):
         self.lerobot_data_root = params.get(
             "save_path", EMBODICHAIN_DEFAULT_DATASET_ROOT
         )
-        self.repo_id = params.get(
-            "id", 0
-        )  # Can be int (version counter) or str (dataset name)
         self.robot_meta = params.get("robot_meta", {})
 
         # Optional parameters
@@ -95,7 +92,7 @@ class LeRobotRecorder(Functor):
 
         # LeRobot dataset instance
         self.dataset: Optional[LeRobotDataset] = None
-        self.dataset_id: int = 0  # Will be set in _initialize_dataset
+        self.dataset_full_path: Optional[Path] = None
 
         # Tracking
         self.total_time: float = 0.0
@@ -109,7 +106,9 @@ class LeRobotRecorder(Functor):
     @property
     def dataset_path(self) -> str:
         """Path to the dataset directory."""
-        return str(Path(self.lerobot_data_root) / self.repo_id)
+        return (
+            str(self.dataset_full_path) if self.dataset_full_path else "Not initialized"
+        )
 
     def reset(self, env_ids: Optional[torch.Tensor] = None) -> None:
         """Reset the recorder buffers.
@@ -268,47 +267,45 @@ class LeRobotRecorder(Functor):
         # Use lerobot_data_root from __init__
         lerobot_data_root = Path(self.lerobot_data_root)
 
-        # repo_id from config or generate one
-        if isinstance(self.repo_id, int):
-            # If repo_id is an integer, generate a name
-            dataset_id = self.repo_id
-            while True:
-                repo_id = f"{robot_type}_{scene_type}_{task_description}_v{dataset_id}"
-                dataset_dir = lerobot_data_root / repo_id
-                if not dataset_dir.exists():
-                    break
-                dataset_id += 1
-            self.repo_id = repo_id
-            self.dataset_id = dataset_id
+        # Generate dataset folder name with auto-incrementing suffix
+        base_name = f"{robot_type}_{scene_type}_{task_description}"
+
+        # Find the next available sequence number by checking existing folders
+        existing_dirs = list(lerobot_data_root.glob(f"{base_name}_*"))
+        if not existing_dirs:
+            dataset_id = 0
         else:
-            # repo_id is already a string, use it directly
-            self.dataset_id = 0
+            # Extract sequence numbers from existing directories
+            max_id = -1
+            for dir_path in existing_dirs:
+                suffix = dir_path.name[len(base_name) + 1 :]  # +1 for underscore
+                if suffix.isdigit():
+                    max_id = max(max_id, int(suffix))
+            dataset_id = max_id + 1
+
+        # Format dataset name with zero-padding (3 digits: 000, 001, 002, ...)
+        dataset_name = f"{base_name}_{dataset_id:03d}"
+
+        # LeRobot's root parameter is the COMPLETE dataset path (not parent directory)
+        self.dataset_full_path = lerobot_data_root / dataset_name
 
         fps = self.robot_meta.get("control_freq", 30)
         features = self._build_features()
 
-        try:
-            self.dataset = LeRobotDataset.create(
-                repo_id=self.repo_id,
-                fps=fps,
-                root=str(lerobot_data_root),
-                robot_type=robot_type,
-                features=features,
-                use_videos=self.use_videos,
-            )
-            logger.log_info(
-                f"Created LeRobot dataset at: {lerobot_data_root / self.repo_id}"
-            )
-        except FileExistsError:
-            self.dataset = LeRobotDataset(
-                repo_id=self.repo_id, root=str(lerobot_data_root)
-            )
-            logger.log_info(
-                f"Loaded existing LeRobot dataset at: {lerobot_data_root / self.repo_id}"
-            )
-        except Exception as e:
-            logger.log_error(f"Failed to create/load LeRobot dataset: {e}")
-            raise
+        logger.log_info("------------------------------------------")
+        logger.log_info(f"Building dataset: {dataset_name}")
+        logger.log_info(f"Parent directory: {lerobot_data_root}")
+        logger.log_info(f"Full path: {self.dataset_full_path}")
+
+        self.dataset = LeRobotDataset.create(
+            repo_id=dataset_name,
+            fps=fps,
+            root=str(self.dataset_full_path),
+            robot_type=robot_type,
+            features=features,
+            use_videos=self.use_videos,
+        )
+        logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 
     def _build_features(self) -> Dict:
         """Build LeRobot features dict."""
