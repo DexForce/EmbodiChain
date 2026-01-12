@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
-import math
+
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import logger
@@ -23,7 +23,7 @@ from embodichain.utils import logger
 __all__ = ["SimpleTaskEnv"]
 
 
-@register_env("simple_task_1", max_episode_steps=600)
+@register_env("SimpleTask-v1", max_episode_steps=600)
 class SimpleTaskEnv(EmbodiedEnv):
     """A demo environment with sinusoidal trajectory
 

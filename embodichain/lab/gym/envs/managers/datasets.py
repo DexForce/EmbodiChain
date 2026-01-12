@@ -40,8 +40,12 @@ try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
 
     LEROBOT_AVAILABLE = True
+
+    __all__ = ["LeRobotRecorder"]
 except ImportError:
     LEROBOT_AVAILABLE = False
+
+    __all__ = []
 
 
 class LeRobotRecorder(Functor):

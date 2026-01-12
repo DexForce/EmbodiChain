@@ -146,6 +146,8 @@ class EmbodiedEnv(BaseEnv):
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
         self.action_bank = None
+
+        # TODO: Change to array like data structure to handle different demo action list length for across different arena.
         self.action_length: int = 0  # Set by create_demo_action_list
         self._action_step_counter: int = 0  # Track steps within current action sequence
 

@@ -25,4 +25,4 @@ from .manager_base import Functor, ManagerBase
 from .event_manager import EventManager
 from .observation_manager import ObservationManager
 from .dataset_manager import DatasetManager
-from .datasets import LeRobotRecorder
+from .datasets import *

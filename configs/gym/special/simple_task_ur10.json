@@ -1,5 +1,5 @@
 {   
-    "id": "simple_task_1",
+    "id": "SimpleTask-v1",
     "max_episodes": 24,
     "env": {
         "events": {
@@ -31,7 +31,6 @@
                 "func": "LeRobotRecorder",
                 "mode": "save",
                 "params": {
-                    "save_path": "/home/dex/projects/yuanhaonan/embodichain/outputs/data_example",
                     "robot_meta": {
                         "robot_type": "UR10",
                         "arm_dofs": 6,
