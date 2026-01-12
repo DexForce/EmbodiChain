@@ -34,18 +34,18 @@
     },
     "init_pos": [0.0, 0.0, 0.0],
     "init_rot": [0.0, 0.0, 0.0],
-    "init_qpos": [0.0, 0.6],
+    "init_qpos": [0.0, 1.0],
     "drive_pros": {
       "stiffness": {
-        "slider_to_cart": 1e2,
+        "slider_to_cart": 1e-1,
         "cart_to_pole":1e-2
       },
       "damping": {
-        "slider_to_cart": 1e1,
+        "slider_to_cart": 1e-2,
         "cart_to_pole":1e-3
       },
       "max_effort": {
-        "slider_to_cart": 1e3,
+        "slider_to_cart": 1e0,
         "cart_to_pole":1e-1
       }
     },

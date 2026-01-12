@@ -37,7 +37,7 @@ class CartPoleEnv(EmbodiedEnv):
     def __init__(self, cfg=None, **kwargs):
         if cfg is None:
             cfg = EmbodiedEnvCfg()
-        cfg.sim_cfg.arena_space = 35.0
+        cfg.sim_cfg.arena_space = 12.0
         extensions = getattr(cfg, "extensions", {}) or {}
 
         # cfg.sim_cfg.enable_rt = True
@@ -78,7 +78,6 @@ class CartPoleEnv(EmbodiedEnv):
         super()._initialize_episode(env_ids=env_ids, **kwargs)
 
     def _step_action(self, action: EnvAction) -> EnvAction:
-
         if self.obs_mode == "state":
             delta_qpos = action[:, 0]
         scaled_action = delta_qpos * self.action_scale
@@ -140,7 +139,7 @@ class CartPoleEnv(EmbodiedEnv):
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         is_timeout = self._elapsed_steps >= self.episode_length
         pole_qpos = self.robot.get_qpos(name="hand").reshape(-1)
-        is_fallen = torch.abs(pole_qpos) > torch.pi * 0.25
+        is_fallen = torch.abs(pole_qpos) > torch.pi * 0.5
         return is_timeout | is_fallen
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
