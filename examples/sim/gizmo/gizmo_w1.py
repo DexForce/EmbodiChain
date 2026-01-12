@@ -42,9 +42,6 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
     )
     parser.add_argument(
@@ -66,10 +63,6 @@ def main():
 
     sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
-
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Get DexForce W1 URDF path
     urdf_path = get_data_path(
@@ -104,8 +97,9 @@ def main():
             ),
         },
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"LEFT_J[1-7]": 1e4, "RIGHT_J[1-7]": 1e4},
-            damping={"LEFT_J[1-7]": 1e3, "RIGHT_J[1-7]": 1e3},
+            stiffness={"(LEFT|RIGHT)_J[1-7]": 1e4, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e7},
+            damping={"(LEFT|RIGHT)_J[1-7]": 1e3, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e4},
+            max_effort={"(LEFT|RIGHT)_J[1-7]": 1e5, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e10},
         ),
     )
     robot = sim.add_robot(cfg=robot_cfg)

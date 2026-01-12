@@ -24,8 +24,9 @@ import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from dexsim.utility.path import get_resources_data_path
 
 
 def main():
@@ -63,14 +64,12 @@ def main():
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
         enable_rt=args.enable_rt,  # Enable ray tracing for better visuals
+        num_envs=args.num_envs,
+        arena_space=3.0,
     )
 
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
-
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Add objects to the scene
     cube: RigidObject = sim.add_rigid_object(

@@ -16,7 +16,7 @@
 
 import torch
 import numpy as np
-from typing import Dict, List, Tuple, Union, Optional, Any
+from typing import Dict, List, Tuple, Union, Any
 from enum import Enum
 from scipy.spatial.transform import Rotation, Slerp
 
@@ -170,7 +170,7 @@ class MotionGenerator:
         }
 
     def _create_state_dict(
-        self, position: np.ndarray, velocity: Optional[np.ndarray] = None
+        self, position: np.ndarray, velocity: np.ndarray | None = None
     ) -> Dict:
         r"""Create a state dictionary for trajectory planning.
 
@@ -207,10 +207,10 @@ class MotionGenerator:
         **kwargs,
     ) -> Tuple[
         bool,
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[np.ndarray],
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
         float,
     ]:
         r"""Plan trajectory without collision checking.
@@ -290,15 +290,15 @@ class MotionGenerator:
 
     def create_discrete_trajectory(
         self,
-        xpos_list: Optional[List[np.ndarray]] = None,
-        qpos_list: Optional[List[np.ndarray]] = None,
+        xpos_list: list[np.ndarray] | None = None,
+        qpos_list: list[np.ndarray] | None = None,
         is_use_current_qpos: bool = True,
         is_linear: bool = False,
         sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY,
-        sample_num: Union[float, int] = 20,
-        qpos_seed: Optional[np.ndarray] = None,
+        sample_num: float | int = 20,
+        qpos_seed: np.ndarray | None = None,
         **kwargs,
-    ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         r"""Generate a discrete trajectory between waypoints using cartesian or joint space interpolation.
 
         This method supports two trajectory planning approaches:

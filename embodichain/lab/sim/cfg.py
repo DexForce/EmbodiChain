@@ -19,7 +19,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Optional, Any
+from typing import Sequence, Union, Dict, Literal, List, Any
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -43,12 +43,25 @@ from .shapes import ShapeCfg, MeshCfg
 @configclass
 class PhysicsCfg:
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
+    """Gravity vector for the simulation environment."""
+
     bounce_threshold: float = 2.0
+    """The speed threshold below which collisions will not produce bounce effects."""
+
     enable_pcm: bool = True
+    """Enable persistent contact manifold (PCM) for improved collision handling."""
+
     enable_tgs: bool = True
+    """Enable temporal gauss-seidel (TGS) solver for better stability."""
+
     enable_ccd: bool = False
+    """Enable continuous collision detection (CCD) for fast-moving objects."""
+
     enable_enhanced_determinism: bool = False
+    """Enable enhanced determinism for consistent simulation results."""
+
     enable_friction_every_iteration: bool = True
+    """Enable friction calculations at every solver iteration."""
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
@@ -86,20 +99,28 @@ class MarkerCfg:
 
     name: str = "empty-mesh"
     """Name of the marker for identification purposes."""
+
     marker_type: Literal["axis", "line", "point"] = "axis"
     """Type of marker to display. Can be 'axis' (3D coordinate frame), 'line', or 'point'. (only axis supported now)"""
+
     axis_xpos: List[np.ndarray] = None
     """List of 4x4 transformation matrices defining the position and orientation of each axis marker."""
+
     axis_size: float = 0.002
     """Thickness/size of the axis lines in meters."""
+
     axis_len: float = 0.005
     """Length of each axis arm in meters."""
+
     line_color: List[float] = [1, 1, 0, 1.0]
     """RGBA color values for the marker lines. Values should be between 0.0 and 1.0."""
+
     arrow_type: AxisArrowType = AxisArrowType.CONE
     """Type of arrow head for axis markers (e.g., CONE, ARROW, etc.)."""
+
     corner_type: AxisCornerType = AxisCornerType.SPHERE
     """Type of corner/joint visualization for axis markers (e.g., SPHERE, CUBE, etc.)."""
+
     arena_index: int = -1
     """Index of the arena where the marker should be placed. -1 means all arenas."""
 
@@ -110,13 +131,17 @@ class GPUMemoryCfg:
 
     temp_buffer_capacity: int = 2**24
     """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
+
     max_rigid_contact_count: int = 2**19
     """Increase this if you get 'Contact buffer overflow detected'"""
+
     max_rigid_patch_count: int = (
         2**18
     )  # 81920 is DexSim default but most tasks work with 2**18
     """Increase this if you get 'Patch buffer overflow detected'"""
+
     heap_capacity: int = 2**26
+
     found_lost_pairs_capacity: int = (
         2**25
     )  # 262144 is DexSim default but most tasks work with 2**25
@@ -135,29 +160,60 @@ class RigidBodyAttributesCfg:
     """
 
     mass: float = 1.0
-    # set mass to 0 will use density to calculate mass.
+    """Mass of the rigid body in kilograms. 
+    
+    Set to 0 will use density to calculate mass.
+    """
+
     density: float = 1000.0
+    """Density of the rigid body in kg/m^3."""
 
     angular_damping: float = 0.7
+    """Angular damping coefficient."""
+
     linear_damping: float = 0.7
+    """Linear damping coefficient."""
+
     max_depenetration_velocity: float = 10.0
+    """Maximum depenetration velocity."""
+
     sleep_threshold: float = 0.001
+    """Threshold below which the body can go to sleep."""
+
     min_position_iters: int = 4
+    """Minimum position iterations."""
+
     min_velocity_iters: int = 1
+    """Minimum velocity iterations."""
 
     max_linear_velocity: float = 1e2
+    """Maximum linear velocity."""
+
     max_angular_velocity: float = 1e2
+    """Maximum angular velocity."""
 
     # collision properties.
     enable_ccd: bool = False
+    """Enable continuous collision detection (CCD)."""
+
     contact_offset: float = 0.002
+    """Contact offset for collision detection."""
+
     rest_offset: float = 0.001
+    """Rest offset for collision detection."""
+
     enable_collision: bool = True
+    """Enable collision for the rigid body."""
 
     # physics material properties.
     restitution: float = 0.0
+    """Restitution (bounciness) coefficient."""
+
     dynamic_friction: float = 0.5
+    """Dynamic friction coefficient."""
+
     static_friction: float = 0.5
+    """Static friction coefficient."""
 
     def attr(self) -> PhysicalAttr:
         """Convert to dexsim PhysicalAttr"""
@@ -165,7 +221,6 @@ class RigidBodyAttributesCfg:
         attr.mass = self.mass
         attr.contact_offset = self.contact_offset
         attr.rest_offset = self.rest_offset
-        attr.enable_collision = self.enable_collision
         attr.dynamic_friction = self.dynamic_friction
         attr.static_friction = self.static_friction
         attr.angular_damping = self.angular_damping
@@ -403,7 +458,7 @@ class ObjectBaseCfg:
     init_rot: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Euler angles (in degree) of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0)."""
 
-    init_local_pose: Optional[np.ndarray] = None
+    init_local_pose: np.ndarray | None = None
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
     @classmethod
@@ -554,7 +609,7 @@ class RigidObjectGroupCfg:
     body_type: Literal["dynamic", "kinematic"] = "dynamic"
     """Body type for all rigid objects in the group. """
 
-    folder_path: Optional[str] = None
+    folder_path: str | None = None
     """Path to the folder containing the rigid object assets.
     
     This is used to initialize multiple rigid object configurations from a folder.
@@ -641,10 +696,10 @@ class URDFCfg:
     base_link_name: str = "base_link"
     """Name of the base link in the assembled robot."""
 
-    fpath: Optional[str] = None
+    fpath: str | None = None
     """Full output file path for the assembled URDF. If specified, overrides fname and fpath_prefix."""
 
-    fname: Optional[str] = None
+    fname: str | None = None
     """Name used for output file and directory. If not specified, auto-generated from component names."""
 
     fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
@@ -652,10 +707,10 @@ class URDFCfg:
 
     def __init__(
         self,
-        components: Optional[List[Dict[str, Union[str, np.ndarray]]]] = None,
-        sensors: Optional[Dict[str, Dict[str, Union[str, np.ndarray]]]] = None,
-        fpath: Optional[str] = None,
-        fname: Optional[str] = None,
+        components: list[dict[str, str | np.ndarray]] | None = None,
+        sensors: dict[str, dict[str, str | np.ndarray]] | None = None,
+        fpath: str | None = None,
+        fname: str | None = None,
         fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled",
         use_signature_check: bool = True,
         base_link_name: str = "base_link",
@@ -664,14 +719,14 @@ class URDFCfg:
         Initialize URDFCfg with optional list of components and output path settings.
 
         Args:
-            components (Optional[List[Dict]]): List of component configurations. Each dict should contain:
+            components (list[dict[str, str | np.ndarray]] | None): List of component configurations. Each dict should contain:
                 - 'component_type' (str): The type/name of the component (e.g., 'chassis', 'arm', 'hand').
                 - 'urdf_path' (str): Path to the component's URDF file.
-                - 'transform' (Optional[np.ndarray]): 4x4 transformation matrix (optional).
+                - 'transform' (np.ndarray | None): 4x4 transformation matrix (optional).
                 - Additional params can be included as extra keys.
-            sensors (Optional[Dict]): Sensor configurations for the robot.
-            fpath (Optional[str]): Full output file path for the assembled URDF. If specified, overrides fname and fpath_prefix.
-            fname (Optional[str]): Name used for output file and directory. If not specified, auto-generated from component names.
+            sensors (dict[str, dict[str, str | np.ndarray]] | None): Sensor configurations for the robot.
+            fpath (str | None): Full output file path for the assembled URDF. If specified, overrides fname and fpath_prefix.
+            fname (str | None): Name used for output file and directory. If not specified, auto-generated from component names.
             fpath_prefix (str): Output directory prefix for the assembled URDF file.
             use_signature_check (bool): Whether to use signature check when merging URDFs.
             base_link_name (str): Name of the base link in the assembled robot.
@@ -763,7 +818,7 @@ class URDFCfg:
         self,
         component_type: str,
         urdf_path: str,
-        transform: Optional[np.ndarray] = None,
+        transform: np.ndarray | None = None,
         **params,
     ) -> URDFCfg:
         """Add a robot component to the assembly configuration.
@@ -772,7 +827,7 @@ class URDFCfg:
             component_type (str): The type/name of the component. Should be one of SUPPORTED_COMPONENTS
                 (e.g., 'chassis', 'torso', 'head', 'left_arm', 'right_hand', 'arm', 'hand', etc.).
             urdf_path (str): Path to the component's URDF file.
-            transform (Optional[np.ndarray]): 4x4 transformation matrix for the component in the robot frame (default: None).
+            transform (np.ndarray | None): 4x4 transformation matrix for the component in the robot frame (default: None).
             **params: Additional keyword parameters for the component (e.g., color, material, etc.).
 
         Returns:
@@ -786,6 +841,9 @@ class URDFCfg:
                 else:
                     logger.log_error(f"URDF path '{urdf_path}' does not exist.")
                     raise FileNotFoundError(f"URDF path '{urdf_path}' does not exist.")
+
+        if transform is None:
+            transform = np.eye(4)
 
         self.components[component_type] = {
             "urdf_path": urdf_path,
@@ -953,18 +1011,21 @@ class ArticulationCfg(ObjectBaseCfg):
     build_pk_chain: bool = True
     """Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation."""
 
+    compute_uv: bool = False
+    """Whether to compute the UV mapping for the articulation link.
+    
+    Currently, the uv mapping is computed for each link with projection uv mapping method.
+    """
+
 
 @configclass
 class RobotCfg(ArticulationCfg):
     from embodichain.lab.sim.solvers import SolverCfg
 
     """Configuration for a robot asset in the simulation.
-
-    # TODO: solver and motion planner may not be configurable inside the robot.
-    # But currently we put them here and could be moved if necessary.
     """
 
-    control_parts: Union[Dict[str, List[str]], None] = None
+    control_parts: Dict[str, List[str]] | None = None
     """Control parts is the mapping from part name to joint names.
 
     For example, {'left_arm': ['joint1', 'joint2'], 'right_arm': ['joint3', 'joint4']}
@@ -975,9 +1036,12 @@ class RobotCfg(ArticulationCfg):
             keys corresponding to the control parts name.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
+        - `Robot` is a derived class of `Articulation`, with control parts support. So the `drive_pros`
+            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
+            which will be overridden if these joint names are already specified.
     """
 
-    urdf_cfg: Optional[URDFCfg] = None
+    urdf_cfg: URDFCfg | None = None
     """URDF assembly configuration which allows for assembling a robot from multiple URDF components.
     """
 
@@ -1004,11 +1068,13 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "fpath":
+                    setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
-                elif "class_type" in value:
+                elif isinstance(value, dict) and "class_type" in value:
                     setattr(
                         cfg,
                         key,

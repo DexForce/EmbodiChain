@@ -18,7 +18,7 @@ import torch
 import numpy as np
 import warp as wp
 from itertools import product
-from typing import Optional, Union, Tuple, Any, Literal, TYPE_CHECKING
+from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 
@@ -286,7 +286,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
 
     def _compute_reference_plane(
         self, target_pose: np.ndarray, elbow_config: int
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
         """
         Calculate the reference plane vector, rotation matrix, and joint values.
 
@@ -411,7 +411,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
 
     def _get_each_ik(
         self, target_pose: np.ndarray, nsparam: float, config: np.ndarray
-    ) -> Tuple[bool, Optional[np.ndarray]]:
+    ) -> tuple[bool, np.ndarray | None]:
         """
         Computes the inverse kinematics for a given target pose, normalization parameter, and configuration.
 

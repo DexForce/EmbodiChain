@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 
 from abc import abstractmethod
-from typing import Dict, List, Any, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Any, Sequence, Tuple, Union
 from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils.math import matrix_from_quat
@@ -43,7 +43,7 @@ class SensorCfg(ObjectBaseCfg):
         quat: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
         """Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0)."""
 
-        parent: Optional[str] = None
+        parent: str | None = None
         """Name of the parent frame. If not specified, the sensor will be placed in the arena frame.
 
         This is usually the case when the sensor is not attached to any specific object, eg, link of a robot arm.
@@ -171,5 +171,5 @@ class BaseSensor(BatchEntity):
             return {key: value.clone() for key, value in self._data_buffer.items()}
         return self._data_buffer
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         return super().reset(env_ids)

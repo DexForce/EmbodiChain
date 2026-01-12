@@ -19,17 +19,26 @@ Key Features
 - **Batch and Single Query**: Supports both batch and single FK/IK/Jacobian queries.
 - **Extensible**: New solvers can be added by subclassing `BaseSolver` and implementing required methods.
 
-Example: Using PinkSolver
-~~~~~~~~~~~~~~~~~~~~~~~~~
+The Code
+~~~~~~~~
 
+The tutorial corresponds to the ``srs_solver.py`` script in the ``scripts/tutorials/sim`` directory.
+
+.. dropdown:: Code for srs_solver.py
+    :icon: code
+
+    .. literalinclude:: ../../../scripts/tutorials/sim/srs_solver.py
+        :language: python
+        :linenos:
+
+Typical Usage
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Step 1: Configure solver**
 
 .. code-block:: python
 
-   from embodichain.lab.sim.solvers import PinkSolverCfg
-   from embodichain.lab.sim.objects.robot import Robot
-
-   # 1. Configure PinkSolver
-   pink_cfg = PinkSolverCfg(
+   srs_cfg = SrsSolverCfg(
        urdf_path="/path/to/robot.urdf",
        joint_names=[
            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
@@ -38,17 +47,21 @@ Example: Using PinkSolver
        end_link_name="ee_link",
        root_link_name="base_link"
    )
-   # 2. Assign solver config to robot config
-   robot_cfg.solver_cfg = pink_cfg
-   # 3. Instantiate robot (solver will be initialized automatically)
+
+**Step 2: Instantiate the robot with solver**
+
+.. code-block:: python
+
+   robot_cfg.solver_cfg = srs_cfg
    robot = Robot(cfg=robot_cfg, entities=[], device="cpu")
 
-   # 4. Use FK/IK/Jacobian
-   qpos = [0.0, -1.57, 1.57, 0.0, 1.57, 0.0]  # 6-DOF joint angles (radians)
-   ee_pose = robot.compute_fk(qpos)  # Forward kinematics, returns 4x4 matrix
-   print("End-effector pose (FK):\n", ee_pose)
+**Step 3: Use FK/IK/Jacobian**
 
-   import numpy as np
+.. code-block:: python
+
+   qpos = [0.0, -1.57, 1.57, 0.0, 1.57, 0.0]
+   ee_pose = robot.compute_fk(qpos)
+
    target_pose = np.array([
        [0, -1, 0, 0.5],
        [1,  0, 0, 0.2],
@@ -56,11 +69,8 @@ Example: Using PinkSolver
        [0,  0, 0, 1.0]
    ])
    success, qpos_sol = robot.compute_ik(target_pose, joint_seed=qpos)
-   print("IK success:", success)
-   print("IK solution:", qpos_sol)
-
    J = robot.get_solver().get_jacobian(qpos)
-   print("Jacobian:\n", J)
+
 
 **Note**
 
@@ -87,12 +97,6 @@ API Reference
 - **set_ik_nearst_weight**: Set weights for IK nearest neighbor search.
 - **set_position_limits / get_position_limits**: Set or get joint position limits.
 - **set_tcp / get_tcp**: Set or get the tool center point (TCP) transformation.
-
-**PinkSolver**
-
-- Implements all BaseSolver methods using the Pink library.
-- Supports custom task lists, solver type selection, and joint limit handling.
-- See PinkSolverCfg for all configuration options.
 
 Configuration
 ~~~~~~~~~~~~~

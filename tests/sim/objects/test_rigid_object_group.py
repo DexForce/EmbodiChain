@@ -35,9 +35,10 @@ class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        config = SimulationManagerCfg(
+            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+        )
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(NUM_ARENAS)
 
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -106,6 +107,14 @@ class BaseRigidObjectGroupTest:
         assert (
             self.obj_group.uid not in self.sim.asset_uids
         ), "Object group UID still present after removal"
+
+    def test_set_physical_visible(self):
+        self.obj_group.set_physical_visible(visible=True)
+        self.obj_group.set_physical_visible(visible=False)
+
+    def test_set_visible(self):
+        self.obj_group.set_visible(visible=True)
+        self.obj_group.set_visible(visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

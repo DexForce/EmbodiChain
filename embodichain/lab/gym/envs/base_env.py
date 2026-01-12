@@ -17,7 +17,7 @@
 import torch
 import gymnasium as gym
 
-from typing import Dict, List, Union, Tuple, Any, Optional, Sequence
+from typing import Dict, List, Union, Tuple, Any, Sequence
 from functools import cached_property
 
 from embodichain.lab.sim.types import EnvObs, EnvAction
@@ -41,7 +41,7 @@ class EnvCfg:
     sim_cfg: SimulationManagerCfg = SimulationManagerCfg()
     """Simulation configuration for the environment."""
 
-    seed: Optional[int] = None
+    seed: int | None = None
     """The seed for the random number generator. Defaults to -1, in which case the seed is not set.
 
     Note:
@@ -109,6 +109,7 @@ class BaseEnv(gym.Env):
             self.sim_cfg = SimulationManagerCfg(headless=True)
         else:
             self.sim_cfg = self.cfg.sim_cfg
+            self.sim_cfg.num_envs = self.num_envs
 
         if self.cfg.seed is not None:
             self.cfg.seed = set_seed(self.cfg.seed)
@@ -208,8 +209,6 @@ class BaseEnv(gym.Env):
         logger.log_info(
             f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
         )
-        if self.num_envs > 1:
-            self.sim.build_multiple_arenas(self.num_envs)
 
         self.robot = self._setup_robot(**kwargs)
         if self.robot is None:
@@ -272,7 +271,7 @@ class BaseEnv(gym.Env):
         # TODO: Add randomization event here.
         pass
 
-    def _initialize_episode(self, env_ids: Optional[Sequence[int]] = None, **kwargs):
+    def _initialize_episode(self, env_ids: Sequence[int] | None = None, **kwargs):
         """Initialize the simulation assets before each episode. Randomization can be performed at this stage.
 
         Args:
@@ -427,7 +426,7 @@ class BaseEnv(gym.Env):
         pass
 
     def reset(
-        self, seed: Optional[int] = None, options: Optional[Dict] = None
+        self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
         """Reset the SimulationManager environment and return the observation and info.
 

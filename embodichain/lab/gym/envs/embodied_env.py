@@ -20,7 +20,7 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Optional, Sequence, Tuple, Any, List
+from typing import Dict, Union, Sequence, Tuple, Any, List
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -95,6 +95,19 @@ class EmbodiedEnvCfg(EnvCfg):
     """Data pipeline configuration. Defaults to None.
     """
 
+    extensions: Union[Dict[str, Any], None] = None
+    """Extension parameters for task-specific configurations.
+    
+    This field can be used to pass additional parameters that are specific to certain environments
+    or tasks without modifying the base configuration class. For example:
+    - obs_mode: Observation mode (e.g., "state", "image")
+    - episode_length: Maximum episode length
+    - joint_limits: Joint limit constraints
+    - action_scale: Action scaling factor
+    - vr_joint_mapping: VR joint mapping for teleoperation
+    - control_frequency: Control frequency for VR teleoperation
+    """
+
     # Some helper attributes
     filter_visual_rand: bool = False
     """Whether to filter out visual randomization 
@@ -134,17 +147,9 @@ class EmbodiedEnv(BaseEnv):
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
-        defaults = {
-            "obs_mode": "state",
-            "episode_length": 50,
-            "joint_limits": 0.5,
-            "action_scale": 0.1,
-        }
-
-        for name, default in defaults.items():
-            value = extensions.get(name, getattr(cfg, name, default))
+        for name, value in extensions.items():
             setattr(cfg, name, value)
-            setattr(self, name, getattr(cfg, name))
+            setattr(self, name, value)
 
         super().__init__(cfg, **kwargs)
 
@@ -185,7 +190,7 @@ class EmbodiedEnv(BaseEnv):
         from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
         functors_to_remove = get_all_exported_items_from_module(
-            "embodichain.lab.gym.envs.managers.randomization.rendering"
+            "embodichain.lab.gym.envs.managers.randomization.visual"
         )
         if self.cfg.filter_visual_rand and self.cfg.events:
             # Iterate through all attributes of the events object
@@ -253,7 +258,7 @@ class EmbodiedEnv(BaseEnv):
         return self.affordance_datas.get(key, default)
 
     def reset(
-        self, seed: Optional[int] = None, options: Optional[Dict] = None
+        self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
         obs, info = super().reset(seed=seed, options=options)
 
@@ -297,7 +302,7 @@ class EmbodiedEnv(BaseEnv):
                 self.event_manager.apply(mode="interval")
 
     def _initialize_episode(
-        self, env_ids: Optional[Sequence[int]] = None, **kwargs
+        self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
@@ -439,20 +444,20 @@ class EmbodiedEnv(BaseEnv):
             plt.imshow(view)
             plt.savefig(f"sensor_data_{data_type}.png")
 
-    def create_demo_action_list(self, *args, **kwargs) -> Optional[Sequence[EnvAction]]:
+    def create_demo_action_list(self, *args, **kwargs) -> Sequence[EnvAction] | None:
         """Create a demonstration action list for the environment.
 
         This function should be implemented in subclasses to generate a sequence of actions
         that demonstrate a specific task or behavior within the environment.
 
         Returns:
-            Optional[Sequence[EnvAction]]: A list of actions if a demonstration is available, otherwise None.
+            Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.
         """
         raise NotImplementedError(
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def to_dataset(self, id: str, save_path: str = None) -> Optional[str]:
+    def to_dataset(self, id: str, save_path: str = None) -> str | None:
         """Convert the recorded episode data to a dataset format.
 
         Args:
@@ -460,7 +465,7 @@ class EmbodiedEnv(BaseEnv):
             save_path (str, optional): Path to save the dataset. If None, use config or default.
 
         Returns:
-            Optional[str]: The path to the saved dataset, or None if failed.
+            str | None: The path to the saved dataset, or None if failed.
         """
         raise NotImplementedError(
             "The method 'to_dataset' will be implemented in the near future."

@@ -111,13 +111,13 @@ class replace_assets_from_group(Functor):
 
             # remove regular expression from patterns
             patterns = remove_regex_chars(patterns)
-            full_path = get_data_path(f"{folder_path}/")
+            self._full_path = get_data_path(f"{folder_path}/")
             self._asset_group_path = get_all_files_in_directory(
-                full_path, patterns=patterns
+                self._full_path, patterns=patterns
             )
         else:
-            full_path = get_data_path(folder_path)
-            self._asset_group_path = get_all_files_in_directory(full_path)
+            self._full_path = get_data_path(folder_path)
+            self._asset_group_path = get_all_files_in_directory(self._full_path)
 
     def __call__(
         self,
@@ -601,6 +601,7 @@ def drop_rigid_object_group_sequentially(
             lower=range_low,
             upper=range_high,
             size=(num_instance, 3),
+            device=env.device,
         )
         drop_pose_i = drop_pose.unsqueeze(1)
         drop_pose_i[:, 0, :3] = drop_pos + random_offset

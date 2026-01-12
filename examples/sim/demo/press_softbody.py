@@ -39,6 +39,7 @@ from embodichain.lab.sim.cfg import (
     SoftObjectCfg,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
+    URDFCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 
@@ -100,12 +101,19 @@ def create_robot(sim: SimulationManager):
     # Configure the robot with its components and control properties
     cfg = RobotCfg(
         uid="UR10",
-        fpath=ur10_urdf_path,
-        solver_cfg=PytorchSolverCfg(
-            end_link_name="ee_link",
-            root_link_name="base_link",
-            tcp=np.eye(4),
+        urdf_cfg=URDFCfg(
+            components=[{"component_type": "arm", "urdf_path": ur10_urdf_path}]
         ),
+        control_parts={
+            "arm": ["Joint[0-9]"],
+        },
+        solver_cfg={
+            "arm": PytorchSolverCfg(
+                end_link_name="ee_link",
+                root_link_name="base_link",
+                tcp=np.eye(4),
+            )
+        },
         init_qpos=[
             0.0,
             -np.pi / 2,
@@ -133,13 +141,14 @@ def create_soft_cow(sim: SimulationManager) -> SoftObject:
             shape=MeshCfg(
                 fpath=get_resources_data_path("Model", "cow", "cow2.obj"),
             ),
-            init_pos=[0.5, 0.0, 0.3],
+            init_rot=[0, 90, 0],
+            init_pos=[0.45, -0.1, 0.12],
             voxel_attr=SoftbodyVoxelAttributesCfg(
                 simulation_mesh_resolution=8,
                 maximal_edge_length=0.5,
             ),
             physical_attr=SoftbodyPhysicalAttributesCfg(
-                youngs=1e4,
+                youngs=5e3,
                 poissons=0.45,
                 density=100,
                 dynamic_friction=0.1,
@@ -162,7 +171,7 @@ def press_cow(sim: SimulationManager, robot: Robot):
 
     arm_start_xpos = robot.compute_fk(arm_start_qpos, name="arm", to_matrix=True)
     press_xpos = arm_start_xpos.clone()
-    press_xpos[:, :3, 3] = torch.tensor([0.5, -0.1, 0.01], device=press_xpos.device)
+    press_xpos[:, :3, 3] = torch.tensor([0.5, -0.1, 0.005], device=press_xpos.device)
 
     approach_xpos = press_xpos.clone()
     approach_xpos[:, 2, 3] += 0.05

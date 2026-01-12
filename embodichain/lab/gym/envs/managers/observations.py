@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
-from typing import TYPE_CHECKING, Literal, Union, Optional, List, Dict, Sequence
+from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
 
 from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
 from embodichain.lab.sim.sensors import Camera, StereoCamera
@@ -28,6 +28,7 @@ from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.events import resolve_dict
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils import logger
+from embodichain.utils.math import quat_from_matrix
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -40,6 +41,9 @@ def get_rigid_object_pose(
 ) -> torch.Tensor:
     """Get the world poses of the rigid objects in the environment.
 
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
     Args:
         env: The environment instance.
         obs: The observation dictionary.
@@ -48,6 +52,9 @@ def get_rigid_object_pose(
     Returns:
         A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
     """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return torch.zeros((env.num_envs, 4, 4), dtype=torch.float32)
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
@@ -84,6 +91,81 @@ def normalize_robot_joint_data(
     return data
 
 
+def get_sensor_pose_in_robot_frame(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+    robot_uid: str | None = None,
+) -> torch.Tensor:
+    """Get the pose of a sensor in the robot's base coordinate frame.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the sensor entity.
+        robot_uid: The uid of the robot. If None, uses the default robot from env.
+
+    Returns:
+        A tensor of shape (num_envs, 7) representing the sensor pose in robot coordinates as [x, y, z, qw, qx, qy, qz].
+    """
+    # Get robot base pose in world frame
+    robot = env.sim.get_robot(robot_uid) if robot_uid else env.robot
+    robot_pose = robot.get_local_pose(to_matrix=True)
+    robot_pose_inv = torch.linalg.inv(robot_pose)
+
+    # Get sensor pose in world frame
+    sensor: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
+    if sensor is None:
+        logger.log_error(
+            f"Sensor with UID '{entity_cfg.uid}' not found in the simulation."
+        )
+
+    cam_pose = sensor.get_arena_pose(to_matrix=True)
+
+    # Compute sensor pose in robot coordinate frame: T_robot_cam = inv(T_world_robot) @ T_world_cam
+    cam_in_robot = torch.matmul(robot_pose_inv, cam_pose)
+
+    # Convert (num_envs, 4, 4) to (num_envs, 7): [x, y, z, qw, qx, qy, qz]
+    xyz = cam_in_robot[:, :3, 3]
+    quat = quat_from_matrix(cam_in_robot[:, :3, :3])
+    pose = torch.cat([xyz, quat], dim=-1)
+
+    return pose
+
+
+def get_sensor_intrinsics(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+    is_right: bool = False,
+) -> torch.Tensor:
+    """Get the intrinsic matrix of a sensor (camera).
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the sensor entity.
+        is_right: Whether to return the right camera intrinsics for stereo cameras.
+            Defaults to False (left camera). Ignored for monocular cameras.
+
+    Returns:
+        A tensor of shape (num_envs, 3, 3) representing the camera intrinsics.
+    """
+    sensor = env.sim.get_sensor(entity_cfg.uid)
+    if sensor is None:
+        logger.log_error(
+            f"Sensor with UID '{entity_cfg.uid}' not found in the simulation."
+        )
+    if isinstance(sensor, StereoCamera):
+        left_intrinsics, right_intrinsics = sensor.get_intrinsics()
+        return right_intrinsics if is_right else left_intrinsics
+    elif isinstance(sensor, Camera):
+        return sensor.get_intrinsics()  # (num_envs, 3, 3)
+    else:
+        logger.log_error(f"Sensor '{entity_cfg.uid}' is not Camera or StereoCamera.")
+        return torch.zeros((env.num_envs, 3, 3), dtype=torch.float32)
+
+
 def compute_semantic_mask(
     env: EmbodiedEnv,
     obs: EnvObs,
@@ -110,6 +192,7 @@ def compute_semantic_mask(
     Returns:
         A tensor of shape (num_envs, height, width) representing the semantic mask.
     """
+    from embodichain.data.enum import SemanticMask
 
     sensor: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     if sensor.cfg.enable_mask is False:
@@ -130,7 +213,10 @@ def compute_semantic_mask(
 
     robot_mask = (mask_exp == robot_uids_exp).any(-1).squeeze_(-1)
 
-    foreground_assets = [env.sim.get_asset(uid) for uid in foreground_uids]
+    asset_uids = env.sim.asset_uids
+    foreground_assets = [
+        env.sim.get_asset(uid) for uid in foreground_uids if uid in asset_uids
+    ]
 
     # cat assets uid (num_envs, n) into dim 1
     foreground_uids = torch.cat(
@@ -151,7 +237,19 @@ def compute_semantic_mask(
 
     background_mask = ~(robot_mask | foreground_mask).squeeze_(-1)
 
-    return torch.stack([robot_mask, background_mask, foreground_mask], dim=-1)
+    masks = [None, None, None]
+    masks_ids = [member.value for member in SemanticMask]
+    assert len(masks) == len(
+        masks_ids
+    ), "Different length of mask slots and SemanticMask Enum {}.".format(masks_ids)
+    mask_id_to_label = {
+        SemanticMask.BACKGROUND.value: background_mask,
+        SemanticMask.FOREGROUND.value: foreground_mask,
+        SemanticMask.ROBOT.value: robot_mask,
+    }
+    for mask_id in masks_ids:
+        masks[mask_id] = mask_id_to_label[mask_id]
+    return torch.stack(masks, dim=-1)
 
 
 class compute_exteroception(Functor):
@@ -366,7 +464,7 @@ class compute_exteroception(Functor):
         return points_2d
 
     def _get_gripper_ratio(
-        self, control_part: str, gripper_qpos: Optional[torch.Tensor] = None
+        self, control_part: str, gripper_qpos: torch.Tensor | None = None
     ):
         robot: Robot = self._env.robot
         gripper_max_limit = robot.body_data.qpos_limits[
@@ -380,11 +478,11 @@ class compute_exteroception(Functor):
 
     def _get_robot_exteroception(
         self,
-        control_part: Optional[str] = None,
+        control_part: str | None = None,
         x_interval: float = 0.02,
         y_interval: float = 0.02,
         kpnts_number: int = 12,
-        offset: Optional[Union[List, torch.Tensor]] = None,
+        offset: list | torch.Tensor | None = None,
         follow_eef: bool = False,
     ) -> torch.Tensor:
         """Get the robot exteroception poses.
@@ -446,7 +544,7 @@ class compute_exteroception(Functor):
         y_interval: float = 0.02,
         kpnts_number: int = 12,
         is_arena_coord: bool = False,
-        follow_eef: Optional[str] = None,
+        follow_eef: str | None = None,
     ) -> torch.Tensor:
         """Get the rigid object exteroception poses.
 

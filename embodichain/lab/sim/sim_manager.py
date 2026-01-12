@@ -25,7 +25,7 @@ from tqdm import tqdm
 from pathlib import Path
 from copy import deepcopy
 from functools import cached_property
-from typing import List, Union, Optional, Dict, Tuple, Union, Sequence
+from typing import List, Union, Dict, Union, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
 from .contact import ContactReport
 
@@ -47,7 +47,7 @@ from dexsim.types import (
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType
-from dexsim.render import GizmoController
+from dexsim.engine import GizmoController
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -77,7 +77,6 @@ from embodichain.lab.sim.cfg import (
     ContactFilterCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
-from embodichain.data.assets import SimResources
 from embodichain.utils import configclass, logger
 
 __all__ = [
@@ -125,6 +124,12 @@ class SimulationManagerCfg:
     - RENDER_SCENE_SHARE_ENGINE: The rendering thread and scene update thread share the same thread with the simulation engine.
     """
 
+    cpu_num: int = 1
+    """The number of CPU threads to use for the simulation engine."""
+
+    num_envs: int = 1
+    """The number of parallel environments (arenas) to simulate."""
+
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
@@ -145,21 +150,12 @@ class SimulationManager:
 
     This class is used to manage the global simulation environment and simulated assets.
         - assets loading, creation, modification and deletion.
-            - assets include robots, fixed actors, dynamic actors and background.
+            - assets include rigid objects, soft objects, articulations, robots, sensors and lights.
         - manager the scenes and the simulation environment.
             - parallel scenes simulation on both CPU and GPU.
-            - sensors arrangement
-            - lighting and indirect lighting
-            - physics simulation parameters control
-        - ...
-
-    Note:
-        1. The arena is used as a standalone space for robots to simulate in. When :meth:`build_multiple_arenas` is called,
-             it will create multiple arenas in a grid pattern. Meanwhile, each simulation assets adding interface will
-             take an additional parameter `arena_index` to specify which arena to place the asset. The name of the asset to
-             be added will be appended with the arena index to avoid name conflict.
-        2. In GUI mode, the physics will be set to a fps (or a wait time for manual mode) for better visualization.
-
+            - create and setup the rendering related settings, eg. environment map, lighting, materials, etc.
+            - physics simulation management, eg. time step, manual update, etc.
+            - interactive control via gizmo and window callbacks events.
 
     Args:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
@@ -201,11 +197,8 @@ class SimulationManager:
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
-        if sys.platform == "linux":
-            dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
-            dexsim.set_physics_gpu_memory_config(
-                **sim_config.gpu_memory_config.to_dict()
-            )
+        dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
+        dexsim.set_physics_gpu_memory_config(**sim_config.gpu_memory_config.to_dict())
 
         self._is_initialized_gpu_physics = False
         self._ps = self._world.get_physics_scene()
@@ -215,12 +208,11 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        self._default_resources = SimResources()
-
         # set unique material path to accelerate material creation.
+        # TODO: This will be removed.
         if self.sim_config.enable_rt is False:
             self._env.set_unique_mat_path(
-                os.path.join(self._material_cache_dir, "dexsim_mat")
+                os.path.join(self._material_cache_dir, "default_mat")
             )
 
         # arena is used as a standalone space for robots to simulate in.
@@ -248,8 +240,7 @@ class SimulationManager:
         # The structure is keys to the loaded texture data. The keys represent the texture group.
         self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
 
-        # TODO: maybe need to add some interface to interact with background and layouts.
-        # background and layouts are 3d assets that can has only render body for visualization.
+        self._init_sim_resources()
 
         self._create_default_plane()
         self.set_default_background()
@@ -257,58 +248,7 @@ class SimulationManager:
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
 
-        self.enable_contact = False
-
-    def _convert_sim_config(
-        self, sim_config: SimulationManagerCfg
-    ) -> dexsim.WorldConfig:
-        world_config = dexsim.WorldConfig()
-        win_config = dexsim.WindowsConfig()
-        win_config.width = sim_config.width
-        win_config.height = sim_config.height
-        world_config.win_config = win_config
-        world_config.open_windows = not sim_config.headless
-        self.is_window_opened = not sim_config.headless
-        world_config.backend = Backend.VULKAN
-        world_config.thread_mode = sim_config.thread_mode
-        world_config.cache_path = str(self._material_cache_dir)
-        world_config.length_tolerance = sim_config.physics_config.length_tolerance
-        world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
-
-        if sim_config.enable_rt:
-            world_config.renderer = dexsim.types.Renderer.FASTRT
-            if sim_config.enable_denoiser is False:
-                world_config.raytrace_config.spp = sim_config.spp
-                world_config.raytrace_config.open_denoise = False
-
-        if type(sim_config.sim_device) is str:
-            self.device = torch.device(sim_config.sim_device)
-        else:
-            self.device = sim_config.sim_device
-
-        if self.device.type == "cuda":
-            world_config.enable_gpu_sim = True
-            world_config.direct_gpu_api = True
-
-            if self.device.index is not None and sim_config.gpu_id != self.device.index:
-                logger.log_warning(
-                    f"Conflict gpu_id {sim_config.gpu_id} and device index {self.device.index}. Using device index."
-                )
-                sim_config.gpu_id = self.device.index
-
-                self.device = torch.device(f"cuda:{sim_config.gpu_id}")
-
-        world_config.gpu_id = sim_config.gpu_id
-
-        return world_config
-
-    def get_default_resources(self) -> SimResources:
-        """Get the default resources instance.
-
-        Returns:
-            SimResources: The default resources path.
-        """
-        return self._default_resources
+        self._build_multiple_arenas(sim_config.num_envs)
 
     @property
     def num_envs(self) -> int:
@@ -349,8 +289,59 @@ class SimulationManager:
         uid_list.extend(list(self._robots.keys()))
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
+        uid_list.extend(list(self._soft_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
+
+    def _convert_sim_config(
+        self, sim_config: SimulationManagerCfg
+    ) -> dexsim.WorldConfig:
+        world_config = dexsim.WorldConfig()
+        win_config = dexsim.WindowsConfig()
+        win_config.width = sim_config.width
+        win_config.height = sim_config.height
+        world_config.cpu_num = sim_config.cpu_num
+        world_config.win_config = win_config
+        world_config.open_windows = not sim_config.headless
+        self.is_window_opened = not sim_config.headless
+        world_config.backend = Backend.VULKAN
+        world_config.thread_mode = sim_config.thread_mode
+        world_config.cache_path = str(self._material_cache_dir)
+        world_config.length_tolerance = sim_config.physics_config.length_tolerance
+        world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
+
+        if sim_config.enable_rt:
+            world_config.renderer = dexsim.types.Renderer.FASTRT
+            if sim_config.enable_denoiser is False:
+                world_config.raytrace_config.spp = sim_config.spp
+                world_config.raytrace_config.open_denoise = False
+
+        if type(sim_config.sim_device) is str:
+            self.device = torch.device(sim_config.sim_device)
+        else:
+            self.device = sim_config.sim_device
+
+        if self.device.type == "cuda":
+            world_config.enable_gpu_sim = True
+            world_config.direct_gpu_api = True
+
+            if self.device.index is not None and sim_config.gpu_id != self.device.index:
+                logger.log_warning(
+                    f"Conflict gpu_id {sim_config.gpu_id} and device index {self.device.index}. Using device index."
+                )
+                sim_config.gpu_id = self.device.index
+
+                self.device = torch.device(f"cuda:{sim_config.gpu_id}")
+
+        world_config.gpu_id = sim_config.gpu_id
+
+        return world_config
+
+    def _init_sim_resources(self) -> None:
+        """Initialize the default simulation resources."""
+        from embodichain.data.assets import SimResources
+
+        self._default_resources = SimResources()
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -386,7 +377,7 @@ class SimulationManager:
         rigid_body_num = (
             0
             if self._get_non_static_rigid_obj_num() == 0
-            else len(self._ps.gpu_rigid_indices)
+            else len(self._ps.get_gpu_rigid_indices())
         )
         self._rigid_body_pose = torch.zeros(
             (rigid_body_num, 7), dtype=torch.float32, device=self.device
@@ -396,7 +387,7 @@ class SimulationManager:
         articulation_num = (
             0
             if len(self._articulations) == 0 and len(self._robots) == 0
-            else len(self._ps.gpu_articulation_indices)
+            else len(self._ps.get_gpu_articulation_indices())
         )
         max_link_count = self._ps.gpu_get_articulation_max_link_count()
         self._link_pose = torch.zeros(
@@ -426,11 +417,11 @@ class SimulationManager:
                 "This interface is only valid when Ray Tracing rendering backend is enabled."
             )
 
-    def update(self, physics_dt: Optional[float] = None, step: int = 10) -> None:
+    def update(self, physics_dt: float | None = None, step: int = 10) -> None:
         """Update the physics.
 
         Args:
-            physics_dt (Optional[float], optional): the time step for physics simulation. Defaults to None.
+            physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
         if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
@@ -465,14 +456,14 @@ class SimulationManager:
             if len(self._rigid_body_pose) > 0:
                 self._ps.gpu_fetch_rigid_body_data(
                     data=CudaArray(self._rigid_body_pose),
-                    gpu_indices=self._ps.gpu_rigid_indices,
+                    gpu_indices=self._ps.get_gpu_rigid_indices(),
                     data_type=RigidBodyGPUAPIReadType.POSE,
                 )
 
             if len(self._link_pose) > 0:
                 self._ps.gpu_fetch_link_data(
                     data=CudaArray(self._link_pose),
-                    gpu_indices=self._ps.gpu_articulation_indices,
+                    gpu_indices=self._ps.get_gpu_articulation_indices(),
                     data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
                 )
 
@@ -516,14 +507,14 @@ class SimulationManager:
         self._world.close_window()
         self.is_window_opened = False
 
-    def build_multiple_arenas(self, num: int, space: Optional[float] = None) -> None:
+    def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
         """Build multiple arenas in a grid pattern.
 
         This interface is used for vectorized simulation.
 
         Args:
             num (int): number of arenas to build.
-            space (float, optional): The distance between each arena. Defaults to the arena_space in sim_config.
+            space (float | None, optional): The distance between each arena. Defaults to the arena_space in sim_config.
         """
 
         if space is None:
@@ -558,13 +549,13 @@ class SimulationManager:
         self._env.set_IBL(ibl_path)
 
     def set_emission_light(
-        self, color: Optional[Sequence[float]] = None, intensity: Optional[float] = None
+        self, color: Sequence[float] | None = None, intensity: float | None = None
     ) -> None:
         """Set environment emission light.
 
         Args:
-            color (Sequence[float]): color of the light.
-            intensity (float): intensity of the light.
+            color (Sequence[float] | None): color of the light.
+            intensity (float | None): intensity of the light.
         """
         if color is None:
             self._env.set_env_light_emission(color)
@@ -624,15 +615,15 @@ class SimulationManager:
         self._texture_cache[key] = texture
 
     def get_texture_cache(
-        self, key: Optional[str] = None
-    ) -> Optional[Union[torch.Tensor, List[torch.Tensor]]]:
+        self, key: str | None = None
+    ) -> torch.Tensor | list[torch.Tensor] | None:
         """Get the texture from the global texture cache.
 
         Args:
-            key (str, optional): The key of the texture. If None, return None. Defaults to None.
+            key (str | None, optional): The key of the texture. If None, return None. Defaults to None.
 
         Returns:
-            Optional[Union[torch.Tensor, List[torch.Tensor]]]: The texture if found, otherwise None.
+            torch.Tensor | list[torch.Tensor] | None: The texture if found, otherwise None.
         """
         if key is None:
             return self._texture_cache
@@ -644,7 +635,7 @@ class SimulationManager:
 
     def get_asset(
         self, uid: str
-    ) -> Optional[Union[Light, BaseSensor, Robot, RigidObject, Articulation]]:
+    ) -> Light | BaseSensor | Robot | RigidObject | Articulation | None:
         """Get an asset by its UID.
 
         The asset can be a light, sensor, robot, rigid object or articulation.
@@ -665,6 +656,8 @@ class SimulationManager:
             return self._rigid_objects[uid]
         if uid in self._rigid_object_groups:
             return self._rigid_object_groups[uid]
+        if uid in self._soft_objects:
+            return self._soft_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -710,7 +703,7 @@ class SimulationManager:
 
         return batch_lights
 
-    def get_light(self, uid: str) -> Optional[Light]:
+    def get_light(self, uid: str) -> Light | None:
         """Get a light by its UID.
 
         Args:
@@ -793,19 +786,33 @@ class SimulationManager:
         self._soft_objects[uid] = soft_obj
         return soft_obj
 
-    def get_rigid_object(self, uid: str) -> Optional[RigidObject]:
+    def get_rigid_object(self, uid: str) -> RigidObject | None:
         """Get a rigid object by its unique ID.
 
         Args:
             uid (str): The unique ID of the rigid object.
 
         Returns:
-            Optional[RigidObject]: The rigid object instance if found, otherwise None.
+            RigidObject | None: The rigid object instance if found, otherwise None.
         """
         if uid not in self._rigid_objects:
             logger.log_warning(f"Rigid object {uid} not found.")
             return None
         return self._rigid_objects[uid]
+
+    def get_soft_object(self, uid: str) -> SoftObject | None:
+        """Get a soft object by its unique ID.
+
+        Args:
+            uid (str): The unique ID of the soft object.
+
+        Returns:
+            SoftObject | None: The soft object instance if found, otherwise None.
+        """
+        if uid not in self._soft_objects:
+            logger.log_warning(f"Soft object {uid} not found.")
+            return None
+        return self._soft_objects[uid]
 
     def get_rigid_object_uid_list(self) -> List[str]:
         """Get current rigid body uid list
@@ -814,6 +821,14 @@ class SimulationManager:
             List[str]: list of rigid body uid.
         """
         return list(self._rigid_objects.keys())
+
+    def get_soft_object_uid_list(self) -> List[str]:
+        """Get current soft body uid list
+
+        Returns:
+            List[str]: list of soft body uid.
+        """
+        return list(self._soft_objects.keys())
 
     def add_rigid_object_group(self, cfg: RigidObjectGroupCfg) -> RigidObjectGroup:
         """Add a rigid object group to the scene.
@@ -857,14 +872,14 @@ class SimulationManager:
 
         return rigid_obj_group
 
-    def get_rigid_object_group(self, uid: str) -> Optional[RigidObjectGroup]:
+    def get_rigid_object_group(self, uid: str) -> RigidObjectGroup | None:
         """Get a rigid object group by its unique ID.
 
         Args:
             uid (str): The unique ID of the rigid object group.
 
         Returns:
-            Optional[RigidObjectGroup]: The rigid object group instance if found, otherwise None.
+            RigidObjectGroup | None: The rigid object group instance if found, otherwise None.
         """
         if uid not in self._rigid_object_groups:
             logger.log_warning(f"Rigid object group {uid} not found.")
@@ -934,14 +949,14 @@ class SimulationManager:
 
         return articulation
 
-    def get_articulation(self, uid: str) -> Optional[Articulation]:
+    def get_articulation(self, uid: str) -> Articulation | None:
         """Get an articulation by its unique ID.
 
         Args:
             uid (str): The unique ID of the articulation.
 
         Returns:
-            Optional[Articulation]: The articulation instance if found, otherwise None.
+            Articulation | None: The articulation instance if found, otherwise None.
         """
         if uid not in self._articulations:
             logger.log_warning(f"Articulation {uid} not found.")
@@ -956,14 +971,14 @@ class SimulationManager:
         """
         return list(self._articulations.keys())
 
-    def add_robot(self, cfg: RobotCfg) -> Optional[Robot]:
+    def add_robot(self, cfg: RobotCfg) -> Robot | None:
         """Add a Robot to the scene.
 
         Args:
             cfg (RobotCfg): Configuration for the robot.
 
         Returns:
-            Optional[Robot]: The added robot instance handle, or None if failed.
+            Robot | None: The added robot instance handle, or None if failed.
         """
 
         uid = cfg.uid
@@ -1079,14 +1094,14 @@ class SimulationManager:
         contact_report.contact_env_ids = filtered_env_ids
         return contact_report
 
-    def get_robot(self, uid: str) -> Optional[Robot]:
+    def get_robot(self, uid: str) -> Robot | None:
         """Get a Robot by its unique ID.
 
         Args:
             uid (str): The unique ID of the robot.
 
         Returns:
-            Optional[Robot]: The robot instance if found, otherwise None.
+            Robot | None: The robot instance if found, otherwise None.
         """
         if uid not in self._robots:
             logger.log_warning(f"Robot {uid} not found.")
@@ -1103,13 +1118,13 @@ class SimulationManager:
         return list(self._robots.keys())
 
     def enable_gizmo(
-        self, uid: str, control_part: Optional[str] = None, gizmo_cfg: object = None
+        self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
     ) -> None:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
             uid (str): UID of the object to attach gizmo to (searches in robots, rigid_objects, sensors, etc.)
-            control_part (Optional[str], optional): Control part name for robots. Defaults to "arm".
+            control_part (str | None, optional): Control part name for robots. Defaults to "arm".
             gizmo_cfg (object, optional): Gizmo configuration object. Defaults to None.
         """
         # Create gizmo key combining uid and control_part
@@ -1151,24 +1166,25 @@ class SimulationManager:
 
             # Initialize GizmoController if not already done.
             if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
-                windows = (
+                window = (
                     self._world.get_windows()
                     if hasattr(self._world, "get_windows")
                     else None
                 )
-                self._gizmo_controller = GizmoController(windows)
+                self._gizmo_controller = GizmoController()
+                window.add_input_control(self._gizmo_controller)
 
         except Exception as e:
             logger.log_error(
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
 
-    def disable_gizmo(self, uid: str, control_part: Optional[str] = None) -> None:
+    def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
         """Disable and remove gizmo for a robot.
 
         Args:
             uid (str): Object UID to disable gizmo for
-            control_part (Optional[str], optional): Control part name for robots. Defaults to None.
+            control_part (str | None, optional): Control part name for robots. Defaults to None.
         """
         # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
@@ -1200,12 +1216,12 @@ class SimulationManager:
                 f"Failed to disable gizmo for '{uid}' with control_part '{control_part}': {e}"
             )
 
-    def get_gizmo(self, uid: str, control_part: Optional[str] = None) -> object:
+    def get_gizmo(self, uid: str, control_part: str | None = None) -> object:
         """Get gizmo instance for a robot.
 
         Args:
             uid (str): Object UID
-            control_part (Optional[str], optional): Control part name for robots. Defaults to None.
+            control_part (str | None, optional): Control part name for robots. Defaults to None.
 
         Returns:
             object: Gizmo instance if found, None otherwise.
@@ -1214,12 +1230,12 @@ class SimulationManager:
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
         return self._gizmos.get(gizmo_key, None)
 
-    def has_gizmo(self, uid: str, control_part: Optional[str] = None) -> bool:
+    def has_gizmo(self, uid: str, control_part: str | None = None) -> bool:
         """Check if a gizmo exists for the given UID and control part.
 
         Args:
             uid (str): Object UID to check
-            control_part (Optional[str], optional): Control part name for robots. Defaults to None.
+            control_part (str | None, optional): Control part name for robots. Defaults to None.
 
         Returns:
             bool: True if gizmo exists, False otherwise.
@@ -1252,7 +1268,7 @@ class SimulationManager:
                     logger.log_error(f"Error updating gizmo '{gizmo_key}': {e}")
 
     def toggle_gizmo_visibility(
-        self, uid: str, control_part: Optional[str] = None
+        self, uid: str, control_part: str | None = None
     ) -> bool:
         """
         Toggle the visibility of a gizmo by uid and optional control_part.
@@ -1264,14 +1280,14 @@ class SimulationManager:
         return None
 
     def set_gizmo_visibility(
-        self, uid: str, visible: bool, control_part: Optional[str] = None
+        self, uid: str, visible: bool, control_part: str | None = None
     ) -> None:
         """
         Set the visibility of a gizmo by uid and optional control_part.
         """
         gizmo = self.get_gizmo(uid, control_part)
         if gizmo is not None:
-            gizmo.set_visibility(visible)
+            gizmo.set_visible(visible)
 
     def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
         """General interface to add a sensor to the scene and returns a handle.
@@ -1304,7 +1320,7 @@ class SimulationManager:
 
         return sensor
 
-    def get_sensor(self, uid: str) -> Optional[BaseSensor]:
+    def get_sensor(self, uid: str) -> BaseSensor | None:
         """Get a sensor by its UID.
 
         Args:
@@ -1365,34 +1381,6 @@ class SimulationManager:
             return True
 
         return False
-
-    def get_asset(
-        self, uid: str
-    ) -> Optional[Union[RigidObject, Articulation, Robot, Light, BaseSensor]]:
-        """Get an asset by its UID.
-
-        The asset can be a rigid object, articulation or robot.
-
-        Args:
-            uid (str): The UID of the asset.
-        """
-        if uid in self._rigid_objects:
-            return self._rigid_objects[uid]
-
-        if uid in self._articulations:
-            return self._articulations[uid]
-
-        if uid in self._robots:
-            return self._robots[uid]
-
-        if uid in self._lights:
-            return self._lights[uid]
-
-        if uid in self._sensors:
-            return self._sensors[uid]
-
-        logger.log_warning(f"Asset {uid} not found.")
-        return None
 
     def draw_marker(
         self,
@@ -1561,11 +1549,11 @@ class SimulationManager:
         self._visual_materials = {}
         self._env.clean_materials()
 
-    def reset_objects_state(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def reset_objects_state(self, env_ids: Sequence[int] | None = None) -> None:
         """Reset the state of all objects in the scene.
 
         Args:
-            env_ids: The environment IDs to reset. If None, reset all environments.
+            env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
         """
         for robot in self._robots.values():
             robot.reset(env_ids)

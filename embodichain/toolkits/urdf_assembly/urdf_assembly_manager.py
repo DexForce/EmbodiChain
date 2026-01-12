@@ -23,7 +23,7 @@ from functools import wraps
 import xml.etree.ElementTree as ET
 
 from scipy.spatial.transform import Rotation as R
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Union, Tuple
 
 from embodichain.toolkits.urdf_assembly.logging_utils import (
     setup_urdf_logging,
@@ -209,7 +209,7 @@ class URDFAssemblyManager:
         self,
         component_type: str,
         urdf_path: Union[str, Path],
-        transform: Optional[np.ndarray] = None,
+        transform: np.ndarray | None = None,
         **params,
     ) -> bool:
         r"""Add a URDF component to the component registry.
@@ -230,6 +230,11 @@ class URDFAssemblyManager:
                 raise ValueError("component_type must be a string")
             if not isinstance(urdf_path, (str, Path)):
                 raise ValueError("urdf_path must be a string or Path")
+            if component_type not in self.SUPPORTED_COMPONENTS:
+                raise ValueError(
+                    f"Unsupported component_type: {component_type}. "
+                    f"Supported types: {self.SUPPORTED_COMPONENTS}"
+                )
 
             component = URDFComponent(
                 urdf_path=urdf_path, params=params, transform=transform
@@ -249,7 +254,7 @@ class URDFAssemblyManager:
         sensor_source,
         parent_component: str,
         parent_link: str,
-        transform: Optional[np.ndarray] = None,
+        transform: np.ndarray | None = None,
         **kwargs,
     ) -> bool:
         r"""Attach a sensor to a specific component and link, and register it in the sensor registry.
@@ -308,7 +313,7 @@ class URDFAssemblyManager:
         """
         return self.sensor_registry.all()
 
-    def _load_urdf(self, urdf_path: str) -> Optional[ET.Element]:
+    def _load_urdf(self, urdf_path: str) -> ET.Element | None:
         r"""Load a URDF file and return its root element.
 
         Args:

@@ -122,11 +122,10 @@ def main():
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         enable_rt=not args.disable_rt,
+        num_envs=args.num_envs,
+        arena_space=10.0,
     )
     sim = SimulationManager(sim_cfg)
-
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=10.0)
 
     num_lights = 8
     radius = 5

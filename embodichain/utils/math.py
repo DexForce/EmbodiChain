@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-# needed to import for allowing type-hinting: Union[torch.Tensor, np.ndarray]
+# needed to import for allowing type-hinting: torch.Tensor | np.ndarray
 from __future__ import annotations
 
 import math
@@ -22,7 +22,7 @@ import warnings
 import torch
 import numpy as np
 import torch.nn.functional
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 
 def look_at_to_pose(
@@ -280,8 +280,8 @@ def matrix_from_quat(quaternions: torch.Tensor) -> torch.Tensor:
 
 
 def convert_quat(
-    quat: Union[torch.Tensor, np.ndarray], to: Literal["xyzw", "wxyz"] = "xyzw"
-) -> Union[torch.Tensor, np.ndarray]:
+    quat: torch.Tensor | np.ndarray, to: Literal["xyzw", "wxyz"] = "xyzw"
+) -> torch.Tensor | np.ndarray:
     """Converts quaternion from one convention to another.
 
     The convention to convert TO is specified as an optional argument. If to == 'xyzw',
@@ -914,8 +914,8 @@ def is_identity_pose(pos: torch.tensor, rot: torch.tensor) -> bool:
 def combine_frame_transforms(
     t01: torch.Tensor,
     q01: torch.Tensor,
-    t12: Optional[torch.Tensor] = None,
-    q12: Optional[torch.Tensor] = None,
+    t12: torch.Tensor | None = None,
+    q12: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Combine transformations between two reference frames into a stationary frame.
 
@@ -1570,6 +1570,7 @@ def sample_uniform(
     lower: Union[torch.Tensor, float],
     upper: Union[torch.Tensor, float],
     size: Union[int, tuple[int, ...]],
+    device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
     """Sample uniformly within a range.
 
@@ -1586,7 +1587,7 @@ def sample_uniform(
     if isinstance(size, int):
         size = (size,)
     # return tensor
-    return torch.rand(*size, device=lower.device) * (upper - lower) + lower
+    return torch.rand(*size, device=device) * (upper - lower) + lower
 
 
 def sample_log_uniform(

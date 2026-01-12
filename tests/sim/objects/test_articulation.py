@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 import os
-from numpy import mat
 import torch
 import pytest
 
@@ -29,7 +28,7 @@ from embodichain.lab.sim.cfg import ArticulationCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
 
-ART_PATH = "AiLiMu_BoxDrawer/AiLiMu_BoxDrawer.urdf"
+ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
 
 
@@ -37,9 +36,10 @@ class BaseArticulationTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        config = SimulationManagerCfg(
+            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+        )
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(NUM_ARENAS)
 
         art_path = get_data_path(ART_PATH)
         assert os.path.isfile(art_path)
@@ -174,6 +174,15 @@ class BaseArticulationTest:
         assert (
             self.art.uid not in self.sim.asset_uids
         ), "FAIL: Articulation UID still present after removal"
+
+    def test_set_physical_visible(self):
+        self.art.set_physical_visible(
+            visible=True,
+            rgba=(0.1, 0.1, 0.9, 0.4),
+        )
+        self.art.set_physical_visible(visible=False)
+        all_link_names = self.art.link_names
+        self.art.set_physical_visible(visible=True, link_names=all_link_names[:3])
 
     def teardown_method(self):
         """Clean up resources after each test method."""

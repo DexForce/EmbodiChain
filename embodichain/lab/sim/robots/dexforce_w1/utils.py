@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmKind,
@@ -296,17 +296,17 @@ def build_dexforce_w1_assembly_urdf_cfg(
         DexforceW1ArmSide.LEFT,
         DexforceW1ArmSide.RIGHT,
     ],
-    fname: Optional[str] = "DexforceW1V021",
-    hand_types: Optional[Dict[DexforceW1ArmSide, DexforceW1HandBrand]] = None,
-    hand_versions: Optional[Dict[DexforceW1ArmSide, DexforceW1Version]] = None,
-    hand_attach_xposes: Optional[Dict[DexforceW1ArmSide, np.ndarray]] = None,
+    fname: str | None = "DexforceW1V021",
+    hand_types: dict[DexforceW1ArmSide, DexforceW1HandBrand] | None = None,
+    hand_versions: dict[DexforceW1ArmSide, DexforceW1Version] | None = None,
+    hand_attach_xposes: dict[DexforceW1ArmSide, np.ndarray] | None = None,
     include_chassis: bool = True,
     include_torso: bool = True,
     include_head: bool = True,
     include_hand: bool = True,
     include_eyes: bool = True,
     include_wrist_cameras: bool = True,
-    component_versions: Optional[Dict[DexforceW1Type, DexforceW1Version]] = None,
+    component_versions: dict[DexforceW1Type, DexforceW1Version] | None = None,
 ) -> URDFCfg:
     """
     Assemble DexforceW1 robot urdf configuration.
@@ -515,8 +515,8 @@ def build_dexforce_w1_solver_cfg(
         DexforceW1ArmSide.LEFT,
         DexforceW1ArmSide.RIGHT,
     ],
-    component_versions: Optional[Dict[DexforceW1Type, DexforceW1Version]] = None,
-    urdf_cfg: Optional[URDFCfg] = None,
+    component_versions: dict[DexforceW1Type, DexforceW1Version] | None = None,
+    urdf_cfg: URDFCfg | None = None,
 ) -> Dict[DexforceW1Type, SolverCfg]:
     """
     Build DexforceW1 solver configuration dict.
@@ -607,15 +607,15 @@ def build_dexforce_w1_cfg(
         DexforceW1ArmSide.LEFT,
         DexforceW1ArmSide.RIGHT,
     ],
-    hand_types: Optional[Dict[DexforceW1ArmSide, DexforceW1HandBrand]] = None,
-    hand_versions: Optional[Dict[DexforceW1ArmSide, DexforceW1Version]] = None,
-    hand_attach_xposes: Optional[Dict[DexforceW1ArmSide, np.ndarray]] = None,
+    hand_types: dict[DexforceW1ArmSide, DexforceW1HandBrand] | None = None,
+    hand_versions: dict[DexforceW1ArmSide, DexforceW1Version] | None = None,
+    hand_attach_xposes: dict[DexforceW1ArmSide, np.ndarray] | None = None,
     include_chassis: bool = True,
     include_torso: bool = True,
     include_head: bool = True,
     include_hand: bool = True,
-    component_versions: Optional[Dict[DexforceW1Type, DexforceW1Version]] = None,
-    solver_cfg: Optional[Dict[DexforceW1Type, SolverCfg]] = None,
+    component_versions: dict[DexforceW1Type, DexforceW1Version] | None = None,
+    solver_cfg: dict[DexforceW1Type, SolverCfg] | None = None,
 ) -> "DexforceW1Cfg":
     """
     Build DexforceW1 robot configuration object.
@@ -646,6 +646,7 @@ def build_dexforce_w1_cfg(
         include_chassis=include_chassis,
         include_torso=include_torso,
         include_head=include_head,
+        include_hand=include_hand,
         component_versions=component_versions,
     )
 

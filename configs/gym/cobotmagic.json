@@ -59,6 +59,7 @@
     },
     "sensor": [
         {
+            "uid": "camera_1",
             "sensor_type": "Camera",
             "width": 640,
             "height": 480,

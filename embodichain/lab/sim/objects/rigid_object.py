@@ -19,7 +19,7 @@ import dexsim
 import numpy as np
 
 from dataclasses import dataclass
-from typing import List, Sequence, Optional, Union
+from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
@@ -60,10 +60,14 @@ class RigidBodyData:
         self.device = device
 
         # get gpu indices for the entities.
-        self.gpu_indices = torch.as_tensor(
-            [entity.get_gpu_index() for entity in self.entities],
-            dtype=torch.int32,
-            device=self.device,
+        self.gpu_indices = (
+            torch.as_tensor(
+                [entity.get_gpu_index() for entity in self.entities],
+                dtype=torch.int32,
+                device=self.device,
+            )
+            if self.device.type == "cuda"
+            else None
         )
 
         # Initialize rigid body data.
@@ -172,12 +176,10 @@ class RigidObject(BatchEntity):
         self._world = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
 
-        self._all_indices = torch.arange(
-            len(entities), dtype=torch.int32, device=device
-        )
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
-        self._data: Optional[RigidBodyData] = None
+        self._data: RigidBodyData | None = None
         if self.is_static is False:
             self._data = RigidBodyData(entities=entities, ps=self._ps, device=device)
 
@@ -196,6 +198,15 @@ class RigidObject(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
+        # TODO: Must be called after setting all attributes.
+        # May be improved in the future.
+        if cfg.attrs.enable_collision is False:
+            flag = torch.zeros(len(entities), dtype=torch.bool)
+            self.enable_collision(flag)
+
+        # reserve flag for collision visible node existence
+        self._has_collision_visible_node = False
+
     def __str__(self) -> str:
         parent_str = super().__str__()
         return (
@@ -213,7 +224,7 @@ class RigidObject(BatchEntity):
         return self._all_indices
 
     @property
-    def body_data(self) -> Optional[RigidBodyData]:
+    def body_data(self) -> RigidBodyData | None:
         """Get the rigid body data manager for this rigid object.
 
         Returns:
@@ -275,7 +286,7 @@ class RigidObject(BatchEntity):
         self.set_collision_filter(collision_filter_data)
 
     def set_collision_filter(
-        self, filter_data: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """set collision filter data for the rigid object.
 
@@ -285,7 +296,7 @@ class RigidObject(BatchEntity):
                 If 2nd element is 0, the object will collision with all other objects in world.
                 3rd and 4th elements are not used currently.
 
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used. Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -301,13 +312,13 @@ class RigidObject(BatchEntity):
             )
 
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set local pose of the rigid object.
 
         Args:
             pose (torch.Tensor): The local pose of the rigid object with shape (N, 7) or (N, 4, 4).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -348,6 +359,7 @@ class RigidObject(BatchEntity):
             # we should keep `pose_` life cycle to the end of the function.
             pose = torch.cat((quat, xyz), dim=-1)
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=pose.clone(),
                 gpu_indices=indices,
@@ -404,10 +416,10 @@ class RigidObject(BatchEntity):
 
     def add_force_torque(
         self,
-        force: Optional[torch.Tensor] = None,
-        torque: Optional[torch.Tensor] = None,
-        pos: Optional[torch.Tensor] = None,
-        env_ids: Optional[Sequence[int]] = None,
+        force: torch.Tensor | None = None,
+        torque: torch.Tensor | None = None,
+        pos: torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Add force and/or torque to the rigid object.
 
@@ -418,10 +430,10 @@ class RigidObject(BatchEntity):
             - if not `pos` is specified, the force and torque are applied at the center of mass of the rigid body.
 
         Args:
-            force (Optional[torch.Tensor] = None): The force to add with shape (N, 3). Defaults to None.
-            torque (Optional[torch.Tensor], optional): The torque to add with shape (N, 3). Defaults to None.
-            pos (Optional[torch.Tensor], optional): The position to apply the force at with shape (N, 3). Defaults to None.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            force (torch.Tensor | None = None): The force to add with shape (N, 3). Defaults to None.
+            torque (torch.Tensor | None, optional): The torque to add with shape (N, 3). Defaults to None.
+            pos (torch.Tensor | None, optional): The position to apply the force at with shape (N, 3). Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         if force is None and torque is None:
             logger.log_warning(
@@ -456,6 +468,7 @@ class RigidObject(BatchEntity):
 
         else:
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             if force is not None:
                 self._ps.gpu_apply_rigid_body_data(
                     data=force,
@@ -472,13 +485,13 @@ class RigidObject(BatchEntity):
     def set_attrs(
         self,
         attrs: Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]],
-        env_ids: Optional[Sequence[int]] = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set physical attributes for the rigid object.
 
         Args:
             attrs (Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]]): The physical attributes to set.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -495,14 +508,52 @@ class RigidObject(BatchEntity):
             for i, env_idx in enumerate(local_env_ids):
                 self._entities[env_idx].set_physical_attr(attrs[i].attr())
 
+    def set_mass(
+        self, mass: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set mass for the rigid object.
+
+        Args:
+            mass (torch.Tensor): The mass to set with shape (N,).
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(mass):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
+            )
+
+        mass = mass.cpu().numpy()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].get_physical_body().set_mass(mass[i])
+
+    def get_mass(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get mass for the rigid object.
+
+        Args:
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+
+        Returns:
+            torch.Tensor: The mass of the rigid object with shape (N,).
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        masses = []
+        for _, env_idx in enumerate(local_env_ids):
+            mass = self._entities[env_idx].get_physical_body().get_mass()
+            masses.append(mass)
+
+        return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
+
     def set_visual_material(
-        self, mat: VisualMaterial, env_ids: Optional[Sequence[int]] = None
+        self, mat: VisualMaterial, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set visual material for the rigid object.
 
         Args:
             mat (VisualMaterial): The material to set.
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -512,12 +563,12 @@ class RigidObject(BatchEntity):
             self._visual_material[env_idx] = mat_inst
 
     def get_visual_material_inst(
-        self, env_ids: Optional[Sequence[int]] = None
+        self, env_ids: Sequence[int] | None = None
     ) -> List[VisualMaterialInst]:
         """Get material instances for the rigid object.
 
         Args:
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
 
         Returns:
             List[MaterialInst]: List of material instances.
@@ -525,12 +576,29 @@ class RigidObject(BatchEntity):
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return [self._visual_material[i] for i in ids]
 
-    def get_body_scale(self, env_ids: Optional[Sequence[int]] = None) -> torch.Tensor:
+    def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
+        """Share material instances for the rigid object.
+
+        Args:
+            mat_insts (List[VisualMaterialInst]): List of material instances to share.
+        """
+        if len(self._entities) != len(mat_insts):
+            logger.log_error(
+                f"Length of entities {len(self._entities)} does not match length of material instances {len(mat_insts)}."
+            )
+
+        for i, entity in enumerate(self._entities):
+            if mat_insts[i] is None:
+                continue
+            entity.set_material(mat_insts[i].mat)
+            self._visual_material[i] = mat_insts[i]
+
+    def get_body_scale(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """
         Retrieve the body scale for specified environment instances.
 
         Args:
-            env_ids (Optional[Sequence[int]]): A sequence of environment instance IDs.
+            env_ids (Sequence[int] | None): A sequence of environment instance IDs.
                 If None, retrieves the body scale for all instances.
 
         Returns:
@@ -545,13 +613,13 @@ class RigidObject(BatchEntity):
         )
 
     def set_body_scale(
-        self, scale: torch.Tensor, env_ids: Optional[Sequence[int]] = None
+        self, scale: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set the scale of the rigid body.
 
         Args:
             scale (torch.Tensor): The scale to set with shape (N, 3).
-            env_ids (Optional[Sequence[int]], optional): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -567,12 +635,12 @@ class RigidObject(BatchEntity):
         else:
             logger.log_error(f"Setting body scale on GPU is not supported yet.")
 
-    def get_vertices(self, env_ids: Optional[Sequence[int]] = None) -> torch.Tensor:
+    def get_vertices(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """
         Retrieve the vertices of the rigid objects.
 
         Args:
-            env_ids (Optional[Sequence[int]]): A sequence of environment IDs for which to retrieve vertices.
+            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve vertices.
                                                 If None, retrieves vertices for all instances.
 
         Returns:
@@ -599,11 +667,31 @@ class RigidObject(BatchEntity):
             device=self.device,
         )
 
-    def clear_dynamics(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def enable_collision(
+        self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Enable or disable collision for the rigid bodies.
+
+        Args:
+            enable (torch.Tensor): A tensor of shape (N,) representing whether to enable collision for each rigid body.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(enable):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match enable length {len(enable)}."
+            )
+
+        enable_list = enable.tolist()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].enable_collision(bool(enable_list[i]))
+
+    def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
 
         Args:
-            env_ids (Optional[Sequence[int]]): Environment indices. If None, then all indices are used.
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         if self.is_non_dynamic:
             return
@@ -619,6 +707,7 @@ class RigidObject(BatchEntity):
                 (len(local_env_ids), 3), dtype=torch.float32, device=self.device
             )
             indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_rigid_body_data(
                 data=zeros,
                 gpu_indices=indices,
@@ -640,7 +729,51 @@ class RigidObject(BatchEntity):
                 data_type=RigidBodyGPUAPIWriteType.TORQUE,
             )
 
-    def reset(self, env_ids: Optional[Sequence[int]] = None) -> None:
+    def set_physical_visible(
+        self,
+        visible: bool = True,
+        rgba: Sequence[float] | None = None,
+    ):
+        """set collion render visibility
+
+        Args:
+            visible (bool, optional): is collision body visible. Defaults to True.
+            rgba (Sequence[float] | None, optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
+        """
+        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
+        if len(rgba) != 4:
+            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+
+        # create collision visible node if not exist
+        if visible:
+            if not self._has_collision_visible_node:
+                for i, env_idx in enumerate(self._all_indices):
+                    self._entities[env_idx].create_physical_visible_node(
+                        np.array(
+                            [
+                                rgba[0],
+                                rgba[1],
+                                rgba[2],
+                                rgba[3],
+                            ]
+                        )
+                    )
+                self._has_collision_visible_node = True
+
+        # create collision visible node if not exist
+        for i, env_idx in enumerate(self._all_indices):
+            self._entities[env_idx].set_physical_visible(visible)
+
+    def set_visible(self, visible: bool = True) -> None:
+        """Set the visibility of the rigid object.
+
+        Args:
+            visible (bool, optional): Whether the rigid object is visible. Defaults to True.
+        """
+        for i, env_idx in enumerate(self._all_indices):
+            self._entities[env_idx].set_visible(visible)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
         self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)

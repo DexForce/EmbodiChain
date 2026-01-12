@@ -34,7 +34,6 @@ def main():
     sim_device = "cpu"
     config = SimulationManagerCfg(headless=False, sim_device=sim_device)
     sim = SimulationManager(config)
-    sim.build_multiple_arenas(1)
     sim.set_manual_update(False)
 
     # Load robot URDF file
@@ -149,9 +148,7 @@ def main():
         if ik_qpos.dim() == 3:
             robot.set_qpos(qpos=ik_qpos[0][0], joint_ids=robot.get_joint_ids(arm_name))
         else:
-            robot.set_qpos(
-                qpos=ik_qpos.unsqueeze(0), joint_ids=robot.get_joint_ids(arm_name)
-            )
+            robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
         # Visualize current pose
         ik_xpos = robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)

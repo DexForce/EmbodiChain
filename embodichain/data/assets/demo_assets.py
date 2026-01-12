@@ -23,11 +23,15 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
+demo_assets = "demo"
+
 
 class ScoopIceNewEnv(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "demo/ScoopIceNewEnv.zip"),
+            os.path.join(
+                EMBODICHAIN_DOWNLOAD_PREFIX, demo_assets, "ScoopIceNewEnv.zip"
+            ),
             "e92734a9de0f64be33a11fbda0fbd3b6",
         )
         prefix = "ScoopIceNewEnv"
@@ -39,7 +43,7 @@ class ScoopIceNewEnv(EmbodiChainDataset):
 class MultiW1Data(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "demo/multi_w1_demo.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, demo_assets, "multi_w1_demo.zip"),
             "984e8fa3aa05cb36a1fd973a475183ed",
         )
         prefix = "MultiW1Data"

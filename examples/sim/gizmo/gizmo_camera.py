@@ -41,9 +41,6 @@ def main():
         description="Create and simulate a camera with gizmo in SimulationManager"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of environments to simulate"
-    )
-    parser.add_argument(
         "--device",
         type=str,
         default="cpu",
@@ -71,10 +68,6 @@ def main():
     # Create simulation context
     sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
-
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Add some objects to the scene for camera to observe
     for i in range(5):

@@ -46,7 +46,7 @@ def main():
         description="Create and simulate a robot in SimulationManager"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of environments to simulate"
+        "--num_envs", type=int, default=4, help="Number of environments to simulate"
     )
     parser.add_argument(
         "--device",
@@ -69,12 +69,9 @@ def main():
         arena_space=3.0,
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
     )
     sim = SimulationManager(config)
-
-    # Build multiple environments if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs)
 
     # Create robot configuration
     robot = create_robot(sim)

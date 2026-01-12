@@ -48,6 +48,9 @@ from embodichain.data.constants import (
 # ======================================================================
 
 
+w1_assets = "dexforce_w1"
+
+
 class DexforceW1V021(EmbodiChainDataset):
     """Dataset class for the Dexforce W1 V021.
 
@@ -62,7 +65,7 @@ class DexforceW1V021(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/DexforceW1V021.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "DexforceW1V021.zip"),
             "3cc3a0bfd1c50ebed5bee9dadeee6756",
         )
         prefix = "DexforceW1V021"
@@ -86,7 +89,8 @@ class DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
                 EMBODICHAIN_DOWNLOAD_PREFIX,
-                "dexforce_w1/DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M.zip",
+                w1_assets,
+                "DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M.zip",
             ),
             "06ec5dfa76dc69160d7ff9bc537a6a7b",
         )
@@ -111,7 +115,8 @@ class DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
                 EMBODICHAIN_DOWNLOAD_PREFIX,
-                "dexforce_w1/DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1.zip",
+                w1_assets,
+                "DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1.zip",
             ),
             "ef19d247799e79233863b558c47b32cd",
         )
@@ -124,9 +129,7 @@ class DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1(EmbodiChainDataset):
 class DexforceW1ChassisV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_Chassis_v021.zip"
-            ),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Chassis_v021.zip"),
             "6b0517a4d92a572988641d46269d063f",
         )
         prefix = "DexforceW1ChassisV021"
@@ -138,7 +141,7 @@ class DexforceW1ChassisV021(EmbodiChainDataset):
 class DexforceW1TorsoV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_Torso_v021.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Torso_v021.zip"),
             "4f762a3ae6ef2acbe484c915cf80da7b",
         )
         prefix = "DexforceW1TorsoV021"
@@ -150,7 +153,7 @@ class DexforceW1TorsoV021(EmbodiChainDataset):
 class DexforceW1EyesV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_Eyes_v021.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Eyes_v021.zip"),
             "80e0b86ef2e934f439c99b79074f6f3c",
         )
         prefix = "DexforceW1EyesV021"
@@ -162,7 +165,7 @@ class DexforceW1EyesV021(EmbodiChainDataset):
 class DexforceW1HeadV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_Head_v021.zip"),
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Head_v021.zip"),
             "ba72805828c5fd62ad55d6a1458893d0",
         )
         prefix = "DexforceW1HeadV021"
@@ -175,7 +178,7 @@ class DexforceW1LeftArm1V021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_LeftArm_1_v021.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_LeftArm_1_v021.zip"
             ),
             "c3cacda7bd36389ed98620047bff6216",
         )
@@ -189,7 +192,7 @@ class DexforceW1RightArm1V021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_RightArm_1_v021.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_RightArm_1_v021.zip"
             ),
             "456c9495748171003246a3f6626bb0db",
         )
@@ -203,7 +206,7 @@ class DexforceW1LeftArm2V021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_LeftArm_2_v021.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_LeftArm_2_v021.zip"
             ),
             "b99bd0587cc9a36fed3cdaa4f9fd62e7",
         )
@@ -217,7 +220,7 @@ class DexforceW1RightArm2V021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, "dexforce_w1/W1_RightArm_2_v021.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_RightArm_2_v021.zip"
             ),
             "d9f25b2d5244ca5a859040327273a99e",
         )

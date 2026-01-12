@@ -26,17 +26,16 @@ from embodichain.data import get_data_path
 
 
 NUM_ENVS = 4
-ART_PATH = "AiLiMu_BoxDrawer/AiLiMu_BoxDrawer.urdf"
+ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
     def setup_simulation(self, sim_device, enable_rt):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt
+            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
         )
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(NUM_ENVS)
         # Create batch of cameras
         cfg_dict = {
             "sensor_type": "Camera",
@@ -113,6 +112,7 @@ class CameraTest:
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
+        # from IPython import embed; embed()
         self.camera: Camera = self.sim.add_sensor(
             sensor_cfg=CameraCfg(
                 uid="test", extrinsics=CameraCfg.ExtrinsicsCfg(parent="handle_xpos")
@@ -143,11 +143,22 @@ class TestCameraRaster(CameraTest):
         self.setup_simulation("cpu", enable_rt=False)
 
 
+class TestCameraRaster(CameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=False)
+
+
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
         self.setup_simulation("cpu", enable_rt=True)
 
 
+class TestCameraFastRT(CameraTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", enable_rt=True)
+
+
 if __name__ == "__main__":
     test = CameraTest()
     test.setup_simulation("cpu", enable_rt=False)
+    test.test_attach_to_parent()
