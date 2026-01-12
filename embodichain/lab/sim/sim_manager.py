@@ -250,6 +250,9 @@ class SimulationManager:
 
         self._build_multiple_arenas(sim_config.num_envs)
 
+        # For contact fetching
+        self._enable_contact: bool = False
+
     @property
     def num_envs(self) -> int:
         """Get the number of arenas in the simulation.
@@ -1013,7 +1016,7 @@ class SimulationManager:
 
     def _enable_contact_fetching(self) -> None:
         """enable contact fetching"""
-        if self.enable_contact:
+        if self._enable_contact:
             return
         if self.is_use_gpu_physics:
             MAX_CONTACT = 65536
@@ -1026,7 +1029,7 @@ class SimulationManager:
         else:
             self._ps.enable_contact_data_update_on_cpu(True)
 
-        self.enable_contact = True
+        self._enable_contact = True
 
     def get_contact(self, contact_filter_cfg: ContactFilterCfg) -> ContactReport:
         """get contact

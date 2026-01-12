@@ -209,10 +209,6 @@ def main():
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
 
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
-
     # Add objects to the scene
     cube0 = create_cube(sim, "cube0", position=[0.0, 0.0, 0.03])
     cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.06])

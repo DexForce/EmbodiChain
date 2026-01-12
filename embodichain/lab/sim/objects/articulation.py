@@ -20,7 +20,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import List, Sequence, Dict, Union, Tuple
+from typing import List, Sequence, Dict, Union, Tuple, Optional
 
 from dexsim.engine import Articulation as _Articulation
 from dexsim.types import (

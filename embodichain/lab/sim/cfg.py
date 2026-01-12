@@ -1163,7 +1163,10 @@ class ContactFilterCfg:
             self.item_user_ids = torch.cat(
                 (self.item_user_ids, rigid_object.get_user_ids())
             )
-            self.item_env_ids = torch.cat((self.item_env_ids, rigid_object.all_env_ids))
+            env_ids = torch.tensor(
+                rigid_object.all_env_ids, dtype=torch.int32, device=sim.device
+            )
+            self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
 
         for articulation_cfg in self.articulation_cfg_list:
             articulation = sim.get_articulation(articulation_cfg.articulation_uid)
@@ -1188,9 +1191,10 @@ class ContactFilterCfg:
                     continue
                 link_user_ids = articulation.get_user_ids(link_name).reshape(-1)
                 self.item_user_ids = torch.cat((self.item_user_ids, link_user_ids))
-                self.item_env_ids = torch.cat(
-                    (self.item_env_ids, articulation.all_env_ids)
+                env_ids = torch.tensor(
+                    articulation.all_env_ids, dtype=torch.int32, device=sim.device
                 )
+                self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
         # build user_id to env_id map
         max_user_id = int(self.item_user_ids.max().item())
         self.item_user_env_ids_map = torch.full(
