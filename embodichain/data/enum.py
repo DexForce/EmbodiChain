@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 
 from enum import Enum, IntEnum
+import torch
+import numpy as np
 
 
 class SemanticMask(IntEnum):
@@ -59,3 +61,16 @@ class Hints(Enum):
         EndEffector.DEXTROUSHAND.value,
     )
     ARM = (ControlParts.LEFT_ARM.value, ControlParts.RIGHT_ARM.value)
+
+
+class JointType(Enum):
+    QPOS = "qpos"
+
+
+class EefType(Enum):
+    POSE = "eef_pose"
+
+
+class ActionMode(Enum):
+    ABSOLUTE = ""
+    RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.

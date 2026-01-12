@@ -47,7 +47,7 @@ def get_pcd_svd_frame(pc: torch.Tensor) -> torch.Tensor:
     pc_centered = pc - pc_center
     u, s, vt = torch.linalg.svd(pc_centered)
     rotation = vt.T
-    pc_pose = torch.eye(4, dtype=torch.float32)
+    pc_pose = torch.eye(4, dtype=torch.float32, device=pc.device)
     pc_pose[:3, :3] = rotation
     pc_pose[:3, 3] = pc_center
     return pc_pose
@@ -90,7 +90,7 @@ def apply_svd_transfer_pcd(
     standard_verts = []
     for object_verts in verts:
         pc_svd_frame = get_pcd_svd_frame(object_verts)
-        inv_svd_frame = inv_transform(pc_svd_frame)
+        inv_svd_frame = torch.linalg.inv(pc_svd_frame)
         standard_object_verts = (
             object_verts @ inv_svd_frame[:3, :3].T + inv_svd_frame[:3, 3]
         )
@@ -175,7 +175,7 @@ def compute_object_length(
         )
     pcs = rigid_object.get_vertices(env_ids)
     body_scale = rigid_object.get_body_scale(env_ids)
-    scaled_pcs = pcs * body_scale
+    scaled_pcs = pcs * body_scale.unsqueeze(1)
 
     if is_svd_frame:
         scaled_pcs = apply_svd_transfer_pcd(scaled_pcs, sample_points)

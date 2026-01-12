@@ -309,3 +309,15 @@ class SceneEntityCfg:
                 if isinstance(self.body_ids, int):
                     self.body_ids = [self.body_ids]
                 self.body_names = [entity.body_names[i] for i in self.body_ids]
+
+
+@configclass
+class DatasetFunctorCfg(FunctorCfg):
+    """Configuration for dataset collection functors.
+
+    Dataset functors are called with mode="save" which handles both:
+    - Recording observation-action pairs on every step
+    - Auto-saving episodes when dones=True
+    """
+
+    mode: Literal["save"] = "save"

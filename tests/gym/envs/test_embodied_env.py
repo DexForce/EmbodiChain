@@ -135,20 +135,22 @@ class EmbodiedEnvTest:
             for i in range(2):
                 action = self.env.action_space.sample()
                 action = torch.as_tensor(
-                    action, dtype=torch.float32, device=self.env.device
+                    action,
+                    dtype=torch.float32,
+                    device=self.env.get_wrapper_attr("device"),
                 )
 
                 obs, reward, done, truncated, info = self.env.step(action)
 
         assert reward.shape == (
-            self.env.num_envs,
-        ), f"Expected reward shape ({self.env.num_envs},), got {reward.shape}"
+            self.env.get_wrapper_attr("num_envs"),
+        ), f"Expected reward shape ({self.env.get_wrapper_attr('num_envs')},), got {reward.shape}"
         assert done.shape == (
-            self.env.num_envs,
-        ), f"Expected done shape ({self.env.num_envs},), got {done.shape}"
+            self.env.get_wrapper_attr("num_envs"),
+        ), f"Expected done shape ({self.env.get_wrapper_attr('num_envs')},), got {done.shape}"
         assert truncated.shape == (
-            self.env.num_envs,
-        ), f"Expected truncated shape ({self.env.num_envs},), got {truncated.shape}"
+            self.env.get_wrapper_attr("num_envs"),
+        ), f"Expected truncated shape ({self.env.get_wrapper_attr('num_envs')},), got {truncated.shape}"
         assert obs.get("robot") is not None, "Expected 'robot' info in the info dict"
 
     def teardown_method(self):
