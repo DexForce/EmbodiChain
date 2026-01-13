@@ -30,6 +30,9 @@ dependencies = [
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
   "toppra==0.6.3",
+  "pin",
+  "pin-pink",
+  "casadi",
   "qpsolvers==4.8.1",
   "py_opw_kinematics==0.1.6",
   "pytorch_kinematics==0.7.6",
@@ -51,12 +54,6 @@ dependencies = [
 [project.optional-dependencies]
 lerobot = [
   "lerobot==0.4.2"
-]
-
-pin = [
-  "pin==2.7.0",
-  "pin-pink==3.4.0"，
-  "casadi==3.7.1"
 ]
 
 [tool.setuptools.dynamic]
