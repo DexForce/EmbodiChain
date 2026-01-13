@@ -67,7 +67,7 @@ jobs:
     needs: lint
     runs-on: Linux
     env:
-      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_`DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: *container_template
@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests
         run: |
-          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -e .[pin] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
           pip uninstall pymeshlab -y
