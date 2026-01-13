@@ -99,7 +99,6 @@ class ScoopIce(EmbodiedEnv):
         return arm_qpos_offset_batch[0].to("cpu").numpy()
 
     def pack_qpos(self):
-        self.num_envs = self.sim.num_envs
         left_arm_qpos = self.trajectory["left_arm"]  # [waypoint_num, dof]
         logger.log_info("Adding x and z offset to left arm trajectory...")
         left_arm_qpos = self.add_xpos_offset(

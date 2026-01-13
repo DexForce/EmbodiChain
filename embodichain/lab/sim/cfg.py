@@ -19,7 +19,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any
+from typing import Sequence, Union, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -544,6 +544,17 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
+
+    grasp_pose_object: Optional[Union[np.ndarray, List[np.ndarray]]] = None
+    """Grasp pose(s) in object frame as 4x4 transformation matrix/matrices.
+    
+    Can be either:
+    - A single 4x4 numpy array for one grasp pose
+    - A list of 4x4 numpy arrays for multiple grasp poses
+    
+    This defines the preferred grasping pose(s) relative to the object's local coordinate frame.
+    """
+
 
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""

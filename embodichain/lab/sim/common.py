@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import List, TypeVar, Sequence
 
-from embodichain.lab.sim.cfg import ObjectBaseCfg
+from embodichain.lab.sim.cfg import ObjectBaseCfg, RigidObjectCfg
 from embodichain.utils import logger
 
 T = TypeVar("T")
