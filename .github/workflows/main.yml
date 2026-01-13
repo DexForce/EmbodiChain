@@ -67,7 +67,7 @@ jobs:
     needs: lint
     runs-on: Linux
     env:
-      NVIDIA_`DRIVER_CAPABILITIES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: *container_template
