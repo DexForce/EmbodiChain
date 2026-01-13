@@ -555,7 +555,6 @@ class RigidObjectCfg(ObjectBaseCfg):
     This defines the preferred grasping pose(s) relative to the object's local coordinate frame.
     """
 
-
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""
         if self.body_type == "dynamic":
