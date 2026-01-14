@@ -26,13 +26,14 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
+)
+from embodichain.lab.sim.sensors import (
     ContactFilterCfg,
     ArticulationContactFilterCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot, RobotCfg
 from embodichain.data import get_data_path
-from IPython import embed
 
 
 def create_cube(
@@ -118,7 +119,7 @@ def create_robot(
     ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
     pgi_urdf_path = get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf")
     robot_cfg_dict = {
-        "uid": "UR10_PGI",
+        "uid": uid,
         "urdf_cfg": {
             "components": [
                 {
@@ -183,7 +184,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=100, help="Number of parallel environments"
+        "--num_envs", type=int, default=64, help="Number of parallel environments"
     )
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
@@ -200,6 +201,7 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
+        num_envs=args.num_envs,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
@@ -248,30 +250,18 @@ def run_simulation(sim: SimulationManager):
     contact_filter_art_cfg.link_name_list = ["finger1_link", "finger2_link"]
     contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
     contact_filter_cfg.filter_need_both_actor = True
+
+    contact_sensor = sim.add_sensor(sensor_cfg=contact_filter_cfg)
+
     try:
         accmulated_cost_time = 0.0
         while True:
             # Update physics simulation
             sim.update(step=1)
             start_time = time.time()
-            contact_report = sim.get_contact(contact_filter_cfg)
+            contact_sensor.update()
+            contact_report = contact_sensor.get_data()
             accmulated_cost_time += time.time() - start_time
-
-            n_contact = contact_report.contact_data.shape[0]
-            if n_contact > 0:
-                # contact position
-                contact_positions = contact_report.contact_data[:, 0:3]
-                contact_normals = contact_report.contact_data[:, 3:6]
-                contact_frictions = contact_report.contact_data[:, 6:9]
-                contact_impulses = contact_report.contact_data[:, 9]
-                contact_distances = contact_report.contact_data[:, 10]
-                contact_user_ids = (
-                    contact_report.contact_user_ids
-                )  # user can use userid to identify which object the contact belongs to, using rigid_object.get_user_id()
-                contact_env_ids = (
-                    contact_report.contact_env_ids
-                )  # contact belongs to which environment
-
             step_count += 1
 
             # Print FPS every second
@@ -280,27 +270,20 @@ def run_simulation(sim: SimulationManager):
                 print(
                     f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
                 )
-
-                # filter contact report for specific rigid object
-                cube1_user_ids = sim.get_rigid_object("cube1").get_user_ids()
-                cube1_contact_report = contact_report.filter_by_user_ids(cube1_user_ids)
-                cube1_contact_report.set_contact_point_visibility(
-                    sim, visible=True, rgba=(1.0, 0.0, 0.0, 1.0), point_size=6.0
-                )
-                n_cube1_contact = cube1_contact_report.contact_data.shape[0]
-
-                # filter contact report for specific link
+                # filter contact report for a rigid object with a articulation link
+                cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
                 finger1_user_ids = (
                     sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
                 )
-                finger1_contact_report = contact_report.filter_by_user_ids(
-                    finger1_user_ids
+                filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
+                filter_contact_report = contact_sensor.filter_by_user_ids(
+                    filter_user_ids
                 )
+                # print("filter_contact_report", filter_contact_report)
                 # visualize contact points
-                finger1_contact_report.set_contact_point_visibility(
-                    sim, visible=True, rgba=(0.0, 0.0, 1.0, 1.0), point_size=6.0
+                contact_sensor.set_contact_point_visibility(
+                    visible=True, rgba=(0.0, 0.0, 1.0, 1.0), point_size=6.0
                 )
-                n_finger1_contact = finger1_contact_report.contact_data.shape[0]
                 accmulated_cost_time = 0.0
 
     except KeyboardInterrupt:

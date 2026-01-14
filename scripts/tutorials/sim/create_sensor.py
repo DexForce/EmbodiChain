@@ -20,7 +20,6 @@ It shows how to configure a camera sensor, attach it to the robot's end-effector
 """
 
 import argparse
-import cv2
 import numpy as np
 import time
 import torch
