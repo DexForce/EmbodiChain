@@ -80,6 +80,7 @@ jobs:
           export HF_ENDPOINT=https://hf-mirror.com
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
+          pip install numpy==1.26.4
           pytest tests
 
   publish:

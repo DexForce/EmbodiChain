@@ -67,9 +67,9 @@ class Robot(Articulation):
         entities: List[_Articulation],
         device: torch.device = torch.device("cpu"),
     ) -> None:
-        super().__init__(cfg, entities, device)
 
-        self._solvers = {}
+        self._entities = entities
+        self.cfg = cfg
 
         # Initialize joint ids for control parts.
         self._joint_ids: Dict[str, List[int]] = {}
@@ -78,6 +78,10 @@ class Robot(Articulation):
 
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
+
+        super().__init__(cfg, entities, device)
+
+        self._solvers = {}
 
         if self.cfg.solver_cfg:
             self.init_solver(self.cfg.solver_cfg)
@@ -123,6 +127,107 @@ class Robot(Articulation):
             else [i for i in self._joint_ids[name] if i not in self.mimic_ids]
         )
 
+    def get_link_names(self, name: str | None = None) -> Union[List[str], None]:
+        """Get the link names of the robot for a specific control part.
+
+        If no control part is specified, return all link names.
+
+        Args:
+            name (str, optional): The name of the control part to get the link names for. If None, the default part is used.
+
+        Returns:
+            List[str]: The link names of the robot for the specified control part.
+        """
+        if not self.control_parts or name is None:
+            return self.link_names
+
+        if name not in self.control_parts:
+            logger.log_error(
+                f"The control part '{name}' does not exist in the robot's control parts {self.control_parts}."
+            )
+        return self._control_groups[name].link_names
+
+    def get_qpos_limits(
+        self, name: str | None = None, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        """Get the joint position limits (qpos) of the robot for a specific control part.
+
+        It returns all joint position limits if no control part is specified.
+
+        Args:
+            name (str | None): The name of the control part to get the qpos limits for.
+            env_ids (Sequence[int] | None): The environment ids to get the qpos limits for. If None, all environments are used.
+
+        Returns:
+            torch.Tensor: Joint position limits with shape (N, dof, 2), where N is the number of environments.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        qpos_limits = self.body_data.qpos_limits
+        if name is None:
+            return qpos_limits[local_env_ids, :]
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            return qpos_limits[local_env_ids][:, part_joint_ids, :]
+
+    def get_qvel_limits(
+        self, name: str | None = None, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        """Get the joint velocity limits (qvel) of the robot for a specific control part.
+
+        It returns all joint velocity limits if no control part is specified.
+
+        Args:
+            name (str | None): The name of the control part to get the qvel limits for.
+            env_ids (Sequence[int] | None): The environment ids to get the qvel limits for. If None, all environments are used.
+
+        Returns:
+            torch.Tensor: Joint velocity limits with shape (N, dof), where N is the number of environments.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        qvel_limits = self.body_data.qvel_limits
+        if name is None:
+            return qvel_limits[local_env_ids, :]
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            return qvel_limits[local_env_ids][:, part_joint_ids]
+
+    def get_qf_limits(
+        self, name: str | None = None, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        """Get the joint effort limits (qf) of the robot for a specific control part.
+
+        It returns all joint effort limits if no control part is specified.
+
+        Args:
+            name (str | None): The name of the control part to get the qf limits for.
+            env_ids (Sequence[int] | None): The environment ids to get the qf limits for. If None, all environments are used.
+
+        Returns:
+            torch.Tensor: Joint effort limits with shape (N, dof), where N is the number of environments.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        qf_limits = self.body_data.qf_limits
+        if name is None:
+            return qf_limits[local_env_ids, :]
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            return qf_limits[local_env_ids][:, part_joint_ids]
+
     def get_proprioception(self) -> Dict[str, torch.Tensor]:
         """Gets robot proprioception information, primarily for agent state representation in robot learning scenarios.
 
@@ -138,6 +243,191 @@ class Robot(Articulation):
         return dict(
             qpos=self.body_data.qpos, qvel=self.body_data.qvel, qf=self.body_data.qf
         )
+
+    def set_qpos(
+        self,
+        qpos: torch.Tensor,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+        target: bool = True,
+        name: str | None = None,
+    ) -> None:
+        """Set the joint positions (qpos) or target positions for the articulation.
+
+        Args:
+            qpos (torch.Tensor): Joint positions with shape (N, dof), where N is the number of environments.
+            joint_ids (Sequence[int] | None, optional): Joint indices to apply the positions. If None, applies to all joints.
+            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
+            target (bool): If True, sets target positions for simulation. If False, updates current positions directly.
+            name (str | None): The name of the control part to set the qpos for. If None, the default part is used.
+
+        Raises:
+            ValueError: If the length of `env_ids` does not match the length of `qpos`.
+        """
+        if name is None:
+            super().set_qpos(
+                qpos=qpos,
+                joint_ids=joint_ids,
+                env_ids=env_ids,
+                target=target,
+            )
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            if joint_ids is not None:
+                logger.log_warning(f"`joint_ids` is ignored when `name` is specified.")
+
+            super().set_qpos(
+                qpos=qpos,
+                joint_ids=part_joint_ids,
+                env_ids=env_ids,
+                target=target,
+            )
+
+    def get_qpos(self, name: str | None = None) -> torch.Tensor:
+        """Get the joint positions (qpos) of the robot.
+
+        Args:
+            name (str | None): The name of the control part to get the qpos for. If None, the default part is used.
+        Returns:
+            torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
+        """
+
+        qpos = super().get_qpos()
+        if name is None:
+            return qpos
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            return qpos[:, part_joint_ids]
+
+    def set_qvel(
+        self,
+        qvel: torch.Tensor,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+        target: bool = True,
+        name: str | None = None,
+    ) -> None:
+        """Set the joint velocities (qvel) or target velocities for the articulation.
+
+        Args:
+            qvel (torch.Tensor): Joint velocities with shape (N, dof), where N is the number of environments.
+            joint_ids (Sequence[int] | None, optional): Joint indices to apply the velocities. If None, applies to all joints.
+            env_ids (Sequence[int] | None): Environment indices to apply the velocities. Defaults to all environments.
+            target (bool): If True, sets target velocities for simulation. If False, updates current velocities directly.
+            name (str | None): The name of the control part to set the qvel for. If None, the default part is used.
+
+        Raises:
+            ValueError: If the length of `env_ids` does not match the length of `qvel`.
+        """
+        if name is None:
+            super().set_qvel(
+                qvel=qvel,
+                joint_ids=joint_ids,
+                env_ids=env_ids,
+                target=target,
+            )
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            if joint_ids is not None:
+                logger.log_warning(f"`joint_ids` is ignored when `name` is specified.")
+
+            super().set_qvel(
+                qvel=qvel,
+                joint_ids=part_joint_ids,
+                env_ids=env_ids,
+                target=target,
+            )
+
+    def get_qvel(self, name: str | None = None) -> torch.Tensor:
+        """Get the joint velocities (qvel) of the robot.
+
+        Args:
+            name (str | None): The name of the control part to get the qvel for. If None, the default part is used.
+        Returns:
+            torch.Tensor: Joint velocities with shape (N, dof), where N is the number of environments.
+        """
+
+        qvel = super().get_qvel()
+        if name is None:
+            return qvel
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            return qvel[:, part_joint_ids]
+
+    def set_qf(
+        self,
+        qf: torch.Tensor,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+        name: str | None = None,
+    ) -> None:
+        """Set the joint efforts (qf) for the articulation.
+
+        Args:
+            qf (torch.Tensor): Joint efforts with shape (N, dof), where N is the number of environments.
+            joint_ids (Sequence[int] | None, optional): Joint indices to apply the efforts. If None, applies to all joints.
+            env_ids (Sequence[int] | None): Environment indices to apply the efforts. Defaults to all environments.
+            name (str | None): The name of the control part to set the qf for. If None, the default part is used.
+
+        Raises:
+            ValueError: If the length of `env_ids` does not match the length of `qf`.
+        """
+        if name is None:
+            super().set_qf(
+                qf=qf,
+                joint_ids=joint_ids,
+                env_ids=env_ids,
+            )
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            if joint_ids is not None:
+                logger.log_warning(f"`joint_ids` is ignored when `name` is specified.")
+
+            super().set_qf(
+                qf=qf,
+                joint_ids=part_joint_ids,
+                env_ids=env_ids,
+            )
+
+    def get_qf(self, name: str | None = None) -> torch.Tensor:
+        """Get the joint efforts (qf) of the robot.
+
+        Args:
+            name (str | None): The name of the control part to get the qf for. If None, the default part is used.
+        Returns:
+            torch.Tensor: Joint efforts with shape (N, dof), where N is the number of environments.
+        """
+
+        qf = super().get_qf()
+        if name is None:
+            return qf
+        else:
+            if not self.control_parts or name not in self.control_parts:
+                logger.log_error(
+                    f"The control part '{name}' does not exist in the robot's control parts."
+                )
+            part_joint_ids = self.get_joint_ids(name=name)
+            return qf[:, part_joint_ids]
 
     def compute_fk(
         self,
@@ -477,7 +767,10 @@ class Robot(Articulation):
             control_parts (Dict[str, List[str]]): A dictionary where keys are control part names and values are lists of
                 joint names or regular expressions that match joint names.
         """
-        joint_name_to_ids = {name: i for i, name in enumerate(self.joint_names)}
+        joint_name_to_ids = {
+            name: i
+            for i, name in enumerate(self._entities[0].get_actived_joint_names())
+        }
         for name, joint_names in control_parts.items():
             # convert joint_names which is a regular expression to a list of joint names
             joint_names_expanded = []
@@ -503,6 +796,74 @@ class Robot(Articulation):
 
         # Initialize control groups
         self._control_groups = self._extract_control_groups()
+
+    def _set_default_joint_drive(self) -> None:
+        """Set default joint drive parameters based on the configuration."""
+        import numbers
+        from embodichain.utils.string import resolve_matching_names_values
+
+        drive_props = [
+            ("damping", self.default_joint_damping),
+            ("stiffness", self.default_joint_stiffness),
+            ("max_effort", self.default_joint_max_effort),
+            ("max_velocity", self.default_joint_max_velocity),
+            ("friction", self.default_joint_friction),
+        ]
+
+        for prop_name, default_array in drive_props:
+            value = getattr(self.cfg.drive_pros, prop_name, None)
+            if value is None:
+                continue
+            if isinstance(value, numbers.Number):
+                default_array[:] = value
+            else:
+                try:
+                    control_part_dict = {}
+                    value_copy = value.copy()
+                    if self.control_parts:
+                        # Extract control part and map the corresponding joint names
+                        for key in value.keys():
+                            if key in self.control_parts:
+                                control_part_dict[key] = value_copy.pop(key)
+
+                    indices, _, values = resolve_matching_names_values(
+                        value_copy, self.joint_names
+                    )
+
+                    if self.control_parts:
+                        # Add control part joints to indices and values
+                        for part_name, part_value in control_part_dict.items():
+                            part_joint_names = self.control_parts[part_name]
+                            part_indices, _, part_values = (
+                                resolve_matching_names_values(
+                                    {jn: part_value for jn in part_joint_names},
+                                    self.joint_names,
+                                )
+                            )
+                            indices.extend(part_indices)
+                            values.extend(part_values)
+
+                    default_array[:, indices] = torch.as_tensor(
+                        values, dtype=torch.float32, device=self.device
+                    )
+                except Exception as e:
+                    logger.log_error(f"Failed to set {prop_name}: {e}")
+
+        drive_pros = self.cfg.drive_pros
+        if isinstance(drive_pros, dict):
+            drive_type = drive_pros.get("drive_type", None)
+        else:
+            drive_type = getattr(drive_pros, "drive_type", None)
+
+        # Apply drive parameters to all articulations in the batch
+        self.set_drive(
+            stiffness=self.default_joint_stiffness,
+            damping=self.default_joint_damping,
+            max_effort=self.default_joint_max_effort,
+            max_velocity=self.default_joint_max_velocity,
+            friction=self.default_joint_friction,
+            drive_type=drive_type,
+        )
 
     def init_solver(self, cfg: Union[SolverCfg, Dict[str, SolverCfg]]) -> None:
         """Initialize the kinematic solver for the robot.

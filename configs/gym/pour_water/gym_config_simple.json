@@ -1,0 +1,326 @@
+{   
+    "id": "PourWater-v3",
+    "max_episodes": 5,
+    "env": {
+        "events": {
+            "random_light": {
+                "func": "randomize_light",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "light_1"},
+                    "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
+                    "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
+                    "intensity_range": [50.0, 100.0]
+                }
+            },
+            "init_bottle_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "bottle"},
+                    "position_range": [[-0.08, -0.12, 0.0], [0.08, 0.04, 0.0]],
+                    "relative_position": true                
+                }
+            },
+            "init_cup_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "cup"},
+                    "position_range": [[-0.08, -0.04, 0.0], [0.08, 0.12, 0.0]],
+                    "relative_position": true                
+                }
+            },
+            "prepare_extra_attr": {
+                "func": "prepare_extra_attr",
+                "mode": "reset",
+                "params": {
+                    "attrs": [
+                        {
+                            "name": "object_lengths",
+                            "mode": "callable",
+                            "entity_uids": "all_objects",
+                            "func_name": "compute_object_length",
+                            "func_kwargs": {
+                                "is_svd_frame": true,
+                                "sample_points": 5000
+                            }
+                        },
+                        {
+                            "name": "grasp_pose_object",
+                            "mode": "static",
+                            "entity_cfg": {
+                                "uid": "bottle"
+                            },
+                            "value": [[
+                                    [0.32243,  0.03245,  0.94604,  0.025],
+                                    [0.00706, -0.99947,  0.03188, -0.0  ],
+                                    [0.94657, -0.0036 , -0.32249,  0.0  ],
+                                    [0.0    ,  0.0    ,  0.0    ,  1.0  ]
+                            ]]
+                        },
+                        {
+                            "name": "left_arm_base_pose",
+                            "mode": "callable",
+                            "entity_cfg": {
+                                "uid": "CobotMagic"
+                            },
+                            "func_name": "get_link_pose",
+                            "func_kwargs": {
+                                "link_name": "left_arm_base",
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "name": "right_arm_base_pose",
+                            "mode": "callable",
+                            "entity_cfg": {
+                                "uid": "CobotMagic"
+                            },
+                            "func_name": "get_link_pose",
+                            "func_kwargs": {
+                                "link_name": "right_arm_base",
+                                "to_matrix": true
+                            }
+                        }
+                    ]
+                }
+            },
+            "register_info_to_env": {
+                "func": "register_info_to_env",
+                "mode": "reset",
+                "params": {
+                    "registry": [
+                        {
+                            "entity_cfg": {
+                                "uid": "bottle"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "cup"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "CobotMagic",
+                                "control_parts": ["left_arm"]
+                            },
+                            "attrs": ["left_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "cup",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "CobotMagic",
+                                "control_parts": ["right_arm"]
+                            },
+                            "attrs": ["right_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "bottle",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
+                        }
+                    ],
+                    "registration": "affordance_datas",
+                    "sim_update": true
+                }
+            },
+            "random_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "table"},
+                    "random_texture_prob": 0.0,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
+                }
+            },
+            "random_cup_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "cup"},
+                    "random_texture_prob": 0.0,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
+                }
+            },
+            "random_bottle_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 10,
+                "params": {
+                    "entity_cfg": {"uid": "bottle"},
+                    "random_texture_prob": 0.0,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
+                }
+            },
+            "random_robot_init_eef_pose": {
+                "func": "randomize_robot_eef_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "CobotMagic", "control_parts": ["left_arm", "right_arm"]},
+                    "position_range":  [[-0.01, -0.01, -0.01], [0.01, 0.01, 0]]
+                }
+            }
+        },
+        "observations": {
+            "norm_robot_eef_joint": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [12, 13, 14, 15]
+                }
+            }
+        },
+        "dataset": {
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "CobotMagic",
+                        "arm_dofs": 12,
+                        "control_freq": 25,
+                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
+                        "observation": {
+                            "vision": {
+                                "cam_high": ["mask"]
+                            },
+                            "states": ["qpos"],
+                            "exteroception": ["cam_high", "cam_right_wrist", "cam_left_wrist"]
+                        },
+                        "action": "qpos_with_eef_pose",
+                        "min_len_steps": 5
+                    },
+                    "instruction": {
+                        "lang": "Pour water from bottle to cup"
+                    },
+                    "extra": {
+                        "scene_type": "Commercial",
+                        "task_description": "Pour water",
+                        "data_type": "sim"
+                    },
+                    "use_videos": true,
+                    "export_success_only": false
+                }
+            }
+        }
+    },
+    "robot": {
+        "uid": "CobotMagic",
+        "robot_type": "CobotMagic",
+        "init_pos": [0.0, 0.0, 0.7775],
+        "init_qpos": [-0.3,0.3,1.0,1.0,-1.2,-1.2,0.0,0.0,0.6,0.6,0.0,0.0,0.05,0.05,0.05,0.05]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 960,
+            "height": 540,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 480, 270],
+            "extrinsics": {
+                "eye": [0.35368482807598, 0.014695524383058989, 1.4517046071614774],
+                "target": [0.8586357573287919, 0, 0.5232553674540066],
+                "up": [0.9306678549330372, -0.0005600064212467153, 0.3658647703553347]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [2, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "CircleTableSimple/circle_table_simple.ply",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 10.0,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.01
+            },
+            "body_scale": [1, 1, 1],
+            "body_type": "kinematic",
+            "init_pos": [0.725, 0.0, 0.825],
+            "init_rot": [0, 90, 0]
+        }
+    ],
+    "rigid_object": [
+        {
+            "uid":"cup",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "PaperCup/paper_cup.ply",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 0.01,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "restitution": 0.01,
+                "max_depenetration_velocity": 1e1,
+                "min_position_iters": 32,
+                "min_velocity_iters":8
+            },
+            "init_pos": [0.75, 0.1, 0.9],
+            "body_scale":[0.75, 0.75, 1.0],
+            "max_convex_hull_num": 8
+        },
+        {
+            "uid":"bottle",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "ScannedBottle/kashijia_processed.ply",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 0.01,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "restitution": 0.01,
+                "max_depenetration_velocity": 1e1,
+                "min_position_iters": 32,
+                "min_velocity_iters":8
+            },
+            "init_pos": [0.75, -0.1, 0.932],
+            "body_scale":[1, 1, 1],
+            "max_convex_hull_num": 8
+        }
+    ]
+}

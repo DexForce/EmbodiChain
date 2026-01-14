@@ -646,6 +646,7 @@ def build_dexforce_w1_cfg(
         include_chassis=include_chassis,
         include_torso=include_torso,
         include_head=include_head,
+        include_hand=include_hand,
         component_versions=component_versions,
     )
 

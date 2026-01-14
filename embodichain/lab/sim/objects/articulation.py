@@ -797,7 +797,6 @@ class Articulation(BatchEntity):
             # we should keep `pose_` life cycle to the end of the function.
             pose_ = torch.cat((quat, xyz), dim=-1)
             indices = self.body_data.gpu_indices[local_env_ids]
-            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_root_data(
                 data=pose_,
                 gpu_indices=indices,
@@ -891,7 +890,11 @@ class Articulation(BatchEntity):
         return link_pose
 
     def get_qpos(self) -> torch.Tensor:
-        """Get the current positions (qpos) of the articulation."""
+        """Get the current positions (qpos) of the articulation.
+
+        Returns:
+            torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
+        """
         return self.body_data.qpos
 
     def set_qpos(
@@ -977,7 +980,6 @@ class Articulation(BatchEntity):
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set = self.body_data._qpos[local_env_ids]
             qpos_set[:, local_joint_ids] = qpos
-            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qpos_set,
                 gpu_indices=indices,
@@ -1041,7 +1043,6 @@ class Articulation(BatchEntity):
                 self.body_data.qvel
                 qvel_set = self.body_data._qvel[local_env_ids]
                 qvel_set[:, joint_ids] = qvel
-            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qvel_set,
                 gpu_indices=indices,
@@ -1082,7 +1083,6 @@ class Articulation(BatchEntity):
                 self.body_data.qf
                 qf_set = self.body_data._qf[local_env_ids]
                 qf_set[:, joint_ids] = qf
-            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=qf_set,
                 gpu_indices=indices,
@@ -1163,13 +1163,11 @@ class Articulation(BatchEntity):
                 (len(local_env_ids), self.dof), dtype=torch.float32, device=self.device
             )
             indices = self.body_data.gpu_indices[local_env_ids]
-            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=zeros,
                 gpu_indices=indices,
                 data_type=ArticulationGPUAPIWriteType.JOINT_VELOCITY,
             )
-            torch.cuda.synchronize(self.device)
             self._ps.gpu_apply_joint_data(
                 data=zeros,
                 gpu_indices=indices,
@@ -1434,7 +1432,7 @@ class Articulation(BatchEntity):
                                            Defaults to the last link in the chain.
             root_link_name (str, optional): The name of the root link for which the Jacobian is computed.
                                             Defaults to the first link in the chain.
-            locations (Union[torch.Tensor, np.ndarray], optional): Offset points relative to the end-effector
+            locations (torch.Tensor | np.ndarray, optional): Offset points relative to the end-effector
                                                                    frame for which the Jacobian is computed.
                                                                    Shape can be (batch_size, 3) or (3,) for a single offset.
                                                                    Defaults to None (origin of the end-effector frame).

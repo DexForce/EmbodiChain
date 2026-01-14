@@ -103,12 +103,9 @@ def main():
         arena_space=3.0,
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
     )
     sim = SimulationManager(config)
-
-    # Build multiple environments if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs)
 
     # Create robot configuration
     robot = create_robot(sim)
@@ -250,7 +247,7 @@ def get_sensor_image(camera: Camera, headless=False, step_count=0):
     normals = data["normal"].cpu().numpy()[0]  # (H, W, 3)
 
     # Normalize for visualization
-    depth_vis = (depth - depth.min()) / (depth.ptp() + 1e-8)
+    depth_vis = (depth - depth.min()) / (np.ptp(depth) + 1e-8)
     depth_vis = (depth_vis * 255).astype("uint8")
     mask_vis = mask_to_color_map(mask, user_ids=np.unique(mask))
     normals_vis = ((normals + 1) / 2 * 255).astype("uint8")

@@ -364,6 +364,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
         SceneEntityCfg,
         EventCfg,
         ObservationCfg,
+        DatasetFunctorCfg,
     )
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
@@ -453,7 +454,32 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
 
     # load dataset config
-    env_cfg.dataset = config["env"].get("dataset", None)
+    env_cfg.dataset = ComponentCfg()
+    if "dataset" in config["env"]:
+        # Define modules to search for dataset functions
+        dataset_modules = [
+            "embodichain.lab.gym.envs.managers.datasets",
+        ]
+
+        for dataset_name, dataset_params in config["env"]["dataset"].items():
+            dataset_params_modified = deepcopy(dataset_params)
+
+            # Find the function from multiple modules using the utility function
+            dataset_func = find_function_from_modules(
+                dataset_params["func"],
+                dataset_modules,
+                raise_if_not_found=True,
+            )
+
+            from embodichain.lab.gym.envs.managers import DatasetFunctorCfg
+
+            dataset = DatasetFunctorCfg(
+                func=dataset_func,
+                mode=dataset_params_modified["mode"],
+                params=dataset_params_modified["params"],
+            )
+
+            setattr(env_cfg.dataset, dataset_name, dataset)
 
     # TODO: support more env events, eg, grasp pose generation, mesh preprocessing, etc.
 

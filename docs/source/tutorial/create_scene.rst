@@ -31,14 +31,12 @@ Command-line arguments are parsed using ``argparse`` to allow for easy customiza
 .. literalinclude:: ../../../scripts/tutorials/sim/create_scene.py
    :language: python
    :start-at: # Parse command line arguments
-   :end-at: sim.build_multiple_arenas(args.num_envs, space=3.0)
+   :end-at: sim = SimulationManager(sim_cfg)
 
 There are two kinds of physics mode in :class:`SimulationManager`:
 
 - `manual`: The physics updates only when the user calls the :meth:`SimulationManager.update` function. This mode is used for robot learning tasks where precise control over simulation steps is required. Enabled by setting :meth:`SimulationManager.set_manual_update` to True.
 - `auto`: The physics updates in a standalone thread, which enable asynchronous rendering and physics stepping. This mode is suitable for visualizations and demos for digital twins applications. This is the default mode.
-
-If `num_envs` is greater than 1, :meth:`SimulationManager.build_multiple_arenas` should be used to create multiple simulation arenas.
 
 Adding objects to the scene
 ---------------------------

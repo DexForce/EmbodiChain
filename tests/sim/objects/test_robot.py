@@ -52,9 +52,8 @@ CONTROL_PARTS = {
 class BaseRobotTest:
     def setup_simulation(self, sim_device):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=10)
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(10)  # NUM_ARENAS = 10
 
         cfg = DexforceW1Cfg.from_dict(
             {
@@ -240,6 +239,52 @@ class BaseRobotTest:
         assert (
             len(right_eef_ids_without_mimic) == 6
         ), f"Expected 6 right eef joint IDs without mimic, got {len(right_eef_ids_without_mimic)}"
+
+    def test_setter_and_getter_with_control_part(self):
+        left_arm_qpos = self.robot.get_qpos(name="left_arm")
+        assert left_arm_qpos.shape == (10, 7)
+
+        left_qpos_limits = self.robot.get_qpos_limits(name="left_arm")
+        assert left_qpos_limits.shape == (10, 7, 2)
+
+        dummy_qpos = torch.randn(10, 7, device=self.sim.device)
+        # Clamp to limits
+        dummy_qpos = torch.max(
+            torch.min(dummy_qpos, left_qpos_limits[:, :, 1]), left_qpos_limits[:, :, 0]
+        )
+        self.robot.set_qpos(qpos=dummy_qpos, name="left_arm")
+
+    def test_robot_cfg_merge(self):
+        from copy import deepcopy
+        from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+        cfg = deepcopy(self.robot.cfg)
+
+        cfg_dict = {
+            "drive_pros": {
+                "max_effort": {
+                    "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)": 1.0,
+                },
+            },
+            "solver_cfg": {
+                "left_arm": {
+                    "tcp": np.eye(4),
+                }
+            },
+        }
+
+        cfg = merge_robot_cfg(cfg, cfg_dict)
+
+        assert (
+            cfg.drive_pros.max_effort[
+                "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)"
+            ]
+            == 1.0
+        ), "Drive properties merge failed."
+
+        assert np.allclose(
+            cfg.solver_cfg["left_arm"].tcp, np.eye(4)
+        ), "Solver config merge failed."
 
     def teardown_method(self):
         """Clean up resources after each test method."""

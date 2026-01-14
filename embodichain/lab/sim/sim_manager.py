@@ -75,7 +75,6 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
-from embodichain.data.assets import SimResources
 from embodichain.utils import configclass, logger
 
 __all__ = [
@@ -122,6 +121,12 @@ class SimulationManagerCfg:
     - RENDER_SHARE_ENGINE: The rendering thread shares the same thread with the simulation engine.
     - RENDER_SCENE_SHARE_ENGINE: The rendering thread and scene update thread share the same thread with the simulation engine.
     """
+
+    cpu_num: int = 1
+    """The number of CPU threads to use for the simulation engine."""
+
+    num_envs: int = 1
+    """The number of parallel environments (arenas) to simulate."""
 
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
@@ -241,6 +246,8 @@ class SimulationManager:
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
 
+        self._build_multiple_arenas(sim_config.num_envs)
+
     @property
     def num_envs(self) -> int:
         """Get the number of arenas in the simulation.
@@ -291,6 +298,7 @@ class SimulationManager:
         win_config = dexsim.WindowsConfig()
         win_config.width = sim_config.width
         win_config.height = sim_config.height
+        world_config.cpu_num = sim_config.cpu_num
         world_config.win_config = win_config
         world_config.open_windows = not sim_config.headless
         self.is_window_opened = not sim_config.headless
@@ -327,16 +335,10 @@ class SimulationManager:
 
         return world_config
 
-    def get_default_resources(self) -> SimResources:
-        """Get the default resources instance.
-
-        Returns:
-            SimResources: The default resources path.
-        """
-        return self._default_resources
-
     def _init_sim_resources(self) -> None:
         """Initialize the default simulation resources."""
+        from embodichain.data.assets import SimResources
+
         self._default_resources = SimResources()
 
     def enable_physics(self, enable: bool) -> None:
@@ -503,7 +505,7 @@ class SimulationManager:
         self._world.close_window()
         self.is_window_opened = False
 
-    def build_multiple_arenas(self, num: int, space: float | None = None) -> None:
+    def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
         """Build multiple arenas in a grid pattern.
 
         This interface is used for vectorized simulation.

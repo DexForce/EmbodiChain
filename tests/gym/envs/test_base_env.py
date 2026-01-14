@@ -45,7 +45,6 @@ class RandomReachEnv(BaseEnv):
 
     def __init__(
         self,
-        num_envs=1,
         drive_type="force",
         headless=False,
         device="cpu",
@@ -57,7 +56,7 @@ class RandomReachEnv(BaseEnv):
             sim_cfg=SimulationManagerCfg(
                 headless=headless, arena_space=2.0, sim_device=device
             ),
-            num_envs=num_envs,
+            num_envs=NUM_ENVS,
         )
 
         super().__init__(
@@ -137,7 +136,7 @@ class BaseEnvTest:
                     action, dtype=torch.float32, device=self.env.device
                 )
 
-                init_pose = self.env.robot_init_qpos
+                init_pose = self.env.get_wrapper_attr("robot_init_qpos")
                 init_pose = (
                     torch.as_tensor(
                         init_pose, dtype=torch.float32, device=self.env.device
@@ -184,3 +183,11 @@ class TestBaseEnvCPU(BaseEnvTest):
 class TestBaseEnvCUDA(BaseEnvTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+
+if __name__ == "__main__":
+    # Execute the tests when the script is run directly
+    test_cpu = TestBaseEnvCPU()
+    test_cpu.setup_method()
+    test_cpu.test_env_rollout()
+    test_cpu.teardown_method()

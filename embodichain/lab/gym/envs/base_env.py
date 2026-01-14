@@ -103,12 +103,13 @@ class BaseEnv(gym.Env):
         self.cfg = cfg
 
         # the number of envs to be simulated in parallel.
-        self.num_envs = self.cfg.num_envs
+        self._num_envs = self.cfg.num_envs
 
         if self.cfg.sim_cfg is None:
             self.sim_cfg = SimulationManagerCfg(headless=True)
         else:
             self.sim_cfg = self.cfg.sim_cfg
+            self.sim_cfg.num_envs = self._num_envs
 
         if self.cfg.seed is not None:
             self.cfg.seed = set_seed(self.cfg.seed)
@@ -128,7 +129,7 @@ class BaseEnv(gym.Env):
             self.sim.open_window()
 
         self._elapsed_steps = torch.zeros(
-            self.num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
+            self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
         )
 
         self._init_sim_state(**kwargs)
@@ -137,7 +138,7 @@ class BaseEnv(gym.Env):
 
         logger.log_info("[INFO]: Initialized environment:")
         logger.log_info(f"\tEnvironment device    : {self.sim.device}")
-        logger.log_info(f"\tNumber of environments: {self.num_envs}")
+        logger.log_info(f"\tNumber of environments: {self._num_envs}")
         logger.log_info(f"\tEnvironment seed      : {self.cfg.seed}")
         logger.log_info(f"\tPhysics dt            : {self.sim_cfg.physics_dt}")
         logger.log_info(
@@ -145,7 +146,12 @@ class BaseEnv(gym.Env):
         )
 
     @property
-    def device(self) -> torch.Tensor:
+    def num_envs(self) -> int:
+        """Return the number of environments simulated in parallel."""
+        return self._num_envs
+
+    @property
+    def device(self) -> torch.device:
         """Return the device used by the environment."""
         return self.sim.device
 
@@ -208,8 +214,6 @@ class BaseEnv(gym.Env):
         logger.log_info(
             f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
         )
-        if self.num_envs > 1:
-            self.sim.build_multiple_arenas(self.num_envs)
 
         self.robot = self._setup_robot(**kwargs)
         if self.robot is None:
@@ -381,7 +385,7 @@ class BaseEnv(gym.Env):
         info.update(self.evaluate(**kwargs))
         return info
 
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> bool:
+    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         """Check if the episode is truncated.
 
         Args:
@@ -389,7 +393,7 @@ class BaseEnv(gym.Env):
             info: The info dictionary.
 
         Returns:
-            True if the episode is truncated, False otherwise.
+            A boolean tensor indicating truncation for each environment in the batch.
         """
         return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 

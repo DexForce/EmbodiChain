@@ -35,9 +35,10 @@ class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        config = SimulationManagerCfg(
+            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+        )
         self.sim = SimulationManager(config)
-        self.sim.build_multiple_arenas(NUM_ARENAS)
 
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)

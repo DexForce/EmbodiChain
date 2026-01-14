@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING, Literal, Union, List
+from typing import TYPE_CHECKING, Union, List
 
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils.math import sample_uniform, matrix_from_euler
 from embodichain.utils import logger
 
@@ -70,6 +71,7 @@ def get_random_pose(
             lower=pos_low,
             upper=pos_high,
             size=(num_instance, 3),
+            device=init_pos.device,
         )
         if relative_position:
             random_value += init_pos
@@ -86,6 +88,7 @@ def get_random_pose(
                 lower=rot_low,
                 upper=rot_high,
                 size=(num_instance, 3),
+                device=init_pos.device,
             )
             * torch.pi
             / 180.0
@@ -252,6 +255,7 @@ def randomize_robot_qpos(
         lower=torch.tensor(qpos_range[0], device=env.device),
         upper=torch.tensor(qpos_range[1], device=env.device),
         size=(num_instance, len(joint_ids)),
+        device=env.device,
     )
 
     if relative_qpos:

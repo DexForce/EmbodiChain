@@ -14,10 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .rendering import *
-from .spatial import *
-from .scale import *
-
+from .physics import *  # noqa: F401, F403
+from .visual import *  # noqa: F401, F403
+from .spatial import *  # noqa: F401, F403
+from .scale import *  # noqa: F401, F403
 
 """
 Randomization are all implemented as Event functors.

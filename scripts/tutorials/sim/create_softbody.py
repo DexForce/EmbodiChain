@@ -71,9 +71,6 @@ def main():
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
 
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
     print("[INFO]: Scene setup complete!")
 
     # add softbody to the scene

@@ -45,3 +45,5 @@ from embodichain.lab.gym.envs.tasks.tableware.match_object_container import (
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
+
+from embodichain.lab.gym.envs.tasks.special.simple_task import SimpleTaskEnv

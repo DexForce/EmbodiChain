@@ -103,10 +103,10 @@ class URDFSensorManager:
             sensor_source: Sensor definition source (multiple formats supported).
             parent_component (str): Target component name for sensor attachment.
             parent_link (str): Specific link within parent component for attachment.
-            transform (Optional[np.ndarray]): Optional 4x4 homogeneous transformation matrix.
-            sensor_type (Optional[str]): Sensor type classification.
-            extract_links (Optional[List[str]]): Specific link names to extract from URDF.
-            extract_joints (Optional[List[str]]): Specific joint names to extract from URDF.
+            transform (np.ndarray | None): Optional 4x4 homogeneous transformation matrix.
+            sensor_type (str | None): Sensor type classification.
+            extract_links (list[str] | None): Specific link names to extract from URDF.
+            extract_joints (list[str] | None): Specific joint names to extract from URDF.
 
         Returns:
             bool: True if sensor attachment successful, False on failure.

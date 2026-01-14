@@ -59,7 +59,7 @@ class SolverCfg:
     """
 
     # TODO: may be support pos and rot separately for easier manipulation.
-    tcp: Union[torch.Tensor, np.ndarray] = np.eye(4)
+    tcp: torch.Tensor | np.ndarray = np.eye(4)
     """The tool center point (TCP) position as a 4x4 homogeneous matrix.
 
     This represents the position and orientation of the tool in the robot's end-effector frame.
@@ -413,56 +413,3 @@ class BaseSolver(metaclass=ABCMeta):
             raise ValueError(
                 f"Invalid jac_type '{jac_type}'. Must be 'full', 'trans', or 'rot'."
             )
-
-
-def merge_solver_cfg(
-    default: Dict[str, SolverCfg], provided: Dict[str, Any]
-) -> Dict[str, SolverCfg]:
-    """Merge provided solver configuration into the default solver config.
-
-    Rules:
-    - For each arm key in provided, if the key exists in default, update fields provided.
-    - If a provided value is a dict, update attributes on the SolverCfg-like object (or dict) by setting keys.
-    - Primitive values or arrays/lists replace the target value.
-    - Unknown keys in provided create new entries in the result.
-    """
-
-    result = {}
-    # copy defaults shallowly
-    for k, v in default.items():
-        result[k] = v
-
-    for k, v in provided.items():
-        if k in result:
-            target = result[k]
-            # if target has __dict__ or is a dataclass-like, set attrs
-            if hasattr(target, "__dict__") or isinstance(target, dict):
-                # if provided is a dict, set/override attributes
-                if isinstance(v, dict):
-                    for sub_k, sub_v in v.items():
-                        # try to set attribute if possible, otherwise assign into dict
-                        if hasattr(target, sub_k):
-                            try:
-                                setattr(target, sub_k, sub_v)
-                            except Exception:
-                                # fallback to dict assignment if object doesn't accept
-                                try:
-                                    target[sub_k] = sub_v
-                                except Exception:
-                                    pass
-                        else:
-                            try:
-                                target[sub_k] = sub_v
-                            except Exception:
-                                setattr(target, sub_k, sub_v)
-                else:
-                    # non-dict provided value replaces the target entirely
-                    result[k] = v
-            else:
-                # target is a primitive, replace
-                result[k] = v
-        else:
-            # new solver entry provided; include as-is
-            result[k] = v
-
-    return result

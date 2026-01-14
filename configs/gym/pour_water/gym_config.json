@@ -1,6 +1,6 @@
 {   
     "id": "PourWater-v3",
-    "max_episodes": 5,
+    "max_episodes": 10,
     "env": {
         "events": {
             "random_light": {
@@ -258,11 +258,38 @@
             }
         },
         "dataset": {
-            "robot_meta": {
-                "arm_dofs": 12,
-                "control_freq": 25,
-                "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
-                "min_len_steps": 5
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "CobotMagic",
+                        "arm_dofs": 12,
+                        "control_freq": 25,
+                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
+                        "observation": {
+                            "vision": {
+                                "cam_high": ["mask"],
+                                "cam_right_wrist": ["mask"],
+                                "cam_left_wrist": ["mask"]
+                            },
+                            "states": ["qpos"],
+                            "exteroception": ["cam_high", "cam_right_wrist", "cam_left_wrist"]
+                        },
+                        "action": "qpos_with_eef_pose",
+                        "min_len_steps": 5
+                    },
+                    "instruction": {
+                        "lang": "Pour water from bottle to cup"
+                    },
+                    "extra": {
+                        "scene_type": "Commercial",
+                        "task_description": "Pour water",
+                        "data_type": "sim"
+                    },
+                    "use_videos": true,
+                    "export_success_only": false
+                }
             }
         }
     },

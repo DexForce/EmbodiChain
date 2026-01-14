@@ -43,12 +43,25 @@ from .shapes import ShapeCfg, MeshCfg
 @configclass
 class PhysicsCfg:
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
+    """Gravity vector for the simulation environment."""
+
     bounce_threshold: float = 2.0
+    """The speed threshold below which collisions will not produce bounce effects."""
+
     enable_pcm: bool = True
+    """Enable persistent contact manifold (PCM) for improved collision handling."""
+
     enable_tgs: bool = True
+    """Enable temporal gauss-seidel (TGS) solver for better stability."""
+
     enable_ccd: bool = False
+    """Enable continuous collision detection (CCD) for fast-moving objects."""
+
     enable_enhanced_determinism: bool = False
+    """Enable enhanced determinism for consistent simulation results."""
+
     enable_friction_every_iteration: bool = True
+    """Enable friction calculations at every solver iteration."""
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
@@ -86,20 +99,28 @@ class MarkerCfg:
 
     name: str = "empty-mesh"
     """Name of the marker for identification purposes."""
+
     marker_type: Literal["axis", "line", "point"] = "axis"
     """Type of marker to display. Can be 'axis' (3D coordinate frame), 'line', or 'point'. (only axis supported now)"""
+
     axis_xpos: List[np.ndarray] = None
     """List of 4x4 transformation matrices defining the position and orientation of each axis marker."""
+
     axis_size: float = 0.002
     """Thickness/size of the axis lines in meters."""
+
     axis_len: float = 0.005
     """Length of each axis arm in meters."""
+
     line_color: List[float] = [1, 1, 0, 1.0]
     """RGBA color values for the marker lines. Values should be between 0.0 and 1.0."""
+
     arrow_type: AxisArrowType = AxisArrowType.CONE
     """Type of arrow head for axis markers (e.g., CONE, ARROW, etc.)."""
+
     corner_type: AxisCornerType = AxisCornerType.SPHERE
     """Type of corner/joint visualization for axis markers (e.g., SPHERE, CUBE, etc.)."""
+
     arena_index: int = -1
     """Index of the arena where the marker should be placed. -1 means all arenas."""
 
@@ -110,13 +131,17 @@ class GPUMemoryCfg:
 
     temp_buffer_capacity: int = 2**24
     """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
+
     max_rigid_contact_count: int = 2**19
     """Increase this if you get 'Contact buffer overflow detected'"""
+
     max_rigid_patch_count: int = (
         2**18
     )  # 81920 is DexSim default but most tasks work with 2**18
     """Increase this if you get 'Patch buffer overflow detected'"""
+
     heap_capacity: int = 2**26
+
     found_lost_pairs_capacity: int = (
         2**25
     )  # 262144 is DexSim default but most tasks work with 2**25
@@ -135,29 +160,60 @@ class RigidBodyAttributesCfg:
     """
 
     mass: float = 1.0
-    # set mass to 0 will use density to calculate mass.
+    """Mass of the rigid body in kilograms. 
+    
+    Set to 0 will use density to calculate mass.
+    """
+
     density: float = 1000.0
+    """Density of the rigid body in kg/m^3."""
 
     angular_damping: float = 0.7
+    """Angular damping coefficient."""
+
     linear_damping: float = 0.7
+    """Linear damping coefficient."""
+
     max_depenetration_velocity: float = 10.0
+    """Maximum depenetration velocity."""
+
     sleep_threshold: float = 0.001
+    """Threshold below which the body can go to sleep."""
+
     min_position_iters: int = 4
+    """Minimum position iterations."""
+
     min_velocity_iters: int = 1
+    """Minimum velocity iterations."""
 
     max_linear_velocity: float = 1e2
+    """Maximum linear velocity."""
+
     max_angular_velocity: float = 1e2
+    """Maximum angular velocity."""
 
     # collision properties.
     enable_ccd: bool = False
+    """Enable continuous collision detection (CCD)."""
+
     contact_offset: float = 0.002
+    """Contact offset for collision detection."""
+
     rest_offset: float = 0.001
+    """Rest offset for collision detection."""
+
     enable_collision: bool = True
+    """Enable collision for the rigid body."""
 
     # physics material properties.
     restitution: float = 0.0
+    """Restitution (bounciness) coefficient."""
+
     dynamic_friction: float = 0.5
+    """Dynamic friction coefficient."""
+
     static_friction: float = 0.5
+    """Static friction coefficient."""
 
     def attr(self) -> PhysicalAttr:
         """Convert to dexsim PhysicalAttr"""
@@ -786,6 +842,9 @@ class URDFCfg:
                     logger.log_error(f"URDF path '{urdf_path}' does not exist.")
                     raise FileNotFoundError(f"URDF path '{urdf_path}' does not exist.")
 
+        if transform is None:
+            transform = np.eye(4)
+
         self.components[component_type] = {
             "urdf_path": urdf_path,
             "transform": np.array(transform),
@@ -964,12 +1023,9 @@ class RobotCfg(ArticulationCfg):
     from embodichain.lab.sim.solvers import SolverCfg
 
     """Configuration for a robot asset in the simulation.
-
-    # TODO: solver and motion planner may not be configurable inside the robot.
-    # But currently we put them here and could be moved if necessary.
     """
 
-    control_parts: Union[Dict[str, List[str]], None] = None
+    control_parts: Dict[str, List[str]] | None = None
     """Control parts is the mapping from part name to joint names.
 
     For example, {'left_arm': ['joint1', 'joint2'], 'right_arm': ['joint3', 'joint4']}
@@ -980,6 +1036,9 @@ class RobotCfg(ArticulationCfg):
             keys corresponding to the control parts name.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
+        - `Robot` is a derived class of `Articulation`, with control parts support. So the `drive_pros`
+            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
+            which will be overridden if these joint names are already specified.
     """
 
     urdf_cfg: URDFCfg | None = None
@@ -1009,6 +1068,8 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "fpath":
+                    setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)

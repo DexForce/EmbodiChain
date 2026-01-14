@@ -42,9 +42,6 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
     )
     parser.add_argument(
@@ -66,10 +63,6 @@ def main():
 
     sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
-
-    # Build multiple arenas if requested
-    if args.num_envs > 1:
-        sim.build_multiple_arenas(args.num_envs, space=3.0)
 
     # Get UR10 URDF path
     urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
