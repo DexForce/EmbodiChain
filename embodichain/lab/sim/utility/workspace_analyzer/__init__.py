@@ -53,9 +53,6 @@ from embodichain.lab.sim.utility.workspace_analyzer import caches
 from embodichain.lab.sim.utility.workspace_analyzer import visualizers
 from embodichain.lab.sim.utility.workspace_analyzer import metrics
 from embodichain.lab.sim.utility.workspace_analyzer import constraints
-from embodichain.lab.sim.utility.workspace_analyzer.workspace_sampler import (
-    sample_circular_plane_reachability,
-)
 
 __all__ = [
     "WorkspaceAnalyzer",
@@ -67,5 +64,4 @@ __all__ = [
     "visualizers",
     "metrics",
     "constraints",
-    "sample_circular_plane_reachability",
 ]

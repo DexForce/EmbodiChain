@@ -1,6 +1,6 @@
 {   
     "id": "PourWater-v3",
-    "max_episodes": 10,
+    "max_episodes": 5,
     "env": {
         "events": {
             "random_light": {
@@ -146,32 +146,34 @@
             "random_material": {
                 "func": "randomize_visual_material",
                 "mode": "interval",
-                "interval_step": 2,
+                "interval_step": 10,
                 "params": {
                     "entity_cfg": {"uid": "table"},
-                    "random_texture_prob": 0.5,
+                    "random_texture_prob": 0.0,
                     "texture_path": "CocoBackground/coco",
                     "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }
             },
-            "random_robot_material": {
+            "random_cup_material": {
                 "func": "randomize_visual_material",
                 "mode": "interval",
-                "interval_step": 5,
+                "interval_step": 10,
                 "params": {
-                    "entity_cfg": {"uid": "CobotMagic", "link_names": [".*"]},
-                    "random_texture_prob": 0.5,
+                    "entity_cfg": {"uid": "cup"},
+                    "random_texture_prob": 0.0,
                     "texture_path": "CocoBackground/coco",
                     "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }
             },
-            "random_camera_intrinsics": {
-                "func": "randomize_camera_intrinsics",
-                "mode": "reset",
+            "random_bottle_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 10,
                 "params": {
-                    "entity_cfg": {"uid": "cam_high"},
-                    "focal_x_range": [-50, 50],
-                    "focal_y_range": [-50, 50]
+                    "entity_cfg": {"uid": "bottle"},
+                    "random_texture_prob": 0.0,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }
             },
             "random_robot_init_eef_pose": {
@@ -180,17 +182,6 @@
                 "params": {
                     "entity_cfg": {"uid": "CobotMagic", "control_parts": ["left_arm", "right_arm"]},
                     "position_range":  [[-0.01, -0.01, -0.01], [0.01, 0.01, 0]]
-                }
-            },
-            "record_camera": {
-                "func": "record_camera_data",
-                "mode": "interval",
-                "interval_step": 1,
-                "params": {
-                    "name": "cam1",
-                    "resolution": [320, 240],
-                    "eye": [2, 0, 2],
-                    "target": [0.5, 0, 1]
                 }
             }
         },
@@ -201,59 +192,6 @@
                 "name": "robot/qpos",
                 "params": {
                     "joint_ids": [12, 13, 14, 15]
-                }
-            },
-            "bottle_pose": {
-                "func": "get_rigid_object_pose",
-                "mode": "add",
-                "name": "bottle_pose",
-                "params": {
-                    "entity_cfg": {"uid": "bottle"}
-                }
-            },
-            "cup_pose": {
-                "func": "get_rigid_object_pose",
-                "mode": "add",
-                "name": "cup_pose",
-                "params": {
-                    "entity_cfg": {"uid": "cup"}
-                }
-            },
-            "cam_high_semantic_mask_l": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_high/semantic_mask_l",
-                "params": {
-                    "entity_cfg": {"uid": "cam_high"},
-                    "foreground_uids": ["bottle", "cup"]
-                }
-            },
-            "cam_high_semantic_mask_r": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_high/semantic_mask_r",
-                "params": {
-                    "entity_cfg": {"uid": "cam_high"},
-                    "foreground_uids": ["bottle", "cup"],
-                    "is_right": true
-                }
-            },
-            "cam_left_semantic_mask": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_left_wrist/semantic_mask_l",
-                "params": {
-                    "entity_cfg": {"uid": "cam_left_wrist"},
-                    "foreground_uids": ["bottle", "cup"]
-                }
-            },
-            "cam_right_semantic_mask": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_right_wrist/semantic_mask_l",
-                "params": {
-                    "entity_cfg": {"uid": "cam_right_wrist"},
-                    "foreground_uids": ["bottle", "cup"]
                 }
             }
         },
@@ -269,9 +207,7 @@
                         "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
                         "observation": {
                             "vision": {
-                                "cam_high": ["mask"],
-                                "cam_right_wrist": ["mask"],
-                                "cam_left_wrist": ["mask"]
+                                "cam_high": ["mask"]
                             },
                             "states": ["qpos"],
                             "exteroception": ["cam_high", "cam_right_wrist", "cam_left_wrist"]
@@ -301,45 +237,15 @@
     },
     "sensor": [
         {
-            "sensor_type": "StereoCamera",
+            "sensor_type": "Camera",
             "uid": "cam_high",
             "width": 960,
             "height": 540,
-            "enable_mask": true,
-            "enable_depth": true,
-            "left_to_right_pos": [0.059684025824163614, 0, 0],
-            "intrinsics": [453.851402686215, 453.8347628855552, 469.827725021235, 258.6656181845155],
-            "intrinsics_right": [453.4536601653505, 453.3306024582175, 499.13697412367776, 297.7176248477935],
+            "intrinsics": [488.1665344238281, 488.1665344238281, 480, 270],
             "extrinsics": {
                 "eye": [0.35368482807598, 0.014695524383058989, 1.4517046071614774],
-                "target": [0.7186357573287919, -0.054534732904795505, 0.5232553674540066],
+                "target": [0.8586357573287919, 0, 0.5232553674540066],
                 "up": [0.9306678549330372, -0.0005600064212467153, 0.3658647703553347]
-            }
-        },
-        {
-            "sensor_type": "Camera",
-            "uid": "cam_right_wrist",
-            "width": 640,
-            "height": 480,
-            "enable_mask": true,
-            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
-            "extrinsics": {
-                "parent": "right_link6",
-                "pos": [-0.08, 0.0, 0.04],
-                "quat": [0.15304635, 0.69034543, -0.69034543, -0.15304635]
-            }
-        },
-        {
-            "sensor_type": "Camera",
-            "uid": "cam_left_wrist",
-            "width": 640,
-            "height": 480,
-            "enable_mask": true,
-            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
-            "extrinsics": {
-                "parent": "left_link6",
-                "pos": [-0.08, 0.0, 0.04],
-                "quat": [0.15304635, 0.69034543, -0.69034543, -0.15304635]
             }
         }
     ],
@@ -360,7 +266,8 @@
             "uid": "table",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "CircleTableSimple/circle_table_simple.ply"
+                "fpath": "CircleTableSimple/circle_table_simple.ply",
+                "compute_uv": true
             },
             "attrs" : {
                 "mass": 10.0,
@@ -379,7 +286,8 @@
             "uid":"cup",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "PaperCup/paper_cup.ply"
+                "fpath": "PaperCup/paper_cup.ply",
+                "compute_uv": true
             },
             "attrs" : {
                 "mass": 0.01,
@@ -398,7 +306,8 @@
             "uid":"bottle",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "ScannedBottle/kashijia_processed.ply"
+                "fpath": "ScannedBottle/kashijia_processed.ply",
+                "compute_uv": true
             },
             "attrs" : {
                 "mass": 0.01,

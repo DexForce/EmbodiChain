@@ -34,7 +34,7 @@ from embodichain.utils.logger import log_warning, log_info, log_error
 
 def generate_and_execute_action_list(env, idx, debug_mode):
 
-    action_list = env.create_demo_action_list(action_sentence=idx)
+    action_list = env.get_wrapper_attr("create_demo_action_list")(action_sentence=idx)
 
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
@@ -44,9 +44,8 @@ def generate_and_execute_action_list(env, idx, debug_mode):
         action_list, desc=f"Executing action list #{idx}", unit="step"
     ):
         # Step the environment with the current action
+        # The environment will automatically detect truncation based on action_length
         obs, reward, terminated, truncated, info = env.step(action)
-
-        # TODO: May be add some functions for debug_mode
 
     # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
     # but truncation is useful to improve the generation efficiency.
@@ -83,24 +82,33 @@ def generate_function(
     """
 
     valid = True
+    _, _ = env.reset()
     while True:
-        _, _ = env.reset()
-
+        ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
 
             if not valid:
+                _, _ = env.reset()
                 break
 
-            if not debug_mode and env.is_task_success().item():
-                pass
-
-                # TODO: Add data saving and online data streaming logic here.
-
+            # Check task success for all environments
+            if not debug_mode:
+                success = env.get_wrapper_attr("is_task_success")()
+                # For multiple environments, check if all succeeded
+                all_success = (
+                    success.all().item() if success.numel() > 1 else success.item()
+                )
+                if all_success:
+                    pass
+                    # TODO: Add data saving and online data streaming logic here.
+                else:
+                    log_warning(f"Task fail, Skip to next generation.")
+                    valid = False
+                    break
             else:
-                log_warning(f"Task fail, Skip to next generation.")
-                valid = False
-                break
+                # In debug mode, skip success check
+                pass
 
         if valid:
             break
@@ -188,8 +196,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.num_envs != 1:
-        log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+    # if args.num_envs != 1:
+    #     log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
 
     gym_config = load_json(args.gym_config)
     cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)

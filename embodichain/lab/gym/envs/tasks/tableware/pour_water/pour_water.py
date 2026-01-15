@@ -57,6 +57,7 @@ class PourWaterEnv(EmbodiedEnv):
         logger.log_info(
             f"Demo action list created with {len(action_list)} steps.", color="green"
         )
+        self.action_length = len(action_list)
         return action_list
 
     def create_expert_demo_action_list(self, **kwargs):
