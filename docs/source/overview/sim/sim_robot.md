@@ -20,6 +20,7 @@ A `Robot` must be spawned within a `SimulationManager`.
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RobotCfg
+from embodichain.lab.sim.solvers import SolverCfg
 
 # 1. Initialize Simulation Environment
 # Note: Use 'sim_device' to specify device (e.g., "cuda:0" or "cpu")
@@ -34,14 +35,15 @@ robot_cfg = RobotCfg(
         "arm": ["panda_joint[1-7]"],
         "gripper": ["panda_finger_joint[1-2]"]
     },
-    solver_cfg={} # Enable default solver
+    solver_cfg=SolverCfg() 
 )
 
 # 3. Spawn Robot
 # Note: The method is 'add_robot', and it takes 'cfg' as argument
 robot: Robot = sim.add_robot(cfg=robot_cfg)
 
-# 4. Reset Objects State (SimulationManager does not have a global reset() method)
+# 4. Reset Simulation
+# This performs a global reset of the simulation state
 sim.reset_objects_state()
 ```
 
