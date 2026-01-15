@@ -1,0 +1,92 @@
+# Articulation
+
+The `Articulation` class represents the fundamental physics entity for articulated objects (e.g., robots, grippers, cabinets, doors) in EmbodiChain.
+
+## Configuration
+
+Articulations are configured using the `ArticulationCfg` dataclass.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `fpath` | `str` | `None` | Path to the asset file (URDF/MJCF). |
+| `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
+| `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
+| `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
+| `drive_pros` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
+
+### Setup & Initialization
+
+```python
+import torch
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.objects import Articulation, ArticulationCfg
+
+# 1. Initialize Simulation
+device = "cuda" if torch.cuda.is_available() else "cpu"
+sim_cfg = SimulationManagerCfg(sim_device=device)
+sim = SimulationManager(sim_config=sim_cfg)
+
+# 2. Configure Articulation
+art_cfg = ArticulationCfg(
+    fpath="assets/robots/franka/franka.urdf",
+    init_pos=(0, 0, 0.5),
+    fix_base=True
+)
+
+# 3. Spawn Articulation
+# Note: The method is 'add_articulation'
+articulation: Articulation = sim.add_articulation(cfg=art_cfg)
+
+# 4. Initialize Physics
+sim.reset_objects_state()
+```
+## Articulation Class
+State Data (Observation)
+State data is accessed via properties that return batched tensors.
+
+| Property | Shape | Description |
+| :--- | :--- | :--- |
+| `root_pose` | `(N, 7)` | Root link pose `[x, y, z, qw, qx, qy, qz]`. |
+| `qpos` | `(N, dof)` | Joint positions. |
+| `qvel` | `(N, dof)` | Joint velocities. |
+
+
+
+```python
+# Example: Accessing state
+print(f"Current Joint Positions: {articulation.qpos}")
+print(f"Root Pose: {articulation.root_pose}")
+```
+### Control & Dynamics
+You can control the articulation by setting joint targets.
+
+### Joint Control
+```python
+# Set joint position targets (PD Control)
+target_qpos = torch.zeros_like(articulation.qpos)
+articulation.set_qpos(target_qpos, target=True)
+
+# Important: Step simulation to apply control
+sim.update()
+```
+### Drive Configuration
+Dynamically adjust drive properties.
+
+```python
+# Set stiffness for all joints
+articulation.set_drive(
+    stiffness=torch.tensor([100.0], device=device), 
+    damping=torch.tensor([10.0], device=device)
+)
+```
+### Kinematics
+Supports differentiable Forward Kinematics (FK) and Jacobian computation.
+```python
+# Compute Forward Kinematics
+# Note: Ensure 'build_pk_chain=True' in cfg
+if art_cfg.build_pk_chain:
+    ee_pose = articulation.compute_fk(
+        qpos=articulation.qpos, 
+        end_link_name="ee_link" # Replace with actual link name
+    )
+```
