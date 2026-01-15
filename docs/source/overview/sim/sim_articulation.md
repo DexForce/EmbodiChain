@@ -46,16 +46,17 @@ State data is accessed via properties that return batched tensors.
 
 | Property | Shape | Description |
 | :--- | :--- | :--- |
-| `root_pose` | `(N, 7)` | Root link pose `[x, y, z, qw, qx, qy, qz]`. |
-| `qpos` | `(N, dof)` | Joint positions. |
-| `qvel` | `(N, dof)` | Joint velocities. |
+| `get_root_pose` | `(N, 7)` | Root link pose `[x, y, z, qw, qx, qy, qz]`. |
+| `get_qpos` | `(N, dof)` | Joint positions. |
+| `get_qvel` | `(N, dof)` | Joint velocities. |
 
 
 
 ```python
 # Example: Accessing state
-print(f"Current Joint Positions: {articulation.qpos}")
-print(f"Root Pose: {articulation.root_pose}")
+# Note: Use methods (with brackets) instead of properties
+print(f"Current Joint Positions: {articulation.get_qpos()}")
+print(f"Root Pose: {articulation.get_root_pose()}")
 ```
 ### Control & Dynamics
 You can control the articulation by setting joint targets.
@@ -63,7 +64,10 @@ You can control the articulation by setting joint targets.
 ### Joint Control
 ```python
 # Set joint position targets (PD Control)
-target_qpos = torch.zeros_like(articulation.qpos)
+# Get current qpos to create a target tensor of correct shape
+current_qpos = articulation.get_qpos()
+target_qpos = torch.zeros_like(current_qpos)
+
 articulation.set_qpos(target_qpos, target=True)
 
 # Important: Step simulation to apply control
@@ -84,9 +88,9 @@ Supports differentiable Forward Kinematics (FK) and Jacobian computation.
 ```python
 # Compute Forward Kinematics
 # Note: Ensure 'build_pk_chain=True' in cfg
-if art_cfg.build_pk_chain:
+if getattr(art_cfg, 'build_pk_chain', False):
     ee_pose = articulation.compute_fk(
-        qpos=articulation.qpos, 
+        qpos=articulation.get_qpos(), # Use method call
         end_link_name="ee_link" # Replace with actual link name
     )
 ```
