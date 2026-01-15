@@ -568,7 +568,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, num_targets, 7),
+                    (num_targets, 7),
                     dtype=qpos_seed.dtype,
                     device=self.device,
                 ),
