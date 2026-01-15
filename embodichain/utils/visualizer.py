@@ -148,6 +148,241 @@ def draw_feature(
     return vis_features
 
 
+class HeatMapEnvV3:
+    def __init__(
+        self,
+        title="Real-time Heatmap",
+        output_prefix="heatmap",
+        output_dir="./outputs",
+        x_range=(0.275, 1.125),
+        y_range=(-0.425, 0.425),
+        bins=100,
+        categories=None,
+        zones=None,
+        figsize=(10, 8),
+        cmap="Greys",
+    ):
+        """Initialize a general heatmap visualization environment
+
+        Args:
+            title (str): Title of the heatmap plot
+            output_prefix (str): Prefix for saved image files (e.g., "success" -> "success_heatmap.png")
+            output_dir (str): Directory to save output images
+            x_range (tuple): (x_min, x_max) for the heatmap
+            y_range (tuple): (y_min, y_max) for the heatmap
+            bins (int): Number of bins for the 2D histogram
+            categories (list): List of category names for tracking different point types
+                             If None, uses a single category "points"
+                             Example: ["success", "fail_type_a", "fail_type_b"]
+            zones (list): List of zone dicts to draw on the heatmap, each with:
+                         - type: "circle" or "rectangle"
+                         - params: dict with shape-specific parameters
+                         - edgecolor, linewidth, linestyle, label (optional)
+                         Example: [{"type": "circle", "params": {"center": (0.7, 0), "radius": 0.425},
+                                   "edgecolor": "red", "linestyle": "--"}]
+            figsize (tuple): Figure size (width, height)
+            cmap (str): Colormap for the heatmap
+        """
+        self.title = title
+        self.output_prefix = output_prefix
+        self.output_dir = output_dir
+        self.x_min, self.x_max = x_range
+        self.y_min, self.y_max = y_range
+        self.bins = bins
+        self.cmap = cmap
+
+        # Initialize point storage for each category
+        if categories is None:
+            categories = ["points"]
+        self.categories = categories
+        self.points = {cat: [] for cat in categories}
+        self.active_category = categories[0]  # Default to first category
+
+        # Setup figure
+        self.fig, self.ax = plt.subplots(figsize=figsize)
+        self.ax.set_aspect("equal")
+
+        # Draw zones if provided
+        if zones is not None:
+            for zone in zones:
+                zone_type = zone.get("type", "circle")
+                params = zone.get("params", {})
+                edgecolor = zone.get("edgecolor", "red")
+                linewidth = zone.get("linewidth", 2)
+                linestyle = zone.get("linestyle", "--")
+                label = zone.get("label", None)
+
+                if zone_type == "circle":
+                    center = params.get("center", (0, 0))
+                    radius = params.get("radius", 0.1)
+                    patch = Circle(
+                        center,
+                        radius=radius,
+                        fill=False,
+                        edgecolor=edgecolor,
+                        linewidth=linewidth,
+                        linestyle=linestyle,
+                        label=label,
+                    )
+                elif zone_type == "rectangle":
+                    xy = params.get("xy", (0, 0))
+                    width = params.get("width", 0.1)
+                    height = params.get("height", 0.1)
+                    angle = params.get("angle", 0)
+                    patch = Rectangle(
+                        xy,
+                        width,
+                        height,
+                        angle=angle,
+                        fill=False,
+                        edgecolor=edgecolor,
+                        linewidth=linewidth,
+                        linestyle=linestyle,
+                        label=label,
+                    )
+                else:
+                    continue
+
+                self.ax.add_patch(patch)
+
+        # Setup axes
+        self.ax.set(
+            xlim=(self.x_min, self.x_max),
+            ylim=(self.y_min, self.y_max),
+            xticks=np.arange(self.x_min, self.x_max + 0.01, 0.04),
+            yticks=np.arange(self.y_min, self.y_max + 0.01, 0.04),
+        )
+        self.ax.grid(True, linestyle="--", alpha=0.3)
+        self.ax.set_title(self.title)
+        self.ax.set_xlabel("X")
+        self.ax.set_ylabel("Y")
+
+        # Create separate heatmap layers for each category with different colormaps
+        self.category_colormaps = {
+            "success": "Greens",  # Green colormap for success
+            "fail": "Reds",  # Red colormap for failures
+            "unreachable": "Oranges",  # Orange for unreachable
+        }
+
+        # Create an imshow layer for each category
+        self.heatmap_layers = {}
+        for cat in self.categories:
+            cmap_name = self.category_colormaps.get(cat, self.cmap)
+            hist = np.zeros((self.bins, self.bins))
+            # Use LogNorm to enhance visibility of sparse data
+            # vmin=0.1 (not 0) to avoid log(0), vmax=10 for reasonable upper bound
+            layer = self.ax.imshow(
+                hist.T,
+                origin="lower",
+                extent=[self.x_min, self.x_max, self.y_min, self.y_max],
+                cmap=cmap_name,
+                alpha=0.7,  # Slightly more opaque for better visibility
+                norm=LogNorm(vmin=0.1, vmax=10),
+            )
+            self.heatmap_layers[cat] = layer
+
+        # Add legend to show zones and categories
+        if zones is not None:
+            self.ax.legend(loc="upper left", fontsize=10, framealpha=0.8)
+
+        # Initialize text label
+        self.text_label = self.ax.text(
+            0.95,
+            0.95,
+            self._format_text(),
+            transform=self.ax.transAxes,
+            fontsize=14,
+            color="red",
+            ha="right",
+            va="top",
+        )
+
+        plt.ion()
+        plt.show(block=False)
+        plt.tight_layout()
+
+    def _format_text(self):
+        """Format the text label based on current point counts"""
+        lines = [f"{cat}: {len(pts)}" for cat, pts in self.points.items()]
+        return "\n".join(lines)
+
+    def update_heatmap(self, new_point, category=None):
+        """Update heatmap with a new point
+
+        Args:
+            new_point: (x, y) coordinates or array-like with at least 2 elements
+            category: Category name (must be in self.categories). If None, uses active_category
+        """
+        if category is None:
+            category = self.active_category
+
+        if category not in self.categories:
+            raise ValueError(f"Category '{category}' not in {self.categories}")
+
+        # Add point to the specified category
+        self.points[category].append(new_point)
+
+        # Update each category's heatmap layer
+        for cat in self.categories:
+            points_list = self.points[cat]
+            if not points_list:
+                # Keep the layer as zeros if no points
+                continue
+
+            x_coords = [p[0] for p in points_list]
+            y_coords = [p[1] for p in points_list]
+
+            # Generate histogram for this category
+            hist, x_edges, y_edges = np.histogram2d(
+                x_coords,
+                y_coords,
+                bins=self.bins,
+                range=[[self.x_min, self.x_max], [self.y_min, self.y_max]],
+            )
+
+            # Use masked array to make 0 values truly transparent
+            # This way background stays white/transparent
+            hist_masked = np.ma.masked_where(hist == 0, hist)
+
+            # Update this category's heatmap layer
+            self.heatmap_layers[cat].set_data(hist_masked.T)
+
+        # Update text
+        self.text_label.set_text(self._format_text())
+
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+
+    def set_active_category(self, category):
+        """Set the active category for updates when category is not specified"""
+        if category not in self.categories:
+            raise ValueError(f"Category '{category}' not in {self.categories}")
+        self.active_category = category
+
+    def save_map(self, filename=None):
+        """Save the heatmap to a file
+
+        Args:
+            filename (str): Custom filename. If None, uses "{output_prefix}_heatmap.png"
+        """
+        if filename is None:
+            filename = f"{self.output_prefix}_heatmap.png"
+
+        filepath = os.path.join(self.output_dir, filename)
+        os.makedirs(self.output_dir, exist_ok=True)
+        plt.savefig(filepath)
+
+    def clear_category(self, category):
+        """Clear all points in a specific category"""
+        if category in self.points:
+            self.points[category] = []
+
+    def clear_all(self):
+        """Clear all points in all categories"""
+        for cat in self.categories:
+            self.points[cat] = []
+
+
 class HeatMapEnv:
     def __init__(self, is_success):
         """Initialize the drawing environment and static elements"""

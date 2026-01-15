@@ -19,7 +19,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any, Optional
+from typing import Sequence, Union, Dict, Literal, List, Any
 from dataclasses import field, MISSING
 
 from dexsim.types import (
