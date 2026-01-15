@@ -199,7 +199,7 @@ class ContactTest:
         contact_report = self.contact_sensor.get_data()
         n_contacts = contact_report["position"].shape[0]
         # TODO: dexsim cuda cannot get link user ids
-        # assert n_contacts > 0, "No contact detected between gripper and cube."
+        assert n_contacts > 0, "No contact detected between gripper and cube."
 
 
 class TestContactRaster(ContactTest):
@@ -224,5 +224,5 @@ class TestContactFastRT(ContactTest):
 
 if __name__ == "__main__":
     test = ContactTest()
-    test.setup_simulation("cpu", enable_rt=False)
+    test.setup_simulation("cuda", enable_rt=False)
     test.test_fetch_contact()
