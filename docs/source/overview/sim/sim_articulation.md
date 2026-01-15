@@ -12,7 +12,20 @@ Articulations are configured using the `ArticulationCfg` dataclass.
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
 | `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
-| `drive_pros` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
+| `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
+
+### Drive Configuration
+
+The `drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `stiffness` | `float` / `Dict` | `1.0e4` | Stiffness (P-gain) of the joint drive. Unit: $N/m$ or $Nm/rad$. |
+| `damping` | `float` / `Dict` | `1.0e3` | Damping (D-gain) of the joint drive. Unit: $Ns/m$ or $Nms/rad$. |
+| `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
+| `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
+| `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
+| `drive_type` | `str` | `"force"` | Drive mode: `"force"` or `"acceleration"`. |
 
 ### Setup & Initialization
 
@@ -42,11 +55,11 @@ sim.reset_objects_state()
 ```
 ## Articulation Class
 State Data (Observation)
-State data is accessed via properties that return batched tensors.
+State data is accessed via getter methods that return batched tensors.
 
 | Property | Shape | Description |
 | :--- | :--- | :--- |
-| `get_root_pose` | `(N, 7)` | Root link pose `[x, y, z, qw, qx, qy, qz]`. |
+| `get_local_pose` | `(N, 7)` | Root link pose `[x, y, z, qw, qx, qy, qz]`. |
 | `get_qpos` | `(N, dof)` | Joint positions. |
 | `get_qvel` | `(N, dof)` | Joint velocities. |
 
@@ -56,7 +69,7 @@ State data is accessed via properties that return batched tensors.
 # Example: Accessing state
 # Note: Use methods (with brackets) instead of properties
 print(f"Current Joint Positions: {articulation.get_qpos()}")
-print(f"Root Pose: {articulation.get_root_pose()}")
+print(f"Root Pose: {articulation.get_local_pose()}")
 ```
 ### Control & Dynamics
 You can control the articulation by setting joint targets.
@@ -68,6 +81,9 @@ You can control the articulation by setting joint targets.
 current_qpos = articulation.get_qpos()
 target_qpos = torch.zeros_like(current_qpos)
 
+# Set target position
+# target=True: Sets the drive target. The physics engine applies forces to reach this position.
+# target=False: Instantly resets/teleports joints to this position (ignoring physics).
 articulation.set_qpos(target_qpos, target=True)
 
 # Important: Step simulation to apply control
