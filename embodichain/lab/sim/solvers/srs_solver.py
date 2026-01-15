@@ -511,6 +511,15 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         joints_output[5] = (angle6 - dh_params[5, 3]) * rotation_directions[5]
         joints_output[6] = (angle7 - dh_params[6, 3]) * rotation_directions[6]
 
+        # Check if the calculated joint angles are within the limits
+        for i in range(len(joints_output)):
+            if not (
+                self.qpos_limits_np[i, 0]
+                <= joints_output[i]
+                <= self.qpos_limits_np[i, 1]
+            ):
+                return False, None
+
         return True, joints_output
 
     def get_ik(
