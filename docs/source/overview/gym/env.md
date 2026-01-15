@@ -18,9 +18,30 @@ Unlike the standard {class}`envs.BaseEnv`, the {class}`envs.EmbodiedEnv` integra
 
 The environment is defined by inheriting from {class}`envs.EmbodiedEnvCfg`. This configuration class serves as the single source of truth for the scene description.
 
+{class}`envs.EmbodiedEnvCfg` inherits from {class}`envs.EnvCfg` (the base environment configuration class, sometimes referred to as `BaseEnvCfg`), which provides fundamental environment parameters. The following sections describe both the base class parameters and the additional parameters specific to {class}`envs.EmbodiedEnvCfg`.
+
+### BaseEnvCfg Parameters
+
+Since {class}`envs.EmbodiedEnvCfg` inherits from {class}`envs.EnvCfg`, it includes the following base parameters:
+
+* **num_envs** (int): 
+  The number of sub environments (arenas) to be simulated in parallel. Defaults to ``1``.
+
+* **sim_cfg** ({class}`embodichain.lab.sim.cfg.SimulationManagerCfg`): 
+  Simulation configuration for the environment, including physics settings, device selection, and rendering options. Defaults to a basic configuration with headless mode enabled.
+
+* **seed** (int | None): 
+  The seed for the random number generator. Defaults to ``None``, in which case the seed is not set. The seed is set at the beginning of the environment initialization to ensure deterministic behavior across different runs.
+
+* **sim_steps_per_control** (int): 
+  Number of simulation steps per control (environment) step. This parameter determines the relationship between the simulation timestep and the control timestep. For instance, if the simulation dt is 0.01s and the control dt is 0.1s, then ``sim_steps_per_control`` should be 10. This means that the control action is updated every 10 simulation steps. Defaults to ``4``.
+
+* **ignore_terminations** (bool): 
+  Whether to ignore terminations when deciding when to auto reset. Terminations can be caused by the task reaching a success or fail state as defined in a task's evaluation function. If set to ``False``, episodes will stop early when termination conditions are met. If set to ``True``, episodes will only stop due to the timelimit, which is useful for modeling tasks as infinite horizon. Defaults to ``False``.
+
 ### EmbodiedEnvCfg Parameters
 
-The {class}`envs.EmbodiedEnvCfg` class exposes the following parameters:
+The {class}`envs.EmbodiedEnvCfg` class exposes the following additional parameters:
 
 * **robot** ({class}`embodichain.lab.sim.cfg.RobotCfg`): 
   Defines the agent in the scene. Supports loading robots from URDF/MJCF with specified initial state and control mode. This is a required field.
