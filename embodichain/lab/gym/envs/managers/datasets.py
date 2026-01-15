@@ -36,7 +36,15 @@ from .cfg import DatasetFunctorCfg
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
+try:
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
+
+    LEROBOT_AVAILABLE = True
+
+    __all__ = ["LeRobotRecorder"]
+except ImportError:
+    LEROBOT_AVAILABLE = False
+
 
 __all__ = ["LeRobotRecorder"]
 
@@ -65,6 +73,11 @@ class LeRobotRecorder(Functor):
                 - export_success_only: Whether to export only successful episodes
             env: The environment instance
         """
+        if not LEROBOT_AVAILABLE:
+            logger.log_error(
+                "LeRobot is not installed. Please install it with: pip install lerobot"
+            )
+
         super().__init__(cfg, env)
 
         # Extract parameters from cfg.params
