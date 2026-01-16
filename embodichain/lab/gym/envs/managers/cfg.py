@@ -312,6 +312,29 @@ class SceneEntityCfg:
 
 
 @configclass
+class RewardCfg(FunctorCfg):
+    """Configuration for a reward functor.
+
+    The reward functor is used to compute rewards for the environment. The `mode` attribute
+    determines how the reward is combined with existing rewards.
+    """
+
+    mode: Literal["add", "replace"] = "add"
+    """The mode for the reward computation.
+
+    - `add`: The reward is added to the existing total reward.
+    - `replace`: The reward replaces the total reward (useful for single reward functions).
+    """
+
+    name: str = MISSING
+    """The name of the reward term.
+
+    This is used for logging and debugging purposes. The name should be descriptive of what
+    the reward term represents, e.g., "distance_to_goal", "gripper_close", "collision_penalty".
+    """
+
+
+@configclass
 class DatasetFunctorCfg(FunctorCfg):
     """Configuration for dataset collection functors.
 

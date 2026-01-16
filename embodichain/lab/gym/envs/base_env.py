@@ -397,6 +397,30 @@ class BaseEnv(gym.Env):
         """
         return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+    def _extend_reward(
+        self,
+        rewards: torch.Tensor,
+        obs: EnvObs,
+        action: EnvAction,
+        info: Dict[str, Any],
+        **kwargs,
+    ) -> torch.Tensor:
+        """Extend the reward computation.
+
+        Overwrite this function to extend or modify the reward computation.
+
+        Args:
+            rewards: The base reward tensor.
+            obs: The observation from the environment.
+            action: The action applied to the robot agent.
+            info: The info dictionary.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The extended reward tensor.
+        """
+        return rewards
+
     def get_reward(
         self,
         obs: EnvObs,
@@ -417,7 +441,13 @@ class BaseEnv(gym.Env):
             The reward for the current step.
         """
 
-        return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        rewards = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
+        rewards = self._extend_reward(
+            rewards=rewards, obs=obs, action=action, info=info
+        )
+
+        return rewards
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.

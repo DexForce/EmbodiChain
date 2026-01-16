@@ -546,6 +546,50 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
 
             setattr(env_cfg.observations, obs_name, observation)
 
+    env_cfg.rewards = ComponentCfg()
+    if "rewards" in config["env"]:
+        # Define modules to search for reward functions
+        reward_modules = [
+            "embodichain.lab.gym.envs.managers.rewards",
+        ]
+
+        for reward_name, reward_params in config["env"]["rewards"].items():
+            reward_params_modified = deepcopy(reward_params)
+
+            # Handle entity_cfg parameters
+            for param_key in [
+                "entity_cfg",
+                "source_entity_cfg",
+                "target_entity_cfg",
+                "end_effector_cfg",
+                "object_cfg",
+                "goal_cfg",
+                "reference_entity_cfg",
+            ]:
+                if param_key in reward_params["params"]:
+                    entity_cfg = SceneEntityCfg(
+                        **reward_params_modified["params"][param_key]
+                    )
+                    reward_params_modified["params"][param_key] = entity_cfg
+
+            # Find the function from multiple modules using the utility function
+            reward_func = find_function_from_modules(
+                reward_params["func"],
+                reward_modules,
+                raise_if_not_found=True,
+            )
+
+            from embodichain.lab.gym.envs.managers import RewardCfg
+
+            reward = RewardCfg(
+                func=reward_func,
+                mode=reward_params_modified["mode"],
+                name=reward_params_modified["name"],
+                params=reward_params_modified["params"],
+            )
+
+            setattr(env_cfg.rewards, reward_name, reward)
+
     return env_cfg
 
 

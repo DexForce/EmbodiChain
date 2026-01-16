@@ -713,3 +713,16 @@ class compute_exteroception(Functor):
                 exteroception[sensor_uid] = projected_kpnts
 
         return exteroception
+
+
+def virtual_target_position(
+    env: "EmbodiedEnv",
+    obs: EnvObs,
+    target_pose_key: str = "goal_pose",
+) -> torch.Tensor:
+    """Get virtual target position from env state."""
+    state_attr = f"_{target_pose_key}s"
+    if hasattr(env, state_attr):
+        target_poses = getattr(env, state_attr)
+        return target_poses[:, :3, 3]
+    return torch.zeros(env.num_envs, 3, device=env.device)

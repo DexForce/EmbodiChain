@@ -13,20 +13,107 @@
           "position_range": [[-0.2, -0.2, 0.0], [0.2, 0.2, 0.0]],
           "relative_position": true
         }
+      },
+      "randomize_goal": {
+        "func": "randomize_target_pose",
+        "mode": "reset",
+        "params": {
+          "position_range": [[-0.3, -0.3, 0.05], [0.3, 0.3, 0.05]],
+          "relative_position": false,
+          "store_key": "goal_pose"
+        }
       }
     },
-    "observations": {},
+    "observations": {
+      "robot_qpos": {
+        "func": "embodichain.lab.gym.envs.managers.observations:normalize_robot_joint_data",
+        "mode": "concatenate",
+        "name": "robot/qpos",
+        "params": {
+          "robot_uid": "Manipulator",
+          "joint_ids": [0, 1, 2, 3, 4, 5],
+          "data_type": "qpos"
+        }
+      },
+      "robot_ee_pos": {
+        "func": "embodichain.lab.gym.envs.managers.observations:get_robot_ee_pose",
+        "mode": "concatenate",
+        "name": "robot/ee_pos",
+        "params": {
+          "robot_uid": "Manipulator",
+          "part_name": "arm"
+        }
+      },
+      "cube_pos": {
+        "func": "embodichain.lab.gym.envs.managers.observations:get_rigid_object_pose",
+        "mode": "concatenate",
+        "name": "object/cube_pos",
+        "params": {
+          "entity_cfg": {"uid": "cube"}
+        }
+      },
+      "goal_pos": {
+        "func": "embodichain.lab.gym.envs.managers.observations:virtual_target_position",
+        "mode": "concatenate",
+        "name": "object/goal_pos",
+        "params": {
+          "target_pose_key": "goal_pose"
+        }
+      }
+    },
+    "rewards": {
+      "reaching_reward": {
+        "func": "reaching_behind_object_reward",
+        "mode": "add",
+        "name": "reaching",
+        "params": {
+          "weight": 0.1,
+          "end_effector_cfg": {"uid": "Manipulator", "body_ids": "ee_link"},
+          "object_cfg": {"uid": "cube"},
+          "goal_cfg": {"uid": "goal_sphere"},
+          "behind_offset": 0.015,
+          "height_offset": 0.015,
+          "distance_scale": 5.0
+        }
+      },
+      "place_reward": {
+        "func": "incremental_distance_to_target",
+        "mode": "add",
+        "name": "place",
+        "params": {
+          "weight": 1.0,
+          "source_entity_cfg": {"uid": "cube"},
+          "target_pose_key": "goal_pose",
+          "tanh_scale": 10.0,
+          "positive_weight": 2.0,
+          "negative_weight": 0.5,
+          "use_xy_only": true
+        }
+      },
+      "action_penalty": {
+        "func": "action_smoothness_penalty",
+        "mode": "add",
+        "name": "action_penalty",
+        "params": {
+          "weight": 0.01
+        }
+      },
+      "success_bonus": {
+        "func": "success_reward",
+        "mode": "add",
+        "name": "success",
+        "params": {
+          "weight": 10.0,
+          "reward_value": 1.0
+        }
+      }
+    },
     "extensions": {
       "obs_mode": "state",
       "episode_length": 100,
       "joint_limits": 0.5,
       "action_scale": 0.1,
-      "success_threshold": 0.1,
-      "reaching_reward_weight": 0.1,
-      "place_reward_weight": 2.0,
-      "place_penalty_weight": 0.5,
-      "action_penalty_weight": 0.01,
-      "success_bonus_weight": 10.0
+      "success_threshold": 0.1
     }
   },
   "robot": {
@@ -85,21 +172,7 @@
   "sensor": [],
   "light": {
   },
-  "background": [
-    {
-      "uid": "goal_sphere",
-      "shape": {
-        "shape_type": "Sphere",
-        "radius": 0.02
-      },
-      "body_type": "kinematic",
-      "init_pos": [-0.9, -0.6, 0.05],
-      "attrs": {
-        "enable_collision": false,
-        "mass": 0.0
-      }
-    }
-  ],
+  "background": [],
   "rigid_object": [
     {
       "uid": "cube",
