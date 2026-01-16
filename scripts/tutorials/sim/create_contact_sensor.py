@@ -28,7 +28,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.sensors import (
-    ContactFilterCfg,
+    ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
@@ -243,7 +243,7 @@ def run_simulation(sim: SimulationManager):
 
     step_count = 0
     # contact filter config
-    contact_filter_cfg = ContactFilterCfg()
+    contact_filter_cfg = ContactSensorCfg()
     contact_filter_cfg.rigid_uid_list = ["cube0", "cube1", "cube2"]
     contact_filter_art_cfg = ArticulationContactFilterCfg()
     contact_filter_art_cfg.articulation_uid = "UR10_PGI"

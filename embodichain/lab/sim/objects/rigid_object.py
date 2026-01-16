@@ -215,15 +215,6 @@ class RigidObject(BatchEntity):
         )
 
     @property
-    def all_env_ids(self) -> torch.Tensor:
-        """Get all environment ids for the articulation.
-
-        Returns:
-            torch.Tensor: All environment ids for the articulation.
-        """
-        return self._all_indices
-
-    @property
     def body_data(self) -> RigidBodyData | None:
         """Get the rigid body data manager for this rigid object.
 

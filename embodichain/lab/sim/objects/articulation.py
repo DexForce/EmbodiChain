@@ -591,15 +591,6 @@ class Articulation(BatchEntity):
         return parent_str + f" | dof: {self.dof} | num_links: {self.num_links}"
 
     @property
-    def all_env_ids(self) -> torch.Tensor:
-        """Get all environment ids for the articulation.
-
-        Returns:
-            torch.Tensor: All environment ids for the articulation.
-        """
-        return self._all_indices
-
-    @property
     def dof(self) -> int:
         """Get the degree of freedom of the articulation.
 
@@ -1141,11 +1132,11 @@ class Articulation(BatchEntity):
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
 
-    def get_user_ids(self, link_name: Optional[str]) -> torch.Tensor:
+    def get_user_ids(self, link_name: str | None) -> torch.Tensor:
         """Get the user ids of the articulation.
 
         Args:
-            link_name: (Optional[str]): The name of the link. If None, returns user ids for all links.
+            link_name: (str | None): The name of the link. If None, returns user ids for all links.
 
         Returns:
             torch.Tensor: The user ids of the articulation with shape (N, 1) for given link_name or (N, num_links) if link_name is None.

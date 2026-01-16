@@ -29,21 +29,12 @@ import numpy as np
 
 
 @configclass
-class ContactFilterCfg(SensorCfg):
+class ContactSensorCfg(SensorCfg):
     """Base class for sensor abstraction in the simulation engine.
 
     Sensors should inherit from this class and implement the `update` and `get_data` methods.
     """
 
-    SUPPORTED_DATA_TYPES = [
-        "position",
-        "normal",
-        "friction",
-        "impulse",
-        "distance",
-        "user_ids",
-        "env_ids",
-    ]
     rigid_uid_list: List[str] = []
     """rigid body contact filter configs"""
 
@@ -68,8 +59,18 @@ class ArticulationContactFilterCfg:
 class ContactSensor(BaseSensor):
     """Sensor to get contacts from rigid body and articulation links."""
 
+    SUPPORTED_DATA_TYPES = [
+        "position",
+        "normal",
+        "friction",
+        "impulse",
+        "distance",
+        "user_ids",
+        "env_ids",
+    ]
+
     def __init__(
-        self, config: ContactFilterCfg, device: torch.device = torch.device("cpu")
+        self, config: ContactSensorCfg, device: torch.device = torch.device("cpu")
     ) -> None:
         from embodichain.lab.sim import SimulationManager
 
@@ -110,7 +111,7 @@ class ContactSensor(BaseSensor):
         self.device = device
         super().__init__(config, device)
 
-    def _precompute_filter_ids(self, config: ContactFilterCfg):
+    def _precompute_filter_ids(self, config: ContactSensorCfg):
         self.item_user_ids = torch.tensor([], dtype=torch.int32, device=self.device)
         self.item_env_ids = torch.tensor([], dtype=torch.int32, device=self.device)
         self.item_user_env_ids_map = torch.tensor(
@@ -127,7 +128,7 @@ class ContactSensor(BaseSensor):
                 (self.item_user_ids, rigid_object.get_user_ids())
             )
             env_ids = torch.tensor(
-                rigid_object.all_env_ids, dtype=torch.int32, device=self.device
+                rigid_object._all_indices, dtype=torch.int32, device=self.device
             )
             self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
 
@@ -155,7 +156,7 @@ class ContactSensor(BaseSensor):
                 link_user_ids = articulation.get_user_ids(link_name).reshape(-1)
                 self.item_user_ids = torch.cat((self.item_user_ids, link_user_ids))
                 env_ids = torch.tensor(
-                    articulation.all_env_ids, dtype=torch.int32, device=self.device
+                    articulation._all_indices, dtype=torch.int32, device=self.device
                 )
                 self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
         # build user_id to env_id map
@@ -168,7 +169,7 @@ class ContactSensor(BaseSensor):
         )
         self.item_user_env_ids_map[self.item_user_ids] = self.item_env_ids
 
-    def _build_sensor_from_config(self, config: ContactFilterCfg, device: torch.device):
+    def _build_sensor_from_config(self, config: ContactSensorCfg, device: torch.device):
         self._precompute_filter_ids(config)
         self._world: dexsim.World = dexsim.default_world()
         self._ps = self._world.get_physics_scene()

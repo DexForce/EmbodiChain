@@ -26,7 +26,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.sensors import (
-    ContactFilterCfg,
+    ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
@@ -55,7 +55,7 @@ class ContactTest:
         cube2 = self.create_cube("cube2", position=[0.0, 0.0, 0.09])
         self.robot = self.create_robot("UR10_PGI", position=[0.5, 0.0, 0.0])
 
-        contact_filter_cfg = ContactFilterCfg()
+        contact_filter_cfg = ContactSensorCfg()
         contact_filter_cfg.rigid_uid_list = ["cube2"]
         contact_filter_art_cfg = ArticulationContactFilterCfg()
         contact_filter_art_cfg.articulation_uid = "UR10_PGI"

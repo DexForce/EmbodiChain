@@ -19,6 +19,6 @@ from .camera import Camera, CameraCfg
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact_sensor import (
     ContactSensor,
-    ContactFilterCfg,
+    ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
