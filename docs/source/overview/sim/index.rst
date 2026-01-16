@@ -8,16 +8,17 @@ Overview of the Simulation Framework:
 - Components
   
   - Simulation Manager
-  - Simulation Object
-  - Material
+  - Simulation Assets
   - Virtual Sensor
   - Kinematics Solver
   - Motion Generation
 
-
 .. toctree::
    :maxdepth: 1
    :glob:
-
+   
+   sim_manager.md
+   sim_assets.md
+   sim_sensor.md
    solvers/index
    planners/index

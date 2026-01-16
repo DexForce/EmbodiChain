@@ -303,13 +303,13 @@ def create_ice_cubes(sim: SimulationManager):
 
     # Set visual material for ice cubes.
     # The material below only works for ray tracing backend.
-    # Set ior to 1.31 and material type to "BSDF_GGX_SMITH" for better ice appearance.
+    # Set ior to 1.31 and material type to "BSDF" for better ice appearance.
     ice_mat = sim.create_visual_material(
         cfg=VisualMaterialCfg(
             base_color=[1.0, 1.0, 1.0, 1.0],
             ior=1.31,
             roughness=0.05,
-            rt_material_type="BSDF_GGX_SMITH",
+            material_type="BSDF",
         )
     )
     ice_cubes.set_visual_material(mat=ice_mat)
