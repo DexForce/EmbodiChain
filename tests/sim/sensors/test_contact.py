@@ -215,7 +215,7 @@ class TestContactRaster(ContactTest):
         self.setup_simulation("cpu", enable_rt=False)
 
 
-class TestContactRaster(ContactTest):
+class TestContactRasterCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation("cuda", enable_rt=False)
 
@@ -225,7 +225,7 @@ class TestContactFastRT(ContactTest):
         self.setup_simulation("cpu", enable_rt=True)
 
 
-class TestContactFastRT(ContactTest):
+class TestContactFastRTCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation("cuda", enable_rt=True)
 
