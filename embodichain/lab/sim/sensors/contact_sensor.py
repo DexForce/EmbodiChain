@@ -69,12 +69,11 @@ class ContactSensor(BaseSensor):
     """Sensor to get contacts from rigid body and articulation links."""
 
     def __init__(
-        self,
-        config: ContactFilterCfg,
-        device: torch.device = torch.device("cpu"),
-        sim: "SimulationManager" = None,
+        self, config: ContactFilterCfg, device: torch.device = torch.device("cpu")
     ) -> None:
-        self._sim = sim
+        from embodichain.lab.sim import SimulationManager
+
+        self._sim = SimulationManager.get_instance()
         """simulation manager reference"""
 
         self.item_user_ids: Optional[torch.Tensor] = None

@@ -1293,13 +1293,7 @@ class SimulationManager:
             logger.log_warning(f"Sensor {sensor_uid} already exists.")
             return None
 
-        if sensor_type == "ContactSensor":
-            # Need to pass sim reference to contact sensor for contact fetching.
-            sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](
-                sensor_cfg, self.device, self
-            )
-        else:
-            sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
+        sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
 
         self._sensors[sensor_uid] = sensor
 
