@@ -198,8 +198,16 @@ class ContactTest:
         self.contact_sensor.update()
         contact_report = self.contact_sensor.get_data()
         n_contacts = contact_report["position"].shape[0]
-        # TODO: dexsim cuda cannot get link user ids
-        assert n_contacts > 0, "No contact detected between gripper and cube."
+        assert n_contacts > 0, "No contact detected."
+
+        cube2_user_ids = self.sim.get_rigid_object("cube2").get_user_ids()
+        finger1_user_ids = (
+            self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
+        )
+        filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
+        filter_contact_report = self.contact_sensor.filter_by_user_ids(filter_user_ids)
+        n_filtered_contact = contact_report["position"].shape[0]
+        assert n_filtered_contact > 0, "No contact detected between gripper and cube."
 
 
 class TestContactRaster(ContactTest):
