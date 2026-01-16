@@ -246,9 +246,45 @@ class DatasetManager(ManagerBase):
 
         return None
 
-    """
-    Operations - Functor settings.
-    """
+    def get_cached_data(self) -> list[Dict[str, Any]]:
+        """Get cached data from all dataset functors (for online training).
+
+        Iterates through all functors and collects cached data from those
+        that support online training mode (have get_cached_data method).
+
+        Returns:
+            List of cached data dictionaries from all functors.
+        """
+        all_cached_data = []
+
+        # Iterate through all modes and functors
+        for mode_cfgs in self._mode_functor_cfgs.values():
+            for functor_cfg in mode_cfgs:
+                if hasattr(functor_cfg.func, "get_cached_data"):
+                    cached_data = functor_cfg.func.get_cached_data()
+                    all_cached_data.extend(cached_data)
+
+        return all_cached_data
+
+    def clear_cache(self) -> int:
+        """Clear cached data from all dataset functors (for online training).
+
+        Iterates through all functors and clears their cache if they
+        support online training mode (have clear_cache method).
+
+        Returns:
+            Total number of cached items cleared across all functors.
+        """
+        total_cleared = 0
+
+        # Iterate through all modes and functors
+        for mode_cfgs in self._mode_functor_cfgs.values():
+            for functor_cfg in mode_cfgs:
+                if hasattr(functor_cfg.func, "clear_cache"):
+                    cleared = functor_cfg.func.clear_cache()
+                    total_cleared += cleared
+
+        return total_cleared
 
     def get_functor_cfg(self, functor_name: str) -> DatasetFunctorCfg:
         """Gets the configuration for the specified functor.
@@ -266,10 +302,6 @@ class DatasetManager(ManagerBase):
             if functor_name in functors:
                 return self._mode_functor_cfgs[mode][functors.index(functor_name)]
         logger.log_error(f"Dataset functor '{functor_name}' not found.")
-
-    """
-    Helper functions.
-    """
 
     def _prepare_functors(self):
         """Prepare dataset functors from configuration.
