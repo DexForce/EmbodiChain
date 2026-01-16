@@ -122,3 +122,93 @@ stereo_cfg = StereoCameraCfg(
 
 # 2. Add Sensor to Simulation
 stereo_camera: StereoCamera = sim.add_sensor(sensor_cfg=stereo_cfg)
+```
+
+## Contact Sensor
+
+### Configuration
+
+The {class}`ContactSensorCfg` class defines the configuration for contact sensors. It inherits from {class}`~SensorCfg` and enables filtering and monitoring of contact events between specific rigid bodies and articulation links in the simulation.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `rigid_uid_list` | `List[str]` | `[]` | List of rigid body UIDs to monitor for contacts. |
+| `articulation_cfg_list` | `List[ArticulationContactFilterCfg]` | `[]` | List of articulation link contact filter configurations. |
+| `filter_need_both_actor` | `bool` | `True` | Whether to filter contact only when both actors are in the filter list. If `False`, contact is reported if either actor is in the filter. |
+
+### Articulation Contact Filter Configuration
+
+The `ArticulationContactFilterCfg` class specifies which articulation links to monitor for contacts.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `articulation_uid` | `str` | `""` | Unique identifier of the articulation (robot or articulated object). |
+| `link_name_list` | `List[str]` | `[]` | List of link names in the articulation to monitor. If empty, all links are monitored. |
+
+### Usage
+
+You can create a contact sensor using `sim.add_sensor()` with a `ContactSensorCfg` object.
+
+#### Code Example
+
+```python
+from embodichain.lab.sim.sensors import ContactSensor, ContactSensorCfg, ArticulationContactFilterCfg
+import torch
+
+# 1. Define Contact Filter Configuration
+contact_filter_cfg = ContactSensorCfg()
+
+# Monitor contacts for specific rigid bodies
+contact_filter_cfg.rigid_uid_list = ["cube0", "cube1", "cube2"]
+
+# Monitor contacts for specific articulation links
+contact_filter_art_cfg = ArticulationContactFilterCfg()
+contact_filter_art_cfg.articulation_uid = "UR10_PGI"
+contact_filter_art_cfg.link_name_list = ["finger1_link", "finger2_link"]
+contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
+
+# Only report contacts when both actors are in the filter list
+contact_filter_cfg.filter_need_both_actor = True
+
+# 2. Add Sensor to Simulation
+contact_sensor: ContactSensor = sim.add_sensor(sensor_cfg=contact_filter_cfg)
+
+# 3. Update and Retrieve Contact Data
+sim.update(step=1)
+contact_sensor.update()
+contact_report = contact_sensor.get_data()
+
+# 4. Filter contacts by specific user IDs
+cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
+finger1_user_ids = sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
+filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
+filter_contact_report = contact_sensor.filter_by_user_ids(filter_user_ids)
+
+# 5. Visualize Contact Points
+contact_sensor.set_contact_point_visibility(
+    visible=True, 
+    rgba=(0.0, 0.0, 1.0, 1.0),  # Blue color
+    point_size=6.0
+)
+```
+
+### Observation Data
+
+Retrieve contact data using `contact_sensor.get_data()`. The data is returned as a dictionary of tensors on the specified device.
+
+| Key | Data Type | Shape | Description |
+| :--- | :--- | :--- | :--- |
+| `position` | `torch.float32` | `(n_contact, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
+| `normal` | `torch.float32` | `(n_contact, 3)` | Contact normal vectors. |
+| `friction` | `torch.float32` | `(n_contact, 3)` | Contact friction forces. *Note: Currently this value may not be accurate.* |
+| `impulse` | `torch.float32` | `(n_contact,)` | Contact impulse magnitudes. |
+| `distance` | `torch.float32` | `(n_contact,)` | Contact penetration distances. |
+| `user_ids` | `torch.int32` | `(n_contact, 2)` | Pair of user IDs for the two actors in contact. Use with `rigid_object.get_user_ids()` to identify objects. |
+| `env_ids` | `torch.int32` | `(n_contact,)` | Environment IDs indicating which parallel environment each contact belongs to. |
+
+*Note: `N` represents the number of contacts detected.*
+
+### Additional Methods
+
+- **`filter_by_user_ids(item_user_ids)`**: Filter contact report to include only contacts involving specific user IDs.
+- **`set_contact_point_visibility(visible, rgba, point_size)`**: Enable/disable visualization of contact points with customizable color and size.
