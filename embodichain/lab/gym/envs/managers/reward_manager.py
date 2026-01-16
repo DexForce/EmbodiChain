@@ -164,9 +164,8 @@ class RewardManager(ManagerBase):
                         reward_term, device=self._env.device, dtype=torch.float32
                     )
 
-                # get weight from params or default to 1.0
-                weight = functor_cfg.params.get("weight", 1.0)
-                weighted_reward = reward_term * weight
+                # apply weight from config
+                weighted_reward = reward_term * functor_cfg.weight
 
                 # combine reward based on mode
                 if mode == "add":
@@ -224,7 +223,7 @@ class RewardManager(ManagerBase):
                 )
 
             # resolve common parameters
-            self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
+            self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=4)
 
             # check if mode is a new mode
             if functor_cfg.mode not in self._mode_functor_names:

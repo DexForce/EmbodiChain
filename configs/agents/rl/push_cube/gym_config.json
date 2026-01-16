@@ -26,35 +26,32 @@
     },
     "observations": {
       "robot_qpos": {
-        "func": "embodichain.lab.gym.envs.managers.observations:normalize_robot_joint_data",
-        "mode": "concatenate",
+        "func": "normalize_robot_joint_data",
+        "mode": "add",
         "name": "robot/qpos",
         "params": {
-          "robot_uid": "Manipulator",
-          "joint_ids": [0, 1, 2, 3, 4, 5],
-          "data_type": "qpos"
+          "joint_ids": [0, 1, 2, 3, 4, 5]
         }
       },
       "robot_ee_pos": {
-        "func": "embodichain.lab.gym.envs.managers.observations:get_robot_ee_pose",
-        "mode": "concatenate",
+        "func": "get_robot_ee_pose",
+        "mode": "add",
         "name": "robot/ee_pos",
         "params": {
-          "robot_uid": "Manipulator",
           "part_name": "arm"
         }
       },
       "cube_pos": {
-        "func": "embodichain.lab.gym.envs.managers.observations:get_rigid_object_pose",
-        "mode": "concatenate",
+        "func": "get_rigid_object_pose",
+        "mode": "add",
         "name": "object/cube_pos",
         "params": {
           "entity_cfg": {"uid": "cube"}
         }
       },
       "goal_pos": {
-        "func": "embodichain.lab.gym.envs.managers.observations:virtual_target_position",
-        "mode": "concatenate",
+        "func": "target_position",
+        "mode": "add",
         "name": "object/goal_pos",
         "params": {
           "target_pose_key": "goal_pose"
@@ -66,8 +63,8 @@
         "func": "reaching_behind_object_reward",
         "mode": "add",
         "name": "reaching",
+        "weight": 0.1,
         "params": {
-          "weight": 0.1,
           "end_effector_cfg": {"uid": "Manipulator", "body_ids": "ee_link"},
           "object_cfg": {"uid": "cube"},
           "goal_cfg": {"uid": "goal_sphere"},
@@ -80,8 +77,8 @@
         "func": "incremental_distance_to_target",
         "mode": "add",
         "name": "place",
+        "weight": 1.0,
         "params": {
-          "weight": 1.0,
           "source_entity_cfg": {"uid": "cube"},
           "target_pose_key": "goal_pose",
           "tanh_scale": 10.0,
@@ -94,16 +91,15 @@
         "func": "action_smoothness_penalty",
         "mode": "add",
         "name": "action_penalty",
-        "params": {
-          "weight": 0.01
-        }
+        "weight": 0.01,
+        "params": {}
       },
       "success_bonus": {
         "func": "success_reward",
         "mode": "add",
         "name": "success",
+        "weight": 10.0,
         "params": {
-          "weight": 10.0,
           "reward_value": 1.0
         }
       }

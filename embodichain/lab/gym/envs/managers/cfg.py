@@ -333,6 +333,13 @@ class RewardCfg(FunctorCfg):
     the reward term represents, e.g., "distance_to_goal", "gripper_close", "collision_penalty".
     """
 
+    weight: float = 1.0
+    """The weight multiplier for this reward term.
+
+    This value is used to scale the reward before adding it to the total reward.
+    Default is 1.0 (no scaling).
+    """
+
 
 @configclass
 class DatasetFunctorCfg(FunctorCfg):
