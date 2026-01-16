@@ -269,14 +269,10 @@ class BaseRobotSolverTest:
         assert res[0] == False
         assert ik_qpos.shape == (1, dof)
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.sim is not None:
-            try:
-                cls.sim.destroy()
-                print("sim destroyed successfully")
-            except Exception as e:
-                print(f"Error during sim.destroy(): {e}")
+    def teardown_method(self):
+        """Clean up resources after each test method."""
+        if self.sim is not None:
+            self.sim.destroy()
 
 
 class TestSRSCPUSolver(BaseSolverTest):

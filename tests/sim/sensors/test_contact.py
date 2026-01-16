@@ -209,6 +209,10 @@ class ContactTest:
         n_filtered_contact = filter_contact_report["position"].shape[0]
         assert n_filtered_contact > 0, "No contact detected between gripper and cube."
 
+    def teardown_method(self):
+        """Clean up resources after each test method."""
+        self.sim.destroy()
+
 
 class TestContactRaster(ContactTest):
     def setup_method(self):
