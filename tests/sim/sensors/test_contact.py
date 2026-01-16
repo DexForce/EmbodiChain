@@ -206,7 +206,7 @@ class ContactTest:
         )
         filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
         filter_contact_report = self.contact_sensor.filter_by_user_ids(filter_user_ids)
-        n_filtered_contact = contact_report["position"].shape[0]
+        n_filtered_contact = filter_contact_report["position"].shape[0]
         assert n_filtered_contact > 0, "No contact detected between gripper and cube."
 
 
@@ -232,5 +232,5 @@ class TestContactFastRTCuda(ContactTest):
 
 if __name__ == "__main__":
     test = ContactTest()
-    test.setup_simulation("cuda", enable_rt=False)
+    test.setup_simulation("cuda", enable_rt=True)
     test.test_fetch_contact()
