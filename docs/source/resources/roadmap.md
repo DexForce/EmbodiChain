@@ -1,6 +1,6 @@
 # Roadmap
 
-Currently, EmbodiChain is under active development. Our plan for the feature roadmap is as follows:
+Currently, EmbodiChain is under active development. Our roadmap is as follows:
 
 - Simulation:
     - Rendering:
@@ -15,12 +15,10 @@ Currently, EmbodiChain is under active development. Our plan for the feature roa
         - We are also exploring how to integrate [newton physics](https://github.com/newton-physics/newton) into EmbodiChain as an alternative physics backend.
     - Sensors:
         - Add contact and force sensors with examples.
-    - Kinematics Solvers:
-        - Improve the existing IK solver performance and stability (especially SRSSolver and OPWSolver).
     - Motion Generation:
         - Add more advanced motion generation methods and examples.
     - Useful Tools:
-        - We are working on USD support for EmbodiChain to enable better scene creation and asset management.
+        - We are working on USD support for EmbodiChain to enable better asset management and interoperability.
         - We will release a simple Real2Sim pipeline, which enables automatic task generation from real-world data.
     - Robots Integration:
         - Add support for more robot models (eg: LeRobot, Unitree H1/G1, etc).

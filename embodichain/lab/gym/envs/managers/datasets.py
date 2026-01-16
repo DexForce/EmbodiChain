@@ -40,11 +40,9 @@ try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
 
     LEROBOT_AVAILABLE = True
-
     __all__ = ["LeRobotRecorder"]
 except ImportError:
     LEROBOT_AVAILABLE = False
-
     __all__ = []
 
 
@@ -72,6 +70,11 @@ class LeRobotRecorder(Functor):
                 - export_success_only: Whether to export only successful episodes
             env: The environment instance
         """
+        if not LEROBOT_AVAILABLE:
+            logger.log_error(
+                "LeRobot is not installed. Please install it with: pip install lerobot"
+            )
+
         super().__init__(cfg, env)
 
         # Extract parameters from cfg.params
@@ -103,8 +106,6 @@ class LeRobotRecorder(Functor):
 
         # Initialize dataset
         self._initialize_dataset()
-
-        logger.log_info(f"LeRobotRecorder initialized at: {self.dataset_path}")
 
     @property
     def dataset_path(self) -> str:
@@ -215,7 +216,6 @@ class LeRobotRecorder(Functor):
             elif terminateds is not None:
                 is_success = terminateds[env_id].item()
 
-            logger.log_info(f"Episode {env_id} success: {is_success}")
             if self.export_success_only and not is_success:
                 logger.log_info(f"Skipping failed episode for env {env_id}")
                 continue
@@ -294,11 +294,6 @@ class LeRobotRecorder(Functor):
 
         fps = self.robot_meta.get("control_freq", 30)
         features = self._build_features()
-
-        logger.log_info("------------------------------------------")
-        logger.log_info(f"Building dataset: {dataset_name}")
-        logger.log_info(f"Parent directory: {lerobot_data_root}")
-        logger.log_info(f"Full path: {self.dataset_full_path}")
 
         self.dataset = LeRobotDataset.create(
             repo_id=dataset_name,
