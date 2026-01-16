@@ -1,14 +1,17 @@
 # Simulation Manager
 
-The `SimulationManager` is the central class in EmbodiChain's simulation framework for managing the simulation lifecycle. It handles:
-- **Asset Management**: Loading and managing robots, rigid objects, soft objects, articulations, sensors, and lights.
+```{currentmodule} embodichain.lab.sim
+```
+
+The {class}`SimulationManager` is the central class in EmbodiChain's simulation framework for managing the simulation lifecycle. It handles:
+- **Asset Management**: Loading and managing robots, rigid objects, soft objects, articulations, and lights.
 - **Simulation Loop**: Controlling the physics stepping and rendering updates.
 - **Rendering**: Managing the simulation window, camera rendering, material settings and ray-tracing configuration.
 - **Interaction**: Providing gizmo controls for interactive manipulation of objects.
 
 ## Configuration
 
-The simulation is configured using the `SimulationManagerCfg` class.
+The simulation is configured using the {class}`SimulationManagerCfg` class.
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
@@ -45,7 +48,7 @@ sim_config = SimulationManagerCfg(
 
 ### Physics Configuration
 
-The `PhysicsCfg` class controls the global physics simulation parameters.
+The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parameters.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -77,7 +80,6 @@ The manager provides methods to add, retrieve and remove various simulation asse
 - Soft Objects
 - Articulations
 - Robots
-- Sensors
 - Lights
 - Materials
 
@@ -87,7 +89,7 @@ For more details on simulation assets, please refer to their respective document
 
 ### Manual Update mode
 
-In this mode, the physics simulation should be explicitly stepped by calling `update()` method, which provides precise control over the simulation timing. 
+In this mode, the physics simulation should be explicitly stepped by calling {meth}`~SimulationManager.update()` method, which provides precise control over the simulation timing. 
 
 The use case for manual update mode includes:
 - Data generation with openai gym environments, in which the observation and action must be synchronized with the physics simulation.
@@ -110,11 +112,13 @@ In this mode, the physics simulation stepping is automatically handling by the p
 > When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
 
 
-### Methods
+### Mainly used methods
 
-- **`update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
-- **`enable_physics(enable: bool)`**: Enable or disable physics simulation.
-- **`set_manual_update(enable: bool)`**: Set manual update mode for physics.
+- **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
+- **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
+- **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
+
+For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
 
 ### Related Tutorials
 

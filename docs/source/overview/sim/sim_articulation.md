@@ -1,11 +1,13 @@
 # Articulation
 
-The `Articulation` class represents the fundamental physics entity for articulated objects (e.g., robots, grippers, cabinets, doors) in EmbodiChain.
+```{currentmodule} embodichain.lab.sim
+```
+
+The {class}`~objects.Articulation` class represents the fundamental physics entity for articulated objects (e.g., robots, grippers, cabinets, doors) in EmbodiChain.
 
 ## Configuration
 
-Articulations are configured using the `ArticulationCfg` dataclass.
-
+Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `fpath` | `str` | `None` | Path to the asset file (URDF/MJCF). |

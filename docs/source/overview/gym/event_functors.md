@@ -3,7 +3,7 @@
 ```{currentmodule} embodichain.lab.gym.envs.managers
 ```
 
-This page lists all available event functors that can be used with the Event Manager. Event functors are configured using {class}`envs.managers.cfg.EventCfg` and can be triggered at different stages: ``startup``, ``reset``, or ``interval``.
+This page lists all available event functors that can be used with the Event Manager. Event functors are configured using {class}`~envs.managers.cfg.EventCfg` and can be triggered at different stages: ``startup``, ``reset``, or ``interval``.
 
 ## Physics Randomization
 

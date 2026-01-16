@@ -1,12 +1,15 @@
 # Simulation Assets
 
-Simulation assets in EmbodiChain are configured using Python dataclasses. This approach provides a structured and type-safe way to define properties for physics, materials, objects and sensors in the simulation environment. 
+```{currentmodule} embodichain.lab.sim
+```
+
+Simulation assets in EmbodiChain are configured using Python dataclasses. This approach provides a structured and type-safe way to define properties for physics, materials and objects in the simulation environment. 
 
 ## Visual Materials
 
 ### Configuration
 
-The `VisualMaterialCfg` class defines the visual appearance of objects using Physically Based Rendering (PBR) properties.
+The {class}`~material.VisualMaterialCfg` class defines the visual appearance of objects using Physically Based Rendering (PBR) properties.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -25,11 +28,11 @@ The `VisualMaterialCfg` class defines the visual appearance of objects using Phy
 
 ### Visual Material and Visual Material Instance
 
-A visual material is defined using the `VisualMaterialCfg` class. It is actually a material template that can be used to create multiple instances with different parameters.
+A visual material is defined using the {class}`~material.VisualMaterialCfg` class. It is actually a material template that can be used to create multiple instances with different parameters.
 
-A visual material instance is created from a visual material using the method `create_instance()`. User can set different properties for each instance. For details API usage, please refer to the [VisualMaterialInst](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.material.VisualMaterialInst) documentation.
+A visual material instance is created from a visual material using the method {meth}`~material.VisualMaterial.create_instance()`. User can set different properties for each instance. For details API usage, please refer to the [VisualMaterialInst](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.material.VisualMaterialInst) documentation.
 
-For batch simualtion scenarios, when user set a material to a object (eg, a rigid object), the material instance will be created for each simulation instance automatically. 
+For batch simualtion scenarios, when user set a material to a object (eg, a rigid object with `num_envs` instances), the material instance will be created for each simulation instance automatically. 
 
 ### Code 
 
@@ -56,7 +59,7 @@ mat_inst[0].set_base_color([1.0, 0.0, 0.0, 1.0])
 
 ## Objects
 
-All objects inherit from `ObjectBaseCfg`, which provides common properties.
+All objects inherit from {class}`~cfg.ObjectBaseCfg`, which provides common properties.
 
 **Base Properties**
 
@@ -69,7 +72,7 @@ All objects inherit from `ObjectBaseCfg`, which provides common properties.
 
 ## Rigid Object
 
-Configured via `RigidObjectCfg`.
+Configured via {class}`~cfg.RigidObjectCfg`.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -81,7 +84,7 @@ Configured via `RigidObjectCfg`.
 
 ### Rigid Body Attributes
 
-The `RigidBodyAttributesCfg` class defines physical properties for rigid bodies.
+The {class}`~cfg.RigidBodyAttributesCfg` class defines physical properties for rigid bodies.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -99,59 +102,12 @@ The `RigidBodyAttributesCfg` class defines physical properties for rigid bodies.
 | `dynamic_friction` | `float` | `0.5` | Dynamic friction coefficient. |
 | `static_friction` | `float` | `0.5` | Static friction coefficient. |
 
-For Rigid Object tutorial, please refer to the [Create Scene](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html).
+For Rigid Object tutorial, please refer to the [Create Scene](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html) tutorial.
 
 ## Rigid Object Groups
 
-`RigidObjectGroupCfg` allows initializing multiple rigid objects, potentially from a folder.
+{class}`~cfg.RigidObjectGroupCfg` allows initializing multiple rigid objects, potentially from a folder.
 
-
-## Soft Object
-
-Configured via `SoftObjectCfg`.
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `voxel_attr` | `SoftbodyVoxelAttributesCfg` | `...` | Voxelization attributes. |
-| `physical_attr` | `SoftbodyPhysicalAttributesCfg` | `...` | Physical attributes. |
-| `shape` | `MeshCfg` | `MeshCfg()` | Mesh configuration. |
-
-### Soft Body Attributes
-
-Soft bodies require both voxelization and physical attributes.
-
-**Voxel Attributes (`SoftbodyVoxelAttributesCfg`)**
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `triangle_remesh_resolution` | `int` | `8` | Resolution to remesh the softbody mesh before building physx collision mesh. |
-| `triangle_simplify_target` | `int` | `0` | Simplify mesh faces to target value. |
-| `simulation_mesh_resolution` | `int` | `8` | Resolution to build simulation voxelize textra mesh. |
-| `simulation_mesh_output_obj` | `bool` | `False` | Whether to output the simulation mesh as an obj file for debugging. |
-
-**Physical Attributes (`SoftbodyPhysicalAttributesCfg`)**
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `youngs` | `float` | `1e6` | Young's modulus (higher = stiffer). |
-| `poissons` | `float` | `0.45` | Poisson's ratio (higher = closer to incompressible). |
-| `dynamic_friction` | `float` | `0.0` | Dynamic friction coefficient. |
-| `elasticity_damping` | `float` | `0.0` | Elasticity damping factor. |
-| `material_model` | `SoftBodyMaterialModel` | `CO_ROTATIONAL` | Material constitutive model. |
-| `enable_kinematic` | `bool` | `False` | If True, (partially) kinematic behavior is enabled. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection. |
-| `enable_self_collision` | `bool` | `False` | Enable self-collision handling. |
-| `mass` | `float` | `-1.0` | Total mass. If negative, density is used. |
-| `density` | `float` | `1000.0` | Material density in kg/m^3. |
-
-For Soft Object tutorial, please refer to the [Soft Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html).
-
-
-### Articulations & Robots
-
-Configured via `ArticulationCfg` and `RobotCfg` (which inherits from `ArticulationCfg`).
-
-These configurations are typically loaded from URDF or MJCF files.
 
 ### Lights
 
@@ -164,15 +120,11 @@ Configured via `LightCfg`.
 | `intensity` | `float` | `50.0` | Intensity in watts/m^2. |
 | `radius` | `float` | `1e2` | Falloff radius. |
 
-### Markers
 
-Configured via `MarkerCfg` for debugging and visualization.
+```{toctree}
+:maxdepth: 1
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `marker_type` | `Literal` | `"axis"` | "axis", "line", or "point". |
-| `axis_size` | `float` | `0.002` | Thickness of axis lines. |
-| `axis_len` | `float` | `0.005` | Length of axis arms. |
-| `line_color` | `list` | `[1, 1, 0, 1.0]` | RGBA color for lines. |
-
-
+sim_soft_object.md
+sim_articulation.md
+sim_robot.md
+```
