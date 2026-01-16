@@ -1,0 +1,31 @@
+{    "TaskAgent": {
+        "prompt_name": "one_stage_prompt_for_correction"
+    },
+    "CodeAgent": {
+        "prompt_name": "one_stage_prompt_according_to_task_plan"
+    },
+    "Agent": {
+        "prompt_kwargs": {
+            "task_prompt": {
+                "type": "text",
+                "name": "RearrangementAgent-v3/task_prompt.txt"
+            },
+            "basic_background": {
+                "type": "text",
+                "name": "basic_background.txt"
+            },
+            "atom_actions": {
+                "type": "text",
+                "name": "atom_actions.txt"
+            },
+            "code_prompt": {
+                "type": "text",
+                "name": "code_prompt.txt"
+            },
+            "code_example": {
+                "type": "text",
+                "name": "code_example.txt"
+            }
+        }
+    }
+}
