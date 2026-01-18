@@ -20,6 +20,7 @@ import os
 database_dir = os.path.dirname(os.path.abspath(__file__)).replace("data", "database")
 database_2d_dir = os.path.join(database_dir, "2dasset")
 database_agent_prompt_dir = os.path.join(database_dir, "agent_prompt")
+database_demo_dir = os.path.join(database_dir, "demostration")
 
 from . import assets
 from .dataset import *
