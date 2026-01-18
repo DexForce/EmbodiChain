@@ -26,7 +26,7 @@ dynamic = ["version"]
 # Core install dependencies (kept from requirements.txt). Some VCS links are
 # specified using PEP 508 direct references where present.
 dependencies = [
-  "dexsim_engine==0.3.8",
+  "dexsim_engine==0.3.9",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
   "toppra==0.6.3",

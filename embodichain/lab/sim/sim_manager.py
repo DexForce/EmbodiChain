@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import sys
 import dexsim
@@ -62,6 +64,7 @@ from embodichain.lab.sim.sensors import (
     BaseSensor,
     Camera,
     StereoCamera,
+    ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
     PhysicsCfg,
@@ -155,15 +158,41 @@ class SimulationManager:
             - physics simulation management, eg. time step, manual update, etc.
             - interactive control via gizmo and window callbacks events.
 
+    This class implements the singleton pattern to ensure only one instance exists at a time.
+
     Args:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
     """
 
-    SUPPORTED_SENSOR_TYPES = {"Camera": Camera, "StereoCamera": StereoCamera}
+    _instance = None
+    _is_initialized = False
+
+    SUPPORTED_SENSOR_TYPES = {
+        "Camera": Camera,
+        "StereoCamera": StereoCamera,
+        "ContactSensor": ContactSensor,
+    }
+
+    def __new__(cls, sim_config: SimulationManagerCfg = SimulationManagerCfg()):
+        """Create or return the singleton instance."""
+        if cls._instance is None:
+            cls._instance = super(SimulationManager, cls).__new__(cls)
+        return cls._instance
 
     def __init__(
         self, sim_config: SimulationManagerCfg = SimulationManagerCfg()
     ) -> None:
+        # Skip initialization if already initialized
+        if self._is_initialized:
+            logger.log_warning(
+                "SimulationManager is already initialized. Skipping re-initialization. "
+                "Use SimulationManager.get_instance() to get the existing instance or "
+                "SimulationManager.reset() to create a new instance."
+            )
+            return
+
+        # Mark as initialized
+        SimulationManager._is_initialized = True
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
@@ -247,6 +276,43 @@ class SimulationManager:
         self.set_manual_update(True)
 
         self._build_multiple_arenas(sim_config.num_envs)
+
+    @classmethod
+    def get_instance(cls) -> SimulationManager:
+        """Get the singleton instance of SimulationManager.
+
+        Returns:
+            SimulationManager: The singleton instance.
+
+        Raises:
+            RuntimeError: If the instance has not been created yet.
+        """
+        if cls._instance is None:
+            logger.log_error(
+                "SimulationManager has not been instantiated yet. "
+                "Create an instance first using SimulationManager(sim_config)."
+            )
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the singleton instance.
+
+        This allows creating a new instance with different configuration.
+        """
+        if cls._instance is not None:
+            logger.log_info("Resetting SimulationManager singleton instance.")
+        cls._instance = None
+        cls._is_initialized = False
+
+    @classmethod
+    def is_instantiated(cls) -> bool:
+        """Check if the singleton instance has been created.
+
+        Returns:
+            bool: True if the instance exists, False otherwise.
+        """
+        return cls._instance is not None
 
     @property
     def num_envs(self) -> int:
@@ -884,6 +950,24 @@ class SimulationManager:
             return None
         return self._rigid_object_groups[uid]
 
+    @cached_property
+    def arena_offsets(self) -> torch.Tensor:
+        """Get the arena offsets for all arenas.
+
+        Returns:
+            torch.Tensor: The arena offsets of shape (num_arenas, 3).
+        """
+        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+        arena_offsets = torch.zeros(
+            (len(env_list), 3), dtype=torch.float32, device=self.device
+        )
+        for i, env in enumerate(env_list):
+            arena_position = env.get_root_node().get_world_pose()[:3, 3]
+            arena_offsets[i] = torch.tensor(
+                arena_position, dtype=torch.float32, device=self.device
+            )
+        return arena_offsets
+
     def _get_non_static_rigid_obj_num(self) -> int:
         """Get the number of non-static rigid objects in the scene.
 
@@ -1475,3 +1559,5 @@ class SimulationManager:
 
         self._env.clean()
         self._world.quit()
+
+        self.reset()
