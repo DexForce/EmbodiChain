@@ -62,6 +62,14 @@ class ControlParts(Enum):
     HEAD = "head"
     WAIST = "waist"
 
+class ControlPartsMappingW1(Enum):
+    ANKLE_IN_TORSO = 0
+    KNEE_IN_TORSO = 1
+    BUTTOCK_IN_TORSO = 2
+    WAIST_IN_TORSO = 3
+
+    NECK1_IN_HEAD = 0
+    NECK2_IN_HEAD = 1
 
 class Hints(Enum):
     EEF = (
@@ -91,10 +99,105 @@ class PrivilegeType(Enum):
     STATE = "state"
     PROGRESS = "progress"
 
+SUPPORTED_PROPRIO_TYPES = [
+    ControlParts.LEFT_ARM.value + EefType.POSE.value,
+    ControlParts.RIGHT_ARM.value + EefType.POSE.value,
+    ControlParts.LEFT_ARM.value + JointType.QPOS.value,
+    ControlParts.RIGHT_ARM.value + JointType.QPOS.value,
+    ControlParts.LEFT_EEF.value + EndEffector.DEXTROUSHAND.value,
+    ControlParts.RIGHT_EEF.value + EndEffector.DEXTROUSHAND.value,
+    ControlParts.LEFT_EEF.value + EndEffector.GRIPPER.value,
+    ControlParts.RIGHT_EEF.value + EndEffector.GRIPPER.value,
+    ControlParts.HEAD.value + JointType.QPOS.value,
+    ControlParts.WAIST.value + JointType.QPOS.value,
+]
+SUPPORTED_ACTION_TYPES = SUPPORTED_PROPRIO_TYPES + [
+    ControlParts.LEFT_ARM.value + ActionMode.RELATIVE.value + JointType.QPOS.value,
+    ControlParts.RIGHT_ARM.value + ActionMode.RELATIVE.value + JointType.QPOS.value,
+]
+SUPPORTED_EXTRA_VISION_TYPES = [
+    Modality.GEOMAP.value,
+    PrivilegeType.EXTEROCEPTION.value,
+    PrivilegeType.MASK.value,
+]
+
 class ArmEnum(IntEnum):
     LEFT_ARM_ONLY = 1
     RIGHT_ARM_ONLY = 2
     DUAL_ARM = 3
 
+class ArmName(Enum):
+    LEFT_ARM_ONLY = "left_arm"
+    RIGHT_ARM_ONLY = "right_arm"
+
 def is_dual_arms(dofs: int) -> bool:
     return dofs > 10
+
+class HandQposNormalizer:
+    """
+    A class for normalizing and denormalizing dexterous hand qpos data.
+    """
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def normalize_hand_qpos(
+        qpos_data: np.ndarray,
+        key: str,
+        agent=None,
+        robot=None,
+    ) -> np.ndarray:
+        """
+        Clip and normalize dexterous hand qpos data.
+
+        Args:
+            qpos_data: Raw qpos data
+            key: Control part key
+            agent: LearnableRobot instance (for V2 API)
+            robot: Robot instance (for V3 API)
+
+        Returns:
+            Normalized qpos data in range [0, 1]
+        """
+        if isinstance(qpos_data, torch.Tensor):
+            qpos_data = qpos_data.cpu().numpy()
+
+        if agent is not None:
+            if key not in [
+                ControlParts.LEFT_EEF.value + EndEffector.DEXTROUSHAND.value,
+                ControlParts.RIGHT_EEF.value + EndEffector.DEXTROUSHAND.value,
+            ]:
+                return qpos_data
+            indices = agent.get_data_index(key, warning=False)
+            full_limits = agent.get_joint_limits(agent.uid)
+            limits = full_limits[indices]  # shape: [num_joints, 2]
+        elif robot is not None:
+            if key not in [
+                ControlParts.LEFT_EEF.value + EndEffector.DEXTROUSHAND.value,
+                ControlParts.RIGHT_EEF.value + EndEffector.DEXTROUSHAND.value,
+            ]:
+                if key in [ControlParts.LEFT_EEF.value, ControlParts.RIGHT_EEF.value]:
+                    # Note: In V3, robot does not distinguish between GRIPPER EEF and HAND EEF in uid,
+                    # _data_key_to_control_part maps both to EEF. Under current conditions, normalization
+                    # will not be performed. Please confirm if this is intended.
+                    pass
+                return qpos_data
+            indices = robot.get_joint_ids(key, remove_mimic=True)
+            limits = robot.body_data.qpos_limits[0][indices]  # shape: [num_joints, 2]
+        else:
+            raise ValueError("Either agent or robot must be provided")
+
+        if isinstance(limits, torch.Tensor):
+            limits = limits.cpu().numpy()
+
+        qpos_min = limits[:, 0]  # Lower limits
+        qpos_max = limits[:, 1]  # Upper limits
+
+        # Step 1: Clip to valid range
+        qpos_clipped = np.clip(qpos_data, qpos_min, qpos_max)
+
+        # Step 2: Normalize to [0, 1]
+        qpos_normalized = (qpos_clipped - qpos_min) / (qpos_max - qpos_min + 1e-8)
+
+        return qpos_normalized
