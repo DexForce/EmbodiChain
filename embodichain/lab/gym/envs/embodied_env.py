@@ -149,7 +149,6 @@ class EmbodiedEnv(BaseEnv):
 
         # TODO: Change to array like data structure to handle different demo action list length for across different arena.
         self.action_length: int = 0  # Set by create_demo_action_list
-        self._action_step_counter: int = 0  # Track steps within current action sequence
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -257,54 +256,15 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
-    def reset(
-        self, seed: int | None = None, options: dict | None = None
-    ) -> Tuple[EnvObs, Dict]:
-        obs, info = super().reset(seed=seed, options=options)
-        self._action_step_counter = 0  # Reset action step counter
-        return obs, info
-
-    def step(
-        self, action: EnvAction, **kwargs
-    ) -> Tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        """Step the environment with the given action.
-
-        Extends BaseEnv.step() to integrate with DatasetManager for automatic
-        data collection and saving. The key is to:
-        1. Record obs-action pairs as they happen
-        2. Detect episode completion
-        3. Auto-save episodes BEFORE reset
-        4. Then perform the actual reset
-        """
-        self._elapsed_steps += 1
-        self._action_step_counter += 1  # Increment action sequence counter
-
-        action = self._step_action(action=action)
-        self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
-        self._update_sim_state(**kwargs)
-
-        obs = self.get_obs(**kwargs)
-        info = self.get_info(**kwargs)
-        rewards = self.get_reward(obs=obs, action=action, info=info)
-
-        # Check termination conditions
-        terminateds = torch.logical_or(
-            info.get(
-                "success",
-                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
-            ),
-            info.get(
-                "fail", torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-            ),
-        )
-        truncateds = self.check_truncated(obs=obs, info=info)
-        if self.cfg.ignore_terminations:
-            terminateds[:] = False
-
-        # Detect which environments need reset
-        dones = torch.logical_or(terminateds, truncateds)
-        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
-
+    def _hook_after_sim_step(
+        self,
+        obs: EnvObs,
+        action: EnvAction,
+        dones: torch.Tensor,
+        terminateds: torch.Tensor,
+        info: Dict,
+        **kwargs,
+    ):
         # Call dataset manager with mode="save": it will record and auto-save if dones=True
         if self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
@@ -317,12 +277,6 @@ class EmbodiedEnv(BaseEnv):
                     terminateds=terminateds,
                     info=info,
                 )
-
-        # Now perform reset for completed environments
-        if len(reset_env_ids) > 0:
-            obs, _ = self.reset(options={"reset_ids": reset_env_ids})
-
-        return obs, rewards, terminateds, truncateds, info
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -533,8 +487,8 @@ class EmbodiedEnv(BaseEnv):
             A boolean tensor indicating truncation for each environment in the batch.
         """
         # Check if action sequence has reached its end
-        if self.action_length > 0 and self._action_step_counter >= self.action_length:
-            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        if self.action_length > 0:
+            return self._elapsed_steps >= self.action_length
 
         return super().check_truncated(obs, info)
 
