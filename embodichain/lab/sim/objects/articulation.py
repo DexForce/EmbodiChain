@@ -1132,7 +1132,7 @@ class Articulation(BatchEntity):
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
 
-    def get_user_ids(self, link_name: str | None) -> torch.Tensor:
+    def get_user_ids(self, link_name: str | None = None) -> torch.Tensor:
         """Get the user ids of the articulation.
 
         Args:

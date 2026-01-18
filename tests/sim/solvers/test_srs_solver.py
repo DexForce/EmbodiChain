@@ -271,8 +271,7 @@ class BaseRobotSolverTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        if self.sim is not None:
-            self.sim.destroy()
+        self.sim.destroy()
 
 
 class TestSRSCPUSolver(BaseSolverTest):
