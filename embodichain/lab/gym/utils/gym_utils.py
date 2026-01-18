@@ -437,6 +437,9 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
+    # load dataset config
+    env_cfg.dataset = config["env"].get("dataset", None)
+
     # TODO: support more env events, eg, grasp pose generation, mesh preprocessing, etc.
 
     env_cfg.dataset = ComponentCfg()
@@ -471,6 +474,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             "embodichain.lab.gym.envs.managers.randomization",
             "embodichain.lab.gym.envs.managers.record",
             "embodichain.lab.gym.envs.managers.events",
+            "embodichain.lab.gym.envs.managers.real2sim",
         ]
 
         # parser env events config
