@@ -33,6 +33,16 @@ class SemanticMask(IntEnum):
     FOREGROUND = 1
     ROBOT = 2
 
+class Modality(Enum):
+    STATES = "states"
+    STATE_INDICATOR = "state_indicator"
+    ACTIONS = "actions"
+    ACTION_INDICATOR = "action_indicator"
+    IMAGES = "images"
+    LANG = "lang"
+    LANG_INDICATOR = "lang_indicator"
+    GEOMAP = "geomap"  # e.g., depth, point cloud, etc.
+    VISION_LANGUAGE = "vision_language"  # e.g., image + lang
 
 class EndEffector(Enum):
     GRIPPER = "gripper"
@@ -74,3 +84,17 @@ class EefType(Enum):
 class ActionMode(Enum):
     ABSOLUTE = ""
     RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
+
+class PrivilegeType(Enum):
+    EXTEROCEPTION = "exteroception"
+    MASK = "mask"
+    STATE = "state"
+    PROGRESS = "progress"
+
+class ArmEnum(IntEnum):
+    LEFT_ARM_ONLY = 1
+    RIGHT_ARM_ONLY = 2
+    DUAL_ARM = 3
+
+def is_dual_arms(dofs: int) -> bool:
+    return dofs > 10
