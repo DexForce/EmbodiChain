@@ -70,12 +70,13 @@ def generate_function(
         ret = []
         trajectory_idx = 0
 
-        env.create_demo_action_list(regenerate=regenerate)
+        # Access the wrapped environment's method
+        env.get_wrapper_attr("create_demo_action_list")(regenerate=regenerate)
 
         # ---------------------------------------------------------
         # SUCCESS CASE
         # ---------------------------------------------------------
-        if not debug_mode and env.is_task_success().item():
+        if not debug_mode and env.get_wrapper_attr("is_task_success")().item():
 
             dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
 
@@ -85,13 +86,16 @@ def generate_function(
                 num_samples = kwargs.get("num_samples", 0)
                 is_save_dataset = time_id < num_samples
 
-                data_dict = env.to_dataset(id=dataset_id if is_save_dataset else None)
+                data_dict = env.get_wrapper_attr("to_dataset")(id=dataset_id if is_save_dataset else None)
                 ret.append(data_dict)
             else:
-                data_dict = env.to_dataset(id=dataset_id)
+                data_dict = env.get_wrapper_attr("to_dataset")(id=dataset_id)
 
             # episode id
-            episode = getattr(env, "get_current_episode", lambda: time_id)()
+            try:
+                episode = env.get_wrapper_attr("get_current_episode")()
+            except AttributeError:
+                episode = time_id
 
             # video saving
             if save_video:
