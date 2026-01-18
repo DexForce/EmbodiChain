@@ -154,8 +154,8 @@ def plan_gripper_trajectory(env, is_left, sample_num, execute_open,
         ee_state_expand_select = np.array([open_state, close_state])
         env.set_current_gripper_state_agent(close_state, is_left=is_left)
 
-    ee_state_expand_select = mul_linear_expand(ee_state_expand_select, [sample_num], include_endpoint=True)
-
+    ee_state_expand_select = mul_linear_expand(ee_state_expand_select, [sample_num])
+   
     select_qpos_traj.extend([select_arm_current_qpos] * sample_num)
     ee_state_list_select.extend(ee_state_expand_select)
 
