@@ -3,6 +3,9 @@ from embodichain.utils import logger
 import traceback
 from embodichain.data import database_agent_prompt_dir
 from pathlib import Path
+import tempfile
+import numpy as np
+import random
 import os
 from embodichain.toolkits.interfaces import extract_drive_calls, draw_axis
 from embodichain.agents.hierarchy.code_agent import format_execution_history
@@ -179,16 +182,44 @@ class BaseAgentEnv:
             color="green",
         )
 
-        # # Task planning (not used currently)
-        # print(f"\033[92m\nStart task planning.\n\033[0m")
-        # task_agent_input = self.task_agent.get_composed_observations(env=self)
-        # query = self.task_agent.generate(**task_agent_input, regenerate=regenerate, **kwargs)
+        # Task planning
+        print(f"\033[92m\nStart task planning.\n\033[0m")
+        
+        # Handle one_stage_prompt_for_correction which needs obs_image_path
+        if self.task_agent.prompt_name == 'one_stage_prompt_for_correction':
+            kwargs.setdefault("last_task_plan", "None.")
+            kwargs.setdefault("last_executed_failure", "None.")
+            kwargs.setdefault("last_executed_history", "None.")
+            
+            temp_img_dir = Path(tempfile.mkdtemp()) / "obs_images"
+            temp_img_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Convert torch tensor to numpy array if needed
+            obs_image = self.get_obs_for_agent()["valid_rgb_1"]
+            if isinstance(obs_image, torch.Tensor):
+                obs_image = obs_image.cpu().numpy()
+            if obs_image.dtype in [np.float32, np.float64]:
+                obs_image = (obs_image * 255).astype(np.uint8)
+            
+            obs_image_path = save_obs_image(
+                obs_image=obs_image,
+                save_dir=temp_img_dir,
+                step_id=0
+            )
+            kwargs['obs_image_path'] = str(obs_image_path)
+        
+        task_agent_input = self.task_agent.get_composed_observations(
+            env=self, regenerate=regenerate, **kwargs
+        )
+        task_plan = self.task_agent.generate(**task_agent_input)
 
         # Code generation
         print(f"\033[94m\nStart code generation.\n\033[0m")
         code_agent_input = self.code_agent.get_composed_observations(
             env=self, regenerate=regenerate, **kwargs
         )
+        code_agent_input['task_plan'] = task_plan
+        
         code_file_path, kwargs, code = self.code_agent.generate(**code_agent_input)
         return code_file_path, kwargs, code
 
@@ -199,197 +230,55 @@ class BaseAgentEnv:
         )
         action_list = self.code_agent.act(code_file_path, **kwargs)
         return action_list
-
-    def create_demo_action_list_with_self_correction(self, **kwargs):
-        logger.log_info(
-            f"Generate code for creating action list for {self.code_agent.task_name} with self correction.",
-            color="green",
+    
+    def to_dataset(
+        self,
+        id: str = None,
+        obs_list: list = None,
+        action_list: list = None,
+    ):
+        from embodichain.data.data_engine.data_dict_extractor import (
+            fetch_imitation_dataset,
         )
 
-        # Create log file name with timestamp
-        import datetime
+        from embodichain.lab.gym.robots.interface import LearnableRobot
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_dir = (
-            Path(database_agent_prompt_dir)
-            / self.code_agent.task_name
-            / "self_correction_logs"
-            / timestamp
-        )
-        os.makedirs(log_dir, exist_ok=True)
-        img_dir = log_dir / "observation_images"
+        # Initialize curr_episode if not exists
+        if not hasattr(self, "curr_episode"):
+            self.curr_episode = 0
 
-        kwargs.setdefault("env", self)
-        kwargs.setdefault("log_dir", log_dir)
-        kwargs.setdefault("file_path", log_dir / "agent_generated_code.py")
-        kwargs.setdefault("md_path", log_dir / "agent_llm_responses.md")
-        kwargs.setdefault("last_task_plan", "None.")
-        kwargs.setdefault("last_executed_failure", "None.")
-        kwargs.setdefault("last_executed_history", "None.")
+        # Get episode data from env if not provided
+        if obs_list is None:
+            obs_list = getattr(self, "_episode_obs_list", [])
+        if action_list is None:
+            action_list = getattr(self, "_episode_action_list", [])
+        
+        if len(obs_list) == 0 or len(action_list) == 0:
+            logger.log_warning("No episode data found. Returning empty dataset.")
+            return {
+                "data_path": None,
+                "id": id,
+                "current_episode": self.curr_episode,
+                "data": None,
+                "save_path": None,
+            }
 
-        # TODO: rethink which part should be divided to task / code agents. Important!
-        # TODO: use the task agent to select which needs the validation (mainly interaction with the objects), not all steps.
-        # TODO: add logs
-        # TODO： maybe use a sequence of images for task planning
+        dataset_path = self.metadata["dataset"].get("save_path", None)
+        if dataset_path is None:
+            from embodichain.data import database_demo_dir
 
-        step_id = 0
-        save_obs_image(
-            obs_image=self.get_obs_for_agent()["valid_rgb_1"],
-            save_dir=img_dir / "cam_1",
-            step_id=step_id,
-        )
-        save_obs_image(
-            obs_image=self.get_obs_for_agent()["valid_rgb_2"],
-            save_dir=img_dir / "cam_2",
-            step_id=step_id,
-        )
-        save_obs_image(
-            obs_image=self.get_obs_for_agent()["valid_rgb_3"],
-            save_dir=img_dir / "cam_3",
-            step_id=step_id,
+            dataset_path = database_demo_dir
+
+        # TODO: create imitation dataset folder with name "{task_name}_{robot_type}_{num_episodes}"
+        from embodichain.lab.gym.utils.misc import camel_to_snake
+
+        if not hasattr(self, "folder_name") or self.curr_episode == 0:
+            robot_class_name = self.robot.__class__.__name__ if hasattr(self, "robot") and self.robot is not None else "Robot"
+            self.folder_name = f"{camel_to_snake(self.__class__.__name__)}_{camel_to_snake(robot_class_name)}"
+            if os.path.exists(os.path.join(dataset_path, self.folder_name)):
+                self.folder_name = f"{self.folder_name}_{random.randint(0, 1000)}"
+
+        return fetch_imitation_dataset(
+            self, obs_list, action_list, id, self.folder_name
         )
 
-        task_agent_input = self.task_agent.get_composed_observations(**kwargs)
-        code_agent_input = self.code_agent.get_composed_observations(**kwargs)
-        while True:
-            exec_code = []
-            print(f"\033[94m\nStart task planning.\n\033[0m")
-            task_plan, plan_list, validation_list = (
-                self.task_agent.generate_for_correction(
-                    img_dir=img_dir / "cam_1", **task_agent_input
-                )
-            )
-
-            # TODO: maybe here I need to insert an error-occurred agent, calling some error-occurred apis, maybe with correction action too.
-            # TODO：maybe the validation agent can provide correction action, and no need to generate the subsequent full task by the task agent.
-
-            print(f"\033[92m\nStart code generation.\n\033[0m")
-            code_agent_input, code = self.code_agent.generate_according_to_task_plan(
-                task_plan=task_plan, **code_agent_input
-            )
-            drive_list = extract_drive_calls(code)
-            for action_id, single_action in enumerate(drive_list):
-                try:
-                    # ---------- execute ----------
-                    self.code_agent.act_single_action(single_action, **code_agent_input)
-                    exec_success = True
-                    exec_trace = None
-
-                    # # # # TODO: manually adjust the bottle pose for testing
-                    # if step_id == 2:
-                    #
-                    #     # pose = torch.tensor(
-                    #     #     [[[0.99989, -0.00457, -0.01415, 0.72850],
-                    #     #       [0.00457, 0.99999, -0.00041, -0.20441],
-                    #     #       [0.01415, 0.00034, 0.99990, 0.92571],
-                    #     #       [0.00000, 0.00000, 0.00000, 1.00000]]],
-                    #     #     dtype=torch.float32
-                    #     # )
-                    #     # self.sim.get_rigid_object('bottle').set_local_pose(pose)
-                    #
-                    #     pose = torch.tensor(
-                    #         [[[0.99989, -0.00457, -0.01415, 0.722850],
-                    #           [0.00457, 0.99999, -0.00041, 0.20441],
-                    #           [0.01415, 0.00034, 0.99990, 0.92571],
-                    #           [0.00000, 0.00000, 0.00000, 1.00000]]],
-                    #         dtype=torch.float32
-                    #     )
-                    #     self.sim.get_rigid_object('cup').set_local_pose(pose)
-                    #
-                    #     # pose = self.sim.get_rigid_object('spoon').get_local_pose(to_matrix=True).squeeze(0)
-                    #     # pose[0, 3] = 0.6
-                    #     # pose[1, 3] = -0.35
-                    #     # pose[2, 3] = 0.8
-                    #     # self.sim.get_rigid_object('spoon').set_local_pose(pose.unsqueeze(0))
-                    #
-                    #     for i in range(5):
-                    #         _ = self.step(action=self.robot.get_qpos())
-
-                except Exception:
-                    exec_success = False
-                    exec_trace = traceback.format_exc()
-                    print(f"Execution failed:\n{exec_trace}")
-
-                # ---------- step transition ----------
-                step_id += 1
-
-                save_obs_image(
-                    obs_image=self.get_obs_for_agent()["valid_rgb_1"],
-                    save_dir=img_dir / "cam_1",
-                    step_id=step_id,
-                )
-                save_obs_image(
-                    obs_image=self.get_obs_for_agent()["valid_rgb_2"],
-                    save_dir=img_dir / "cam_2",
-                    step_id=step_id,
-                )
-                save_obs_image(
-                    obs_image=self.get_obs_for_agent()["valid_rgb_3"],
-                    save_dir=img_dir / "cam_3",
-                    step_id=step_id,
-                )
-
-                # ---------- post-execution handling ----------
-                if exec_success:
-                    if code_agent_input.get("validation_agent"):
-                        print(
-                            f"\033[33mStarting validation with condition '{validation_list[action_id]}'!\033[0m"
-                        )
-                        validation_info = self.validation_agent.validate_single_action(
-                            single_action,
-                            plan_list[action_id],
-                            validation_list[action_id],
-                            img_dir,
-                            get_obj_position_info(self),
-                        )
-
-                        if "SUCCESS" in validation_info:
-                            print(f"\033[33mValid info:\n{validation_info}\033[0m")
-                            is_success = True
-                            exec_code.append(plan_list[action_id])
-                            continue
-                        else:
-                            print(f"\033[31mValid info:\n{validation_info}\033[0m")
-                            info = (
-                                "Validation Result: FAILED\n\n"
-                                "Failed Step (currently executing step):\n"
-                                f"{plan_list[action_id]}\n\n"
-                                "Failure Analysis (why this step failed):\n"
-                                f"{validation_info}"
-                            )
-                            history = (
-                                "Executed History (previous steps):\n"
-                                f"{format_execution_history(exec_code)}\n\n"
-                            )
-                            is_success = False
-                    else:
-                        is_success = True
-                        exec_code.append(plan_list[action_id])
-                        continue
-                else:
-                    info = (
-                        "Action Execution: FAILED\n\n"
-                        "Failed Step (currently executing step):\n"
-                        f"{plan_list[action_id]}\n\n"
-                        "Execution Error Trace:\n"
-                        f"{exec_trace}\n\n"
-                        "Note: You may try `force_valid=True` for the current action to find the nearest valid pose."
-                    )
-                    history = (
-                        "Executed History (previous steps):\n"
-                        f"{format_execution_history(exec_code)}\n\n"
-                    )
-
-                    is_success = False
-
-                task_agent_input["last_task_plan"] = task_plan
-                task_agent_input["last_executed_failure"] = info
-                task_agent_input["last_executed_history"] = history
-                break
-
-            if single_action == drive_list[-1] and is_success:
-                # ---------- termination ----------
-                print(
-                    "\033[91mExecuted all the plans. The task is considered complete.\033[0m"
-                )
-                break
