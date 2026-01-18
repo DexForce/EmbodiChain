@@ -52,7 +52,7 @@ from embodichain.data.enum import (
     SUPPORTED_EXTRA_VISION_TYPES,
 )
 from copy import deepcopy
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
+from embodichain.lab.gym.envs.action_bank.utils import (
     get_control_part_joint_ids,
 )
 
