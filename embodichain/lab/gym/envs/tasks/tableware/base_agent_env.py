@@ -243,10 +243,6 @@ class BaseAgentEnv:
 
         from embodichain.lab.gym.robots.interface import LearnableRobot
 
-        # Initialize curr_episode if not exists
-        if not hasattr(self, "curr_episode"):
-            self.curr_episode = 0
-
         # Get episode data from env if not provided
         if obs_list is None:
             obs_list = getattr(self, "_episode_obs_list", [])
@@ -258,7 +254,7 @@ class BaseAgentEnv:
             return {
                 "data_path": None,
                 "id": id,
-                "current_episode": self.curr_episode,
+                "current_episode": getattr(self, "curr_episode", 0),
                 "data": None,
                 "save_path": None,
             }
