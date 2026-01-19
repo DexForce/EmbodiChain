@@ -631,9 +631,9 @@ class SimulationManager:
             color (Sequence[float] | None): color of the light.
             intensity (float | None): intensity of the light.
         """
-        if color is None:
+        if color is not None:
             self._env.set_env_light_emission(color)
-        if intensity is None:
+        if intensity is not None:
             self._env.set_env_light_intensity(intensity)
 
     def _create_default_plane(self):
@@ -670,7 +670,7 @@ class SimulationManager:
         )
 
         if self.sim_config.enable_rt:
-            self.set_emission_light([0.1, 0.1, 0.1], 10.0)
+            self.set_emission_light([1.0, 1.0, 1.0], 80.0)
         else:
             self.set_indirect_lighting("lab_day")
 
