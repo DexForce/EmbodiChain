@@ -255,7 +255,7 @@ def joint_limit_penalty(
     return penalty.sum(dim=-1)
 
 
-def orientation_alignment_reward(
+def orientation_alignment(
     env: EmbodiedEnv,
     obs: dict,
     action: torch.Tensor,
@@ -281,7 +281,7 @@ def orientation_alignment_reward(
     Example:
         ```json
         {
-            "func": "orientation_alignment_reward",
+            "func": "orientation_alignment",
             "weight": 0.5,
             "params": {
                 "source_entity_cfg": {"uid": "object"},
@@ -358,7 +358,7 @@ def success_reward(
     )
 
 
-def reaching_behind_object_reward(
+def reaching_behind_object(
     env: EmbodiedEnv,
     obs: dict,
     action: torch.Tensor,
@@ -392,7 +392,7 @@ def reaching_behind_object_reward(
     Example:
         ```json
         {
-            "func": "reaching_behind_object_reward",
+            "func": "reaching_behind_object",
             "weight": 0.1,
             "params": {
                 "object_cfg": {"uid": "cube"},

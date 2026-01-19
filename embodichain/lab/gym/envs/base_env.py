@@ -480,10 +480,6 @@ class BaseEnv(gym.Env):
 
         rewards = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
 
-        rewards = self._extend_reward(
-            rewards=rewards, obs=obs, action=action, info=info
-        )
-
         return rewards
 
     def _step_action(self, action: EnvAction) -> EnvAction:
@@ -548,6 +544,9 @@ class BaseEnv(gym.Env):
         obs = self.get_obs(**kwargs)
         info = self.get_info(**kwargs)
         rewards = self.get_reward(obs=obs, action=action, info=info)
+        rewards = self._extend_reward(
+            rewards=rewards, obs=obs, action=action, info=info
+        )
 
         terminateds = torch.logical_or(
             info.get(
