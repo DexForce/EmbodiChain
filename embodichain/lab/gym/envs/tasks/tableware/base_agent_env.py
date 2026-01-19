@@ -185,29 +185,6 @@ class BaseAgentEnv:
         # Task planning
         print(f"\033[92m\nStart task planning.\n\033[0m")
         
-        # Handle one_stage_prompt_for_correction which needs obs_image_path
-        if self.task_agent.prompt_name == 'one_stage_prompt_for_correction':
-            kwargs.setdefault("last_task_plan", "None.")
-            kwargs.setdefault("last_executed_failure", "None.")
-            kwargs.setdefault("last_executed_history", "None.")
-            
-            temp_img_dir = Path(tempfile.mkdtemp()) / "obs_images"
-            temp_img_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Convert torch tensor to numpy array if needed
-            obs_image = self.get_obs_for_agent()["valid_rgb_1"]
-            if isinstance(obs_image, torch.Tensor):
-                obs_image = obs_image.cpu().numpy()
-            if obs_image.dtype in [np.float32, np.float64]:
-                obs_image = (obs_image * 255).astype(np.uint8)
-            
-            obs_image_path = save_obs_image(
-                obs_image=obs_image,
-                save_dir=temp_img_dir,
-                step_id=0
-            )
-            kwargs['obs_image_path'] = str(obs_image_path)
-        
         task_agent_input = self.task_agent.get_composed_observations(
             env=self, regenerate=regenerate, **kwargs
         )
