@@ -194,6 +194,11 @@ class SimulationManager:
             )
             return
 
+        if sim_config.enable_rt and instance_id > 0:
+            logger.log_error(
+                f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
+            )
+
         # Mark as initialized
         self._is_initialized = True
         self.instance_id = instance_id
