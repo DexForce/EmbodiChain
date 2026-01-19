@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
+import numpy as np
 import gymnasium as gym
 
 from typing import Dict, List, Union, Tuple, Any, Sequence
@@ -172,6 +173,21 @@ class BaseEnv(gym.Env):
             return gym.vector.utils.batch_space(
                 self.single_observation_space, n=self.num_envs
             )
+
+    @cached_property
+    def flattened_observation_space(self) -> gym.spaces.Box:
+        """Flattened observation space for RL training.
+
+        Returns a Box space by computing total dimensions from nested dict observations.
+        This is needed because RL algorithms (PPO, SAC, etc.) require flat vector inputs.
+        """
+        from embodichain.agents.rl.utils.helper import flatten_dict_observation
+
+        flattened_obs = flatten_dict_observation(self._init_raw_obs)
+        total_dim = flattened_obs.shape[-1]
+        return gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(total_dim,), dtype=np.float32
+        )
 
     @cached_property
     def action_space(self) -> gym.spaces.Space:
@@ -418,6 +434,30 @@ class BaseEnv(gym.Env):
         """
         return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+    def _extend_reward(
+        self,
+        rewards: torch.Tensor,
+        obs: EnvObs,
+        action: EnvAction,
+        info: Dict[str, Any],
+        **kwargs,
+    ) -> torch.Tensor:
+        """Extend the reward computation.
+
+        Overwrite this function to extend or modify the reward computation.
+
+        Args:
+            rewards: The base reward tensor.
+            obs: The observation from the environment.
+            action: The action applied to the robot agent.
+            info: The info dictionary.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The extended reward tensor.
+        """
+        return rewards
+
     def get_reward(
         self,
         obs: EnvObs,
@@ -438,7 +478,9 @@ class BaseEnv(gym.Env):
             The reward for the current step.
         """
 
-        return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        rewards = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
+        return rewards
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
@@ -502,6 +544,9 @@ class BaseEnv(gym.Env):
         obs = self.get_obs(**kwargs)
         info = self.get_info(**kwargs)
         rewards = self.get_reward(obs=obs, action=action, info=info)
+        rewards = self._extend_reward(
+            rewards=rewards, obs=obs, action=action, info=info
+        )
 
         terminateds = torch.logical_or(
             info.get(
