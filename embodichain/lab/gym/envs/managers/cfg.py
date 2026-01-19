@@ -326,13 +326,6 @@ class RewardCfg(FunctorCfg):
     - `replace`: The reward replaces the total reward (useful for single reward functions).
     """
 
-    name: str = MISSING
-    """The name of the reward term.
-
-    This is used for logging and debugging purposes. The name should be descriptive of what
-    the reward term represents, e.g., "distance_to_goal", "gripper_close", "collision_penalty".
-    """
-
     weight: float = 1.0
     """The weight multiplier for this reward term.
 

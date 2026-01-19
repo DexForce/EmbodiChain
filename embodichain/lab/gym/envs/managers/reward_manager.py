@@ -41,6 +41,8 @@ class RewardManager(ManagerBase):
     The reward manager offers two modes of operation:
         - `add`: This mode computes a reward term and adds it to the total reward (weighted by the term's weight).
         - `replace`: This mode replaces the total reward with the computed value (useful for single reward functions).
+
+    Note: The config key is used as the unique identifier and display name for each reward functor.
     """
 
     _env: EmbodiedEnv
@@ -82,12 +84,7 @@ class RewardManager(ManagerBase):
             # convert table to string
             msg += table.get_string()
             msg += "\n"
-
         return msg
-
-    """
-    Properties.
-    """
 
     @property
     def active_functors(self) -> dict[str, list[str]]:
@@ -96,10 +93,6 @@ class RewardManager(ManagerBase):
         The keys are the modes of reward computation and the values are the names of the reward functors.
         """
         return self._mode_functor_names
-
-    """
-    Operations.
-    """
 
     def reset(self, env_ids: Union[Sequence[int], None] = None) -> dict[str, float]:
         """Reset reward terms that are stateful (implemented as classes).
@@ -199,10 +192,6 @@ class RewardManager(ManagerBase):
             if functor_name in functors:
                 return self._mode_functor_cfgs[mode][functors.index(functor_name)]
         logger.log_error(f"Reward functor '{functor_name}' not found.")
-
-    """
-    Helper functions.
-    """
 
     def _prepare_functors(self):
         # check if config is dict already

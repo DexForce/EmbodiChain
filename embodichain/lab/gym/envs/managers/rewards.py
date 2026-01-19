@@ -38,21 +38,21 @@ def distance_between_objects(
     sigma: float = 1.0,
 ) -> torch.Tensor:
     """Reward based on distance between two rigid objects.
-    
+
     Encourages the source object to get closer to the target object. Can use either
     linear negative distance or exponential Gaussian-shaped reward.
-    
+
     Args:
         source_entity_cfg: Configuration for the source object (e.g., {"uid": "cube"})
         target_entity_cfg: Configuration for the target object (e.g., {"uid": "goal_sphere"})
         exponential: If True, use exponential reward exp(-d²/2σ²), else use -distance
         sigma: Standard deviation for exponential reward (controls reward spread)
-    
+
     Returns:
         Reward tensor of shape (num_envs,). Higher when objects are closer.
         - Linear mode: ranges from -inf to 0 (0 when objects touch)
         - Exponential mode: ranges from 0 to 1 (1 when objects touch)
-    
+
     Example:
         ```json
         {
@@ -99,21 +99,21 @@ def joint_velocity_penalty(
     part_name: str | None = None,
 ) -> torch.Tensor:
     """Penalize high joint velocities to encourage smooth motion.
-    
+
     Computes the L2 norm of joint velocities and returns negative value as penalty.
     Useful for preventing jerky or unstable robot movements.
-    
+
     Args:
         robot_uid: Robot entity UID in simulation (default: "robot")
         joint_ids: Specific joint indices to penalize. Takes priority over part_name.
                    Example: [0, 1, 2] or slice(0, 6)
         part_name: Control part name (e.g., "arm"). Used only if joint_ids is None.
                    Will penalize all joints in the specified part.
-    
+
     Returns:
         Penalty tensor of shape (num_envs,). Always negative or zero.
         Magnitude increases with joint velocity (larger velocity = more negative).
-    
+
     Example:
         ```json
         {
@@ -150,18 +150,18 @@ def action_smoothness_penalty(
     info: dict,
 ) -> torch.Tensor:
     """Penalize large action changes between consecutive timesteps.
-    
+
     Encourages smooth control commands by penalizing sudden changes in actions.
     Stores previous action in env._reward_states for comparison.
-    
+
     Returns:
         Penalty tensor of shape (num_envs,). Zero on first call (no previous action),
         negative on subsequent calls (larger change = more negative).
-    
+
     Note:
         This function maintains state across calls using env._reward_states['prev_actions'].
         State is automatically reset when the environment resets.
-    
+
     Example:
         ```json
         {
@@ -199,21 +199,21 @@ def joint_limit_penalty(
     margin: float = 0.1,
 ) -> torch.Tensor:
     """Penalize robot joints that are close to their position limits.
-    
+
     Prevents joints from reaching their physical limits, which can cause instability
     or singularities. Penalty increases as joints approach limits within the margin.
-    
+
     Args:
         robot_uid: Robot entity UID in simulation (default: "robot")
         joint_ids: Joint indices to monitor (default: all joints)
         margin: Normalized distance threshold (0 to 1). Penalty applied when joint
                 is within this fraction of its range from either limit.
                 Example: 0.1 means penalty when within 10% of limits.
-    
+
     Returns:
         Penalty tensor of shape (num_envs,). Always negative or zero.
         Sum of penalties across all monitored joints.
-    
+
     Example:
         ```json
         {
@@ -264,20 +264,20 @@ def orientation_alignment_reward(
     target_entity_cfg: SceneEntityCfg = None,
 ) -> torch.Tensor:
     """Reward rotational alignment between two rigid objects.
-    
+
     Encourages the source object's orientation to match the target object's orientation.
     Uses rotation matrix trace to measure alignment.
-    
+
     Args:
         source_entity_cfg: Configuration for the source object (e.g., {"uid": "cube"})
         target_entity_cfg: Configuration for the target object (e.g., {"uid": "reference"})
-    
+
     Returns:
         Reward tensor of shape (num_envs,). Ranges from -1 to 1.
         - 1.0: Perfect alignment (same orientation)
         - 0.0: 90° rotation difference
         - -1.0: 180° rotation difference (opposite orientation)
-    
+
     Example:
         ```json
         {
@@ -315,21 +315,21 @@ def success_reward(
     obs: dict,
     action: torch.Tensor,
     info: dict,
-    ) -> torch.Tensor:
+) -> torch.Tensor:
     """Sparse bonus reward when task succeeds.
-    
+
     Provides a fixed reward when the task success condition is met.
     Reads success status from info['success'] which should be set by the environment.
-    
+
     Returns:
         Reward tensor of shape (num_envs,).
         - 1.0 when successful
         - 0.0 when not successful or if 'success' key missing
-    
+
     Note:
         The environment's get_info() must populate info['success'] with a boolean
         tensor indicating success status for each environment.
-    
+
     Example:
         ```json
         {
@@ -371,10 +371,10 @@ def reaching_behind_object_reward(
     part_name: str = None,
 ) -> torch.Tensor:
     """Reward for positioning end-effector behind object for pushing.
-    
+
     Encourages the robot's end-effector to reach a position behind the object along
     the object-to-goal direction. Useful for push manipulation tasks.
-    
+
     Args:
         object_cfg: Configuration for the object to push (e.g., {"uid": "cube"})
         target_pose_key: Key in info dict for goal pose (default: "goal_pose")
@@ -383,12 +383,12 @@ def reaching_behind_object_reward(
         height_offset: Additional height above object (in meters, default: 0.015)
         distance_scale: Scaling factor for tanh function (higher = steeper, default: 5.0)
         part_name: Robot part name for FK computation (e.g., "arm")
-    
+
     Returns:
         Reward tensor of shape (num_envs,). Ranges from 0 to 1.
         - 1.0: End-effector at ideal pushing position
         - 0.0: End-effector far from ideal position
-    
+
     Example:
         ```json
         {
@@ -461,10 +461,10 @@ def distance_to_target(
     use_xy_only: bool = False,
 ) -> torch.Tensor:
     """Reward based on absolute distance to a virtual target pose.
-    
+
     Encourages an object to get closer to a target pose specified in the info dict.
     Unlike incremental_distance_to_target, this provides direct distance-based reward.
-    
+
     Args:
         source_entity_cfg: Configuration for the object (e.g., {"uid": "cube"})
         target_pose_key: Key in info dict for target pose (default: "target_pose")
@@ -472,12 +472,12 @@ def distance_to_target(
         exponential: If True, use exponential reward exp(-d²/2σ²), else use -distance
         sigma: Standard deviation for exponential reward (default: 1.0)
         use_xy_only: If True, ignore z-axis and only consider horizontal distance
-    
+
     Returns:
         Reward tensor of shape (num_envs,).
         - Linear mode: -distance (negative, approaches 0 when close)
         - Exponential mode: exp(-d²/2σ²) (0 to 1, approaches 1 when close)
-    
+
     Example:
         ```json
         {
@@ -539,11 +539,11 @@ def incremental_distance_to_target(
     use_xy_only: bool = False,
 ) -> torch.Tensor:
     """Incremental reward for progress toward a virtual target pose.
-    
+
     Rewards the robot for getting closer to the target compared to previous timestep.
     Stores previous distance in env._reward_states for comparison. Uses tanh shaping
     to normalize rewards and supports asymmetric weighting for approach vs. retreat.
-    
+
     Args:
         source_entity_cfg: Configuration for the object (e.g., {"uid": "cube"})
         target_pose_key: Key in info dict for target pose (default: "target_pose")
@@ -552,17 +552,17 @@ def incremental_distance_to_target(
         positive_weight: Multiplier for reward when getting closer (default: 1.0)
         negative_weight: Multiplier for penalty when moving away (default: 1.0)
         use_xy_only: If True, ignore z-axis and only consider horizontal distance
-    
+
     Returns:
         Reward tensor of shape (num_envs,). Zero on first call, then:
         - Positive when getting closer (scaled by positive_weight)
         - Negative when moving away (scaled by negative_weight)
         - Magnitude bounded by tanh function
-    
+
     Note:
         This function maintains state using env._reward_states[f"prev_dist_{uid}_{key}"].
         State is automatically reset when the environment resets.
-    
+
     Example:
         ```json
         {

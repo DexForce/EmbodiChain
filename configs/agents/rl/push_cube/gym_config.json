@@ -72,7 +72,6 @@
             "reaching_reward": {
                 "func": "reaching_behind_object_reward",
                 "mode": "add",
-                "name": "reaching",
                 "weight": 0.1,
                 "params": {
                     "object_cfg": {
@@ -88,7 +87,6 @@
             "place_reward": {
                 "func": "incremental_distance_to_target",
                 "mode": "add",
-                "name": "place",
                 "weight": 1.0,
                 "params": {
                     "source_entity_cfg": {
@@ -104,14 +102,12 @@
             "action_penalty": {
                 "func": "action_smoothness_penalty",
                 "mode": "add",
-                "name": "action_penalty",
                 "weight": 0.01,
                 "params": {}
             },
             "success_bonus": {
                 "func": "success_reward",
                 "mode": "add",
-                "name": "success",
                 "weight": 10.0,
                 "params": {}
             }
