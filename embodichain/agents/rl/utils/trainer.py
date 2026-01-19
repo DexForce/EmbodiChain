@@ -239,8 +239,12 @@ class Trainer:
             ep_ret = torch.zeros(num_envs_eval, dtype=torch.float32, device=self.device)
             while not done_any.any():
                 actions, _, _ = self.policy.get_action(obs, deterministic=True)
-                result = self.eval_env.step(actions)
-                obs, reward, terminated, truncated, info = result
+                obs, reward, terminated, truncated, info = self.eval_env.step(actions)
+
+                # Flatten dict observation from step
+                if isinstance(obs, dict):
+                    obs = flatten_dict_observation(obs)
+
                 done = terminated | truncated
                 reward = reward.float()
                 done_any = done

@@ -27,39 +27,6 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
-def reward_from_obs(
-    env: EmbodiedEnv,
-    obs: dict,
-    action: torch.Tensor,
-    info: dict,
-    obs_key: str = "robot/qpos",
-    target_value: float = 0.0,
-    scale: float = 1.0,
-) -> torch.Tensor:
-    """Reward based on observation values."""
-    # Parse nested keys (e.g., "robot/qpos")
-    keys = obs_key.split("/")
-    value = obs
-    for key in keys:
-        if isinstance(value, dict) and key in value:
-            value = value[key]
-        else:
-            return torch.zeros(env.num_envs, device=env.device)
-
-    # Compute distance to target
-    if isinstance(value, torch.Tensor):
-        if value.dim() > 1:
-            # Multiple values, compute norm
-            distance = torch.norm(value - target_value, dim=-1)
-        else:
-            distance = torch.abs(value - target_value)
-        reward = -scale * distance
-    else:
-        reward = torch.zeros(env.num_envs, device=env.device)
-
-    return reward
-
-
 def distance_between_objects(
     env: EmbodiedEnv,
     obs: dict,
@@ -70,32 +37,43 @@ def distance_between_objects(
     exponential: bool = False,
     sigma: float = 1.0,
 ) -> torch.Tensor:
-    """Reward based on distance between two entities."""
+    """Reward based on distance between two rigid objects.
+    
+    Encourages the source object to get closer to the target object. Can use either
+    linear negative distance or exponential Gaussian-shaped reward.
+    
+    Args:
+        source_entity_cfg: Configuration for the source object (e.g., {"uid": "cube"})
+        target_entity_cfg: Configuration for the target object (e.g., {"uid": "goal_sphere"})
+        exponential: If True, use exponential reward exp(-d²/2σ²), else use -distance
+        sigma: Standard deviation for exponential reward (controls reward spread)
+    
+    Returns:
+        Reward tensor of shape (num_envs,). Higher when objects are closer.
+        - Linear mode: ranges from -inf to 0 (0 when objects touch)
+        - Exponential mode: ranges from 0 to 1 (1 when objects touch)
+    
+    Example:
+        ```json
+        {
+            "func": "distance_between_objects",
+            "weight": 0.5,
+            "params": {
+                "source_entity_cfg": {"uid": "cube"},
+                "target_entity_cfg": {"uid": "target"},
+                "exponential": true,
+                "sigma": 0.2
+            }
+        }
+        ```
+    """
     # get source entity position
-    source_obj = env.sim[source_entity_cfg.uid]
-    if hasattr(source_obj, "get_body_pose"):
-        source_pos = source_obj.get_body_pose(body_ids=source_entity_cfg.body_ids)[
-            :, :3, 3
-        ]
-    elif hasattr(source_obj, "get_local_pose"):
-        source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(
-            f"Entity '{source_entity_cfg.uid}' does not support position query."
-        )
+    source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
+    source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
     # get target entity position
-    target_obj = env.sim[target_entity_cfg.uid]
-    if hasattr(target_obj, "get_body_pose"):
-        target_pos = target_obj.get_body_pose(body_ids=target_entity_cfg.body_ids)[
-            :, :3, 3
-        ]
-    elif hasattr(target_obj, "get_local_pose"):
-        target_pos = target_obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(
-            f"Entity '{target_entity_cfg.uid}' does not support position query."
-        )
+    target_obj = env.sim.get_rigid_object(target_entity_cfg.uid)
+    target_pos = target_obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
     # compute distance
     distance = torch.norm(source_pos - target_pos, dim=-1)
@@ -117,13 +95,46 @@ def joint_velocity_penalty(
     action: torch.Tensor,
     info: dict,
     robot_uid: str = "robot",
-    joint_ids: slice | list[int] = slice(None),
+    joint_ids: slice | list[int] | None = None,
+    part_name: str | None = None,
 ) -> torch.Tensor:
-    """Penalize large joint velocities."""
-    robot = env.sim[robot_uid]
+    """Penalize high joint velocities to encourage smooth motion.
+    
+    Computes the L2 norm of joint velocities and returns negative value as penalty.
+    Useful for preventing jerky or unstable robot movements.
+    
+    Args:
+        robot_uid: Robot entity UID in simulation (default: "robot")
+        joint_ids: Specific joint indices to penalize. Takes priority over part_name.
+                   Example: [0, 1, 2] or slice(0, 6)
+        part_name: Control part name (e.g., "arm"). Used only if joint_ids is None.
+                   Will penalize all joints in the specified part.
+    
+    Returns:
+        Penalty tensor of shape (num_envs,). Always negative or zero.
+        Magnitude increases with joint velocity (larger velocity = more negative).
+    
+    Example:
+        ```json
+        {
+            "func": "joint_velocity_penalty",
+            "weight": 0.001,
+            "params": {
+                "robot_uid": "robot",
+                "part_name": "arm"
+            }
+        }
+        ```
+    """
+    robot = env.sim.get_robot(robot_uid)
 
     # get joint velocities
-    qvel = robot.body_data.qvel[:, joint_ids]
+    if joint_ids is not None:
+        qvel = robot.get_qvel()[:, joint_ids]
+    elif part_name is not None:
+        qvel = robot.get_qvel(name=part_name)
+    else:
+        qvel = robot.get_qvel()
 
     # compute L2 norm of joint velocities
     velocity_norm = torch.norm(qvel, dim=-1)
@@ -138,17 +149,42 @@ def action_smoothness_penalty(
     action: torch.Tensor,
     info: dict,
 ) -> torch.Tensor:
-    """Penalize large changes in action between steps."""
+    """Penalize large action changes between consecutive timesteps.
+    
+    Encourages smooth control commands by penalizing sudden changes in actions.
+    Stores previous action in env._reward_states for comparison.
+    
+    Returns:
+        Penalty tensor of shape (num_envs,). Zero on first call (no previous action),
+        negative on subsequent calls (larger change = more negative).
+    
+    Note:
+        This function maintains state across calls using env._reward_states['prev_actions'].
+        State is automatically reset when the environment resets.
+    
+    Example:
+        ```json
+        {
+            "func": "action_smoothness_penalty",
+            "weight": 0.01,
+            "params": {}
+        }
+        ```
+    """
+    # Use dictionary-based state management
+    if not hasattr(env, "_reward_states"):
+        env._reward_states = {}
+
     # compute difference between current and previous action
-    if hasattr(env, "_prev_actions"):
-        action_diff = action - env._prev_actions
+    if "prev_actions" in env._reward_states:
+        action_diff = action - env._reward_states["prev_actions"]
         penalty = -torch.norm(action_diff, dim=-1)
     else:
         # no previous action, no penalty
         penalty = torch.zeros(env.num_envs, device=env.device)
 
     # store current action for next step
-    env._prev_actions = action.clone()
+    env._reward_states["prev_actions"] = action.clone()
 
     return penalty
 
@@ -162,12 +198,40 @@ def joint_limit_penalty(
     joint_ids: slice | list[int] = slice(None),
     margin: float = 0.1,
 ) -> torch.Tensor:
-    """Penalize joints approaching their limits."""
-    robot = env.sim[robot_uid]
+    """Penalize robot joints that are close to their position limits.
+    
+    Prevents joints from reaching their physical limits, which can cause instability
+    or singularities. Penalty increases as joints approach limits within the margin.
+    
+    Args:
+        robot_uid: Robot entity UID in simulation (default: "robot")
+        joint_ids: Joint indices to monitor (default: all joints)
+        margin: Normalized distance threshold (0 to 1). Penalty applied when joint
+                is within this fraction of its range from either limit.
+                Example: 0.1 means penalty when within 10% of limits.
+    
+    Returns:
+        Penalty tensor of shape (num_envs,). Always negative or zero.
+        Sum of penalties across all monitored joints.
+    
+    Example:
+        ```json
+        {
+            "func": "joint_limit_penalty",
+            "weight": 0.01,
+            "params": {
+                "robot_uid": "robot",
+                "joint_ids": [0, 1, 2, 3, 4, 5],
+                "margin": 0.1
+            }
+        }
+        ```
+    """
+    robot = env.sim.get_robot(robot_uid)
 
     # get joint positions and limits
-    qpos = robot.body_data.qpos[:, joint_ids]
-    qpos_limits = robot.body_data.qpos_limits[:, joint_ids, :]
+    qpos = robot.get_qpos()[:, joint_ids]
+    qpos_limits = robot.get_qpos_limits()[:, joint_ids, :]
 
     # compute normalized position in range [0, 1]
     qpos_normalized = (qpos - qpos_limits[:, :, 0]) / (
@@ -191,33 +255,6 @@ def joint_limit_penalty(
     return penalty.sum(dim=-1)
 
 
-def collision_penalty(
-    env: EmbodiedEnv,
-    obs: dict,
-    action: torch.Tensor,
-    info: dict,
-    robot_uid: str = "robot",
-    force_threshold: float = 1.0,
-) -> torch.Tensor:
-    """Penalize collisions based on contact forces."""
-    robot = env.sim[robot_uid]
-
-    # get joint forces (torques)
-    qf = robot.body_data.qf
-
-    # check if any joint force exceeds threshold
-    collision_detected = (torch.abs(qf) > force_threshold).any(dim=-1)
-
-    # return penalty for collisions
-    penalty = torch.where(
-        collision_detected,
-        torch.full((env.num_envs,), -1.0, device=env.device),
-        torch.zeros(env.num_envs, device=env.device),
-    )
-
-    return penalty
-
-
 def orientation_alignment_reward(
     env: EmbodiedEnv,
     obs: dict,
@@ -226,32 +263,40 @@ def orientation_alignment_reward(
     source_entity_cfg: SceneEntityCfg = None,
     target_entity_cfg: SceneEntityCfg = None,
 ) -> torch.Tensor:
-    """Reward alignment of orientations between two entities."""
+    """Reward rotational alignment between two rigid objects.
+    
+    Encourages the source object's orientation to match the target object's orientation.
+    Uses rotation matrix trace to measure alignment.
+    
+    Args:
+        source_entity_cfg: Configuration for the source object (e.g., {"uid": "cube"})
+        target_entity_cfg: Configuration for the target object (e.g., {"uid": "reference"})
+    
+    Returns:
+        Reward tensor of shape (num_envs,). Ranges from -1 to 1.
+        - 1.0: Perfect alignment (same orientation)
+        - 0.0: 90° rotation difference
+        - -1.0: 180° rotation difference (opposite orientation)
+    
+    Example:
+        ```json
+        {
+            "func": "orientation_alignment_reward",
+            "weight": 0.5,
+            "params": {
+                "source_entity_cfg": {"uid": "object"},
+                "target_entity_cfg": {"uid": "goal_object"}
+            }
+        }
+        ```
+    """
     # get source entity rotation matrix
-    source_obj = env.sim[source_entity_cfg.uid]
-    if hasattr(source_obj, "get_body_pose"):
-        source_rot = source_obj.get_body_pose(body_ids=source_entity_cfg.body_ids)[
-            :, :3, :3
-        ]
-    elif hasattr(source_obj, "get_local_pose"):
-        source_rot = source_obj.get_local_pose(to_matrix=True)[:, :3, :3]
-    else:
-        raise ValueError(
-            f"Entity '{source_entity_cfg.uid}' does not support orientation query."
-        )
+    source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
+    source_rot = source_obj.get_local_pose(to_matrix=True)[:, :3, :3]
 
     # get target entity rotation matrix
-    target_obj = env.sim[target_entity_cfg.uid]
-    if hasattr(target_obj, "get_body_pose"):
-        target_rot = target_obj.get_body_pose(body_ids=target_entity_cfg.body_ids)[
-            :, :3, :3
-        ]
-    elif hasattr(target_obj, "get_local_pose"):
-        target_rot = target_obj.get_local_pose(to_matrix=True)[:, :3, :3]
-    else:
-        raise ValueError(
-            f"Entity '{target_entity_cfg.uid}' does not support orientation query."
-        )
+    target_obj = env.sim.get_rigid_object(target_entity_cfg.uid)
+    target_rot = target_obj.get_local_pose(to_matrix=True)[:, :3, :3]
 
     # compute rotation difference
     rot_diff = torch.bmm(source_rot, target_rot.transpose(-1, -2))
@@ -270,9 +315,30 @@ def success_reward(
     obs: dict,
     action: torch.Tensor,
     info: dict,
-    reward_value: float = 1.0,
-) -> torch.Tensor:
-    """Sparse reward for task success."""
+    ) -> torch.Tensor:
+    """Sparse bonus reward when task succeeds.
+    
+    Provides a fixed reward when the task success condition is met.
+    Reads success status from info['success'] which should be set by the environment.
+    
+    Returns:
+        Reward tensor of shape (num_envs,).
+        - 1.0 when successful
+        - 0.0 when not successful or if 'success' key missing
+    
+    Note:
+        The environment's get_info() must populate info['success'] with a boolean
+        tensor indicating success status for each environment.
+    
+    Example:
+        ```json
+        {
+            "func": "success_reward",
+            "weight": 10.0,
+            "params": {}
+        }
+        ```
+    """
     # Check if success info is available in info dict
     if "success" in info:
         success = info["success"]
@@ -285,13 +351,11 @@ def success_reward(
         return torch.zeros(env.num_envs, device=env.device)
 
     # return reward
-    reward = torch.where(
+    return torch.where(
         success,
-        torch.full((env.num_envs,), reward_value, device=env.device),
+        torch.ones(env.num_envs, device=env.device),
         torch.zeros(env.num_envs, device=env.device),
     )
-
-    return reward
 
 
 def reaching_behind_object_reward(
@@ -306,7 +370,41 @@ def reaching_behind_object_reward(
     distance_scale: float = 5.0,
     part_name: str = None,
 ) -> torch.Tensor:
-    """Reward for reaching behind an object along object-to-goal direction."""
+    """Reward for positioning end-effector behind object for pushing.
+    
+    Encourages the robot's end-effector to reach a position behind the object along
+    the object-to-goal direction. Useful for push manipulation tasks.
+    
+    Args:
+        object_cfg: Configuration for the object to push (e.g., {"uid": "cube"})
+        target_pose_key: Key in info dict for goal pose (default: "goal_pose")
+                        Can be (num_envs, 3) position or (num_envs, 4, 4) transform
+        behind_offset: Distance behind object to reach (in meters, default: 0.015)
+        height_offset: Additional height above object (in meters, default: 0.015)
+        distance_scale: Scaling factor for tanh function (higher = steeper, default: 5.0)
+        part_name: Robot part name for FK computation (e.g., "arm")
+    
+    Returns:
+        Reward tensor of shape (num_envs,). Ranges from 0 to 1.
+        - 1.0: End-effector at ideal pushing position
+        - 0.0: End-effector far from ideal position
+    
+    Example:
+        ```json
+        {
+            "func": "reaching_behind_object_reward",
+            "weight": 0.1,
+            "params": {
+                "object_cfg": {"uid": "cube"},
+                "target_pose_key": "goal_pose",
+                "behind_offset": 0.015,
+                "height_offset": 0.015,
+                "distance_scale": 5.0,
+                "part_name": "arm"
+            }
+        }
+        ```
+    """
     # get end effector position from robot FK
     robot = env.robot
     joint_ids = robot.get_joint_ids(part_name)
@@ -362,19 +460,41 @@ def distance_to_target(
     sigma: float = 1.0,
     use_xy_only: bool = False,
 ) -> torch.Tensor:
-    """Reward based on distance to a virtual target pose from info."""
+    """Reward based on absolute distance to a virtual target pose.
+    
+    Encourages an object to get closer to a target pose specified in the info dict.
+    Unlike incremental_distance_to_target, this provides direct distance-based reward.
+    
+    Args:
+        source_entity_cfg: Configuration for the object (e.g., {"uid": "cube"})
+        target_pose_key: Key in info dict for target pose (default: "target_pose")
+                        Can be (num_envs, 3) position or (num_envs, 4, 4) transform
+        exponential: If True, use exponential reward exp(-d²/2σ²), else use -distance
+        sigma: Standard deviation for exponential reward (default: 1.0)
+        use_xy_only: If True, ignore z-axis and only consider horizontal distance
+    
+    Returns:
+        Reward tensor of shape (num_envs,).
+        - Linear mode: -distance (negative, approaches 0 when close)
+        - Exponential mode: exp(-d²/2σ²) (0 to 1, approaches 1 when close)
+    
+    Example:
+        ```json
+        {
+            "func": "distance_to_target",
+            "weight": 0.5,
+            "params": {
+                "source_entity_cfg": {"uid": "cube"},
+                "target_pose_key": "goal_pose",
+                "exponential": false,
+                "use_xy_only": true
+            }
+        }
+        ```
+    """
     # get source entity position
-    source_obj = env.sim[source_entity_cfg.uid]
-    if hasattr(source_obj, "get_body_pose"):
-        source_pos = source_obj.get_body_pose(body_ids=source_entity_cfg.body_ids)[
-            :, :3, 3
-        ]
-    elif hasattr(source_obj, "get_local_pose"):
-        source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(
-            f"Entity '{source_entity_cfg.uid}' does not support position query."
-        )
+    source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
+    source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
     # get target position from info
     if target_pose_key not in info:
@@ -418,7 +538,47 @@ def incremental_distance_to_target(
     negative_weight: float = 1.0,
     use_xy_only: bool = False,
 ) -> torch.Tensor:
-    """Incremental reward for progress toward a virtual target pose from info."""
+    """Incremental reward for progress toward a virtual target pose.
+    
+    Rewards the robot for getting closer to the target compared to previous timestep.
+    Stores previous distance in env._reward_states for comparison. Uses tanh shaping
+    to normalize rewards and supports asymmetric weighting for approach vs. retreat.
+    
+    Args:
+        source_entity_cfg: Configuration for the object (e.g., {"uid": "cube"})
+        target_pose_key: Key in info dict for target pose (default: "target_pose")
+                        Can be (num_envs, 3) position or (num_envs, 4, 4) transform
+        tanh_scale: Scaling for tanh normalization (higher = more sensitive, default: 10.0)
+        positive_weight: Multiplier for reward when getting closer (default: 1.0)
+        negative_weight: Multiplier for penalty when moving away (default: 1.0)
+        use_xy_only: If True, ignore z-axis and only consider horizontal distance
+    
+    Returns:
+        Reward tensor of shape (num_envs,). Zero on first call, then:
+        - Positive when getting closer (scaled by positive_weight)
+        - Negative when moving away (scaled by negative_weight)
+        - Magnitude bounded by tanh function
+    
+    Note:
+        This function maintains state using env._reward_states[f"prev_dist_{uid}_{key}"].
+        State is automatically reset when the environment resets.
+    
+    Example:
+        ```json
+        {
+            "func": "incremental_distance_to_target",
+            "weight": 1.0,
+            "params": {
+                "source_entity_cfg": {"uid": "cube"},
+                "target_pose_key": "goal_pose",
+                "tanh_scale": 10.0,
+                "positive_weight": 2.0,
+                "negative_weight": 0.5,
+                "use_xy_only": true
+            }
+        }
+        ```
+    """
     # get source entity position
     source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
     source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
@@ -443,13 +603,17 @@ def incremental_distance_to_target(
         current_dist = torch.norm(source_pos - target_pos, dim=-1)
 
     # initialize previous distance on first call
-    prev_dist_key = f"_prev_dist_{source_entity_cfg.uid}_{target_pose_key}"
-    if not hasattr(env, prev_dist_key):
-        setattr(env, prev_dist_key, current_dist.clone())
+    # Use dictionary-based state management for better organization
+    if not hasattr(env, "_reward_states"):
+        env._reward_states = {}
+
+    state_key = f"prev_dist_{source_entity_cfg.uid}_{target_pose_key}"
+    if state_key not in env._reward_states:
+        env._reward_states[state_key] = current_dist.clone()
         return torch.zeros(env.num_envs, device=env.device)
 
     # compute distance delta (positive = getting closer)
-    prev_dist = getattr(env, prev_dist_key)
+    prev_dist = env._reward_states[state_key]
     distance_delta = prev_dist - current_dist
 
     # apply tanh shaping
@@ -463,6 +627,6 @@ def incremental_distance_to_target(
     )
 
     # update previous distance
-    setattr(env, prev_dist_key, current_dist.clone())
+    env._reward_states[state_key] = current_dist.clone()
 
     return reward

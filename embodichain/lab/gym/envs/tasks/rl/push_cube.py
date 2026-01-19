@@ -40,6 +40,11 @@ class PushCubeEnv(EmbodiedEnv):
 
         super().__init__(cfg, **kwargs)
 
+    @property
+    def goal_pose(self) -> torch.Tensor:
+        """Get current goal poses (4x4 matrices) for all environments."""
+        return self._goal_pose
+
     def _draw_goal_marker(self):
         """Draw axis marker at goal position for visualization."""
         goal_sphere = self.sim.get_rigid_object("goal_sphere")
@@ -91,15 +96,17 @@ class PushCubeEnv(EmbodiedEnv):
         cube = self.sim.get_rigid_object("cube")
         cube_pos = cube.body_data.pose[:, :3]
 
-        # Get virtual goal pose from env state (set by randomize_target_pose event)
-        if hasattr(self, "_goal_poses"):
-            goal_pos = self._goal_poses[:, :3, 3]
+        # Get goal position from event-managed goal pose
+        if self.goal_pose is not None:
+            goal_pos = self.goal_pose[:, :3, 3]
+            xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
+            is_success = xy_distance < self.success_threshold
         else:
-            # Fallback: no virtual goal set
-            goal_pos = torch.zeros_like(cube_pos)
-
-        xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
-        is_success = xy_distance < self.success_threshold
+            # Goal not yet set by randomize_target_pose event (e.g., before first reset)
+            xy_distance = torch.zeros(self.cfg.num_envs, device=self.device)
+            is_success = torch.zeros(
+                self.cfg.num_envs, device=self.device, dtype=torch.bool
+            )
 
         info = {
             "success": is_success,
@@ -107,7 +114,7 @@ class PushCubeEnv(EmbodiedEnv):
                 self.cfg.num_envs, device=self.device, dtype=torch.bool
             ),
             "elapsed_steps": self._elapsed_steps,
-            "goal_pose": self._goal_poses if hasattr(self, "_goal_poses") else None,
+            "goal_pose": self.goal_pose,
         }
         info["metrics"] = {
             "distance_to_goal": xy_distance,

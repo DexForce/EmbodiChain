@@ -346,6 +346,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
         SceneEntityCfg,
         EventCfg,
         ObservationCfg,
+        RewardCfg,
         DatasetFunctorCfg,
     )
     from embodichain.utils import configclass
@@ -455,8 +456,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                 raise_if_not_found=True,
             )
 
-            from embodichain.lab.gym.envs.managers import DatasetFunctorCfg
-
             dataset = DatasetFunctorCfg(
                 func=dataset_func,
                 mode=dataset_params_modified["mode"],
@@ -561,8 +560,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                 reward_modules,
                 raise_if_not_found=True,
             )
-
-            from embodichain.lab.gym.envs.managers import RewardCfg
 
             reward = RewardCfg(
                 func=reward_func,

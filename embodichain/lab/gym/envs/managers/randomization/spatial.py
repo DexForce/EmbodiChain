@@ -339,7 +339,7 @@ def randomize_target_pose(
     )
 
     # Store in env state (to be exposed via get_info)
-    state_attr = f"_{store_key}s"
+    state_attr = f"_{store_key}"
     if not hasattr(env, state_attr):
         setattr(
             env,

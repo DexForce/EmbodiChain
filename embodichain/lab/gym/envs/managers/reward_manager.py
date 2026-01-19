@@ -76,7 +76,7 @@ class RewardManager(ManagerBase):
             table.align["Name"] = "l"
             for index, name in enumerate(self._mode_functor_names[mode]):
                 functor_cfg = self._mode_functor_cfgs[mode][index]
-                weight = functor_cfg.params.get("weight", 1.0)
+                weight = getattr(functor_cfg, "weight", 1.0)
                 table.add_row([index, name, f"{weight:.3f}"])
 
             # convert table to string

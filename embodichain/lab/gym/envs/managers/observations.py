@@ -252,7 +252,7 @@ def compute_semantic_mask(
     return torch.stack(masks, dim=-1)
 
 
-def get_robot_ee_pose(
+def get_robot_eef_pose(
     env: "EmbodiedEnv",
     obs: EnvObs,
     part_name: str | None = None,
@@ -263,7 +263,6 @@ def get_robot_ee_pose(
     Args:
         env: The environment instance.
         obs: The observation dictionary.
-        robot_uid: The uid of the robot. If None, uses env.robot.
         part_name: The name of the control part. If None, uses default part.
         position_only: If True, returns only position (3D). If False, returns full pose (4x4 matrix).
 

@@ -352,9 +352,7 @@ class EmbodiedEnv(BaseEnv):
             rewards, reward_info = self.reward_manager.compute(
                 obs=obs, action=action, info=info
             )
-            # Add individual reward terms to info for logging
-            for term_name, term_value in reward_info.items():
-                info[f"reward/{term_name}"] = term_value
+            info["rewards"] = reward_info
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
