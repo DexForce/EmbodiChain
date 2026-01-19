@@ -1,6 +1,6 @@
 # Roadmap
 
-Currently, EmbodiChain is under active development. Our roadmap is as follows:
+Currently, EmbodiChain is under active development. Our roadmap includes the following planned features and enhancements:
 
 - Simulation:
     - Rendering:
@@ -10,7 +10,7 @@ Currently, EmbodiChain is under active development. Our roadmap is as follows:
         - Add a new rasterization backend for basic rendering tasks.
     - Physics:
         - Improve GPU physics throughput.
-        - We are working on research and development of next-generation physics backend for more accurate and faster simulation.
+        - We are working on research and development of next-generation physics backend, supporting high-accuracy simulation, differentiable dynamics, and neural physical models for end-to-end AI integration.
     - Sensors:
         - Add more physical sensors (eg, force sensor) with examples.
     - Motion Generation:
@@ -27,10 +27,10 @@ Currently, EmbodiChain is under active development. Our roadmap is as follows:
 
 - Models & Training Infrastructure:
     - We will release a modular VLA framework for fast prototyping and training of embodied agents.
-    - Add a simple online data streaming pipeline for model training.
+    - Add simple online data streaming pipeline for model training.
 
 - Tasks:
     - Add more benchmark tasks for EmbodiChain.
     - Add more tasks with reinforcement learning support. 
-    - We will release a set of tableware manipulation tasks for demonstration of data generation pipeline.
+    - Add a set of tableware manipulation tasks for demonstration of data generation pipeline.
     
