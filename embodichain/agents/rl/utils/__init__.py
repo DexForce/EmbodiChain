@@ -15,7 +15,9 @@
 # ----------------------------------------------------------------------------
 
 from .config import AlgorithmCfg
+from .helper import flatten_dict_observation
 
 __all__ = [
     "AlgorithmCfg",
+    "flatten_dict_observation",
 ]

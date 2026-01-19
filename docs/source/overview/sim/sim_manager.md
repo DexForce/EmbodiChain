@@ -112,11 +112,22 @@ In this mode, the physics simulation stepping is automatically handling by the p
 > When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
 
 
-### Mainly used methods
+## Mainly used methods
 
 - **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
 - **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
+
+
+## Multiple instances
+
+`SimulationManager` supports multiple instances to run separate simulations world independently. Each instance maintains its own simulation state, assets, and configurations.
+
+- To get current instance number of `SimulationManager`: `SimulationManager.get_instance_num()`
+- To get specific instance: `SimulationManager.get_instance(instance_id)`.
+
+> Currently, multiple instances are not supported for ray tracing rendering backend. Good news is that we are working on adding this feature in future releases.
+
 
 For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
 

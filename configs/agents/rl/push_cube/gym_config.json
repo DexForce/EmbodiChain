@@ -1,129 +1,193 @@
-{
-  "id": "PushCubeRL",
-  "max_episodes": 5,
-  "env": {
-    "num_envs": 128,
-    "sim_steps_per_control": 4,
-    "events": {
-      "randomize_cube": {
-        "func": "randomize_rigid_object_pose",
-        "mode": "reset",
-        "params": {
-          "entity_cfg": {"uid": "cube"},
-          "position_range": [[-0.2, -0.2, 0.0], [0.2, 0.2, 0.0]],
-          "relative_position": true
-        }
-      }
-    },
-    "observations": {},
-    "extensions": {
-      "obs_mode": "state",
-      "episode_length": 100,
-      "joint_limits": 0.5,
-      "action_scale": 0.1,
-      "success_threshold": 0.1,
-      "reaching_reward_weight": 0.1,
-      "place_reward_weight": 2.0,
-      "place_penalty_weight": 0.5,
-      "action_penalty_weight": 0.01,
-      "success_bonus_weight": 10.0
-    }
-  },
-  "robot": {
-    "uid": "Manipulator",
-    "urdf_cfg": {
-      "components": [
-        {
-          "component_type": "arm",
-          "urdf_path": "UniversalRobots/UR10/UR10.urdf",
-          "transform": [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0]
-          ]
+{ 
+    "id": "PushCubeRL",
+    "max_episodes": 5,
+    "env": {
+        "num_envs": 128,
+        "sim_steps_per_control": 4,
+        "events": {
+            "randomize_cube": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {
+                        "uid": "cube"
+                    },
+                    "position_range": [
+                        [-0.2, -0.2, 0.0],
+                        [0.2, 0.2, 0.0]
+                    ],
+                    "relative_position": true
+                }
+            },
+            "randomize_goal": {
+                "func": "randomize_target_pose",
+                "mode": "reset",
+                "params": {
+                    "position_range": [
+                        [-0.3, -0.3, 0.05],
+                        [0.3, 0.3, 0.05]
+                    ],
+                    "relative_position": false,
+                    "store_key": "goal_pose"
+                }
+            }
         },
-        {
-          "component_type": "hand",
-          "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf",
-          "transform": [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0]
-          ]
+        "observations": {
+            "robot_qpos": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [0, 1, 2, 3, 4, 5]
+                }
+            },
+            "robot_ee_pos": {
+                "func": "get_robot_eef_pose",
+                "mode": "add",
+                "name": "robot/ee_pos",
+                "params": {
+                    "part_name": "arm"
+                }
+            },
+            "cube_pos": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "object/cube_pos",
+                "params": {
+                    "entity_cfg": {
+                        "uid": "cube"
+                    }
+                }
+            },
+            "goal_pos": {
+                "func": "target_position",
+                "mode": "add",
+                "name": "object/goal_pos",
+                "params": {
+                    "target_pose_key": "goal_pose"
+                }
+            }
+        },
+        "rewards": {
+            "reaching_reward": {
+                "func": "reaching_behind_object",
+                "mode": "add",
+                "weight": 0.1,
+                "params": {
+                    "object_cfg": {
+                        "uid": "cube"
+                    },
+                    "target_pose_key": "goal_pose",
+                    "behind_offset": 0.015,
+                    "height_offset": 0.015,
+                    "distance_scale": 5.0,
+                    "part_name": "arm"
+                }
+            },
+            "place_reward": {
+                "func": "incremental_distance_to_target",
+                "mode": "add",
+                "weight": 1.0,
+                "params": {
+                    "source_entity_cfg": {
+                        "uid": "cube"
+                    },
+                    "target_pose_key": "goal_pose",
+                    "tanh_scale": 10.0,
+                    "positive_weight": 2.0,
+                    "negative_weight": 0.5,
+                    "use_xy_only": true
+                }
+            },
+            "action_penalty": {
+                "func": "action_smoothness_penalty",
+                "mode": "add",
+                "weight": 0.01,
+                "params": {}
+            },
+            "success_bonus": {
+                "func": "success_reward",
+                "mode": "add",
+                "weight": 10.0,
+                "params": {}
+            }
+        },
+        "extensions": {
+            "obs_mode": "state",
+            "episode_length": 100,
+            "joint_limits": 0.5,
+            "action_scale": 0.1,
+            "success_threshold": 0.1
         }
-      ]
     },
-    "init_pos": [0.0, 0.0, 0.0],
-    "init_rot": [0.0, 0.0, 0.0],
-    "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.04, 0.04],
-    "drive_pros": {
-      "drive_type": "force",
-      "stiffness": 100000.0,
-      "damping": 1000.0,
-      "max_velocity": 2.0,
-      "max_effort": 500.0
+    "robot": {
+        "uid": "Manipulator",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+                }
+            ]
+        },
+        "init_pos": [0.0, 0.0, 0.0],
+        "init_rot": [0.0, 0.0, 0.0],
+        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.04, 0.04],
+        "drive_pros": {
+            "drive_type": "force",
+            "stiffness": 100000.0,
+            "damping": 1000.0,
+            "max_velocity": 2.0,
+            "max_effort": 500.0
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "control_parts": {
+            "arm": ["JOINT[1-6]"]
+        }
     },
-    "solver_cfg": {
-      "arm": {
-        "class_type": "PytorchSolver",
-        "end_link_name": "ee_link",
-        "root_link_name": "base_link",
-        "tcp": [
-          [1.0, 0.0, 0.0, 0.0],
-          [0.0, 1.0, 0.0, 0.0],
-          [0.0, 0.0, 1.0, 0.16],
-          [0.0, 0.0, 0.0, 1.0]
-        ]
-      }
-    },
-    "control_parts": {
-      "arm": ["JOINT[1-6]"]
-    }
-  },
-  "sensor": [],
-  "light": {
-  },
-  "background": [
-    {
-      "uid": "goal_sphere",
-      "shape": {
-        "shape_type": "Sphere",
-        "radius": 0.02
-      },
-      "body_type": "kinematic",
-      "init_pos": [-0.9, -0.6, 0.05],
-      "attrs": {
-        "enable_collision": false,
-        "mass": 0.0
-      }
-    }
-  ],
-  "rigid_object": [
-    {
-      "uid": "cube",
-      "shape": {
-        "shape_type": "Cube",
-        "size": [0.1, 0.1, 0.1]
-      },
-      "body_type": "dynamic",
-      "init_pos": [-0.6, -0.4, 0.05],
-      "attrs": {
-        "mass": 10.0,
-        "static_friction": 3.0,
-        "dynamic_friction": 2.0,
-        "linear_damping": 2.0,
-        "angular_damping": 2.0,
-        "contact_offset": 0.003,
-        "rest_offset": 0.001,
-        "restitution": 0.1,
-        "max_depenetration_velocity": 10.0,
-        "max_linear_velocity": 1.0,
-        "max_angular_velocity": 1.0
-      }
-    }
-  ],
-  "rigid_object_group": [],
-  "articulation": []
+    "sensor": [],
+    "light": {},
+    "background": [],
+    "rigid_object": [
+        {
+            "uid": "cube",
+            "shape": {
+                "shape_type": "Cube",
+                "size": [0.1, 0.1, 0.1]
+            },
+            "body_type": "dynamic",
+            "init_pos": [-0.6, -0.4, 0.05],
+            "attrs": {
+                "mass": 10.0,
+                "static_friction": 3.0,
+                "dynamic_friction": 2.0,
+                "linear_damping": 2.0,
+                "angular_damping": 2.0,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 10.0,
+                "max_linear_velocity": 1.0,
+                "max_angular_velocity": 1.0
+            }
+        }
+    ],
+    "rigid_object_group": [],
+    "articulation": []
 }

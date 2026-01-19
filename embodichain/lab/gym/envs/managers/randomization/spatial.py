@@ -266,3 +266,86 @@ def randomize_robot_qpos(
 
     robot.set_qpos(qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids)
     env.sim.update(step=100)
+
+
+def randomize_target_pose(
+    env: EmbodiedEnv,
+    env_ids: Union[torch.Tensor, None],
+    position_range: tuple[list[float], list[float]],
+    rotation_range: tuple[list[float], list[float]] | None = None,
+    relative_position: bool = False,
+    relative_rotation: bool = False,
+    reference_entity_cfg: SceneEntityCfg | None = None,
+    store_key: str = "target_pose",
+) -> None:
+    """Randomize a virtual target pose and store in env state for use in get_info().
+
+    This function generates random target poses without requiring a physical object in the scene.
+    The generated poses are stored in env and should be exposed in get_info() for reward functors.
+
+    Args:
+        env (EmbodiedEnv): The environment instance.
+        env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
+        position_range (tuple[list[float], list[float]]): The range for the position randomization.
+        rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
+            The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
+        relative_position (bool): Whether to randomize the position relative to a reference entity. Default is False.
+        relative_rotation (bool): Whether to randomize the rotation relative to a reference entity. Default is False.
+        reference_entity_cfg (SceneEntityCfg | None): The reference entity for relative randomization.
+            If None and relative mode is True, uses world origin.
+        store_key (str): The key to store the target pose in env state. Default is "target_pose".
+            The pose will be stored in env._{store_key}s and should be exposed in info[store_key].
+    """
+    num_instance = len(env_ids)
+
+    # Get reference pose if needed
+    if relative_position or relative_rotation:
+        if reference_entity_cfg is not None:
+            # Get reference entity pose
+            ref_obj = env.sim.get_rigid_object(reference_entity_cfg.uid)
+            if ref_obj is not None:
+                ref_pose = ref_obj.get_local_pose(to_matrix=True)[env_ids]
+                init_pos = ref_pose[:, :3, 3]
+                init_rot = ref_pose[:, :3, :3]
+            else:
+                # Fallback to world origin
+                init_pos = torch.zeros(num_instance, 3, device=env.device)
+                init_rot = (
+                    torch.eye(3, device=env.device)
+                    .unsqueeze(0)
+                    .repeat(num_instance, 1, 1)
+                )
+        else:
+            # Use world origin as reference
+            init_pos = torch.zeros(num_instance, 3, device=env.device)
+            init_rot = (
+                torch.eye(3, device=env.device).unsqueeze(0).repeat(num_instance, 1, 1)
+            )
+    else:
+        # Absolute randomization, init values won't be used
+        init_pos = torch.zeros(num_instance, 3, device=env.device)
+        init_rot = (
+            torch.eye(3, device=env.device).unsqueeze(0).repeat(num_instance, 1, 1)
+        )
+
+    # Generate random pose
+    pose = get_random_pose(
+        init_pos=init_pos,
+        init_rot=init_rot,
+        position_range=position_range,
+        rotation_range=rotation_range,
+        relative_position=relative_position,
+        relative_rotation=relative_rotation,
+    )
+
+    # Store in env state (to be exposed via get_info)
+    state_attr = f"_{store_key}"
+    if not hasattr(env, state_attr):
+        setattr(
+            env,
+            state_attr,
+            torch.zeros(env.num_envs, 4, 4, device=env.device, dtype=torch.float32),
+        )
+
+    target_poses = getattr(env, state_attr)
+    target_poses[env_ids] = pose

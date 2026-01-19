@@ -1,64 +1,67 @@
-{
-  "trainer": {
-    "exp_name": "push_cube_ppo",
-    "gym_config": "configs/agents/rl/push_cube/gym_config.json",
-    "seed": 42,
-    "device": "cuda:0",
-    "headless": true,
-    "iterations": 1000,
-    "rollout_steps": 1024,
-    "eval_freq": 2,
-    "save_freq": 200,
-    "use_wandb": false,
-    "wandb_project_name": "embodychain-push_cube",
-    "events": {
-      "eval": {
-        "record_camera": {
-          "func": "record_camera_data_async",
-          "mode": "interval",
-          "interval_step": 1,
-          "params": {
-            "name": "main_cam",
-            "resolution": [640, 480],
-            "eye": [-1.4, 1.4, 2.0],
-            "target": [0, 0, 0],
-            "up": [0, 0, 1],
-            "intrinsics": [600, 600, 320, 240],
-            "save_path": "./outputs/videos/eval"
-          }
+{ 
+    "trainer": {
+        "exp_name": "push_cube_ppo",
+        "gym_config": "configs/agents/rl/push_cube/gym_config.json",
+        "seed": 42,
+        "device": "cuda:0",
+        "headless": false,
+        "enable_rt": false,
+        "gpu_id": 0,
+        "num_envs": 8,
+        "iterations": 1000,
+        "rollout_steps": 1024,
+        "eval_freq": 200,
+        "save_freq": 200,
+        "use_wandb": true,
+        "wandb_project_name": "embodychain-push_cube",
+        "events": {
+            "eval": {
+                "record_camera": {
+                    "func": "record_camera_data_async",
+                    "mode": "interval",
+                    "interval_step": 1,
+                    "params": {
+                        "name": "main_cam",
+                        "resolution": [640, 480],
+                        "eye": [-1.4, 1.4, 2.0],
+                        "target": [0, 0, 0],
+                        "up": [0, 0, 1],
+                        "intrinsics": [600, 600, 320, 240],
+                        "save_path": "./outputs/videos/eval"
+                    }
+                }
+            }
         }
-      }
-    }
-  },
-  "policy": {
-    "name": "actor_critic",
-    "actor": {
-      "type": "mlp",
-      "network_cfg": {
-        "hidden_sizes": [256, 256],
-        "activation": "relu"
-      }
     },
-    "critic": {
-      "type": "mlp",
-      "network_cfg": {
-        "hidden_sizes": [256, 256],
-        "activation": "relu"
-      }
+    "policy": {
+        "name": "actor_critic",
+        "actor": {
+            "type": "mlp",
+            "network_cfg": {
+                "hidden_sizes": [256, 256],
+                "activation": "relu"
+            }
+        },
+        "critic": {
+            "type": "mlp",
+            "network_cfg": {
+                "hidden_sizes": [256, 256],
+                "activation": "relu"
+            }
+        }
+    },
+    "algorithm": {
+        "name": "ppo",
+        "cfg": {
+            "learning_rate": 0.0001,
+            "n_epochs": 10,
+            "batch_size": 8192,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_coef": 0.2,
+            "ent_coef": 0.01,
+            "vf_coef": 0.5,
+            "max_grad_norm": 0.5
+        }
     }
-  },
-  "algorithm": {
-    "name": "ppo",
-    "cfg": {
-      "learning_rate": 0.0001,
-      "n_epochs": 10,
-      "batch_size": 8192,
-      "gamma": 0.99,
-      "gae_lambda": 0.95,
-      "clip_coef": 0.2,
-      "ent_coef": 0.01,
-      "vf_coef": 0.5,
-      "max_grad_norm": 0.5
-    }
-  }
 }

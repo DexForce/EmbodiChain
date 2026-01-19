@@ -38,26 +38,12 @@ class PushCubeEnv(EmbodiedEnv):
         if cfg is None:
             cfg = EmbodiedEnvCfg()
 
-        extensions = getattr(cfg, "extensions", {}) or {}
-
-        # cfg.sim_cfg.enable_rt = True
-
-        defaults = {
-            "success_threshold": 0.1,
-            "reaching_reward_weight": 0.1,
-            "place_reward_weight": 2.0,
-            "place_penalty_weight": 0.5,
-            "action_penalty_weight": 0.01,
-            "success_bonus_weight": 10.0,
-        }
-        for name, default in defaults.items():
-            value = extensions.get(name, getattr(cfg, name, default))
-            setattr(cfg, name, value)
-            setattr(self, name, getattr(cfg, name))
-
-        self.last_cube_goal_dist = None
-
         super().__init__(cfg, **kwargs)
+
+    @property
+    def goal_pose(self) -> torch.Tensor:
+        """Get current goal poses (4x4 matrices) for all environments."""
+        return self._goal_pose
 
     def _draw_goal_marker(self):
         """Draw axis marker at goal position for visualization."""
@@ -87,32 +73,10 @@ class PushCubeEnv(EmbodiedEnv):
             )
             self.sim.draw_marker(cfg=marker_cfg)
 
-    def _init_sim_state(self, **kwargs):
-        super()._init_sim_state(**kwargs)
-        self.single_action_space = spaces.Box(
-            low=-self.joint_limits,
-            high=self.joint_limits,
-            shape=(6,),
-            dtype=np.float32,
-        )
-        if self.obs_mode == "state":
-            self.single_observation_space = spaces.Box(
-                low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32
-            )
-
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
         super()._initialize_episode(env_ids=env_ids, **kwargs)
-        cube = self.sim.get_rigid_object("cube")
-
-        # Calculate previous distance (for incremental reward) based on current (possibly randomized) pose
-        cube_pos = cube.body_data.pose[:, :3]
-        goal_sphere = self.sim.get_rigid_object("goal_sphere")
-        goal_pos = goal_sphere.body_data.pose[
-            :, :3
-        ]  # Get actual goal positions for each environment
-        self.last_cube_goal_dist = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
 
         # Draw marker at goal position
         # self._draw_goal_marker()
@@ -128,84 +92,29 @@ class PushCubeEnv(EmbodiedEnv):
         self.robot.set_qpos(qpos=target_qpos)
         return scaled_action
 
-    def get_obs(self, **kwargs) -> EnvObs:
-        qpos_all = self.robot.body_data.qpos[:, :6]
-        ee_pose_matrix = self.robot.compute_fk(
-            name="arm", qpos=qpos_all, to_matrix=True
-        )
-        ee_pos_all = ee_pose_matrix[:, :3, 3]
-        cube = self.sim.get_rigid_object("cube")
-        cube_pos_all = cube.body_data.pose[:, :3]
-        # Get actual goal positions for each environment
-        goal_sphere = self.sim.get_rigid_object("goal_sphere")
-        goal_pos_all = goal_sphere.body_data.pose[:, :3]
-        if self.obs_mode == "state":
-            return torch.cat([qpos_all, ee_pos_all, cube_pos_all, goal_pos_all], dim=1)
-        return {
-            "robot": {"qpos": qpos_all, "ee_pos": ee_pos_all},
-            "object": {"cube_pos": cube_pos_all, "goal_pos": goal_pos_all},
-        }
-
-    def get_reward(
-        self, obs: EnvObs, action: EnvAction, info: Dict[str, Any]
-    ) -> torch.Tensor:
-        if self.obs_mode == "state":
-            ee_pos = obs[:, 6:9]
-            cube_pos = obs[:, 9:12]
-            goal_pos = obs[:, 12:15]
-        else:
-            ee_pos = obs["robot"]["ee_pos"]
-            cube_pos = obs["object"]["cube_pos"]
-            goal_pos = obs["object"]["goal_pos"]
-        push_direction = goal_pos - cube_pos
-        push_dir_norm = torch.norm(push_direction, dim=1, keepdim=True) + 1e-6
-        push_dir_normalized = push_direction / push_dir_norm
-        push_pose = (
-            cube_pos
-            - 0.015 * push_dir_normalized
-            + torch.tensor([0, 0, 0.015], device=self.device, dtype=torch.float32)
-        )
-        ee_to_push_dist = torch.norm(ee_pos - push_pose, dim=1)
-        reaching_reward_raw = 1.0 - torch.tanh(5.0 * ee_to_push_dist)
-        reaching_reward = self.reaching_reward_weight * reaching_reward_raw
-        cube_to_goal_dist = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
-        distance_delta = 10.0 * (self.last_cube_goal_dist - cube_to_goal_dist)
-        distance_delta_normalized = torch.tanh(distance_delta)
-        place_reward = torch.where(
-            distance_delta_normalized >= 0,
-            self.place_reward_weight * distance_delta_normalized,
-            self.place_penalty_weight * distance_delta_normalized,
-        )
-        self.last_cube_goal_dist = cube_to_goal_dist
-        action_magnitude = torch.norm(action, dim=1)
-        action_penalty = -self.action_penalty_weight * action_magnitude
-        success_bonus_raw = info["success"].float()
-        success_bonus = self.success_bonus_weight * success_bonus_raw
-        reward = reaching_reward + place_reward + action_penalty + success_bonus
-        # Organize reward components in a dedicated "rewards" dict
-        # This allows trainer to easily identify and log reward components
-        if "rewards" not in info:
-            info["rewards"] = {}
-        info["rewards"]["reaching_reward"] = reaching_reward
-        info["rewards"]["place_reward"] = place_reward
-        info["rewards"]["action_penalty"] = action_penalty
-        info["rewards"]["success_bonus"] = success_bonus
-        return reward
-
     def get_info(self, **kwargs) -> Dict[str, Any]:
         cube = self.sim.get_rigid_object("cube")
         cube_pos = cube.body_data.pose[:, :3]
-        # Get actual goal positions for each environment
-        goal_sphere = self.sim.get_rigid_object("goal_sphere")
-        goal_pos = goal_sphere.body_data.pose[:, :3]
-        xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
-        is_success = xy_distance < self.success_threshold
+
+        # Get goal position from event-managed goal pose
+        if self.goal_pose is not None:
+            goal_pos = self.goal_pose[:, :3, 3]
+            xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
+            is_success = xy_distance < self.success_threshold
+        else:
+            # Goal not yet set by randomize_target_pose event (e.g., before first reset)
+            xy_distance = torch.zeros(self.cfg.num_envs, device=self.device)
+            is_success = torch.zeros(
+                self.cfg.num_envs, device=self.device, dtype=torch.bool
+            )
+
         info = {
             "success": is_success,
             "fail": torch.zeros(
                 self.cfg.num_envs, device=self.device, dtype=torch.bool
             ),
             "elapsed_steps": self._elapsed_steps,
+            "goal_pose": self.goal_pose,
         }
         info["metrics"] = {
             "distance_to_goal": xy_distance,

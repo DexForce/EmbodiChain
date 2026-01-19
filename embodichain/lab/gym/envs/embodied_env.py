@@ -42,6 +42,7 @@ from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
+    RewardManager,
     DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
@@ -89,6 +90,13 @@ class EmbodiedEnvCfg(EnvCfg):
     the observation manager.
 
     Please refer to the :class:`embodichain.lab.gym.managers.ObservationManager` class for more details.
+    """
+
+    rewards: Union[object, None] = None
+    """Reward settings. Defaults to None, in which case no reward computation is performed through
+    the reward manager.
+
+    Please refer to the :class:`embodichain.lab.gym.managers.RewardManager` class for more details.
     """
 
     dataset: Union[object, None] = None
@@ -156,6 +164,11 @@ class EmbodiedEnv(BaseEnv):
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self.event_manager: EventManager | None = None
+        self.observation_manager: ObservationManager | None = None
+        self.reward_manager: RewardManager | None = None
+        self.dataset_manager: DatasetManager | None = None
+
         super().__init__(cfg, **kwargs)
 
     def _init_sim_state(self, **kwargs):
@@ -174,6 +187,9 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.observations:
             self.observation_manager = ObservationManager(self.cfg.observations, self)
+
+        if self.cfg.rewards:
+            self.reward_manager = RewardManager(self.cfg.rewards, self)
 
         if self.cfg.dataset:
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
@@ -283,6 +299,21 @@ class EmbodiedEnv(BaseEnv):
             obs = self.observation_manager.compute(obs)
         return obs
 
+    def _extend_reward(
+        self,
+        rewards: torch.Tensor,
+        obs: EnvObs,
+        action: EnvAction,
+        info: Dict[str, Any],
+        **kwargs,
+    ) -> torch.Tensor:
+        if self.reward_manager:
+            rewards, reward_info = self.reward_manager.compute(
+                obs=obs, action=action, info=info
+            )
+            info["rewards"] = reward_info
+        return rewards
+
     def _prepare_scene(self, **kwargs) -> None:
         self._setup_lights()
         self._setup_background()
@@ -305,6 +336,10 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="reset", env_ids=env_ids)
+
+        # reset reward manager for environments that need a reset
+        if self.cfg.rewards:
+            self.reward_manager.reset(env_ids=env_ids)
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.

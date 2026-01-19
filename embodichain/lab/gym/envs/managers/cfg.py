@@ -231,7 +231,7 @@ class SceneEntityCfg:
     def _resolve_joint_names(self, scene: SimulationManager):
         # convert joint names to indices based on regex
         if self.joint_names is not None or self.joint_ids != slice(None):
-            entity: Articulation = scene[self.uid]
+            entity: Articulation = scene.get_articulation(self.uid)
             # -- if both are not their default values, check if they are valid
             if self.joint_names is not None and self.joint_ids != slice(None):
                 if isinstance(self.joint_names, str):
@@ -272,7 +272,7 @@ class SceneEntityCfg:
     def _resolve_body_names(self, scene: SimulationManager):
         # convert body names to indices based on regex
         if self.body_names is not None or self.body_ids != slice(None):
-            entity: RigidObject = scene[self.uid]
+            entity: RigidObject = scene.get_rigid_object(self.uid)
             # -- if both are not their default values, check if they are valid
             if self.body_names is not None and self.body_ids != slice(None):
                 if isinstance(self.body_names, str):
@@ -309,6 +309,29 @@ class SceneEntityCfg:
                 if isinstance(self.body_ids, int):
                     self.body_ids = [self.body_ids]
                 self.body_names = [entity.body_names[i] for i in self.body_ids]
+
+
+@configclass
+class RewardCfg(FunctorCfg):
+    """Configuration for a reward functor.
+
+    The reward functor is used to compute rewards for the environment. The `mode` attribute
+    determines how the reward is combined with existing rewards.
+    """
+
+    mode: Literal["add", "replace"] = "add"
+    """The mode for the reward computation.
+
+    - `add`: The reward is added to the existing total reward.
+    - `replace`: The reward replaces the total reward (useful for single reward functions).
+    """
+
+    weight: float = 1.0
+    """The weight multiplier for this reward term.
+
+    This value is used to scale the reward before adding it to the total reward.
+    Default is 1.0 (no scaling).
+    """
 
 
 @configclass

@@ -25,6 +25,7 @@ from collections import deque
 import wandb
 
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
+from .helper import flatten_dict_observation
 
 
 class Trainer:
@@ -74,22 +75,22 @@ class Trainer:
 
         # initial obs (assume env returns torch tensors already on target device)
         obs, _ = self.env.reset()
-        self.obs = obs
 
         # Initialize algorithm's buffer
-        self.observation_space = getattr(self.env, "observation_space", None)
-        self.action_space = getattr(self.env, "action_space", None)
-        obs_dim = (
-            self.observation_space.shape[-1]
-            if self.observation_space
-            else self.obs.shape[-1]
-        )
-        action_dim = self.action_space.shape[-1] if self.action_space else None
+        # Flatten dict observations from ObservationManager to tensor for RL algorithms
+        if isinstance(obs, dict):
+            obs_tensor = flatten_dict_observation(obs)
+            obs_dim = obs_tensor.shape[-1]
+            num_envs = obs_tensor.shape[0]
+            # Store flattened observation for RL training
+            self.obs = obs_tensor
+
+        action_space = getattr(self.env, "action_space", None)
+        action_dim = action_space.shape[-1] if action_space else None
         if action_dim is None:
             raise RuntimeError(
                 "Env must expose action_space with shape for buffer initialization."
             )
-        num_envs = self.obs.shape[0] if self.obs.ndim == 2 else 1
 
         # Algorithm manages its own buffer
         self.algorithm.initialize_buffer(num_steps, num_envs, obs_dim, action_dim)
@@ -160,8 +161,9 @@ class Trainer:
                 self.curr_len[done_idx] = 0
 
             # Update global step and observation
+            # next_obs is already flattened in algorithm's collect_rollout
             self.obs = next_obs
-            self.global_step += next_obs.shape[0] if next_obs.ndim == 2 else 1
+            self.global_step += next_obs.shape[0]
 
             if isinstance(info, dict):
                 rewards_dict = info.get("rewards")
@@ -226,6 +228,8 @@ class Trainer:
         returns = []
         for _ in range(num_episodes):
             obs, _ = self.eval_env.reset()
+            obs = flatten_dict_observation(obs)
+
             done_any = torch.zeros(
                 obs.shape[0] if obs.ndim == 2 else 1,
                 dtype=torch.bool,
@@ -235,8 +239,12 @@ class Trainer:
             ep_ret = torch.zeros(num_envs_eval, dtype=torch.float32, device=self.device)
             while not done_any.any():
                 actions, _, _ = self.policy.get_action(obs, deterministic=True)
-                result = self.eval_env.step(actions)
-                obs, reward, terminated, truncated, info = result
+                obs, reward, terminated, truncated, info = self.eval_env.step(actions)
+
+                # Flatten dict observation from step
+                if isinstance(obs, dict):
+                    obs = flatten_dict_observation(obs)
+
                 done = terminated | truncated
                 reward = reward.float()
                 done_any = done
