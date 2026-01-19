@@ -172,19 +172,21 @@ class SimulationManager:
 
     def __new__(
         cls,
-        sim_config: SimulationManagerCfg = SimulationManagerCfg(),
-        instance_id: int = 0,
+        sim_config: SimulationManagerCfg = SimulationManagerCfg()
     ):
         """Create or return the instance based on instance_id."""
-        if instance_id not in cls._instances:
-            cls._instances[instance_id] = super(SimulationManager, cls).__new__(cls)
-        return cls._instances[instance_id]
+        n_instance = len(list(cls._instances.keys()))
+        instance = super(SimulationManager, cls).__new__(cls)
+        # Store sim_config in the instance for use in __init__ or elsewhere
+        instance.sim_config = sim_config
+        cls._instances[str(n_instance + 1)] = instance
+        return instance
 
     def __init__(
         self,
-        sim_config: SimulationManagerCfg = SimulationManagerCfg(),
-        instance_id: int = 0,
+        sim_config: SimulationManagerCfg = SimulationManagerCfg()
     ) -> None:
+        instance_id = SimulationManager.get_n_instances() + 1
         # Skip initialization if already initialized
         if hasattr(self, "_is_initialized") and self._is_initialized:
             logger.log_warning(
