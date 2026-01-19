@@ -302,6 +302,15 @@ class SimulationManager:
         return cls._instances[instance_id]
 
     @classmethod
+    def get_n_instances(cls) -> int:
+        """Get the number of instantiated SimulationManager instances.
+
+        Returns:
+            int: The number of instances.
+        """
+        return len(cls._instances)
+
+    @classmethod
     def reset(cls, instance_id: int = 0) -> None:
         """Reset the instance.
 
