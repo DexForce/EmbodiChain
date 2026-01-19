@@ -3,7 +3,7 @@
 ```{currentmodule} embodichain.lab.gym.envs.managers
 ```
 
-This page lists all available observation functors that can be used with the Observation Manager. Observation functors are configured using {class}`envs.managers.cfg.ObservationCfg` and can operate in two modes: ``modify`` (update existing observations) or ``add`` (add new observations).
+This page lists all available observation functors that can be used with the Observation Manager. Observation functors are configured using {class}`~cfg.ObservationCfg` and can operate in two modes: ``modify`` (update existing observations) or ``add`` (add new observations).
 
 ## Pose Computations
 
@@ -57,8 +57,11 @@ This page lists all available observation functors that can be used with the Obs
   - Normalize joint positions or velocities to [0, 1] range based on joint limits. Supports both ``qpos_limits`` and ``qvel_limits``. Operates in ``modify`` mode.
 ```
 
+```{currentmodule} embodichain.lab.sim.objects
+```
+
 ```{note}
-To get robot end-effector poses, you can use the robot's ``compute_fk()`` method directly in your observation functors or task code.
+To get robot end-effector poses, you can use the robot's {meth}`~Robot.compute_fk()` method directly in your observation functors or task code.
 ```
 
 ## Usage Example
