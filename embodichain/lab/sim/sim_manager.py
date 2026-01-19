@@ -176,30 +176,22 @@ class SimulationManager:
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
-        cls._instances[str(n_instance + 1)] = instance
+        cls._instances[n_instance] = instance
         return instance
 
     def __init__(
         self, sim_config: SimulationManagerCfg = SimulationManagerCfg()
     ) -> None:
-        instance_id = SimulationManager.get_n_instances() + 1
-        # Skip initialization if already initialized
-        if hasattr(self, "_is_initialized") and self._is_initialized:
-            logger.log_warning(
-                f"SimulationManager (id={instance_id}) is already initialized. Skipping re-initialization. "
-                "Use SimulationManager.get_instance(instance_id) to get the existing instance or "
-                "SimulationManager.reset(instance_id) to create a new instance."
-            )
-            return
+        instance_id = SimulationManager.get_instance_num() - 1
+
+        # Mark as initialized
+        self.instance_id = instance_id
 
         if sim_config.enable_rt and instance_id > 0:
             logger.log_error(
                 f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
             )
 
-        # Mark as initialized
-        self._is_initialized = True
-        self.instance_id = instance_id
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
@@ -305,7 +297,7 @@ class SimulationManager:
         return cls._instances[instance_id]
 
     @classmethod
-    def get_n_instances(cls) -> int:
+    def get_instance_num(cls) -> int:
         """Get the number of instantiated SimulationManager instances.
 
         Returns:
