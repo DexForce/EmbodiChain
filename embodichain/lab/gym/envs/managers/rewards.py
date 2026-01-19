@@ -299,42 +299,37 @@ def reaching_behind_object_reward(
     obs: dict,
     action: torch.Tensor,
     info: dict,
-    end_effector_cfg: SceneEntityCfg = None,
     object_cfg: SceneEntityCfg = None,
-    goal_cfg: SceneEntityCfg = None,
+    target_pose_key: str = "goal_pose",
     behind_offset: float = 0.015,
     height_offset: float = 0.015,
     distance_scale: float = 5.0,
+    part_name: str = None,
 ) -> torch.Tensor:
     """Reward for reaching behind an object along object-to-goal direction."""
-    # get end effector position
-    ee_obj = env.sim[end_effector_cfg.uid]
-    if hasattr(ee_obj, "get_body_pose"):
-        ee_pos = ee_obj.get_body_pose(body_ids=end_effector_cfg.body_ids)[:, :3, 3]
-    elif hasattr(ee_obj, "get_local_pose"):
-        ee_pos = ee_obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(
-            f"Entity '{end_effector_cfg.uid}' does not support position query."
-        )
+    # get end effector position from robot FK
+    robot = env.robot
+    joint_ids = robot.get_joint_ids(part_name)
+    qpos = robot.get_qpos()[:, joint_ids]
+    ee_pose = robot.compute_fk(name=part_name, qpos=qpos, to_matrix=True)
+    ee_pos = ee_pose[:, :3, 3]
 
     # get object position
-    obj = env.sim[object_cfg.uid]
-    if hasattr(obj, "get_body_pose"):
-        obj_pos = obj.get_body_pose(body_ids=object_cfg.body_ids)[:, :3, 3]
-    elif hasattr(obj, "get_local_pose"):
-        obj_pos = obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(f"Entity '{object_cfg.uid}' does not support position query.")
+    obj = env.sim.get_rigid_object(object_cfg.uid)
+    obj_pos = obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
-    # get goal position
-    goal_obj = env.sim[goal_cfg.uid]
-    if hasattr(goal_obj, "get_body_pose"):
-        goal_pos = goal_obj.get_body_pose(body_ids=goal_cfg.body_ids)[:, :3, 3]
-    elif hasattr(goal_obj, "get_local_pose"):
-        goal_pos = goal_obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(f"Entity '{goal_cfg.uid}' does not support position query.")
+    # get goal position from info
+    if target_pose_key not in info:
+        raise ValueError(
+            f"Target pose '{target_pose_key}' not found in info dict. "
+            f"Make sure to provide it in get_info()."
+        )
+
+    target_poses = info[target_pose_key]
+    if target_poses.dim() == 2:  # (num_envs, 3)
+        goal_pos = target_poses
+    else:  # (num_envs, 4, 4)
+        goal_pos = target_poses[:, :3, 3]
 
     # compute push direction (from object to goal)
     push_direction = goal_pos - obj_pos
@@ -425,17 +420,8 @@ def incremental_distance_to_target(
 ) -> torch.Tensor:
     """Incremental reward for progress toward a virtual target pose from info."""
     # get source entity position
-    source_obj = env.sim[source_entity_cfg.uid]
-    if hasattr(source_obj, "get_body_pose"):
-        source_pos = source_obj.get_body_pose(body_ids=source_entity_cfg.body_ids)[
-            :, :3, 3
-        ]
-    elif hasattr(source_obj, "get_local_pose"):
-        source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
-    else:
-        raise ValueError(
-            f"Entity '{source_entity_cfg.uid}' does not support position query."
-        )
+    source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
+    source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
     # get target position from info
     if target_pose_key not in info:

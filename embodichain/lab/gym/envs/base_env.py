@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
+import numpy as np
 import gymnasium as gym
 
 from typing import Dict, List, Union, Tuple, Any, Sequence
@@ -172,6 +173,21 @@ class BaseEnv(gym.Env):
             return gym.vector.utils.batch_space(
                 self.single_observation_space, n=self.num_envs
             )
+
+    @cached_property
+    def flattened_observation_space(self) -> gym.spaces.Box:
+        """Flattened observation space for RL training.
+
+        Returns a Box space by computing total dimensions from nested dict observations.
+        This is needed because RL algorithms (PPO, SAC, etc.) require flat vector inputs.
+        """
+        from embodichain.agents.rl.utils.helper import flatten_dict_observation
+
+        flattened_obs = flatten_dict_observation(self._init_raw_obs)
+        total_dim = flattened_obs.shape[-1]
+        return gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(total_dim,), dtype=np.float32
+        )
 
     @cached_property
     def action_space(self) -> gym.spaces.Space:

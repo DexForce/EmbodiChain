@@ -27,7 +27,7 @@
     "observations": {
       "robot_qpos": {
         "func": "normalize_robot_joint_data",
-        "mode": "add",
+        "mode": "modify",
         "name": "robot/qpos",
         "params": {
           "joint_ids": [0, 1, 2, 3, 4, 5]
@@ -65,12 +65,12 @@
         "name": "reaching",
         "weight": 0.1,
         "params": {
-          "end_effector_cfg": {"uid": "Manipulator", "body_ids": "ee_link"},
           "object_cfg": {"uid": "cube"},
-          "goal_cfg": {"uid": "goal_sphere"},
+          "target_pose_key": "goal_pose",
           "behind_offset": 0.015,
           "height_offset": 0.015,
-          "distance_scale": 5.0
+          "distance_scale": 5.0,
+          "part_name": "arm"
         }
       },
       "place_reward": {

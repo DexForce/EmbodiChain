@@ -323,24 +323,6 @@ def cat_tensor_with_ids(
     return out
 
 
-def config_to_rl_cfg(config: dict) -> "RLEnvCfg":
-    """Parse gym-style configuration dict into an RL-ready config object."""
-
-    from embodichain.lab.gym.envs.rl_env_cfg import RLEnvCfg
-
-    # Use config_to_cfg to parse shared fields
-    env_cfg = config_to_cfg(config)
-    # Convert to RLEnvCfg if needed
-    if not isinstance(env_cfg, RLEnvCfg):
-        env_cfg = RLEnvCfg.from_dict(env_cfg.__dict__)
-    # RL-specific fields
-    env_cfg.env_id = config.get("id")
-    env_cfg.num_envs = config["env"].get("num_envs", env_cfg.num_envs)
-    env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
-    # Add any RL-specific parsing here
-    return env_cfg
-
-
 def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -452,6 +434,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             env_cfg.articulation.append(cfg)
 
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
+    env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
     # TODO: support more env events, eg, grasp pose generation, mesh preprocessing, etc.
 

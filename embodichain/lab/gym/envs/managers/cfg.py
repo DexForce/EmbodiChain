@@ -231,7 +231,7 @@ class SceneEntityCfg:
     def _resolve_joint_names(self, scene: SimulationManager):
         # convert joint names to indices based on regex
         if self.joint_names is not None or self.joint_ids != slice(None):
-            entity: Articulation = scene[self.uid]
+            entity: Articulation = scene.get_articulation(self.uid)
             # -- if both are not their default values, check if they are valid
             if self.joint_names is not None and self.joint_ids != slice(None):
                 if isinstance(self.joint_names, str):
@@ -272,7 +272,7 @@ class SceneEntityCfg:
     def _resolve_body_names(self, scene: SimulationManager):
         # convert body names to indices based on regex
         if self.body_names is not None or self.body_ids != slice(None):
-            entity: RigidObject = scene[self.uid]
+            entity: RigidObject = scene.get_rigid_object(self.uid)
             # -- if both are not their default values, check if they are valid
             if self.body_names is not None and self.body_ids != slice(None):
                 if isinstance(self.body_names, str):

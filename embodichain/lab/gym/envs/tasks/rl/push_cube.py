@@ -38,18 +38,6 @@ class PushCubeEnv(EmbodiedEnv):
         if cfg is None:
             cfg = EmbodiedEnvCfg()
 
-        extensions = getattr(cfg, "extensions", {}) or {}
-
-        # cfg.sim_cfg.enable_rt = True
-
-        defaults = {
-            "success_threshold": 0.1,
-        }
-        for name, default in defaults.items():
-            value = extensions.get(name, getattr(cfg, name, default))
-            setattr(cfg, name, value)
-            setattr(self, name, getattr(cfg, name))
-
         super().__init__(cfg, **kwargs)
 
     def _draw_goal_marker(self):
@@ -79,19 +67,6 @@ class PushCubeEnv(EmbodiedEnv):
                 arena_index=arena_idx,
             )
             self.sim.draw_marker(cfg=marker_cfg)
-
-    def _init_sim_state(self, **kwargs):
-        super()._init_sim_state(**kwargs)
-        self.single_action_space = spaces.Box(
-            low=-self.joint_limits,
-            high=self.joint_limits,
-            shape=(6,),
-            dtype=np.float32,
-        )
-        if self.obs_mode == "state":
-            self.single_observation_space = spaces.Box(
-                low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32
-            )
 
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
