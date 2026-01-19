@@ -32,7 +32,7 @@ from embodichain.agents.rl.algo import build_algo, get_registered_algo_names
 from embodichain.agents.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import config_to_rl_cfg
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.utils.utility import load_json
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
@@ -60,6 +60,9 @@ def main():
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
     headless = bool(trainer_cfg.get("headless", True))
+    enable_rt = bool(trainer_cfg.get("enable_rt", False))
+    gpu_id = int(trainer_cfg.get("gpu_id", 0))
+    num_envs = trainer_cfg.get("num_envs", None)
     wandb_project_name = trainer_cfg.get("wandb_project_name", "embodychain-generic")
 
     # Device
@@ -120,7 +123,11 @@ def main():
     logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_json(str(gym_config_path))
-    gym_env_cfg = config_to_rl_cfg(gym_config_data)
+    gym_env_cfg = config_to_cfg(gym_config_data)
+
+    # Override num_envs from train config if provided
+    if num_envs is not None:
+        gym_env_cfg.num_envs = num_envs
 
     # Ensure sim configuration mirrors runtime overrides
     if gym_env_cfg.sim_cfg is None:
@@ -135,24 +142,28 @@ def main():
     else:
         gym_env_cfg.sim_cfg.sim_device = torch.device("cpu")
     gym_env_cfg.sim_cfg.headless = headless
+    gym_env_cfg.sim_cfg.enable_rt = enable_rt
+    gym_env_cfg.sim_cfg.gpu_id = gpu_id
 
     logger.log_info(
-        f"Loaded gym_config from {gym_config_path} (env_id={gym_env_cfg.env_id}, headless={gym_env_cfg.sim_cfg.headless}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
+        f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, enable_rt={gym_env_cfg.sim_cfg.enable_rt}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
     )
 
-    env = build_env(gym_env_cfg.env_id, base_env_cfg=gym_env_cfg)
+    env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
 
     eval_gym_env_cfg = deepcopy(gym_env_cfg)
     eval_gym_env_cfg.num_envs = 4
     eval_gym_env_cfg.sim_cfg.headless = True
 
-    eval_env = build_env(eval_gym_env_cfg.env_id, base_env_cfg=eval_gym_env_cfg)
+    eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
 
     # Build Policy via registry
     policy_name = policy_block["name"]
     # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic)
     if policy_name.lower() == "actor_critic":
-        obs_dim = env.observation_space.shape[-1]
+        # Get observation dimension from flattened observation space
+        # flattened_observation_space returns Box space for RL training
+        obs_dim = env.flattened_observation_space.shape[-1]
         action_dim = env.action_space.shape[-1]
 
         actor_cfg = policy_block.get("actor")
@@ -167,7 +178,7 @@ def main():
 
         policy = build_policy(
             policy_block,
-            env.observation_space,
+            env.flattened_observation_space,
             env.action_space,
             device,
             actor=actor,
@@ -175,7 +186,7 @@ def main():
         )
     else:
         policy = build_policy(
-            policy_block, env.observation_space, env.action_space, device
+            policy_block, env.flattened_observation_space, env.action_space, device
         )
 
     # Build Algorithm via factory

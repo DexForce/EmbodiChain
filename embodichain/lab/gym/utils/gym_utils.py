@@ -323,24 +323,6 @@ def cat_tensor_with_ids(
     return out
 
 
-def config_to_rl_cfg(config: dict) -> "RLEnvCfg":
-    """Parse gym-style configuration dict into an RL-ready config object."""
-
-    from embodichain.lab.gym.envs.rl_env_cfg import RLEnvCfg
-
-    # Use config_to_cfg to parse shared fields
-    env_cfg = config_to_cfg(config)
-    # Convert to RLEnvCfg if needed
-    if not isinstance(env_cfg, RLEnvCfg):
-        env_cfg = RLEnvCfg.from_dict(env_cfg.__dict__)
-    # RL-specific fields
-    env_cfg.env_id = config.get("id")
-    env_cfg.num_envs = config["env"].get("num_envs", env_cfg.num_envs)
-    env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
-    # Add any RL-specific parsing here
-    return env_cfg
-
-
 def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -364,6 +346,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
         SceneEntityCfg,
         EventCfg,
         ObservationCfg,
+        RewardCfg,
         DatasetFunctorCfg,
     )
     from embodichain.utils import configclass
@@ -452,6 +435,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             env_cfg.articulation.append(cfg)
 
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
+    env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
     # TODO: support more env events, eg, grasp pose generation, mesh preprocessing, etc.
 
@@ -471,8 +455,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                 dataset_modules,
                 raise_if_not_found=True,
             )
-
-            from embodichain.lab.gym.envs.managers import DatasetFunctorCfg
 
             dataset = DatasetFunctorCfg(
                 func=dataset_func,
@@ -545,6 +527,48 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             )
 
             setattr(env_cfg.observations, obs_name, observation)
+
+    env_cfg.rewards = ComponentCfg()
+    if "rewards" in config["env"]:
+        # Define modules to search for reward functions
+        reward_modules = [
+            "embodichain.lab.gym.envs.managers.rewards",
+        ]
+
+        for reward_name, reward_params in config["env"]["rewards"].items():
+            reward_params_modified = deepcopy(reward_params)
+
+            # Handle entity_cfg parameters
+            for param_key in [
+                "entity_cfg",
+                "source_entity_cfg",
+                "target_entity_cfg",
+                "end_effector_cfg",
+                "object_cfg",
+                "goal_cfg",
+                "reference_entity_cfg",
+            ]:
+                if param_key in reward_params["params"]:
+                    entity_cfg = SceneEntityCfg(
+                        **reward_params_modified["params"][param_key]
+                    )
+                    reward_params_modified["params"][param_key] = entity_cfg
+
+            # Find the function from multiple modules using the utility function
+            reward_func = find_function_from_modules(
+                reward_params["func"],
+                reward_modules,
+                raise_if_not_found=True,
+            )
+
+            reward = RewardCfg(
+                func=reward_func,
+                mode=reward_params_modified["mode"],
+                name=reward_params_modified["name"],
+                params=reward_params_modified["params"],
+            )
+
+            setattr(env_cfg.rewards, reward_name, reward)
 
     return env_cfg
 
