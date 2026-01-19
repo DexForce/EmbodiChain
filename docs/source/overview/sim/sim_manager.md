@@ -26,6 +26,10 @@ sim_config = SimulationManagerCfg(
 )
 ```
 
+### multiple instance
+- current instance number of `SimulationManager`: `SimulationManager.get_n_instances()`
+- get specific instance: `SimulationManager.get_instance(instance_id)`, `instance_id` < `SimulationManager.get_n_instances()`
+
 ### Configuration Parameters
 
 | Parameter | Type | Default | Description |
