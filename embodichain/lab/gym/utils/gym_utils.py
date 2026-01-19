@@ -465,22 +465,27 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
         for dataset_name, dataset_params in config["env"]["dataset"].items():
             dataset_params_modified = deepcopy(dataset_params)
 
-            # Find the function from multiple modules using the utility function
-            dataset_func = find_function_from_modules(
-                dataset_params["func"],
-                dataset_modules,
-                raise_if_not_found=True,
-            )
+            # Check if this is a functor configuration (has "func" field) or a plain config
+            if "func" in dataset_params:
+                # Find the function from multiple modules using the utility function
+                dataset_func = find_function_from_modules(
+                    dataset_params["func"],
+                    dataset_modules,
+                    raise_if_not_found=True,
+                )
 
-            from embodichain.lab.gym.envs.managers import DatasetFunctorCfg
+                from embodichain.lab.gym.envs.managers import DatasetFunctorCfg
 
-            dataset = DatasetFunctorCfg(
-                func=dataset_func,
-                mode=dataset_params_modified["mode"],
-                params=dataset_params_modified["params"],
-            )
+                dataset = DatasetFunctorCfg(
+                    func=dataset_func,
+                    mode=dataset_params_modified["mode"],
+                    params=dataset_params_modified["params"],
+                )
 
-            setattr(env_cfg.dataset, dataset_name, dataset)
+                setattr(env_cfg.dataset, dataset_name, dataset)
+            else:
+                # Plain configuration (e.g., robot_meta), set directly
+                setattr(env_cfg.dataset, dataset_name, dataset_params_modified)
 
     env_cfg.events = ComponentCfg()
     if "events" in config["env"]:
@@ -499,6 +504,12 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                     **event_params_modified["params"]["entity_cfg"]
                 )
                 event_params_modified["params"]["entity_cfg"] = entity_cfg
+            if "entity_cfgs" in event_params["params"]:
+                entity_cfgs = [
+                    SceneEntityCfg(**cfg)
+                    for cfg in event_params_modified["params"]["entity_cfgs"]
+                ]
+                event_params_modified["params"]["entity_cfgs"] = entity_cfgs
 
             # Find the function from multiple modules using the utility function
             event_func = find_function_from_modules(

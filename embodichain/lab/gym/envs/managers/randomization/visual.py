@@ -43,6 +43,57 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
+__all__ = [
+    "randomize_camera_extrinsics",
+    "randomize_light",
+    "randomize_camera_intrinsics",
+    "set_rigid_object_visual_material",
+    "randomize_visual_material",
+]
+
+
+def set_rigid_object_visual_material(
+    env: EmbodiedEnv,
+    env_ids: Union[torch.Tensor, None],
+    entity_cfg: SceneEntityCfg,
+    base_color: list[float] | None = None,
+    metallic: float = 0.0,
+    roughness: float = 0.5,
+    uid: str | None = None,
+) -> None:
+    """Set a rigid object's visual material (deterministic, non-random).
+
+    This helper exists to support configs that want fixed colors/materials during reset.
+
+    Args:
+        env: Environment instance.
+        env_ids: Target env ids. If None, applies to all envs.
+        entity_cfg: Scene entity config (must point to a rigid object).
+        base_color: RGBA list, e.g. [1.0, 0.0, 0.0, 1.0]. If None, keeps default base color.
+        metallic: PBR metallic factor.
+        roughness: PBR roughness factor.
+        uid: Visual material uid. If None, uses "{entity_uid}_mat".
+    """
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device="cpu")
+    else:
+        env_ids = env_ids.cpu()
+
+    mat_uid = uid or f"{entity_cfg.uid}_mat"
+    cfg = VisualMaterialCfg(
+        uid=mat_uid,
+        base_color=base_color if base_color is not None else [0.5, 0.5, 0.5, 1.0],
+        metallic=metallic,
+        roughness=roughness,
+    )
+    mat = env.sim.create_visual_material(cfg)
+    obj: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
+    obj.set_visual_material(mat, env_ids=env_ids)
+
+
 def randomize_camera_extrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
