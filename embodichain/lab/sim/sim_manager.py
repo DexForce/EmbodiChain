@@ -170,10 +170,7 @@ class SimulationManager:
         "ContactSensor": ContactSensor,
     }
 
-    def __new__(
-        cls,
-        sim_config: SimulationManagerCfg = SimulationManagerCfg()
-    ):
+    def __new__(cls, sim_config: SimulationManagerCfg = SimulationManagerCfg()):
         """Create or return the instance based on instance_id."""
         n_instance = len(list(cls._instances.keys()))
         instance = super(SimulationManager, cls).__new__(cls)
@@ -183,8 +180,7 @@ class SimulationManager:
         return instance
 
     def __init__(
-        self,
-        sim_config: SimulationManagerCfg = SimulationManagerCfg()
+        self, sim_config: SimulationManagerCfg = SimulationManagerCfg()
     ) -> None:
         instance_id = SimulationManager.get_n_instances() + 1
         # Skip initialization if already initialized
