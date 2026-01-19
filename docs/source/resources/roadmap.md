@@ -20,17 +20,17 @@ Currently, EmbodiChain is under active development. Our roadmap includes the fol
     - Robots Integration:
         - Add support for more robot models (eg: LeRobot, Unitree H1/G1, etc).
 
-- Data Pipeline:
-    - We will release a simple Real2Sim pipeline, which enables automatic data generation from real-world data.
+- Data Pipeline Coming Soon:
+    - We will release a Real2Sim pipeline, which enables automatic data generation and scaling from real-world seeding priors.
     - We will release an agentic skill generation framework for automated expert trajectory generation.
-    - Add simple assets and scenes generator and the integration with data pipeline.
+    - Add assets and scenes generator and the integration with data pipeline.
 
-- Models & Training Infrastructure:
+- Models & Training Infrastructure Coming Soon:
     - We will release a modular VLA framework for fast prototyping and training of embodied agents.
-    - Add simple online data streaming pipeline for model training.
+    - Add online data streaming pipeline for model training.
 
-- Tasks:
+- Embodied Tasks Coming Soon:
     - Add more benchmark tasks for EmbodiChain.
-    - Add more tasks with reinforcement learning support. 
-    - Add a set of tableware manipulation tasks for demonstration of data generation pipeline.
+    - Add more tasks with reinforcement learning support.
+    - Add a set of manipulation tasks for demonstration of data generation pipeline.
     
