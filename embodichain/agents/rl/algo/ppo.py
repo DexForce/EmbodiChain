@@ -17,7 +17,7 @@
 import torch
 from typing import Dict, Any, Tuple, Callable
 
-from embodichain.agents.rl.utils import AlgorithmCfg
+from embodichain.agents.rl.utils import AlgorithmCfg, flatten_dict_observation
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
@@ -101,6 +101,10 @@ class PPO(BaseAlgorithm):
             # Light dtype normalization
             reward = reward.float()
             done = done.bool()
+
+            # Flatten dict observation from ObservationManager if needed
+            if isinstance(next_obs, dict):
+                next_obs = flatten_dict_observation(next_obs)
 
             # Add to buffer
             self.buffer.add(current_obs, actions, reward, done, value, log_prob)
