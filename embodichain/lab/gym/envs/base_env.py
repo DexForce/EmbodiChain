@@ -276,6 +276,27 @@ class BaseEnv(gym.Env):
         # TODO: Add randomization event here.
         pass
 
+    def _hook_after_sim_step(
+        self,
+        obs: EnvObs,
+        action: EnvAction,
+        dones: torch.Tensor,
+        terminateds: torch.Tensor,
+        info: Dict,
+        **kwargs,
+    ) -> None:
+        """Hook function called after each simulation step.
+
+        Args:
+            obs: The observation dictionary.
+            action: The action taken by the agent.
+            dones: A tensor indicating which environments are done.
+            terminateds: A tensor indicating which environments are terminated.
+            info: A dictionary containing additional information.
+            **kwargs: Additional keyword arguments to be passed to the :meth:`_hook_after_sim_step` function.
+        """
+        pass
+
     def _initialize_episode(self, env_ids: Sequence[int] | None = None, **kwargs):
         """Initialize the simulation assets before each episode. Randomization can be performed at this stage.
 
@@ -496,11 +517,19 @@ class BaseEnv(gym.Env):
             terminateds[:] = False
 
         dones = torch.logical_or(terminateds, truncateds)
+
+        self._hook_after_sim_step(
+            obs=obs,
+            action=action,
+            dones=dones,
+            terminateds=terminateds,
+            info=info,
+            **kwargs,
+        )
+
         reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:
             obs, _ = self.reset(options={"reset_ids": reset_env_ids})
-
-        # TODO: may be add hook for observation postprocessing.
 
         return obs, rewards, terminateds, truncateds, info
 
