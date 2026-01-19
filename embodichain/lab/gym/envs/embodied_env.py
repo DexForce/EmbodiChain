@@ -164,6 +164,11 @@ class EmbodiedEnv(BaseEnv):
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self.event_manager: EventManager | None = None
+        self.observation_manager: ObservationManager | None = None
+        self.reward_manager: RewardManager | None = None
+        self.dataset_manager: DatasetManager | None = None
+
         super().__init__(cfg, **kwargs)
 
     def _init_sim_state(self, **kwargs):
