@@ -5,13 +5,22 @@ from langchain_openai import AzureChatOpenAI
 # Environment configuration
 # ------------------------------------------------------------------------------
 
+# Clear proxy if not needed (optional, can be set via environment variables)
+
 os.environ["ALL_PROXY"] = ""
 os.environ["all_proxy"] = ""
-#os.environ["HTTP_PROXY"] = "http://127.0.0.1:7890"
-#os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
-os.environ["OPENAI_API_VERSION"] = "2024-10-21"
-os.environ["AZURE_OPENAI_ENDPOINT"] = "YOUR_ENDPOINT_HERE"
-os.environ["AZURE_OPENAI_API_KEY"] = "YOUR_API_KEY_HERE"
+
+# Proxy configuration (optional, uncomment if needed)
+# os.environ["HTTP_PROXY"] = "http://127.0.0.1:7890"
+# os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
+
+# API version (optional, defaults to "2024-10-21" if not set)
+# os.environ["OPENAI_API_VERSION"] = "2024-10-21"
+
+# Note: AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY must be set via environment variables
+# Example in bash:
+#   export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
+#   export AZURE_OPENAI_API_KEY="your-api-key"
 
 # ------------------------------------------------------------------------------
 # LLM factory
