@@ -94,8 +94,12 @@ class PPO(BaseAlgorithm):
                 current_obs, deterministic=False
             )
 
+            # Wrap action as dict for env processing
+            action_type = getattr(env, "action_type", "qpos")
+            action_dict = {action_type: actions}
+
             # Step environment
-            result = env.step(actions)
+            result = env.step(action_dict)
             next_obs, reward, terminated, truncated, env_info = result
             done = terminated | truncated
             # Light dtype normalization

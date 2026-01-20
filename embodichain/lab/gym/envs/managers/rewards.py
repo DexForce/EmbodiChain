@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 def distance_between_objects(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_entity_cfg: SceneEntityCfg = None,
@@ -92,7 +92,7 @@ def distance_between_objects(
 def joint_velocity_penalty(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     robot_uid: str = "robot",
     joint_ids: slice | list[int] | None = None,
@@ -146,7 +146,7 @@ def joint_velocity_penalty(
 def action_smoothness_penalty(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
 ) -> torch.Tensor:
     """Penalize large action changes between consecutive timesteps.
@@ -171,20 +171,27 @@ def action_smoothness_penalty(
         }
         ```
     """
+    # Extract action tensor from dict (priority order)
+    action_tensor = None
+    for key in ["qpos", "delta_qpos", "qvel", "qf", "eef_pose"]:
+        if key in action:
+            action_tensor = action[key]
+            break
+
     # Use dictionary-based state management
     if not hasattr(env, "_reward_states"):
         env._reward_states = {}
 
     # compute difference between current and previous action
     if "prev_actions" in env._reward_states:
-        action_diff = action - env._reward_states["prev_actions"]
+        action_diff = action_tensor - env._reward_states["prev_actions"]
         penalty = -torch.norm(action_diff, dim=-1)
     else:
         # no previous action, no penalty
         penalty = torch.zeros(env.num_envs, device=env.device)
 
     # store current action for next step
-    env._reward_states["prev_actions"] = action.clone()
+    env._reward_states["prev_actions"] = action_tensor.clone()
 
     return penalty
 
@@ -192,7 +199,7 @@ def action_smoothness_penalty(
 def joint_limit_penalty(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     robot_uid: str = "robot",
     joint_ids: slice | list[int] = slice(None),
@@ -258,7 +265,7 @@ def joint_limit_penalty(
 def orientation_alignment(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_entity_cfg: SceneEntityCfg = None,
@@ -313,7 +320,7 @@ def orientation_alignment(
 def success_reward(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
 ) -> torch.Tensor:
     """Sparse bonus reward when task succeeds.
@@ -361,7 +368,7 @@ def success_reward(
 def reaching_behind_object(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     object_cfg: SceneEntityCfg = None,
     target_pose_key: str = "goal_pose",
@@ -452,7 +459,7 @@ def reaching_behind_object(
 def distance_to_target(
     env: "EmbodiedEnv",
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_pose_key: str = "target_pose",
@@ -529,7 +536,7 @@ def distance_to_target(
 def incremental_distance_to_target(
     env: "EmbodiedEnv",
     obs: dict,
-    action: torch.Tensor,
+    action: dict,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_pose_key: str = "target_pose",

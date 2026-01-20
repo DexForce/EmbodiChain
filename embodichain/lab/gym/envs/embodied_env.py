@@ -344,16 +344,31 @@ class EmbodiedEnv(BaseEnv):
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
 
+        Supports multiple action formats:
+        1. torch.Tensor: Interpreted as qpos (joint positions)
+        2. Dict with keys:
+           - "qpos": Joint positions
+           - "qvel": Joint velocities
+           - "qf": Joint forces/torques
+
         Args:
             action: The action applied to the robot agent.
 
         Returns:
             The action return.
         """
-        # TODO: Support data structure action input such as struct.
-        qpos = action
-
-        self.robot.set_qpos(qpos=qpos)
+        if isinstance(action, dict):
+            # Support multiple control modes simultaneously
+            if "qpos" in action:
+                self.robot.set_qpos(qpos=action["qpos"])
+            if "qvel" in action:
+                self.robot.set_qvel(qvel=action["qvel"])
+            if "qf" in action:
+                self.robot.set_qf(qf=action["qf"])
+        elif isinstance(action, torch.Tensor):
+            self.robot.set_qpos(qpos=action)
+        else:
+            logger.error(f"Unsupported action type: {type(action)}")
 
         return action
 

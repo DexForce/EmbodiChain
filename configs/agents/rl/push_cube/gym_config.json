@@ -114,6 +114,7 @@
         },
         "extensions": {
             "obs_mode": "state",
+            "action_type": "delta_qpos",
             "episode_length": 100,
             "joint_limits": 0.5,
             "action_scale": 0.1,
