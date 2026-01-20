@@ -15,5 +15,4 @@
 # ----------------------------------------------------------------------------
 
 from .dexforce_w1 import *
-from .robot import Robot
 from .cobotmagic import CobotMagicCfg

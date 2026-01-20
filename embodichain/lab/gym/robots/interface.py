@@ -14,7 +14,7 @@ from typing import List, Dict, Tuple, Union
 from gymnasium import spaces
 
 from embodichain.data.enum import ControlParts, EndEffector, JointType
-from embodichain.lab.sim.robots import Robot
+from embodichain.lab.sim.objects import Robot
 from embodichain.utils import logger
 from embodichain.data.enum import JointType, EefType, ActionMode
 

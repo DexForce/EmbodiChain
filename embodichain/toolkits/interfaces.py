@@ -12,7 +12,6 @@ from tqdm import tqdm
 from embodichain.lab.gym.motion_generation.action.arm_action import ArmAction
 from embodichain.data.enum import ControlParts, EndEffector, JointType
 from scipy.spatial.transform import Rotation as R
-from embodichain.lab.sim.utility.workspace_analyzer_new import compute_xpos_reachability
 from embodichain.utils.utility import encode_image
 import ast
 '''
@@ -54,7 +53,7 @@ def find_nearest_valid_pose(env, select_arm, pose, xpos_resolution=0.1):
     # delete the cache every time
     if isinstance(pose, torch.Tensor):
         pose = pose.detach().cpu().numpy()
-    ret, _ = compute_xpos_reachability(env.robot, select_arm, pose, xpos_resolution=xpos_resolution,
+    ret, _ = env.robot.compute_xpos_reachability(select_arm, pose, xpos_resolution=xpos_resolution,
                                                  qpos_resolution=np.radians(60), cache_mode="disk", use_cached=False,
                                                  visualize=False)
     ret = np.stack(ret, axis=0)
