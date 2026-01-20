@@ -126,12 +126,12 @@ def batch(*args: Tuple[Union[np.ndarray, Dict]]):
 
 def to_tensor(array: Array, device: Device | None = None):
     """
-    Maps any given sequence to a torch tensor on the CPU/GPU. If physx gpu is not enabled then we use CPU, otherwise GPU, unless specified
+    Maps any given sequence to a torch tensor on the CPU/GPU. If physics gpu is not enabled then we use CPU, otherwise GPU, unless specified
     by the device argument
 
     Args:
         array: The data to map to a tensor
-        device: The device to put the tensor on. By default this is None and to_tensor will put the device on the GPU if physx is enabled
+        device: The device to put the tensor on. By default this is None and to_tensor will put the device on the GPU if physics is enabled
             and CPU otherwise
 
     """
