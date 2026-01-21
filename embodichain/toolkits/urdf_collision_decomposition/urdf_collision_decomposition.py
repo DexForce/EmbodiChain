@@ -50,8 +50,12 @@ class URDFCollisionDecomposer:
         return visual_collision_pairs
 
     def generate_link_collision(
-            self, link_name: str, visual: ET.Element | None, collision: ET.Element | None, link: ET.Element
-        ):
+        self,
+        link_name: str,
+        visual: ET.Element | None,
+        collision: ET.Element | None,
+        link: ET.Element,
+    ):
         if collision is None:
             geom = visual.find("geometry")
             # use visual geometry mesh
@@ -119,12 +123,8 @@ class URDFCollisionDecomposer:
                 collision_origin = ET.SubElement(collision, "origin")
                 visual_origin = visual.find("origin")
                 if visual_origin is not None:
-                    collision_origin.set(
-                        "xyz", visual_origin.get("xyz", "0 0 0")
-                    )
-                    collision_origin.set(
-                        "rpy", visual_origin.get("rpy", "0 0 0")
-                    )
+                    collision_origin.set("xyz", visual_origin.get("xyz", "0 0 0"))
+                    collision_origin.set("rpy", visual_origin.get("rpy", "0 0 0"))
                 else:
                     collision_origin.set("xyz", "0 0 0")
                     collision_origin.set("rpy", "0 0 0")
@@ -143,6 +143,7 @@ class URDFCollisionDecomposer:
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(
         description="Create and simulate a camera with gizmo in SimulationManager"
     )
@@ -151,11 +152,7 @@ if __name__ == "__main__":
         type=str,
         help="Input urdf file path",
     )
-    parser.add_argument(
-        "--output_urdf_name", 
-        type=str,
-        help="Output urdf file name, "
-    )
+    parser.add_argument("--output_urdf_name", type=str, help="Output urdf file name, ")
     parser.add_argument(
         "--max_convex_hull_num",
         type=int,
@@ -165,5 +162,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     generate_urdf_convex_decomposition_collision(
-        args.urdf_path, args.output_urdf_name,  args.max_convex_hull_num
+        args.urdf_path, args.output_urdf_name, args.max_convex_hull_num
     )
