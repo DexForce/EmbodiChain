@@ -61,6 +61,7 @@ class RearrangementEnv3(EmbodiedEnv):
             or abs(fork_y - fork_place_target_y) > tolerance
         )
 
+
 @register_env("RearrangementAgent-v3", max_episode_steps=600)
 class RearrangementAgentEnv3(BaseAgentEnv, RearrangementEnv3):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
@@ -90,4 +91,7 @@ class RearrangementAgentEnv3(BaseAgentEnv, RearrangementEnv3):
         tolerance = self.metadata.get("success_params", {}).get("tolerance", 0.02)
 
         # spoon and fork should with the y range of tolerance related to plate.
-        return (abs(spoon_y - spoon_place_target_y) <= tolerance or abs(fork_y - fork_place_target_y) <= tolerance)
+        return (
+            abs(spoon_y - spoon_place_target_y) <= tolerance
+            or abs(fork_y - fork_place_target_y) <= tolerance
+        )

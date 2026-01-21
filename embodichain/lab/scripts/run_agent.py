@@ -86,7 +86,9 @@ def generate_function(
                 num_samples = kwargs.get("num_samples", 0)
                 is_save_dataset = time_id < num_samples
 
-                data_dict = env.get_wrapper_attr("to_dataset")(id=dataset_id if is_save_dataset else None)
+                data_dict = env.get_wrapper_attr("to_dataset")(
+                    id=dataset_id if is_save_dataset else None
+                )
                 ret.append(data_dict)
             else:
                 data_dict = env.get_wrapper_attr("to_dataset")(id=dataset_id)

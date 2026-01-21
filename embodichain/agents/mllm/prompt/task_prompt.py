@@ -22,7 +22,11 @@ class TaskPrompt:
         Step 2: LLM generates task instructions using only those IDs.
         """
         # Encode image
-        observation = observations["rgb"].cpu().numpy() if isinstance(observations["rgb"], torch.Tensor) else observations["rgb"]
+        observation = (
+            observations["rgb"].cpu().numpy()
+            if isinstance(observations["rgb"], torch.Tensor)
+            else observations["rgb"]
+        )
         kwargs.update({"observation": encode_image(observation)})
 
         # Build hybrid prompt
@@ -89,7 +93,11 @@ class TaskPrompt:
             ]
         )
 
-        observation = observations["rgb"].cpu().numpy() if isinstance(observations["rgb"], torch.Tensor) else observations["rgb"]
+        observation = (
+            observations["rgb"].cpu().numpy()
+            if isinstance(observations["rgb"], torch.Tensor)
+            else observations["rgb"]
+        )
         kwargs.update({"observation": encode_image(observation)})
         # for LLM generate task descriptions
         prompt_query = ChatPromptTemplate.from_messages(

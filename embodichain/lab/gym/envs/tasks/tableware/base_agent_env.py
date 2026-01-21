@@ -184,7 +184,7 @@ class BaseAgentEnv:
 
         # Task planning
         print(f"\033[92m\nStart task planning.\n\033[0m")
-        
+
         task_agent_input = self.task_agent.get_composed_observations(
             env=self, regenerate=regenerate, **kwargs
         )
@@ -195,8 +195,8 @@ class BaseAgentEnv:
         code_agent_input = self.code_agent.get_composed_observations(
             env=self, regenerate=regenerate, **kwargs
         )
-        code_agent_input['task_plan'] = task_plan
-        
+        code_agent_input["task_plan"] = task_plan
+
         code_file_path, kwargs, code = self.code_agent.generate(**code_agent_input)
         return code_file_path, kwargs, code
 
@@ -207,7 +207,7 @@ class BaseAgentEnv:
         )
         action_list = self.code_agent.act(code_file_path, **kwargs)
         return action_list
-    
+
     def to_dataset(
         self,
         id: str = None,
@@ -225,7 +225,7 @@ class BaseAgentEnv:
             obs_list = getattr(self, "_episode_obs_list", [])
         if action_list is None:
             action_list = getattr(self, "_episode_action_list", [])
-        
+
         if len(obs_list) == 0 or len(action_list) == 0:
             logger.log_warning("No episode data found. Returning empty dataset.")
             return {
@@ -246,7 +246,11 @@ class BaseAgentEnv:
         from embodichain.lab.gym.utils.misc import camel_to_snake
 
         if not hasattr(self, "folder_name") or self.curr_episode == 0:
-            robot_class_name = self.robot.__class__.__name__ if hasattr(self, "robot") and self.robot is not None else "Robot"
+            robot_class_name = (
+                self.robot.__class__.__name__
+                if hasattr(self, "robot") and self.robot is not None
+                else "Robot"
+            )
             self.folder_name = f"{camel_to_snake(self.__class__.__name__)}_{camel_to_snake(robot_class_name)}"
             if os.path.exists(os.path.join(dataset_path, self.folder_name)):
                 self.folder_name = f"{self.folder_name}_{random.randint(0, 1000)}"
@@ -254,4 +258,3 @@ class BaseAgentEnv:
         return fetch_imitation_dataset(
             self, obs_list, action_list, id, self.folder_name
         )
-

@@ -91,7 +91,10 @@ class DatasetManager(ManagerBase):
         # This allows legacy code (like action_bank) to access robot_meta via env.metadata["dataset"]["robot_meta"]
         for mode_cfgs in self._mode_functor_cfgs.values():
             for functor_cfg in mode_cfgs:
-                if "robot_meta" in functor_cfg.params or "instruction" in functor_cfg.params:
+                if (
+                    "robot_meta" in functor_cfg.params
+                    or "instruction" in functor_cfg.params
+                ):
                     if not hasattr(env, "metadata"):
                         env.metadata = {}
                     if "dataset" not in env.metadata:

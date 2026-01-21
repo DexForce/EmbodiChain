@@ -433,9 +433,9 @@ class SimRealUnifiedDictDataset:
             "step_id": step_id,
             "instruction": "",
             "camera_used": camera_used,
-            "instruction": f["language_prompt"]
-            if f.get("language_prompt", None)
-            else "",
+            "instruction": (
+                f["language_prompt"] if f.get("language_prompt", None) else ""
+            ),
         }
 
         assert (
@@ -465,26 +465,26 @@ class SimRealUnifiedDictDataset:
                 camera_used=camera_used,
             )
             if PrivilegeType.MASK.value in self.data_meta.get("privileges", []):
-                parse_dict[
-                    cam + "_{}".format(PrivilegeType.MASK.value)
-                ] = SimRealUnifiedDictDataset.parse_img(
-                    f,
-                    step_id,
-                    first_idx,
-                    cam,
-                    self.img_history_size,
-                    PrivilegeType.MASK.value,
-                    camera_used=camera_used,
+                parse_dict[cam + "_{}".format(PrivilegeType.MASK.value)] = (
+                    SimRealUnifiedDictDataset.parse_img(
+                        f,
+                        step_id,
+                        first_idx,
+                        cam,
+                        self.img_history_size,
+                        PrivilegeType.MASK.value,
+                        camera_used=camera_used,
+                    )
                 )
         if PrivilegeType.EXTEROCEPTION.value in self.data_meta.get("privileges", []):
             if obs[PrivilegeType.EXTEROCEPTION.value][camera_used[0]].shape[0] != 0:
-                parse_dict[
-                    PrivilegeType.EXTEROCEPTION.value
-                ] = SimRealUnifiedDictDataset.parse_exteroception(
-                    f,
-                    step_id,
-                    chunk_size,
-                    camera_used=camera_used,
+                parse_dict[PrivilegeType.EXTEROCEPTION.value] = (
+                    SimRealUnifiedDictDataset.parse_exteroception(
+                        f,
+                        step_id,
+                        chunk_size,
+                        camera_used=camera_used,
+                    )
                 )
 
         if Modality.GEOMAP.value in self.data_meta.get("additional_modality", []):
@@ -675,9 +675,9 @@ class RobotRealDataRouter:
             "camera_used": [
                 cam_name for cam_name in given_camera_used if cam_name in camera_used
             ],
-            "instruction": f["language_prompt"]
-            if f.get("language_prompt", None)
-            else "",
+            "instruction": (
+                f["language_prompt"] if f.get("language_prompt", None) else ""
+            ),
         }
         # save all supported proprio and action types.
         robot_meta_config = {"arm_dofs": self.arm_dofs, "observation": {}}

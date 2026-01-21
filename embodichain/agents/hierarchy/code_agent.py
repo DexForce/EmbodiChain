@@ -175,17 +175,17 @@ class CodeAgent(AgentBase):
 
     def act(self, code_file_path, **kwargs):
         """Execute generated code with proper execution environment.
-        
+
         Supports two modes:
         1. If code defines 'create_agent_action_list' function, call it
         2. If code contains module-level drive() calls, execute them directly
         """
         import ast
-        
+
         # Read the generated code file
         with open(code_file_path, "r") as f:
             code_content = f.read()
-        
+
         # Build execution namespace with necessary imports
         ns = {
             "__builtins__": __builtins__,
@@ -193,7 +193,7 @@ class CodeAgent(AgentBase):
             "__file__": str(code_file_path),
             "kwargs": kwargs,  # Make kwargs available for injection
         }
-        
+
         # Import toolkit functions into namespace
         try:
             exec(
@@ -205,20 +205,21 @@ class CodeAgent(AgentBase):
             raise RuntimeError(
                 "Failed to import embodichain.toolkits.interfaces"
             ) from e
-        
+
         # Parse code to check if it defines a function or contains module-level calls
         tree = ast.parse(code_content)
-        
+
         # Check if code defines create_agent_action_list function
         has_function = any(
-            isinstance(node, ast.FunctionDef) and node.name == "create_agent_action_list"
+            isinstance(node, ast.FunctionDef)
+            and node.name == "create_agent_action_list"
             for node in tree.body
         )
-        
+
         if has_function:
             # Execute code (function will be defined in namespace)
             exec(code_content, ns, ns)
-            
+
             # Call the function if it exists
             if "create_agent_action_list" in ns:
                 result = ns["create_agent_action_list"](**kwargs)
@@ -236,30 +237,36 @@ class CodeAgent(AgentBase):
                     self.generic_visit(node)
                     # Inject **kwargs if not present
                     has_kwargs = any(
-                        kw.arg is None and isinstance(kw.value, ast.Name) and kw.value.id == "kwargs"
+                        kw.arg is None
+                        and isinstance(kw.value, ast.Name)
+                        and kw.value.id == "kwargs"
                         for kw in node.keywords
                     )
                     if not has_kwargs:
                         node.keywords.append(
-                            ast.keyword(arg=None, value=ast.Name(id="kwargs", ctx=ast.Load()))
+                            ast.keyword(
+                                arg=None, value=ast.Name(id="kwargs", ctx=ast.Load())
+                            )
                         )
                     return node
-            
+
             # Transform AST to inject kwargs
             tree = InjectKwargs().visit(tree)
             ast.fix_missing_locations(tree)
-            
+
             # Compile and execute transformed code
             compiled_code = compile(tree, filename=str(code_file_path), mode="exec")
             exec(compiled_code, ns, ns)
-            
+
             # Collect actions from drive() calls if they were executed
             # drive() function stores actions in env._episode_action_list
             if "env" in kwargs:
                 env = kwargs["env"]
                 if hasattr(env, "_episode_action_list") and env._episode_action_list:
-                    print(f"Collected {len(env._episode_action_list)} actions from module-level drive() calls.")
+                    print(
+                        f"Collected {len(env._episode_action_list)} actions from module-level drive() calls."
+                    )
                     return env._episode_action_list
-            
+
             print("Code executed successfully, but no actions were collected.")
             return []

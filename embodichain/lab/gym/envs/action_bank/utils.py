@@ -28,6 +28,7 @@ from embodichain.lab.gym.utils.misc import validation_with_process_from_name
 def get_init_affordance(scope: str, tag: str = "init") -> str:
     return "{}_{}_qpos".format(scope, tag)
 
+
 def get_control_part(env, agent_uid):
 
     from embodichain.lab.gym.utils.misc import _data_key_to_control_part
@@ -42,7 +43,8 @@ def get_control_part(env, agent_uid):
             control_parts=control_parts,
             data_key=agent_uid,
         )
-        
+
+
 def get_control_part_joint_ids(env, key: str) -> List[int]:
     from embodichain.data.enum import (
         ControlParts,

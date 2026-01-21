@@ -4,7 +4,11 @@ import numpy as np
 from embodichain.toolkits.toolkits import ToolkitsBase
 from embodichain.utils.logger import log_info, log_warning, log_error
 from copy import deepcopy
-from embodichain.lab.gym.utils.misc import mul_linear_expand, is_qpos_flip, get_rotation_replaced_pose
+from embodichain.lab.gym.utils.misc import (
+    mul_linear_expand,
+    is_qpos_flip,
+    get_rotation_replaced_pose,
+)
 from embodichain.toolkits.graspkit.pg_grasp.antipodal import GraspSelectMethod
 from matplotlib import pyplot as plt
 import torch
@@ -14,15 +18,19 @@ from embodichain.data.enum import ControlParts, EndEffector, JointType
 from scipy.spatial.transform import Rotation as R
 from embodichain.utils.utility import encode_image
 import ast
-'''
+
+"""
 --------------------------------------------Some useful functions----------------------------------------------------
 --------------------------------------------Some useful functions----------------------------------------------------
 --------------------------------------------Some useful functions----------------------------------------------------
-'''
+"""
+
+
 def draw_axis(env, pose):
     from embodichain.lab.sim.cfg import MarkerCfg
+
     marker_cfg = MarkerCfg(
-        name='test',
+        name="test",
         marker_type="axis",
         axis_xpos=pose,
         axis_size=0.01,
@@ -32,30 +40,60 @@ def draw_axis(env, pose):
     env.sim.draw_marker(cfg=marker_cfg)
     env.sim.update()
 
+
 def get_arm_states(env, robot_name):
 
     left_arm_current_qpos, right_arm_current_qpos = env.get_current_qpos_agent()
     left_arm_current_pose, right_arm_current_pose = env.get_current_xpos_agent()
-    left_arm_current_gripper_state, right_arm_current_gripper_state = env.get_current_gripper_state_agent()
+    left_arm_current_gripper_state, right_arm_current_gripper_state = (
+        env.get_current_gripper_state_agent()
+    )
 
     side = "right" if "right" in robot_name else "left"
     is_left = True if side == "left" else False
     select_arm = "left_arm" if is_left else "right_arm"
 
-    arms = {"left": (left_arm_current_qpos, left_arm_current_pose, left_arm_current_gripper_state),
-            "right": (right_arm_current_qpos, right_arm_current_pose, right_arm_current_gripper_state)}
-    select_arm_current_qpos, select_arm_current_pose, select_arm_current_gripper_state = arms[side]
+    arms = {
+        "left": (
+            left_arm_current_qpos,
+            left_arm_current_pose,
+            left_arm_current_gripper_state,
+        ),
+        "right": (
+            right_arm_current_qpos,
+            right_arm_current_pose,
+            right_arm_current_gripper_state,
+        ),
+    }
+    (
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = arms[side]
 
-    return is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, select_arm_current_gripper_state
+    return (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    )
+
 
 def find_nearest_valid_pose(env, select_arm, pose, xpos_resolution=0.1):
     # use the validator to choose the nearest valid pose
     # delete the cache every time
     if isinstance(pose, torch.Tensor):
         pose = pose.detach().cpu().numpy()
-    ret, _ = env.robot.compute_xpos_reachability(select_arm, pose, xpos_resolution=xpos_resolution,
-                                                 qpos_resolution=np.radians(60), cache_mode="disk", use_cached=False,
-                                                 visualize=False)
+    ret, _ = env.robot.compute_xpos_reachability(
+        select_arm,
+        pose,
+        xpos_resolution=xpos_resolution,
+        qpos_resolution=np.radians(60),
+        cache_mode="disk",
+        use_cached=False,
+        visualize=False,
+    )
     ret = np.stack(ret, axis=0)
     # find the nearest valid pose
     xyz = pose[:3, 3]
@@ -65,35 +103,33 @@ def find_nearest_valid_pose(env, select_arm, pose, xpos_resolution=0.1):
     nearest_valid_pose = ret[best_idx]
     return torch.from_numpy(nearest_valid_pose)
 
-def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=''):
+
+def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=""):
     if force_valid:
         try:
-            ret, qpos = env.get_arm_ik(
-                pose, is_left=is_left, qpos_seed=qpos_seed
-            )
+            ret, qpos = env.get_arm_ik(pose, is_left=is_left, qpos_seed=qpos_seed)
             if not ret:
                 log_error(f"Generate {name} qpos failed.\n")
         except Exception as e:
-            log_warning(f"Original {name} pose invalid, using nearest valid pose. ({e})\n")
+            log_warning(
+                f"Original {name} pose invalid, using nearest valid pose. ({e})\n"
+            )
             pose = find_nearest_valid_pose(env, select_arm, pose)
 
-            ret, qpos = env.get_arm_ik(
-                pose, is_left=is_left, qpos_seed=qpos_seed
-            )
+            ret, qpos = env.get_arm_ik(pose, is_left=is_left, qpos_seed=qpos_seed)
     else:
-        ret, qpos = env.get_arm_ik(
-            pose, is_left=is_left, qpos_seed=qpos_seed
-        )
+        ret, qpos = env.get_arm_ik(pose, is_left=is_left, qpos_seed=qpos_seed)
         if not ret:
             log_error(f"Generate {name} qpos failed.\n")
 
     return qpos
 
+
 def get_offset_pose(
-        pose_to_change: torch.Tensor,
-        offset_value: float,
-        direction: str = "z",
-        mode: str = "intrinsic",
+    pose_to_change: torch.Tensor,
+    offset_value: float,
+    direction: str = "z",
+    mode: str = "intrinsic",
 ) -> torch.Tensor:
 
     device = pose_to_change.device
@@ -126,8 +162,16 @@ def get_offset_pose(
 
     return offset_pose
 
-def plan_trajectory(env, select_arm, qpos_list, sample_num,
-                    select_arm_current_gripper_state, select_qpos_traj, ee_state_list_select):
+
+def plan_trajectory(
+    env,
+    select_arm,
+    qpos_list,
+    sample_num,
+    select_arm_current_gripper_state,
+    select_qpos_traj,
+    ee_state_list_select,
+):
     traj_list, _ = ArmAction.create_discrete_trajectory(
         agent=env.robot,
         uid=select_arm,
@@ -141,8 +185,16 @@ def plan_trajectory(env, select_arm, qpos_list, sample_num,
     select_qpos_traj.extend(traj_list)
     ee_state_list_select.extend([select_arm_current_gripper_state] * len(traj_list))
 
-def plan_gripper_trajectory(env, is_left, sample_num, execute_open,
-                            select_arm_current_qpos, select_qpos_traj, ee_state_list_select):
+
+def plan_gripper_trajectory(
+    env,
+    is_left,
+    sample_num,
+    execute_open,
+    select_arm_current_qpos,
+    select_qpos_traj,
+    ee_state_list_select,
+):
     open_state = env.open_state
     close_state = env.close_state
 
@@ -154,14 +206,23 @@ def plan_gripper_trajectory(env, is_left, sample_num, execute_open,
         env.set_current_gripper_state_agent(close_state, is_left=is_left)
 
     ee_state_expand_select = mul_linear_expand(ee_state_expand_select, [sample_num])
-   
+
     select_qpos_traj.extend([select_arm_current_qpos] * sample_num)
     ee_state_list_select.extend(ee_state_expand_select)
 
+
 def finalize_actions(select_qpos_traj, ee_state_list_select):
     # mimic eef state
-    actions = np.concatenate([np.array(select_qpos_traj), np.array(ee_state_list_select), np.array(ee_state_list_select)], axis=-1)
+    actions = np.concatenate(
+        [
+            np.array(select_qpos_traj),
+            np.array(ee_state_list_select),
+            np.array(ee_state_list_select),
+        ],
+        axis=-1,
+    )
     return actions
+
 
 def extract_drive_calls(code_str: str) -> list[str]:
     tree = ast.parse(code_str)
@@ -185,11 +246,14 @@ def extract_drive_calls(code_str: str) -> list[str]:
 
     return drive_blocks
 
-'''
+
+"""
 --------------------------------------------Atom action functions----------------------------------------------------
 --------------------------------------------Atom action functions----------------------------------------------------
 --------------------------------------------Atom action functions----------------------------------------------------
-'''
+"""
+
+
 # TODO: write a move_to_pose atom action, the use this action to form other atom actions
 def grasp(
     robot_name: str,
@@ -197,7 +261,7 @@ def grasp(
     pre_grasp_dis: float = 0.05,
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
     # Get target object
     obj_uids = env.sim.get_rigid_object_uid_list()
@@ -209,36 +273,85 @@ def grasp(
 
     # Open the gripper if currently closed
     actions = None
-    select_arm_current_gripper_state = env.left_arm_current_gripper_state if 'left' in robot_name else env.right_arm_current_gripper_state
+    select_arm_current_gripper_state = (
+        env.left_arm_current_gripper_state
+        if "left" in robot_name
+        else env.right_arm_current_gripper_state
+    )
     if select_arm_current_gripper_state <= env.open_state - 0.01:
         actions = open_gripper(robot_name, env, **kwargs)
 
     # Retract the end-effector to avoid collision
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
-    select_arm_base_pose = env.left_arm_base_pose if is_left else env.right_arm_base_pose
-    base_to_eef_xy_dis = torch.norm(select_arm_base_pose[:2, 3] - select_arm_current_pose[:2, 3])
-    base_to_obj_xy_dis = torch.norm(select_arm_base_pose[:2, 3] - target_obj_pose[:2, 3])
-    dis_eps = kwargs.get('dis_eps', 0.05)
-    select_arm_init_pose = env.left_arm_init_xpos if is_left else env.right_arm_init_xpos
-    if base_to_eef_xy_dis > base_to_obj_xy_dis and not torch.allclose(select_arm_current_pose, select_arm_init_pose, rtol=1e-5, atol=1e-8):
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
+    select_arm_base_pose = (
+        env.left_arm_base_pose if is_left else env.right_arm_base_pose
+    )
+    base_to_eef_xy_dis = torch.norm(
+        select_arm_base_pose[:2, 3] - select_arm_current_pose[:2, 3]
+    )
+    base_to_obj_xy_dis = torch.norm(
+        select_arm_base_pose[:2, 3] - target_obj_pose[:2, 3]
+    )
+    dis_eps = kwargs.get("dis_eps", 0.05)
+    select_arm_init_pose = (
+        env.left_arm_init_xpos if is_left else env.right_arm_init_xpos
+    )
+    if base_to_eef_xy_dis > base_to_obj_xy_dis and not torch.allclose(
+        select_arm_current_pose, select_arm_init_pose, rtol=1e-5, atol=1e-8
+    ):
         delta = base_to_eef_xy_dis - (base_to_obj_xy_dis - dis_eps)
-        back_actions = move_by_relative_offset(robot_name=robot_name, dx=0.0, dy=0.0, dz=-delta, env=env, force_valid=force_valid, mode="intrinsic", sample_num=15, **kwargs)
-        actions = np.concatenate([actions, back_actions], axis=0) if actions is not None else back_actions
+        back_actions = move_by_relative_offset(
+            robot_name=robot_name,
+            dx=0.0,
+            dy=0.0,
+            dz=-delta,
+            env=env,
+            force_valid=force_valid,
+            mode="intrinsic",
+            sample_num=15,
+            **kwargs,
+        )
+        actions = (
+            np.concatenate([actions, back_actions], axis=0)
+            if actions is not None
+            else back_actions
+        )
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
     # Move the end-effector to a good place for starting grasping to avoid bad poses
-    select_arm_retract_pose = deepcopy(env.left_arm_init_xpos if is_left else env.right_arm_init_xpos)
-    select_arm_retract_pose = get_offset_pose(select_arm_retract_pose, 0.15, "z", "intrinsic")
-    select_arm_retract_qpos = get_qpos(env, is_left, select_arm, select_arm_retract_pose, env.left_arm_init_qpos if is_left else env.right_arm_init_qpos,
-                                       force_valid=force_valid, name='retract_to_good_pose')
+    select_arm_retract_pose = deepcopy(
+        env.left_arm_init_xpos if is_left else env.right_arm_init_xpos
+    )
+    select_arm_retract_pose = get_offset_pose(
+        select_arm_retract_pose, 0.15, "z", "intrinsic"
+    )
+    select_arm_retract_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        select_arm_retract_pose,
+        env.left_arm_init_qpos if is_left else env.right_arm_init_qpos,
+        force_valid=force_valid,
+        name="retract_to_good_pose",
+    )
     qpos_list_back_to_retract = [select_arm_current_qpos, select_arm_retract_qpos]
     sample_num = 30
 
@@ -249,7 +362,7 @@ def grasp(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     select_arm_current_qpos = select_arm_retract_qpos
@@ -264,18 +377,43 @@ def grasp(
     select_arm_aim_qpos[0] = aim_horizontal_angle
 
     # Get best grasp pose from affordance data
-    grasp_pose_object = env.init_obj_info.get(obj_name)['grasp_pose_obj']
-    if grasp_pose_object[0, 2] > 0.5: # whether towards x direction TODO: make it robust
+    grasp_pose_object = env.init_obj_info.get(obj_name)["grasp_pose_obj"]
+    if (
+        grasp_pose_object[0, 2] > 0.5
+    ):  # whether towards x direction TODO: make it robust
         # Align the object pose's z-axis with the arm's aiming direction
-        target_obj_pose = torch.tensor(get_rotation_replaced_pose(np.array(target_obj_pose), float(select_arm_aim_qpos[0]), "z","intrinsic"))
+        target_obj_pose = torch.tensor(
+            get_rotation_replaced_pose(
+                np.array(target_obj_pose),
+                float(select_arm_aim_qpos[0]),
+                "z",
+                "intrinsic",
+            )
+        )
     best_pickpose = target_obj_pose @ grasp_pose_object
     grasp_pose = deepcopy(best_pickpose)
     grasp_pose_pre1 = deepcopy(grasp_pose)
-    grasp_pose_pre1 = get_offset_pose(grasp_pose_pre1, -pre_grasp_dis, "z", 'intrinsic')
+    grasp_pose_pre1 = get_offset_pose(grasp_pose_pre1, -pre_grasp_dis, "z", "intrinsic")
 
     # Solve IK for pre-grasp and grasp poses
-    grasp_qpos_pre1 = get_qpos(env, is_left, select_arm, grasp_pose_pre1, select_arm_aim_qpos, force_valid=force_valid, name='grasp pre1')
-    grasp_qpos = get_qpos(env, is_left, select_arm, grasp_pose, grasp_qpos_pre1, force_valid=force_valid, name='grasp')
+    grasp_qpos_pre1 = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        grasp_pose_pre1,
+        select_arm_aim_qpos,
+        force_valid=force_valid,
+        name="grasp pre1",
+    )
+    grasp_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        grasp_pose,
+        grasp_qpos_pre1,
+        force_valid=force_valid,
+        name="grasp",
+    )
 
     # Update env state to final grasp pose
     env.set_current_qpos_agent(grasp_qpos, is_left=is_left)
@@ -296,7 +434,7 @@ def grasp(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ------------------------------------ Traj 1: aim → pre-grasp ------------------------------------
@@ -310,7 +448,7 @@ def grasp(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ------------------------------------ Traj 2: pre-grasp → grasp ------------------------------------
@@ -324,20 +462,27 @@ def grasp(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
     traj_actions = finalize_actions(select_qpos_traj, ee_state_list_select)
-    actions = traj_actions if actions is None else np.concatenate([actions, traj_actions], axis=0)
+    actions = (
+        traj_actions
+        if actions is None
+        else np.concatenate([actions, traj_actions], axis=0)
+    )
 
     # ------------------------------------ Close gripper ------------------------------------
     close_gripper_actions = close_gripper(robot_name, env, **kwargs)
     actions = np.concatenate([actions, close_gripper_actions], axis=0)
 
-    log_info(f"Total generated trajectory number for grasp: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for grasp: {len(actions)}.", color="green"
+    )
 
     return actions
+
 
 # def place_on_table(
 #     robot_name: str,
@@ -422,6 +567,7 @@ def grasp(
 #
 #     return actions
 
+
 def place_on_table(
     robot_name: str,
     obj_name: str,
@@ -430,20 +576,26 @@ def place_on_table(
     pre_place_dis: float = 0.08,
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
 
-    init_obj_height = env.init_obj_info.get(obj_name).get('height')
-    height = init_obj_height + kwargs.get('eps', 0.03)
+    init_obj_height = env.init_obj_info.get(obj_name).get("height")
+    height = init_obj_height + kwargs.get("eps", 0.03)
 
-    traj_actions = move_to_absolute_position(robot_name, x=x, y=y, z=height, env=env, force_valid=force_valid, **kwargs)
+    traj_actions = move_to_absolute_position(
+        robot_name, x=x, y=y, z=height, env=env, force_valid=force_valid, **kwargs
+    )
     open_actions = open_gripper(robot_name, env, **kwargs)
 
     actions = np.concatenate([traj_actions, open_actions], axis=0)
 
-    log_info(f"Total generated trajectory number for place on table: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for place on table: {len(actions)}.",
+        color="green",
+    )
 
     return actions
+
 
 def move_relative_to_object(
     robot_name: str,
@@ -453,15 +605,20 @@ def move_relative_to_object(
     z_offset: float = 0,
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
     # Resolve target object
@@ -482,7 +639,15 @@ def move_relative_to_object(
     move_target_pose[2, 3] += z_offset
 
     # Solve IK for target pose
-    move_target_qpos = get_qpos(env, is_left, select_arm, move_target_pose, select_arm_current_qpos, force_valid=force_valid, name='move relative to object')
+    move_target_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        move_target_pose,
+        select_arm_current_qpos,
+        force_valid=force_valid,
+        name="move relative to object",
+    )
 
     # Update env states
     env.set_current_qpos_agent(move_target_qpos, is_left=is_left)
@@ -499,15 +664,19 @@ def move_relative_to_object(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
     actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for move relative to object: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for move relative to object: {len(actions)}.",
+        color="green",
+    )
 
     return actions
+
 
 def move_to_absolute_position(
     robot_name: str,
@@ -516,15 +685,20 @@ def move_to_absolute_position(
     z: float = None,
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
     # Start from current pose, then selectively update xyz
@@ -543,7 +717,15 @@ def move_to_absolute_position(
     move_pose[:3, 3] = target_xyz
 
     # Try IK on target pose
-    move_qpos = get_qpos(env, is_left, select_arm, move_pose, select_arm_current_qpos, force_valid=force_valid, name='move to absolute position')
+    move_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        move_pose,
+        select_arm_current_qpos,
+        force_valid=force_valid,
+        name="move to absolute position",
+    )
 
     # Update env states
     env.set_current_qpos_agent(move_qpos, is_left=is_left)
@@ -560,33 +742,42 @@ def move_to_absolute_position(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
     actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for move to absolute position: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for move to absolute position: {len(actions)}.",
+        color="green",
+    )
 
     return actions
+
 
 def move_by_relative_offset(
     robot_name: str,
     dx: float = 0.0,
     dy: float = 0.0,
     dz: float = 0.0,
-    mode: str = 'extrinsic',
+    mode: str = "extrinsic",
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
     move_pose = deepcopy(select_arm_current_pose)
@@ -597,7 +788,15 @@ def move_by_relative_offset(
     move_pose = get_offset_pose(move_pose, dz, "z", mode)
 
     # Solve IK
-    move_qpos = get_qpos(env, is_left, select_arm, move_pose, select_arm_current_qpos, force_valid=force_valid, name='move by relative offset')
+    move_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        move_pose,
+        select_arm_current_qpos,
+        force_valid=force_valid,
+        name="move by relative offset",
+    )
 
     # Update environment states
     env.set_current_qpos_agent(move_qpos, is_left=is_left)
@@ -614,29 +813,34 @@ def move_by_relative_offset(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
     actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for move by relative offset: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for move by relative offset: {len(actions)}.",
+        color="green",
+    )
 
     return actions
 
-def back_to_initial_pose(
-    robot_name: str,
-    env=None,
-    **kwargs
-):
+
+def back_to_initial_pose(robot_name: str, env=None, **kwargs):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
     # Get arm states
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # Retrieve the initial joint configuration of this arm
     target_qpos = env.left_arm_init_qpos if is_left else env.right_arm_init_qpos
@@ -648,7 +852,15 @@ def back_to_initial_pose(
     pre_back_pose = get_offset_pose(pre_back_pose, -0.08, "z", "intrinsic")
 
     # IK for pre-back
-    pre_back_qpos = get_qpos(env, is_left, select_arm, pre_back_pose, select_arm_current_qpos, force_valid=kwargs.get("force_valid", False), name="pre back pose")
+    pre_back_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        pre_back_pose,
+        select_arm_current_qpos,
+        force_valid=kwargs.get("force_valid", False),
+        name="pre back pose",
+    )
 
     # Update env states (move to target pose)
     target_pose = env.get_arm_fk(qpos=target_qpos, is_left=is_left)
@@ -666,7 +878,7 @@ def back_to_initial_pose(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ------------------------------------ Traj: init → initial_pose ------------------------------------
@@ -680,32 +892,33 @@ def back_to_initial_pose(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
-    actions = finalize_actions(
-        select_qpos_traj,
-        ee_state_list_select
-    )
+    actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for back to initial pose: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for back to initial pose: {len(actions)}.",
+        color="green",
+    )
 
     return actions
 
-def rotate_eef(
-    robot_name: str,
-    degree: float = 0,
-    env=None,
-    **kwargs
-):
+
+def rotate_eef(robot_name: str, degree: float = 0, env=None, **kwargs):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
     # Compute new joint positions
@@ -738,22 +951,26 @@ def rotate_eef(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
     actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for rotate eef: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for rotate eef: {len(actions)}.",
+        color="green",
+    )
 
     return actions
 
+
 def orient_eef(
     robot_name: str,
-    direction: str = 'front',  # 'front' or 'down'
+    direction: str = "front",  # 'front' or 'down'
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
 
     # ---------------------------------------- Prepare ----------------------------------------
@@ -761,18 +978,27 @@ def orient_eef(
     ee_state_list_select = []
 
     # Get arm state
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
     # Generate replacement rotation matrix
     replaced_rotation_matrix = np.eye(4)
-    if direction == 'front':
+    if direction == "front":
         rotation_matrix = R.from_euler("xyz", [180, -90, 0], degrees=True).as_matrix()
-        replaced_rotation_matrix[:3, :3] = rotation_matrix @ replaced_rotation_matrix[:3, :3]
-    elif direction == 'down':
+        replaced_rotation_matrix[:3, :3] = (
+            rotation_matrix @ replaced_rotation_matrix[:3, :3]
+        )
+    elif direction == "down":
         rotation_matrix = R.from_euler("x", 180, degrees=True).as_matrix()
-        replaced_rotation_matrix[:3, :3] = rotation_matrix @ replaced_rotation_matrix[:3, :3]
+        replaced_rotation_matrix[:3, :3] = (
+            rotation_matrix @ replaced_rotation_matrix[:3, :3]
+        )
     else:
         log_error("Rotation direction must be 'front' or 'down'.")
 
@@ -780,12 +1006,20 @@ def orient_eef(
     rot_torch = torch.as_tensor(
         replaced_rotation_matrix[:3, :3],
         dtype=rotation_replaced_pose.dtype,
-        device=rotation_replaced_pose.device
+        device=rotation_replaced_pose.device,
     )
     rotation_replaced_pose[:3, :3] = rot_torch
 
     # Solve IK for the new pose
-    replace_target_qpos = get_qpos(env, is_left, select_arm, rotation_replaced_pose, select_arm_current_qpos, force_valid=force_valid, name='replaced-rotation')
+    replace_target_qpos = get_qpos(
+        env,
+        is_left,
+        select_arm,
+        rotation_replaced_pose,
+        select_arm_current_qpos,
+        force_valid=force_valid,
+        name="replaced-rotation",
+    )
 
     # ---------------------------------------- Update env ----------------------------------------
     env.set_current_qpos_agent(replace_target_qpos, is_left=is_left)
@@ -802,31 +1036,33 @@ def orient_eef(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
-    actions = finalize_actions(
-        select_qpos_traj,
-        ee_state_list_select
-    )
+    actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for orient eef: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for orient eef: {len(actions)}.",
+        color="green",
+    )
 
     return actions
 
-def close_gripper(
-    robot_name: str,
-    env=None,
-    **kwargs
-):
+
+def close_gripper(robot_name: str, env=None, **kwargs):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Traj ----------------------------------------
     sample_num = kwargs.get("sample_num", 15)
@@ -839,31 +1075,33 @@ def close_gripper(
         execute_open,
         select_arm_current_qpos,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
-    actions = finalize_actions(
-        select_qpos_traj,
-        ee_state_list_select
-    )
+    actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for close gripper: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for close gripper: {len(actions)}.",
+        color="green",
+    )
 
     return actions
 
-def open_gripper(
-    robot_name: str,
-    env=None,
-    **kwargs
-):
+
+def open_gripper(robot_name: str, env=None, **kwargs):
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Traj ----------------------------------------
     sample_num = kwargs.get("sample_num", 15)
@@ -876,22 +1114,23 @@ def open_gripper(
         execute_open,
         select_arm_current_qpos,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     # ---------------------------------------- Final ----------------------------------------
-    actions = finalize_actions(
-        select_qpos_traj,
-        ee_state_list_select
-    )
+    actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for open gripper: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for open gripper: {len(actions)}.",
+        color="green",
+    )
 
     return actions
 
+
 def drive(
-    left_arm_action = None,
-    right_arm_action = None,
+    left_arm_action=None,
+    right_arm_action=None,
     env=None,
     **kwargs,
 ):
@@ -918,20 +1157,34 @@ def drive(
     elif left_arm_action is None and right_arm_action is not None:
         left_arm_index = env.left_arm_joints + env.left_eef_joints
         right_arm_index = env.right_arm_joints + env.right_eef_joints
-        left_arm_action = finalize_actions(env.left_arm_current_qpos, env.left_arm_current_gripper_state)
-        left_arm_action = np.repeat(left_arm_action[None, :], len(right_arm_action), axis=0)
+        left_arm_action = finalize_actions(
+            env.left_arm_current_qpos, env.left_arm_current_gripper_state
+        )
+        left_arm_action = np.repeat(
+            left_arm_action[None, :], len(right_arm_action), axis=0
+        )
 
-        actions = np.zeros((len(right_arm_action), len(env.robot.get_qpos().squeeze(0))), dtype=np.float32)
+        actions = np.zeros(
+            (len(right_arm_action), len(env.robot.get_qpos().squeeze(0))),
+            dtype=np.float32,
+        )
         actions[:, left_arm_index] = left_arm_action
         actions[:, right_arm_index] = right_arm_action
 
     elif right_arm_action is None and left_arm_action is not None:
         left_arm_index = env.left_arm_joints + env.left_eef_joints
         right_arm_index = env.right_arm_joints + env.right_eef_joints
-        right_arm_action = finalize_actions(env.right_arm_current_qpos, env.right_arm_current_gripper_state)
-        right_arm_action = np.repeat(right_arm_action[None, :], len(left_arm_action), axis=0)
+        right_arm_action = finalize_actions(
+            env.right_arm_current_qpos, env.right_arm_current_gripper_state
+        )
+        right_arm_action = np.repeat(
+            right_arm_action[None, :], len(left_arm_action), axis=0
+        )
 
-        actions = np.zeros((len(left_arm_action), len(env.robot.get_qpos().squeeze(0))), dtype=np.float32)
+        actions = np.zeros(
+            (len(left_arm_action), len(env.robot.get_qpos().squeeze(0))),
+            dtype=np.float32,
+        )
         actions[:, left_arm_index] = left_arm_action
         actions[:, right_arm_index] = right_arm_action
 
@@ -944,6 +1197,7 @@ def drive(
         action = actions[i]
         obs, reward, terminated, truncated, info = env.step(action)
     return actions
+
 
 def save_observations(
     step_id: int = 0,
@@ -968,6 +1222,7 @@ def save_observations(
 
         # Decode Base64 back to raw image bytes
         import base64
+
         img_bytes = base64.b64decode(base64_image)
 
         # Ensure step_name is not None

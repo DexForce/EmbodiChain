@@ -33,6 +33,7 @@ class SemanticMask(IntEnum):
     FOREGROUND = 1
     ROBOT = 2
 
+
 class Modality(Enum):
     STATES = "states"
     STATE_INDICATOR = "state_indicator"
@@ -43,6 +44,7 @@ class Modality(Enum):
     LANG_INDICATOR = "lang_indicator"
     GEOMAP = "geomap"  # e.g., depth, point cloud, etc.
     VISION_LANGUAGE = "vision_language"  # e.g., image + lang
+
 
 class EndEffector(Enum):
     GRIPPER = "gripper"
@@ -62,6 +64,7 @@ class ControlParts(Enum):
     HEAD = "head"
     WAIST = "waist"
 
+
 class ControlPartsMappingW1(Enum):
     ANKLE_IN_TORSO = 0
     KNEE_IN_TORSO = 1
@@ -70,6 +73,7 @@ class ControlPartsMappingW1(Enum):
 
     NECK1_IN_HEAD = 0
     NECK2_IN_HEAD = 1
+
 
 class Hints(Enum):
     EEF = (
@@ -93,11 +97,13 @@ class ActionMode(Enum):
     ABSOLUTE = ""
     RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
 
+
 class PrivilegeType(Enum):
     EXTEROCEPTION = "exteroception"
     MASK = "mask"
     STATE = "state"
     PROGRESS = "progress"
+
 
 SUPPORTED_PROPRIO_TYPES = [
     ControlParts.LEFT_ARM.value + EefType.POSE.value,
@@ -121,17 +127,21 @@ SUPPORTED_EXTRA_VISION_TYPES = [
     PrivilegeType.MASK.value,
 ]
 
+
 class ArmEnum(IntEnum):
     LEFT_ARM_ONLY = 1
     RIGHT_ARM_ONLY = 2
     DUAL_ARM = 3
 
+
 class ArmName(Enum):
     LEFT_ARM_ONLY = "left_arm"
     RIGHT_ARM_ONLY = "right_arm"
 
+
 def is_dual_arms(dofs: int) -> bool:
     return dofs > 10
+
 
 class HandQposNormalizer:
     """

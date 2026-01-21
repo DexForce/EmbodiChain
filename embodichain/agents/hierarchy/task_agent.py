@@ -137,4 +137,3 @@ class TaskAgent(AgentBase):
 
     def act(self, *args, **kwargs):
         return super().act(*args, **kwargs)
-

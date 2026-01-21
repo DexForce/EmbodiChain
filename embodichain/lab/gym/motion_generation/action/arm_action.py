@@ -226,9 +226,9 @@ class ArmAction(Action):
         def create_qpos_dict(position: np.ndarray, dof: int) -> Dict:
             """Create qpos dictionary with zero velocity and acceleration"""
             return {
-                "position": position.tolist()
-                if isinstance(position, np.ndarray)
-                else position,
+                "position": (
+                    position.tolist() if isinstance(position, np.ndarray) else position
+                ),
                 "velocity": [0.0] * dof,
                 "acceleration": [0.0] * dof,
             }
