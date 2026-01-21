@@ -41,7 +41,14 @@ def create_llm(*, temperature=0.0, model="gpt-4o"):
 # LLM instances
 # ------------------------------------------------------------------------------
 
-task_llm = create_llm(temperature=0.0, model="gpt-4o")
-code_llm = create_llm(temperature=0.0, model="gpt-4o")
-validation_llm = create_llm(temperature=0.0, model="gpt-4o")
-view_selection_llm = create_llm(temperature=0.0, model="gpt-4o")
+# Initialize LLM instances, but handle errors gracefully for documentation builds
+def _create_llm_safe(*, temperature=0.0, model="gpt-4o"):
+    try:
+        return create_llm(temperature=temperature, model=model)
+    except Exception:
+        return None
+
+task_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
+code_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
+validation_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
+view_selection_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
