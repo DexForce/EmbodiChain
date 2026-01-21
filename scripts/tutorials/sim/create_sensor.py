@@ -20,9 +20,7 @@ It shows how to configure a camera sensor, attach it to the robot's end-effector
 """
 
 import argparse
-import cv2
 import numpy as np
-import time
 import torch
 
 torch.set_printoptions(precision=4, sci_mode=False)
@@ -247,7 +245,7 @@ def get_sensor_image(camera: Camera, headless=False, step_count=0):
     normals = data["normal"].cpu().numpy()[0]  # (H, W, 3)
 
     # Normalize for visualization
-    depth_vis = (depth - depth.min()) / (depth.ptp() + 1e-8)
+    depth_vis = (depth - depth.min()) / (np.ptp(depth) + 1e-8)
     depth_vis = (depth_vis * 255).astype("uint8")
     mask_vis = mask_to_color_map(mask, user_ids=np.unique(mask))
     normals_vis = ((normals + 1) / 2 * 255).astype("uint8")

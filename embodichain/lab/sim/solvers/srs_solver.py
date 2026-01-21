@@ -511,6 +511,14 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         joints_output[5] = (angle6 - dh_params[5, 3]) * rotation_directions[5]
         joints_output[6] = (angle7 - dh_params[6, 3]) * rotation_directions[6]
 
+        # Check if the calculated joint angles are within the limits
+        in_range = (joints_output >= self.qpos_limits_np[:, 0]) & (
+            joints_output <= self.qpos_limits_np[:, 1]
+        )
+
+        if not np.all(in_range):
+            return False, None
+
         return True, joints_output
 
     def get_ik(
@@ -568,7 +576,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, num_targets, 7),
+                    (num_targets, 7),
                     dtype=qpos_seed.dtype,
                     device=self.device,
                 ),

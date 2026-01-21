@@ -17,3 +17,8 @@
 from .base_sensor import BaseSensor, SensorCfg
 from .camera import Camera, CameraCfg
 from .stereo import StereoCamera, StereoCameraCfg
+from .contact_sensor import (
+    ContactSensor,
+    ContactSensorCfg,
+    ArticulationContactFilterCfg,
+)

@@ -20,10 +20,11 @@ import numpy as np
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import List, Sequence, Dict, Union, Tuple
+from typing import List, Sequence, Dict, Union, Tuple, Optional
 
 from dexsim.engine import Articulation as _Articulation
 from dexsim.types import (
+    ArticulationFlag,
     ArticulationGPUAPIWriteType,
     ArticulationGPUAPIReadType,
 )
@@ -1132,15 +1133,18 @@ class Articulation(BatchEntity):
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
 
-    def get_user_ids(self) -> torch.Tensor:
+    def get_user_ids(self, link_name: str | None = None) -> torch.Tensor:
         """Get the user ids of the articulation.
 
+        Args:
+            link_name: (str | None): The name of the link. If None, returns user ids for all links.
+
         Returns:
-            torch.Tensor: The user ids of the articulation with shape (N, num_link).
+            torch.Tensor: The user ids of the articulation with shape (N, 1) for given link_name or (N, num_links) if link_name is None.
         """
         return torch.as_tensor(
             np.array(
-                [entity.get_user_ids() for entity in self._entities],
+                [entity.get_user_ids(link_name) for entity in self._entities],
             ),
             dtype=torch.int32,
             device=self.device,
@@ -1586,6 +1590,40 @@ class Articulation(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
                 self._entities[env_idx].set_physical_visible(visible, link_name)
+
+    def set_fix_base(
+        self,
+        fix: bool = True,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set whether the base of the articulation is fixed.
+
+        Args:
+            fix (bool, optional): Whether to fix the base. Defaults to True.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].set_articulation_flag(
+                ArticulationFlag.FIX_BASE, fix
+            )
+
+    def set_self_collision(
+        self,
+        enable: bool = False,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set whether self-collision is enabled for the articulation.
+
+        Args:
+            enable (bool, optional): Whether to enable self-collision. Defaults to True.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].set_articulation_flag(
+                ArticulationFlag.DISABLE_SELF_COLLISION, not enable
+            )
 
     def destroy(self) -> None:
         env = self._world.get_env()

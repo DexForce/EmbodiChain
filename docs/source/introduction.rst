@@ -9,8 +9,6 @@ EmbodiChain
 .. image:: ../../assets/imgs/teaser.jpg
    :alt: teaser
 
-📘 `Documentation <https://dexforce.github.io/EmbodiChain/introduction.html>`_
-
 ---
 
 EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, real-to-sim data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
@@ -18,7 +16,7 @@ EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It stre
 .. NOTE::
    EmbodiChain is in Alpha and under active development:
 
-   * More features will be continually added in the coming months.
+   * More features will be continually added in the coming months. You can find more details in the `roadmap <https://dexforce.github.io/EmbodiChain/resources/roadmap.html>`_.
    * Since this is an early release, we welcome feedback (bug reports, feature requests, etc.) via GitHub Issues.
 
 
@@ -30,6 +28,11 @@ Key Features
 * 📊 **Scalable Data Pipeline**: Automated data collection, efficient processing, and large-scale generation for model training.
 * ⚡ **Efficient Training & Evaluation**: Online data streaming, parallel environment rollouts, and modern training paradigms.
 * 🧩 **Modular & Extensible**: Easily integrate new robots, environments, and learning algorithms.
+
+The figure below illustrates the overall architecture of EmbodiChain:
+
+.. image:: ../../assets/imgs/frameworks.jpg
+   :alt: frameworks
 
 Getting Started
 ---------------
@@ -44,7 +47,7 @@ To get started with EmbodiChain, follow these steps:
 Citation
 --------
 
-If you use EmbodiChain in your research, please cite:
+If you find EmbodiChain helpful for your research, please consider citing our work:
 
 .. code-block:: bibtex
 
@@ -55,3 +58,15 @@ If you use EmbodiChain in your research, please cite:
      year = {2025},
      url = {https://github.com/DexForce/EmbodiChain}
    }
+
+.. code-block:: bibtex
+
+   @misc{GS-World,
+   author = {Liu, G., Deng, Y., Liu, Z., and Jia, K},
+   title = {GS-World: An Efficient, Engine-driven Learning Paradigm for Pursuing Embodied Intelligence using World
+      Models of Generative Simulation},
+   month = {October},
+   year = {2025},
+   journal = {TechRxiv}
+   }
+

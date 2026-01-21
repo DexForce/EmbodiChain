@@ -252,6 +252,51 @@ def compute_semantic_mask(
     return torch.stack(masks, dim=-1)
 
 
+def get_robot_eef_pose(
+    env: "EmbodiedEnv",
+    obs: EnvObs,
+    part_name: str | None = None,
+    position_only: bool = False,
+) -> torch.Tensor:
+    """Get robot end-effector pose using forward kinematics.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        part_name: The name of the control part. If None, uses default part.
+        position_only: If True, returns only position (3D). If False, returns full pose (4x4 matrix).
+
+    Returns:
+        A tensor of shape (num_envs, 3) if position_only=True, or (num_envs, 4, 4) otherwise.
+    """
+    robot = env.robot
+
+    if part_name is not None:
+        joint_ids = robot.get_joint_ids(part_name)
+        qpos = robot.body_data.qpos[:, joint_ids]
+        ee_pose = robot.compute_fk(name=part_name, qpos=qpos, to_matrix=True)
+    else:
+        qpos = robot.get_qpos()
+        ee_pose = robot.compute_fk(qpos=qpos, to_matrix=True)
+
+    if position_only:
+        return ee_pose[:, :3, 3]
+    return ee_pose
+
+
+def target_position(
+    env: "EmbodiedEnv",
+    obs: EnvObs,
+    target_pose_key: str = "goal_pose",
+) -> torch.Tensor:
+    """Get virtual target position from env state."""
+    state_attr = f"_{target_pose_key}s"
+    if hasattr(env, state_attr):
+        target_poses = getattr(env, state_attr)
+        return target_poses[:, :3, 3]
+    return torch.zeros(env.num_envs, 3, device=env.device)
+
+
 class compute_exteroception(Functor):
     """Compute the exteroception for the observation space.
 

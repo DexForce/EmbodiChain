@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
+import numpy as np
 import gymnasium as gym
 
 from typing import Dict, List, Union, Tuple, Any, Sequence
@@ -103,13 +104,13 @@ class BaseEnv(gym.Env):
         self.cfg = cfg
 
         # the number of envs to be simulated in parallel.
-        self.num_envs = self.cfg.num_envs
+        self._num_envs = self.cfg.num_envs
 
         if self.cfg.sim_cfg is None:
             self.sim_cfg = SimulationManagerCfg(headless=True)
         else:
             self.sim_cfg = self.cfg.sim_cfg
-            self.sim_cfg.num_envs = self.num_envs
+            self.sim_cfg.num_envs = self._num_envs
 
         if self.cfg.seed is not None:
             self.cfg.seed = set_seed(self.cfg.seed)
@@ -129,7 +130,7 @@ class BaseEnv(gym.Env):
             self.sim.open_window()
 
         self._elapsed_steps = torch.zeros(
-            self.num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
+            self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
         )
 
         self._init_sim_state(**kwargs)
@@ -138,7 +139,7 @@ class BaseEnv(gym.Env):
 
         logger.log_info("[INFO]: Initialized environment:")
         logger.log_info(f"\tEnvironment device    : {self.sim.device}")
-        logger.log_info(f"\tNumber of environments: {self.num_envs}")
+        logger.log_info(f"\tNumber of environments: {self._num_envs}")
         logger.log_info(f"\tEnvironment seed      : {self.cfg.seed}")
         logger.log_info(f"\tPhysics dt            : {self.sim_cfg.physics_dt}")
         logger.log_info(
@@ -146,7 +147,12 @@ class BaseEnv(gym.Env):
         )
 
     @property
-    def device(self) -> torch.Tensor:
+    def num_envs(self) -> int:
+        """Return the number of environments simulated in parallel."""
+        return self._num_envs
+
+    @property
+    def device(self) -> torch.device:
         """Return the device used by the environment."""
         return self.sim.device
 
@@ -167,6 +173,21 @@ class BaseEnv(gym.Env):
             return gym.vector.utils.batch_space(
                 self.single_observation_space, n=self.num_envs
             )
+
+    @cached_property
+    def flattened_observation_space(self) -> gym.spaces.Box:
+        """Flattened observation space for RL training.
+
+        Returns a Box space by computing total dimensions from nested dict observations.
+        This is needed because RL algorithms (PPO, SAC, etc.) require flat vector inputs.
+        """
+        from embodichain.agents.rl.utils.helper import flatten_dict_observation
+
+        flattened_obs = flatten_dict_observation(self._init_raw_obs)
+        total_dim = flattened_obs.shape[-1]
+        return gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(total_dim,), dtype=np.float32
+        )
 
     @cached_property
     def action_space(self) -> gym.spaces.Space:
@@ -269,6 +290,27 @@ class BaseEnv(gym.Env):
             **kwargs: Additional keyword arguments to be passed to the :meth:`_update_sim_state` function.
         """
         # TODO: Add randomization event here.
+        pass
+
+    def _hook_after_sim_step(
+        self,
+        obs: EnvObs,
+        action: EnvAction,
+        dones: torch.Tensor,
+        terminateds: torch.Tensor,
+        info: Dict,
+        **kwargs,
+    ) -> None:
+        """Hook function called after each simulation step.
+
+        Args:
+            obs: The observation dictionary.
+            action: The action taken by the agent.
+            dones: A tensor indicating which environments are done.
+            terminateds: A tensor indicating which environments are terminated.
+            info: A dictionary containing additional information.
+            **kwargs: Additional keyword arguments to be passed to the :meth:`_hook_after_sim_step` function.
+        """
         pass
 
     def _initialize_episode(self, env_ids: Sequence[int] | None = None, **kwargs):
@@ -380,7 +422,7 @@ class BaseEnv(gym.Env):
         info.update(self.evaluate(**kwargs))
         return info
 
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> bool:
+    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         """Check if the episode is truncated.
 
         Args:
@@ -388,9 +430,33 @@ class BaseEnv(gym.Env):
             info: The info dictionary.
 
         Returns:
-            True if the episode is truncated, False otherwise.
+            A boolean tensor indicating truncation for each environment in the batch.
         """
         return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+    def _extend_reward(
+        self,
+        rewards: torch.Tensor,
+        obs: EnvObs,
+        action: EnvAction,
+        info: Dict[str, Any],
+        **kwargs,
+    ) -> torch.Tensor:
+        """Extend the reward computation.
+
+        Overwrite this function to extend or modify the reward computation.
+
+        Args:
+            rewards: The base reward tensor.
+            obs: The observation from the environment.
+            action: The action applied to the robot agent.
+            info: The info dictionary.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The extended reward tensor.
+        """
+        return rewards
 
     def get_reward(
         self,
@@ -412,7 +478,9 @@ class BaseEnv(gym.Env):
             The reward for the current step.
         """
 
-        return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        rewards = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
+        return rewards
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
@@ -476,6 +544,9 @@ class BaseEnv(gym.Env):
         obs = self.get_obs(**kwargs)
         info = self.get_info(**kwargs)
         rewards = self.get_reward(obs=obs, action=action, info=info)
+        rewards = self._extend_reward(
+            rewards=rewards, obs=obs, action=action, info=info
+        )
 
         terminateds = torch.logical_or(
             info.get(
@@ -491,11 +562,19 @@ class BaseEnv(gym.Env):
             terminateds[:] = False
 
         dones = torch.logical_or(terminateds, truncateds)
+
+        self._hook_after_sim_step(
+            obs=obs,
+            action=action,
+            dones=dones,
+            terminateds=terminateds,
+            info=info,
+            **kwargs,
+        )
+
         reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:
             obs, _ = self.reset(options={"reset_ids": reset_env_ids})
-
-        # TODO: may be add hook for observation postprocessing.
 
         return obs, rewards, terminateds, truncateds, info
 

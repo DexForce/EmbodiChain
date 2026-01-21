@@ -24,6 +24,7 @@ from typing import List, TypeVar, Sequence
 
 from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.utils import logger
+from copy import deepcopy
 
 T = TypeVar("T")
 
@@ -57,7 +58,7 @@ class BatchEntity(ABC):
         if entities is None or len(entities) == 0:
             logger.log_error("Invalid entities list: must not be empty.")
 
-        self.cfg = cfg.copy()
+        self.cfg = deepcopy(cfg)
         self.uid = self.cfg.uid
         if self.uid is None:
             logger.log_error("UID must be set in the configuration.")

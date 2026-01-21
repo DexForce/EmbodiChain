@@ -1,0 +1,114 @@
+{   
+    "id": "SimpleTask-v1",
+    "max_episodes": 24,
+    "env": {
+        "events": {
+            "random_light": {
+                "func": "randomize_light",
+                "mode": "interval",
+                "interval_step": 20,
+                "params": {
+                    "entity_cfg": {"uid": "light_1"},
+                    "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
+                    "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
+                    "intensity_range": [50.0, 100.0]
+                }
+            },
+            "random_material": {
+                "func": "randomize_visual_material",
+                "mode": "interval",
+                "interval_step": 50,
+                "params": {
+                    "entity_cfg": {"uid": "table"},
+                    "random_texture_prob": 0.0,
+                    "texture_path": "CocoBackground/coco",
+                    "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
+                }
+            }
+        },
+        "dataset": {
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "UR10",
+                        "arm_dofs": 6,
+                        "control_freq": 3,
+                        "observation": {
+                            "vision": {
+                                "cam_high": []
+                            },
+                            "states": ["qpos"]
+                        },
+                        "action": "qpos",
+                        "min_len_steps": 5
+                    },
+                    "instruction": {
+                        "lang": "Acting with Oscillatory motion"
+                    },
+                    "extra": {
+                        "scene_type": "commercial",
+                        "task_description": "Oscillatory motion",
+                        "data_type": "sim"
+                    },
+                    "use_videos": false,
+                    "export_success_only": false
+                }
+            }
+        }
+    },
+    "robot": {
+        "uid": "UR10",
+        "fpath": "UniversalRobots/UR10/UR10.urdf",
+        "init_pos": [0.0, 0.0, 0.7775],
+        "init_qpos": [1.57079, -1.57079, 1.57079, -1.57079, -1.57079, -3.14159]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 320.0, 240.0],
+            "extrinsics": {
+                "eye": [1, 0, 3],
+                "target": [0, 0, 1]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [2, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "CircleTableSimple/circle_table_simple.ply",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 10.0,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.01
+            },
+            "body_scale": [1, 1, 1],
+            "body_type": "kinematic",
+            "init_pos": [0.8, 0.0, 0.825],
+            "init_rot": [0, 90, 0]
+        }
+    ],
+    "rigid_object": [
+    ]
+}

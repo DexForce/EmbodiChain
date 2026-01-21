@@ -53,7 +53,13 @@ Install the project in development mode:
 
 ```bash
 pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+
+# Or install with the lerobot extras:
+pip install -e .[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 ```
+
+> [!NOTE]
+> * [LeRobot](https://huggingface.co/docs/lerobot/installation) is an optional module for EmbodiChain that provides data saving and loading functionalities for robot learning tasks. Installing with the `lerobot` extras will include this module and its dependencies.
 
 ### Verify Installation
 To verify that EmbodiChain is installed correctly, run a simple demo script to create a simulation scene:

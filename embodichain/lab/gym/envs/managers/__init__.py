@@ -14,7 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .cfg import FunctorCfg, SceneEntityCfg, EventCfg, ObservationCfg
+from .cfg import (
+    FunctorCfg,
+    SceneEntityCfg,
+    EventCfg,
+    ObservationCfg,
+    RewardCfg,
+    DatasetFunctorCfg,
+)
 from .manager_base import Functor, ManagerBase
 from .event_manager import EventManager
 from .observation_manager import ObservationManager
+from .reward_manager import RewardManager
+from .dataset_manager import DatasetManager
+from .datasets import *
