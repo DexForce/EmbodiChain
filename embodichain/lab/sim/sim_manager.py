@@ -216,7 +216,7 @@ class SimulationManager:
         wp.init()
         self._world: dexsim.World = dexsim.World(world_config)
 
-        self._window: Windows = None
+        self._window: Windows | None = None
         self._is_registered_window_control = False
         if sim_config.headless is False:
             self._window = self._world.get_windows()
@@ -1531,6 +1531,19 @@ class SimulationManager:
         self._is_registered_window_control = True
 
     def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
+        """Add one or more custom window input controls.
+
+        This method registers additional :class:`ObjectManipulator` instances
+        with the simulation window so they can handle input events alongside
+        any default controls.
+
+        Args:
+            controls (list[ObjectManipulator]): A list of initialized
+                ObjectManipulator instances to add to the current window.
+                Each control will be registered via ``window.add_input_control``.
+                If no window is available, the controls are not added and a
+                warning is logged.
+        """
         if self._window is None:
             logger.log_warning("No window available to add custom controls.")
             return

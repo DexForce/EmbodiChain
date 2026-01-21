@@ -8,7 +8,7 @@ The simulation window comes with a set of default controls that enable users to 
 
 | Events                        | Description                                                                                                                                      |
 |---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Raycast Information Display** | Press the right mouse button and the 'C' key to print the raycast distance and hit position of a surface (world coordinates) to the console. Useful for debugging and checking the position of objects in the simulation. |
+| **Raycast Information Display** | Press the right mouse button to select a point and the 'C' key to print the raycast distance and hit position of a surface (world coordinates) to the console. Useful for debugging and checking the position of objects in the simulation. |
 
 > **Note:** We will add more interaction features in future releases. Stay tuned for updates!
 
@@ -24,8 +24,16 @@ from dexsim.types import InputKey
 
 class CustomWindowEvent(ObjectManipulator):
     def on_key_down(self, key):
-        if key == InputKey.SPACE:
+        if key == InputKey.SPACE.value:
             print("Space key pressed!")
+
+
+# Assuming you already have a SimulationManager instance called `sim_manager`
+# (for example, created elsewhere in your code):
+# sim_manager = SimulationManager(...)
+
+# Register the custom window event handler with the simulation:
+sim_manager.add_custom_window_control(CustomWindowEvent())
 ```
 
 The functions table below summarizes the key methods available in the `ObjectManipulator` class for customizing window events:
