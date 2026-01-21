@@ -9,7 +9,9 @@
 import os
 import sys
 
-os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://mock-endpoint.openai.azure.com/")
+os.environ.setdefault(
+    "AZURE_OPENAI_ENDPOINT", "https://mock-endpoint.openai.azure.com/"
+)
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "mock-api-key-for-docs-build")
 
 sys.path.insert(0, os.path.abspath("../.."))
