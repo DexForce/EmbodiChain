@@ -74,18 +74,17 @@ class URDFCollisionDecomposer:
     def decompose_collisions(self, output_urdf_name: str):
         visual_collision_pairs = self._get_visual_collision_pairs()
         for link_name, (visual, collision, link) in visual_collision_pairs.items():
-            if collision is None:
-                geom = visual.find("geometry")
-                # use visual geometry mesh
-            elif visual is not None:
-                geom = collision.find("geometry")
-                # use collision geometry mesh
-                pass
-            else:
+            if visual is None and collision is None:
                 logger.log_warning(
                     f"Link {link_name} has no visual and collision geometry."
                 )
                 continue
+            if collision is None:
+                geom = visual.find("geometry")
+                # use visual geometry mesh
+            else:
+                # use collision geometry mesh
+                geom = collision.find("geometry")
 
             if geom is None:
                 logger.log_warning(f"Link {link_name} has no geometry.")
