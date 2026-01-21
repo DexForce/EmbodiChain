@@ -128,7 +128,11 @@
                         "control_freq": 25,
                         "arm_dofs": 6,
                         "observation": {
-                            "vision": {}
+                            "vision": {
+                                "wrist_camera": [],
+                                "third_person_camera": []
+                            },
+                            "states": ["qpos"]
                         }
                     },
                     "instruction": {
@@ -185,7 +189,30 @@
             "arm": ["JOINT[1-6]"]
         }
     },
-    "sensor": [],
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "wrist_camera",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [90.0, 90.0, 64.0, 64.0],
+            "extrinsics": {
+                "parent": "ee_link"
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "third_person_camera",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [90.0, 90.0, 64.0, 64.0],
+            "extrinsics": {
+                "eye": [0.5, 0.5, 0.8],
+                "target": [0.0, 0.0, 0.3],
+                "up": [0.0, 0.0, 1.0]
+            }
+        }
+    ],
     "light": {},
     "background": [],
     "rigid_object": [

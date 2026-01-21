@@ -165,6 +165,9 @@ class RLEnv(EmbodiedEnv):
     def _process_eef_pose(self, action: torch.Tensor) -> torch.Tensor:
         """Process end-effector pose action via inverse kinematics.
 
+        TODO: Currently only supports single-arm robots (6-axis or 7-axis).
+        For multi-arm or complex robots, please use qpos/delta_qpos actions instead.
+
         Args:
             action: End-effector pose (position + orientation)
                    Shape: (num_envs, 6) for pos+euler or (num_envs, 7) for pos+quat
@@ -172,32 +175,8 @@ class RLEnv(EmbodiedEnv):
         Returns:
             Joint positions from IK
         """
-        # Auto-select control part if not specified
-        control_part_name = self.control_part_name
-        if control_part_name is None:
-            if self.robot.control_parts is None:
-                raise ValueError(
-                    "Robot has no control_parts defined for eef_pose action"
-                )
-
-            available_parts = list(self.robot.control_parts.keys())
-            if not available_parts:
-                raise ValueError(
-                    "Robot has no control_parts defined for eef_pose action"
-                )
-
-            if len(available_parts) == 1:
-                control_part_name = available_parts[0]
-            else:
-                raise ValueError(
-                    f"Multiple control_parts found {available_parts}. "
-                    f"Please specify control_part_name explicitly."
-                )
-
         # Get current joint positions as IK seed
         current_qpos = self.robot.get_qpos()
-        control_joint_ids = self.robot.get_joint_ids(name=control_part_name)
-        seed_qpos = current_qpos[:, control_joint_ids]
 
         # Convert action to target pose matrix (4x4)
         batch_size = action.shape[0]
@@ -223,15 +202,12 @@ class RLEnv(EmbodiedEnv):
         for env_idx in range(self.num_envs):
             qpos_ik = self.robot.compute_ik(
                 pose=target_pose[env_idx],
-                joint_seed=seed_qpos[env_idx],
-                name=control_part_name,
+                joint_seed=current_qpos[env_idx],
             )
             ik_solutions.append(qpos_ik)
 
-        # Update full qpos with IK solutions
-        result_qpos = current_qpos.clone()
-        ik_qpos = torch.stack(ik_solutions, dim=0)
-        result_qpos[:, control_joint_ids] = ik_qpos
+        # Stack IK solutions
+        result_qpos = torch.stack(ik_solutions, dim=0)
 
         return result_qpos
 
