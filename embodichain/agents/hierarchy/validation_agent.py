@@ -73,10 +73,8 @@ class ValidationAgent(metaclass=ABCMeta):
         {', '.join(step_names)}
 
         Provide the following analysis:
-        1. Determine whether each step was executed correctly.
-        2. If a step failed, identify which one and explain the cause.
-        3. Decide whether the full task succeeded or failed.
-        4. If the task failed, provide a precise and detailed explanation.
+        1. Decide whether the full task succeeded or failed.
+        2. If the task failed, provide a precise and detailed explanation.
 
         Below is a potentially problematic piece of code and the corresponding execution error:
 
