@@ -29,7 +29,6 @@ Table of Contents
 
    overview/sim/index
    overview/gym/index
-   overview/vla/index
    overview/rl/index
 
 .. toctree::

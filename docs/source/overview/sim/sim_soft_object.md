@@ -1,16 +1,50 @@
 # Soft Object
 
-The `SoftObject` class represents deformable entities (e.g., cloth, sponges, soft robotics) in EmbodiChain. Unlike rigid bodies, soft objects are defined by vertices and meshes rather than a single rigid pose.
+```{currentmodule} embodichain.lab.sim
+```
+
+The {class}`~objects.SoftObject` class represents deformable entities (e.g., cloth, sponges, soft robotics) in EmbodiChain. Unlike rigid bodies, soft objects are defined by vertices and meshes rather than a single rigid pose.
 
 ## Configuration
 
-Soft objects are configured using the `SoftObjectCfg` dataclass.
+Configured via {class}`~cfg.SoftObjectCfg`.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `fpath` | `str` | `None` | Path to the soft body asset file (e.g., `.msh`, `.vtk`). |
-| `init_pos` | `tuple` | `(0,0,0)` | Initial position `(x, y, z)`. |
-| `init_rot` | `tuple` | `(0,0,0)` | Initial rotation `(r, p, y)` in degrees. |
+| `voxel_attr` | `SoftbodyVoxelAttributesCfg` | `...` | Voxelization attributes. |
+| `physical_attr` | `SoftbodyPhysicalAttributesCfg` | `...` | Physical attributes. |
+| `shape` | `MeshCfg` | `MeshCfg()` | Mesh configuration. |
+
+### Soft Body Attributes
+
+Soft bodies require both voxelization and physical attributes.
+
+**Voxel Attributes ({class}`~cfg.SoftbodyVoxelAttributesCfg`)**
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `triangle_remesh_resolution` | `int` | `8` | Resolution to remesh the softbody mesh before building physics collision mesh. |
+| `triangle_simplify_target` | `int` | `0` | Simplify mesh faces to target value. |
+| `simulation_mesh_resolution` | `int` | `8` | Resolution to build simulation voxelize textra mesh. |
+| `simulation_mesh_output_obj` | `bool` | `False` | Whether to output the simulation mesh as an obj file for debugging. |
+
+**Physical Attributes ({class}`~cfg.SoftbodyPhysicalAttributesCfg`)**
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `youngs` | `float` | `1e6` | Young's modulus (higher = stiffer). |
+| `poissons` | `float` | `0.45` | Poisson's ratio (higher = closer to incompressible). |
+| `dynamic_friction` | `float` | `0.0` | Dynamic friction coefficient. |
+| `elasticity_damping` | `float` | `0.0` | Elasticity damping factor. |
+| `material_model` | `SoftBodyMaterialModel` | `CO_ROTATIONAL` | Material constitutive model. |
+| `enable_kinematic` | `bool` | `False` | If True, (partially) kinematic behavior is enabled. |
+| `enable_ccd` | `bool` | `False` | Enable continuous collision detection. |
+| `enable_self_collision` | `bool` | `False` | Enable self-collision handling. |
+| `mass` | `float` | `-1.0` | Total mass. If negative, density is used. |
+| `density` | `float` | `1000.0` | Material density in kg/m^3. |
+
+For Soft Object tutorial, please refer to the [Soft Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html).
+
 
 ### Setup & Initialization
 

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import sys
 import dexsim
@@ -62,6 +64,7 @@ from embodichain.lab.sim.sensors import (
     BaseSensor,
     Camera,
     StereoCamera,
+    ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
     PhysicsCfg,
@@ -159,11 +162,36 @@ class SimulationManager:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
     """
 
-    SUPPORTED_SENSOR_TYPES = {"Camera": Camera, "StereoCamera": StereoCamera}
+    _instances = {}
+
+    SUPPORTED_SENSOR_TYPES = {
+        "Camera": Camera,
+        "StereoCamera": StereoCamera,
+        "ContactSensor": ContactSensor,
+    }
+
+    def __new__(cls, sim_config: SimulationManagerCfg = SimulationManagerCfg()):
+        """Create or return the instance based on instance_id."""
+        n_instance = len(list(cls._instances.keys()))
+        instance = super(SimulationManager, cls).__new__(cls)
+        # Store sim_config in the instance for use in __init__ or elsewhere
+        instance.sim_config = sim_config
+        cls._instances[n_instance] = instance
+        return instance
 
     def __init__(
         self, sim_config: SimulationManagerCfg = SimulationManagerCfg()
     ) -> None:
+        instance_id = SimulationManager.get_instance_num() - 1
+
+        # Mark as initialized
+        self.instance_id = instance_id
+
+        if sim_config.enable_rt and instance_id > 0:
+            logger.log_error(
+                f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
+            )
+
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
@@ -247,6 +275,54 @@ class SimulationManager:
         self.set_manual_update(True)
 
         self._build_multiple_arenas(sim_config.num_envs)
+
+    @classmethod
+    def get_instance(cls, instance_id: int = 0) -> SimulationManager:
+        """Get the instance of SimulationManager by id.
+
+        Args:
+            instance_id (int): The instance id. Defaults to 0.
+
+        Returns:
+            SimulationManager: The instance.
+
+        Raises:
+            RuntimeError: If the instance has not been created yet.
+        """
+        if instance_id not in cls._instances:
+            logger.log_error(
+                f"SimulationManager (id={instance_id}) has not been instantiated yet. "
+                f"Create an instance first using SimulationManager(sim_config, instance_id={instance_id})."
+            )
+        return cls._instances[instance_id]
+
+    @classmethod
+    def get_instance_num(cls) -> int:
+        """Get the number of instantiated SimulationManager instances.
+
+        Returns:
+            int: The number of instances.
+        """
+        return len(cls._instances)
+
+    @classmethod
+    def reset(cls, instance_id: int = 0) -> None:
+        """Reset the instance.
+
+        This allows creating a new instance with different configuration.
+        """
+        if instance_id in cls._instances:
+            logger.log_info(f"Resetting SimulationManager instance {instance_id}.")
+            del cls._instances[instance_id]
+
+    @classmethod
+    def is_instantiated(cls, instance_id: int = 0) -> bool:
+        """Check if the instance has been created.
+
+        Returns:
+            bool: True if the instance exists, False otherwise.
+        """
+        return instance_id in cls._instances
 
     @property
     def num_envs(self) -> int:
@@ -555,9 +631,9 @@ class SimulationManager:
             color (Sequence[float] | None): color of the light.
             intensity (float | None): intensity of the light.
         """
-        if color is None:
+        if color is not None:
             self._env.set_env_light_emission(color)
-        if intensity is None:
+        if intensity is not None:
             self._env.set_env_light_intensity(intensity)
 
     def _create_default_plane(self):
@@ -594,7 +670,7 @@ class SimulationManager:
         )
 
         if self.sim_config.enable_rt:
-            self.set_emission_light([0.1, 0.1, 0.1], 10.0)
+            self.set_emission_light([1.0, 1.0, 1.0], 80.0)
         else:
             self.set_indirect_lighting("lab_day")
 
@@ -883,6 +959,24 @@ class SimulationManager:
             logger.log_warning(f"Rigid object group {uid} not found.")
             return None
         return self._rigid_object_groups[uid]
+
+    @cached_property
+    def arena_offsets(self) -> torch.Tensor:
+        """Get the arena offsets for all arenas.
+
+        Returns:
+            torch.Tensor: The arena offsets of shape (num_arenas, 3).
+        """
+        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+        arena_offsets = torch.zeros(
+            (len(env_list), 3), dtype=torch.float32, device=self.device
+        )
+        for i, env in enumerate(env_list):
+            arena_position = env.get_root_node().get_world_pose()[:3, 3]
+            arena_offsets[i] = torch.tensor(
+                arena_position, dtype=torch.float32, device=self.device
+            )
+        return arena_offsets
 
     def _get_non_static_rigid_obj_num(self) -> int:
         """Get the number of non-static rigid objects in the scene.
@@ -1475,3 +1569,5 @@ class SimulationManager:
 
         self._env.clean()
         self._world.quit()
+
+        SimulationManager.reset(self.instance_id)

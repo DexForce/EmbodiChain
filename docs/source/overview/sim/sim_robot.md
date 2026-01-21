@@ -1,11 +1,13 @@
 # Robot
 
-The `Robot` class extends `Articulation` to support advanced robotics features such as kinematic solvers (IK/FK), motion planners, and part-based control (e.g., controlling "arm" and "gripper" separately).
+```{currentmodule} embodichain.lab.sim
+```
+
+The {class}`~objects.Robot` class extends {class}`~objects.Articulation` to support advanced robotics features such as kinematic solvers (IK/FK), motion planners, and part-based control (e.g., controlling "arm" and "gripper" separately).
 
 ## Configuration
 
-Robots are configured using `RobotCfg`.
-
+Robots are configured using {class}`~cfg.RobotCfg`.
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `control_parts` | `Dict[str, List[str]]` | `None` | Defines groups of joints (e.g., `{"arm": ["joint1", ...], "hand": ["finger1", ...]}`). |
@@ -94,7 +96,7 @@ Get standard proprioceptive observation data for learning agents.
 obs = robot.get_proprioception()
 ```
 ### Advanced API
-The Robot class overrides standard Articulation methods to support the name argument for part-specific operations.
+The Robot class overrides standard Articulation methods to support the name argument for part-specific operations. 
 | Method | Description |
 | :--- | :--- |
 | `set_qpos(..., name="part")` | Set joint positions for a specific part. |
@@ -103,5 +105,4 @@ The Robot class overrides standard Articulation methods to support the name argu
 | `get_qpos(name="part")` | Get joint positions of a specific part. |
 | `get_qvel(name="part")` | Get joint velocities of a specific part. |
 
-
-
+For more API details, refer to the {class}`~objects.Robot` documentation.

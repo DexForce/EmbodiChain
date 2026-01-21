@@ -184,6 +184,15 @@ class BaseArticulationTest:
         all_link_names = self.art.link_names
         self.art.set_physical_visible(visible=True, link_names=all_link_names[:3])
 
+    def test_setter_methods(self):
+        """Test setter methods for articulation properties."""
+        # Test setting fix_base
+        self.art.set_fix_base(True)
+        self.art.set_fix_base(False)
+
+        self.art.set_self_collision(False)
+        self.art.set_self_collision(True)
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

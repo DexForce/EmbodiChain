@@ -42,6 +42,7 @@ from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
+    RewardManager,
     DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
@@ -89,6 +90,13 @@ class EmbodiedEnvCfg(EnvCfg):
     the observation manager.
 
     Please refer to the :class:`embodichain.lab.gym.managers.ObservationManager` class for more details.
+    """
+
+    rewards: Union[object, None] = None
+    """Reward settings. Defaults to None, in which case no reward computation is performed through
+    the reward manager.
+
+    Please refer to the :class:`embodichain.lab.gym.managers.RewardManager` class for more details.
     """
 
     dataset: Union[object, None] = None
@@ -149,13 +157,17 @@ class EmbodiedEnv(BaseEnv):
 
         # TODO: Change to array like data structure to handle different demo action list length for across different arena.
         self.action_length: int = 0  # Set by create_demo_action_list
-        self._action_step_counter: int = 0  # Track steps within current action sequence
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
         for name, value in extensions.items():
             setattr(cfg, name, value)
             setattr(self, name, value)
+
+        self.event_manager: EventManager | None = None
+        self.observation_manager: ObservationManager | None = None
+        self.reward_manager: RewardManager | None = None
+        self.dataset_manager: DatasetManager | None = None
 
         super().__init__(cfg, **kwargs)
 
@@ -175,6 +187,9 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.observations:
             self.observation_manager = ObservationManager(self.cfg.observations, self)
+
+        if self.cfg.rewards:
+            self.reward_manager = RewardManager(self.cfg.rewards, self)
 
         if self.cfg.dataset:
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
@@ -257,54 +272,15 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
-    def reset(
-        self, seed: int | None = None, options: dict | None = None
-    ) -> Tuple[EnvObs, Dict]:
-        obs, info = super().reset(seed=seed, options=options)
-        self._action_step_counter = 0  # Reset action step counter
-        return obs, info
-
-    def step(
-        self, action: EnvAction, **kwargs
-    ) -> Tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        """Step the environment with the given action.
-
-        Extends BaseEnv.step() to integrate with DatasetManager for automatic
-        data collection and saving. The key is to:
-        1. Record obs-action pairs as they happen
-        2. Detect episode completion
-        3. Auto-save episodes BEFORE reset
-        4. Then perform the actual reset
-        """
-        self._elapsed_steps += 1
-        self._action_step_counter += 1  # Increment action sequence counter
-
-        action = self._step_action(action=action)
-        self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
-        self._update_sim_state(**kwargs)
-
-        obs = self.get_obs(**kwargs)
-        info = self.get_info(**kwargs)
-        rewards = self.get_reward(obs=obs, action=action, info=info)
-
-        # Check termination conditions
-        terminateds = torch.logical_or(
-            info.get(
-                "success",
-                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
-            ),
-            info.get(
-                "fail", torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-            ),
-        )
-        truncateds = self.check_truncated(obs=obs, info=info)
-        if self.cfg.ignore_terminations:
-            terminateds[:] = False
-
-        # Detect which environments need reset
-        dones = torch.logical_or(terminateds, truncateds)
-        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
-
+    def _hook_after_sim_step(
+        self,
+        obs: EnvObs,
+        action: EnvAction,
+        dones: torch.Tensor,
+        terminateds: torch.Tensor,
+        info: Dict,
+        **kwargs,
+    ):
         # Call dataset manager with mode="save": it will record and auto-save if dones=True
         if self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
@@ -318,16 +294,25 @@ class EmbodiedEnv(BaseEnv):
                     info=info,
                 )
 
-        # Now perform reset for completed environments
-        if len(reset_env_ids) > 0:
-            obs, _ = self.reset(options={"reset_ids": reset_env_ids})
-
-        return obs, rewards, terminateds, truncateds, info
-
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
             obs = self.observation_manager.compute(obs)
         return obs
+
+    def _extend_reward(
+        self,
+        rewards: torch.Tensor,
+        obs: EnvObs,
+        action: EnvAction,
+        info: Dict[str, Any],
+        **kwargs,
+    ) -> torch.Tensor:
+        if self.reward_manager:
+            rewards, reward_info = self.reward_manager.compute(
+                obs=obs, action=action, info=info
+            )
+            info["rewards"] = reward_info
+        return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
         self._setup_lights()
@@ -351,6 +336,10 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="reset", env_ids=env_ids)
+
+        # reset reward manager for environments that need a reset
+        if self.cfg.rewards:
+            self.reward_manager.reset(env_ids=env_ids)
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
@@ -533,8 +522,8 @@ class EmbodiedEnv(BaseEnv):
             A boolean tensor indicating truncation for each environment in the batch.
         """
         # Check if action sequence has reached its end
-        if self.action_length > 0 and self._action_step_counter >= self.action_length:
-            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        if self.action_length > 0:
+            return self._elapsed_steps >= self.action_length
 
         return super().check_truncated(obs, info)
 

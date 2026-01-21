@@ -19,7 +19,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any
+from typing import Sequence, Union, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -253,7 +253,7 @@ class RigidBodyAttributesCfg:
 class SoftbodyVoxelAttributesCfg:
     # voxel config
     triangle_remesh_resolution: int = 8
-    """Resolution to remesh the softbody mesh before building physx collision mesh."""
+    """Resolution to remesh the softbody mesh before building physics collision mesh."""
 
     triangle_simplify_target: int = 0
     """Simplify mesh faces to target value. Do nothing if this value is zero."""
