@@ -13,7 +13,7 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal import GraspSelectMethod
 from matplotlib import pyplot as plt
 import torch
 from tqdm import tqdm
-from embodichain.lab.gym.motion_generation.action.arm_action import ArmAction
+from embodichain.lab.sim.planners.motion_generator import MotionGenerator
 from embodichain.data.enum import ControlParts, EndEffector, JointType
 from scipy.spatial.transform import Rotation as R
 from embodichain.utils.utility import encode_image
@@ -172,9 +172,12 @@ def plan_trajectory(
     select_qpos_traj,
     ee_state_list_select,
 ):
-    traj_list, _ = ArmAction.create_discrete_trajectory(
-        agent=env.robot,
+    motion_generator = MotionGenerator(
+        robot=env.robot,
         uid=select_arm,
+        **getattr(env, "planning_config", {}),
+    )
+    traj_list, _ = motion_generator.create_discrete_trajectory(
         qpos_list=qpos_list,
         sample_num=sample_num,
         qpos_seed=qpos_list[0],
