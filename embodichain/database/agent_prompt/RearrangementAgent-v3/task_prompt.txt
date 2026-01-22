@@ -1,8 +1,0 @@
-Task:
-Use both arms to rearrange a fork and a spoon on opposite sides of a plate. Perform the following steps **simultaneously**.
-
-1. Grasp the fork with the left arm and the spoon with the right arm.
-
-2. Reorient both end-effectors to a downward-facing pose.
-
-3. Place the fork at y = +0.16 and the spoon at y = −0.16 relative to the plate’s center.
