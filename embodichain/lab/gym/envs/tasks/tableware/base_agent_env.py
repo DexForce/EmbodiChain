@@ -4,7 +4,7 @@ from embodichain.utils import logger
 
 class BaseAgentEnv:
 
-    def _init_agents(self, agent_config, task_name):
+    def _init_agents(self, agent_config, task_name, agent_config_path=None):
         from embodichain.agents.hierarchy.task_agent import TaskAgent
         from embodichain.agents.hierarchy.code_agent import CodeAgent
         from embodichain.agents.hierarchy.validation_agent import ValidationAgent
@@ -20,12 +20,14 @@ class BaseAgentEnv:
                 **agent_config["Agent"],
                 **agent_config["TaskAgent"],
                 task_name=task_name,
+                config_dir=agent_config_path,
             )
         self.code_agent = CodeAgent(
             code_llm,
             **agent_config["Agent"],
             **agent_config.get("CodeAgent"),
             task_name=task_name,
+            config_dir=agent_config_path,
         )
         self.validation_agent = ValidationAgent(
             validation_llm,

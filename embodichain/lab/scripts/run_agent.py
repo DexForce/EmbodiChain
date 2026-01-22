@@ -187,6 +187,7 @@ if __name__ == "__main__":
         id=gym_config["id"],
         cfg=cfg,
         agent_config=agent_config,
+        agent_config_path=args.agent_config,
         task_name=args.task_name,
     )
 

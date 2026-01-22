@@ -16,9 +16,43 @@
 
 from abc import ABCMeta
 import os
+from pathlib import Path
 from embodichain.utils.utility import load_txt
 import embodichain.agents.mllm.prompt as mllm_prompt
-from embodichain.data import database_agent_prompt_dir, database_2d_dir
+from embodichain.data import database_2d_dir
+
+
+def _resolve_prompt_path(file_name: str, config_dir: str = None) -> str:
+    # If absolute path, use directly
+    if os.path.isabs(file_name):
+        if os.path.exists(file_name):
+            return file_name
+        raise FileNotFoundError(f"Prompt file not found: {file_name}")
+    
+    # Try config directory first (for task-specific prompts)
+    if config_dir:
+        config_path = os.path.join(config_dir, file_name)
+        if os.path.exists(config_path):
+            return config_path
+    
+    # Try agents/prompts directory (for reusable prompts)
+    agents_prompts_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts"
+    )
+    agents_path = os.path.join(agents_prompts_dir, file_name)
+    if os.path.exists(agents_path):
+        return agents_path
+    
+    # If still not found, raise error with search paths
+    searched_paths = []
+    if config_dir:
+        searched_paths.append(f"  - {config_dir}/{file_name}")
+    searched_paths.append(f"  - {agents_prompts_dir}/{file_name}")
+    
+    raise FileNotFoundError(
+        f"Prompt file not found: {file_name}\n"
+        f"Searched in:\n" + "\n".join(searched_paths)
+    )
 
 
 class AgentBase(metaclass=ABCMeta):
@@ -31,10 +65,15 @@ class AgentBase(metaclass=ABCMeta):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+        # Get config directory if provided
+        config_dir = kwargs.get("config_dir", None)
+        if config_dir:
+            config_dir = os.path.dirname(os.path.abspath(config_dir))
+
         # Preload and store prompt contents inside self.prompt_kwargs
         for key, val in self.prompt_kwargs.items():
             if val["type"] == "text":
-                file_path = os.path.join(database_agent_prompt_dir, val["name"])
+                file_path = _resolve_prompt_path(val["name"], config_dir)
                 val["content"] = load_txt(file_path)  # ← store content here
             else:
                 raise ValueError(
