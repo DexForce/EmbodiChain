@@ -78,6 +78,15 @@ class TaskAgent(AgentBase):
 
     def __init__(self, llm, **kwargs) -> None:
         super().__init__(**kwargs)
+        if llm is None:
+            raise ValueError(
+                "LLM is None. Please set the following environment variables:\n"
+                "  - AZURE_OPENAI_ENDPOINT\n"
+                "  - AZURE_OPENAI_API_KEY\n"
+                "Example:\n"
+                "  export AZURE_OPENAI_ENDPOINT='https://your-endpoint.openai.azure.com/'\n"
+                "  export AZURE_OPENAI_API_KEY='your-api-key'"
+            )
         self.llm = llm
 
     def generate(self, **kwargs) -> str:
