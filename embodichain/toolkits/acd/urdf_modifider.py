@@ -330,13 +330,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--urdf_path",
         type=str,
-        default="/home/chenjian/Downloads/StorageFurniture@45661@18/object_fromJson2urdf_decomposed.urdf",
         help="Input urdf file path",
     )
     parser.add_argument(
         "--output_urdf_name",
         type=str,
-        default="object_acd.urdf",
+        default="articulation_acd.urdf",
         help="Output urdf file name, ",
     )
     parser.add_argument(
