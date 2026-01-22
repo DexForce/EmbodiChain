@@ -109,8 +109,8 @@ class MeshEntity(EntityBase):
             o3d.utility.Vector3iVector(triangle_comp.triangles),
         )
         if add_transform:
-            spatial_comp: SpatializationComponenet = self.get_component(
-                SpatializationComponenet
+            spatial_comp: SpatializationComponent = self.get_component(
+                SpatializationComponent
             )
             o3d_mesh.transform(spatial_comp.get_pose())
         return o3d_mesh

@@ -287,7 +287,7 @@ class ScaleComponent(EntityComponent):
 
 
 @dataclass(eq=False)
-class SpatializationComponenet(EntityComponent):
+class SpatializationComponent(EntityComponent):
     location: np.ndarray = np.array([0, 0, 0], dtype=np.float32)
     rotation: Rotation = Rotation.from_matrix(np.eye(3))
 

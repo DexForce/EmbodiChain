@@ -102,7 +102,7 @@ class EntityBase(metaclass=EntityMetaClass):
 
         Example:
             >>> entity = Entity()
-            >>> entity.add_component(ScaleComponent(), SpatializationComponenet())
+            >>> entity.add_component(ScaleComponent(), SpatializationComponent())
         """
         # The existing component of the same type will be replaced.
         for comp in component:
