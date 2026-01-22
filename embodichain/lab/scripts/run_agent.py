@@ -26,59 +26,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     config_to_cfg,
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
-
-
-def generate_function(
-    env,
-    debug_mode: bool = False,
-    regenerate: bool = True,
-):
-    """
-    Generate and execute a sequence of actions in the environment.
-
-    This function resets the environment, generates and executes action trajectories.
-    Data is automatically saved by the DatasetManager using lerobot format.
-
-    Args:
-        env: The environment instance.
-        debug_mode: Enable debug mode for visualization and logging.
-        regenerate: Whether to regenerate code if already existed.
-
-    Returns:
-        bool: Returns True if generation is successful.
-    """
-    while True:  # repeat until success
-        env.reset()
-
-        # Access the wrapped environment's method
-        env.get_wrapper_attr("create_demo_action_list")(regenerate=regenerate)
-
-        # Check if task is successful
-        if not debug_mode and env.get_wrapper_attr("is_task_success")().item():
-            # Data is automatically saved by DatasetManager in lerobot format
-            break  # success
-        else:
-            log_warning("Task fail, Skip to next generation and retry.")
-            continue  # retry until success
-
-    return True
-
-
-def main(args, env, gym_config):
-    """Main function to run data generation episodes."""
-    log_info("Start data generation with lerobot format.", color="green")
-
-    max_episodes = gym_config.get("max_episodes", 1)
-    for episode_id in range(max_episodes):
-        log_info(f"Generating episode {episode_id + 1}/{max_episodes}", color="blue")
-        generate_function(
-            env,
-            debug_mode=args.debug_mode,
-            regenerate=args.regenerate,
-        )
-
-    if args.headless:
-        env.reset(options={"final": True})
+from .run_env import main
 
 
 if __name__ == "__main__":
@@ -193,3 +141,6 @@ if __name__ == "__main__":
 
     # Run main function
     main(args, env, gym_config)
+
+    if args.headless:
+        env.reset(options={"final": True})
