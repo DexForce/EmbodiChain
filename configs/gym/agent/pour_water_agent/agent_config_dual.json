@@ -8,7 +8,7 @@
         "prompt_kwargs": {
             "task_prompt": {
                 "type": "text",
-                "name": "DualPourWaterAgent-v3/task_prompt.txt"
+                "name": "task_prompt_dual.txt"
             },
             "basic_background": {
                 "type": "text",

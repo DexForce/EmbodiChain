@@ -8,7 +8,7 @@
         "prompt_kwargs": {
             "task_prompt": {
                 "type": "text",
-                "name": "PourWaterAgent-v3/task_prompt.txt"
+                "name": "task_prompt.txt"
             },
             "basic_background": {
                 "type": "text",
