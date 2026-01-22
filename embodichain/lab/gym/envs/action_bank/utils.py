@@ -25,31 +25,12 @@ from embodichain.lab.gym.utils.misc import validation_with_process_from_name
 """Node Generation Utils"""
 
 
-def get_init_affordance(scope: str, tag: str = "init") -> str:
-    return "{}_{}_qpos".format(scope, tag)
-
-
-def get_control_part(env, agent_uid):
-
-    from embodichain.lab.gym.utils.misc import _data_key_to_control_part
-
-    control_parts = env.metadata["dataset"]["robot_meta"].get("control_parts", [])
-
-    if agent_uid in control_parts:
-        return agent_uid
-    else:
-        return _data_key_to_control_part(
-            robot=env.robot,
-            control_parts=control_parts,
-            data_key=agent_uid,
-        )
-
-
 def get_control_part_joint_ids(env, key: str) -> List[int]:
     from embodichain.data.enum import (
         ControlParts,
         ControlPartsMappingW1,
     )
+    from embodichain.lab.gym.envs.action_bank.configurable_action import get_control_part
 
     control_part = get_control_part(env, key)
     if control_part == ControlParts.WAIST.value:
