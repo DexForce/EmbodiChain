@@ -48,13 +48,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build docs
         run: |
-          pip install -e .[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
           echo "Start Building docs..."
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
-          pip install matplotlib==3.10.8
           make html
       - name: Upload docs artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -76,7 +75,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests
         run: |
-          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -e .[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
           pip uninstall pymeshlab -y
