@@ -14,7 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from langchain_core.prompts import ChatPromptTemplate
 import os
 from langchain_core.messages import SystemMessage, HumanMessage
 from abc import ABCMeta
