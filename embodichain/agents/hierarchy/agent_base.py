@@ -28,13 +28,13 @@ def _resolve_prompt_path(file_name: str, config_dir: str = None) -> str:
         if os.path.exists(file_name):
             return file_name
         raise FileNotFoundError(f"Prompt file not found: {file_name}")
-    
+
     # Try config directory first (for task-specific prompts)
     if config_dir:
         config_path = os.path.join(config_dir, file_name)
         if os.path.exists(config_path):
             return config_path
-    
+
     # Try agents/prompts directory (for reusable prompts)
     agents_prompts_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts"
@@ -42,13 +42,13 @@ def _resolve_prompt_path(file_name: str, config_dir: str = None) -> str:
     agents_path = os.path.join(agents_prompts_dir, file_name)
     if os.path.exists(agents_path):
         return agents_path
-    
+
     # If still not found, raise error with search paths
     searched_paths = []
     if config_dir:
         searched_paths.append(f"  - {config_dir}/{file_name}")
     searched_paths.append(f"  - {agents_prompts_dir}/{file_name}")
-    
+
     raise FileNotFoundError(
         f"Prompt file not found: {file_name}\n"
         f"Searched in:\n" + "\n".join(searched_paths)

@@ -30,7 +30,9 @@ def get_control_part_joint_ids(env, key: str) -> List[int]:
         ControlParts,
         ControlPartsMappingW1,
     )
-    from embodichain.lab.gym.envs.action_bank.configurable_action import get_control_part
+    from embodichain.lab.gym.envs.action_bank.configurable_action import (
+        get_control_part,
+    )
 
     control_part = get_control_part(env, key)
     if control_part == ControlParts.WAIST.value:
