@@ -37,6 +37,7 @@ Table of Contents
    :glob:
 
    features/workspace_analyzer/index*
+   features/interaction/index*
 
 .. toctree::
    :maxdepth: 1
