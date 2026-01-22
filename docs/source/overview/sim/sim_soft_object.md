@@ -23,7 +23,7 @@ Soft bodies require both voxelization and physical attributes.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `triangle_remesh_resolution` | `int` | `8` | Resolution to remesh the softbody mesh before building physx collision mesh. |
+| `triangle_remesh_resolution` | `int` | `8` | Resolution to remesh the softbody mesh before building physics collision mesh. |
 | `triangle_simplify_target` | `int` | `0` | Simplify mesh faces to target value. |
 | `simulation_mesh_resolution` | `int` | `8` | Resolution to build simulation voxelize textra mesh. |
 | `simulation_mesh_output_obj` | `bool` | `False` | Whether to output the simulation mesh as an obj file for debugging. |

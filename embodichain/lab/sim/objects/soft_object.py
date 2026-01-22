@@ -340,7 +340,7 @@ class SoftObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 
-        # TODO: set attr for soft body after loading in physx scene
+        # TODO: set attr for soft body after loading in physics scene.
 
         # rest soft body to init_pos
         pos = torch.as_tensor(
