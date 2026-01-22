@@ -58,6 +58,15 @@ class ValidationAgent(metaclass=ABCMeta):
         super().__init__()
         for key, value in kwargs.items():
             setattr(self, key, value)
+        if llm is None:
+            raise ValueError(
+                "LLM is None. Please set the following environment variables:\n"
+                "  - AZURE_OPENAI_ENDPOINT\n"
+                "  - AZURE_OPENAI_API_KEY\n"
+                "Example:\n"
+                "  export AZURE_OPENAI_ENDPOINT='https://your-endpoint.openai.azure.com/'\n"
+                "  export AZURE_OPENAI_API_KEY='your-api-key'"
+        )
         self.llm = llm
 
     def validate(self, step_names, problematic_code, error_message, image_files):
