@@ -148,7 +148,7 @@ class MeshAlign(MeshProcessor):
                     is_larger_positive=self.is_larger_positive,
                 )
             elif self.method == "svd":
-                is_success, mesh_o3dt = cad_standardlize_obb(
+                is_success, mesh_o3dt = cad_standardlize_svd(
                     mesh_o3d,
                     is_use_mesh_clean=False,
                     is_cad_eliminate_symmetry=True,
