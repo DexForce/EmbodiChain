@@ -14,22 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import List, Dict
 import numpy as np
-from embodichain.toolkits.toolkits import ToolkitsBase
 from embodichain.utils.logger import log_info, log_warning, log_error
 from copy import deepcopy
 from embodichain.lab.gym.utils.misc import (
     mul_linear_expand,
-    is_qpos_flip,
     get_rotation_replaced_pose,
 )
-from embodichain.toolkits.graspkit.pg_grasp.antipodal import GraspSelectMethod
-from matplotlib import pyplot as plt
 import torch
 from tqdm import tqdm
 from embodichain.lab.sim.planners.motion_generator import MotionGenerator
-from embodichain.data.enum import ControlParts, EndEffector, JointType
 from scipy.spatial.transform import Rotation as R
 from embodichain.utils.utility import encode_image
 import ast
@@ -390,7 +384,6 @@ def grasp(
     delta_xy = target_obj_pose[:2, 3] - select_arm_base_pose[:2, 3]
     dx, dy = delta_xy[0], delta_xy[1]
     aim_horizontal_angle = np.arctan2(dy, dx)
-    delta_angle = abs(select_arm_current_qpos[0] - aim_horizontal_angle)
     select_arm_aim_qpos = deepcopy(select_arm_current_qpos)
     select_arm_aim_qpos[0] = aim_horizontal_angle
 
@@ -1213,7 +1206,7 @@ def drive(
     actions = list(actions.unbind(dim=0))
     for i in tqdm(range(len(actions))):
         action = actions[i]
-        obs, reward, terminated, truncated, info = env.step(action)
+        env.step(action)
     return actions
 
 

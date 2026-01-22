@@ -15,13 +15,12 @@
 # ----------------------------------------------------------------------------
 
 import torch
-import numpy as np
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
 )
-from embodichain.utils.utility import encode_image, encode_image_from_path
+from embodichain.utils.utility import encode_image
 
 
 class TaskPrompt:

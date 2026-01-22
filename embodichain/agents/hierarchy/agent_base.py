@@ -14,13 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta
 import os
-import cv2
-from embodichain.utils.utility import load_json, load_txt
-from embodichain.agents.mllm.prompt import *
+from embodichain.utils.utility import load_txt
+import embodichain.agents.mllm.prompt as mllm_prompt
 from embodichain.data import database_agent_prompt_dir, database_2d_dir
-from embodichain.utils.utility import encode_image
 
 
 class AgentBase(metaclass=ABCMeta):
