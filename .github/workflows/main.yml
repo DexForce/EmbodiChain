@@ -54,6 +54,7 @@ jobs:
           echo "Start Building docs..."
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
+          pip install matplotlib==3.10.8
           make html
       - name: Upload docs artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
