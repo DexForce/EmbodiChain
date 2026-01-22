@@ -13,6 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-from .urdf_collision_decomposition import generate_urdf_convex_decomposition_collision
+from .urdf_modifider import generate_urdf_collision_convexes
 
-__all__ = ["generate_urdf_convex_decomposition_collision"]
+__all__ = ["generate_urdf_collision_convexes"]
