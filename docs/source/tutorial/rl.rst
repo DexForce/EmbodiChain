@@ -78,6 +78,13 @@ The ``env`` section defines the task environment:
 - **id**: Environment registry ID (e.g., "PushCubeRL")
 - **cfg**: Environment-specific configuration parameters
 
+For RL environments (inheriting from ``RLEnv``), use the ``extensions`` field for RL-specific parameters:
+
+- **action_type**: Action type - "delta_qpos" (default), "qpos", "qvel", "qf", "eef_pose"
+- **action_scale**: Scaling factor applied to all actions (default: 1.0)
+- **episode_length**: Maximum episode length (default: 1000)
+- **success_threshold**: Task-specific success threshold (optional)
+
 Example:
 
 .. code-block:: json
@@ -86,10 +93,12 @@ Example:
      "id": "PushCubeRL",
      "cfg": {
        "num_envs": 4,
-       "obs_mode": "state",
-       "episode_length": 100,
-       "action_scale": 0.1,
-       "success_threshold": 0.1
+       "extensions": {
+         "action_type": "delta_qpos",
+         "action_scale": 0.1,
+         "episode_length": 100,
+         "success_threshold": 0.1
+       }
      }
    }
 
@@ -321,41 +330,74 @@ Adding a New Environment
 
 To add a new RL environment:
 
-1. Create an environment class inheriting from ``EmbodiedEnv``
-2. Register it with the Gymnasium registry:
+1. Create an environment class inheriting from ``RLEnv`` (which provides action preprocessing, goal management, and standardized info structure):
 
 .. code-block:: python
 
+   from embodichain.lab.gym.envs import RLEnv, EmbodiedEnvCfg
    from embodichain.lab.gym.utils.registration import register_env
+   import torch
    
    @register_env("MyTaskRL", max_episode_steps=100, override=True)
-   class MyTaskEnv(EmbodiedEnv):
-       cfg: MyTaskEnvCfg
-       ...
+   class MyTaskEnv(RLEnv):
+       def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+           super().__init__(cfg, **kwargs)
+       
+       def compute_task_state(self, **kwargs):
+           """Compute success/failure conditions and metrics."""
+           is_success = ...  # Define success condition
+           is_fail = torch.zeros_like(is_success)
+           metrics = {"distance": ..., "error": ...}
+           return is_success, is_fail, metrics
+       
+       def check_truncated(self, obs, info):
+           """Optional: Add custom truncation conditions."""
+           is_timeout = super().check_truncated(obs, info)
+           # Add custom conditions if needed
+           return is_timeout
 
-3. Use the environment ID in your JSON config:
+2. Configure the environment in your JSON config with RL-specific extensions:
 
 .. code-block:: json
 
    "env": {
      "id": "MyTaskRL",
      "cfg": {
-       ...
+       "num_envs": 4,
+       "extensions": {
+         "action_type": "delta_qpos",
+         "action_scale": 0.1,
+         "episode_length": 100,
+         "success_threshold": 0.05
+       }
      }
    }
+
+The ``RLEnv`` base class provides:
+
+- **Action Preprocessing**: Automatically handles different action types (delta_qpos, qpos, qvel, qf, eef_pose)
+- **Action Scaling**: Applies ``action_scale`` to all actions
+- **Goal Management**: Built-in goal pose tracking and visualization
+- **Standardized Info**: Implements ``get_info()`` using ``compute_task_state()`` template method
 
 Best Practices
 ~~~~~~~~~~~~~~
 
-- **Device Management**: Device is single-sourced from ``runtime.cuda``. All components (trainer/algorithm/policy/env) share the same device.
+- **Use RLEnv for RL Tasks**: Always inherit from ``RLEnv`` for reinforcement learning tasks. It provides action preprocessing, goal management, and standardized info structure out of the box.
 
-- **Action Scaling**: Keep action scaling in the environment, not in the policy.
+- **Action Type Configuration**: Configure ``action_type`` in the environment's ``extensions`` field. The default is "delta_qpos" (incremental joint positions). Other options: "qpos" (absolute), "qvel" (velocity), "qf" (force), "eef_pose" (end-effector pose with IK).
+
+- **Action Scaling**: Use ``action_scale`` in the environment's ``extensions`` field to scale actions. This is applied in ``RLEnv._preprocess_action()`` before robot control.
+
+- **Device Management**: Device is single-sourced from ``runtime.cuda``. All components (trainer/algorithm/policy/env) share the same device.
 
 - **Observation Format**: Environments should provide consistent observation shape/types (torch.float32) and a single ``done = terminated | truncated``.
 
 - **Algorithm Interface**: Algorithms must implement ``initialize_buffer()``, ``collect_rollout()``, and ``update()`` methods. The algorithm completely controls data collection and buffer management.
 
-- **Reward Components**: Organize reward components in ``info["rewards"]`` dictionary and metrics in ``info["metrics"]`` dictionary. The trainer performs dense per-step logging directly from environment info.
+- **Reward Configuration**: Use the ``RewardManager`` in your environment config to define reward components. Organize reward components in ``info["rewards"]`` dictionary and metrics in ``info["metrics"]`` dictionary. The trainer performs dense per-step logging directly from environment info.
+
+- **Template Methods**: Override ``compute_task_state()`` to define success/failure conditions and metrics. Override ``check_truncated()`` for custom truncation logic.
 
 - **Configuration**: Use JSON for all hyperparameters. This makes experiments reproducible and easy to track.
 

@@ -92,10 +92,6 @@ class LeRobotRecorder(Functor):
         self.use_videos = params.get("use_videos", False)
         self.export_success_only = params.get("export_success_only", False)
 
-        # Episode data buffers
-        self.episode_obs_list: List[Dict] = []
-        self.episode_action_list: List[Any] = []
-
         # LeRobot dataset instance
         self.dataset: Optional[LeRobotDataset] = None
         self.dataset_full_path: Optional[Path] = None
@@ -113,14 +109,6 @@ class LeRobotRecorder(Functor):
         return (
             str(self.dataset_full_path) if self.dataset_full_path else "Not initialized"
         )
-
-    def reset(self, env_ids: Optional[torch.Tensor] = None) -> None:
-        """Reset the recorder buffers.
-
-        Args:
-            env_ids: Environment IDs to reset (currently clears all data).
-        """
-        self._reset_buffer()
 
     def __call__(
         self,
@@ -160,8 +148,6 @@ class LeRobotRecorder(Functor):
             use_videos: Whether to save videos (already set in __init__).
             export_success_only: Whether to export only successful episodes (already set in __init__).
         """
-        # Always record the step
-        self._record_step(obs, action)
 
         # Check if any episodes are done and save them
         done_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
@@ -169,43 +155,38 @@ class LeRobotRecorder(Functor):
             # Save completed episodes
             self._save_episodes(done_env_ids, terminateds, info)
 
-    def _record_step(self, obs: EnvObs, action: EnvAction) -> None:
-        """Record a single step."""
-        self.episode_obs_list.append(obs)
-        self.episode_action_list.append(action)
-
     def _save_episodes(
         self,
         env_ids: torch.Tensor,
         terminateds: Optional[torch.Tensor] = None,
         info: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Save completed episodes."""
-        if len(self.episode_obs_list) == 0:
-            logger.log_warning("No episode data to save")
-            return
-
-        obs_list = self.episode_obs_list
-        action_list = self.episode_action_list
-
-        # Align obs and action
-        if len(obs_list) > len(action_list):
-            obs_list = obs_list[:-1]
-
+        """Save completed episodes for specified environments."""
         task = self.instruction.get("lang", "unknown_task")
-
-        # Update metadata
-        extra_info = self.extra.copy() if self.extra else {}
-        fps = self.dataset.meta.info.get("fps", 30)
-        current_episode_time = (len(obs_list) * len(env_ids)) / fps if fps > 0 else 0
-
-        episode_extra_info = extra_info.copy()
-        self.total_time += current_episode_time
-        episode_extra_info["total_time"] = self.total_time
-        self._update_dataset_info({"extra": episode_extra_info})
 
         # Process each environment
         for env_id in env_ids.cpu().tolist():
+            # Get buffer for this environment (already contains single-env data)
+            obs_list = self._env.episode_obs_buffer[env_id]
+            action_list = self._env.episode_action_buffer[env_id]
+
+            if len(obs_list) == 0:
+                logger.log_warning(f"No episode data to save for env {env_id}")
+                continue
+
+            # Align obs and action
+            if len(obs_list) > len(action_list):
+                obs_list = obs_list[:-1]
+
+            # Update metadata
+            extra_info = self.extra.copy() if self.extra else {}
+            fps = self.dataset.meta.info.get("fps", 30)
+            current_episode_time = len(obs_list) / fps if fps > 0 else 0
+
+            episode_extra_info = extra_info.copy()
+            self.total_time += current_episode_time
+            episode_extra_info["total_time"] = self.total_time
+            self._update_dataset_info({"extra": episode_extra_info})
             is_success = False
             if info is not None and "success" in info:
                 success_tensor = info["success"]
@@ -222,41 +203,47 @@ class LeRobotRecorder(Functor):
 
             try:
                 for obs, action in zip(obs_list, action_list):
-                    frame = self._convert_frame_to_lerobot(obs, action, task, env_id)
+                    frame = self._convert_frame_to_lerobot(obs, action, task)
                     self.dataset.add_frame(frame)
 
                 self.dataset.save_episode()
+
                 logger.log_info(
-                    f"Auto-saved {'successful' if is_success else 'failed'} "
-                    f"episode {self.curr_episode} for env {env_id} with {len(obs_list)} frames"
+                    f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
+                    f"  Episode {self.curr_episode} (env {env_id}): "
+                    f"{'successful' if is_success else 'failed'}, {len(obs_list)} frames"
                 )
+
                 self.curr_episode += 1
             except Exception as e:
                 logger.log_error(f"Failed to save episode {env_id}: {e}")
 
-        self._reset_buffer()
-
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
-        if len(self.episode_obs_list) > 0:
-            active_env_ids = torch.arange(self.num_envs, device=self.device)
+        # Save any remaining episodes
+        env_ids_with_data = []
+        for env_id in range(self.num_envs):
+            if len(self._env.episode_obs_buffer[env_id]) > 0:
+                env_ids_with_data.append(env_id)
+
+        if env_ids_with_data:
+            active_env_ids = torch.tensor(env_ids_with_data, device=self.device)
             self._save_episodes(active_env_ids)
 
         try:
             if self.dataset is not None:
                 self.dataset.finalize()
-                logger.log_info(f"Dataset finalized at: {self.dataset_path}")
+                logger.log_info(
+                    f"[LeRobotRecorder] Dataset finalized successfully\n"
+                    f"  Path: {self.dataset_path}\n"
+                    f"  Total episodes: {self.curr_episode}\n"
+                    f"  Total time: {self.total_time:.2f}s"
+                )
                 return self.dataset_path
         except Exception as e:
-            logger.log_error(f"Failed to finalize dataset: {e}")
+            logger.log_error(f"[LeRobotRecorder] Failed to finalize dataset: {e}")
 
         return None
-
-    def _reset_buffer(self) -> None:
-        """Reset episode buffers."""
-        self.episode_obs_list.clear()
-        self.episode_action_list.clear()
-        logger.log_info("Reset buffers (cleared all batched data)")
 
     def _initialize_dataset(self) -> None:
         """Initialize the LeRobot dataset."""
@@ -348,9 +335,18 @@ class LeRobotRecorder(Functor):
         return features
 
     def _convert_frame_to_lerobot(
-        self, obs: Dict[str, Any], action: Any, task: str, env_id: int
+        self, obs: Dict[str, Any], action: Any, task: str
     ) -> Dict:
-        """Convert a single frame to LeRobot format."""
+        """Convert a single frame to LeRobot format.
+
+        Args:
+            obs: Single environment observation (already extracted from batch)
+            action: Single environment action (already extracted from batch)
+            task: Task name
+
+        Returns:
+            Frame dict in LeRobot format with numpy arrays
+        """
         frame = {"task": task}
         extra_vision_config = self.robot_meta.get("observation", {}).get("vision", {})
         arm_dofs = self.robot_meta.get("arm_dofs", 7)
@@ -363,9 +359,9 @@ class LeRobotRecorder(Functor):
 
                 color_data = obs["sensor"][camera_name]["color"]
                 if isinstance(color_data, torch.Tensor):
-                    color_img = color_data[env_id][:, :, :3].cpu().numpy()
+                    color_img = color_data[:, :, :3].cpu().numpy()
                 else:
-                    color_img = np.array(color_data)[env_id][:, :, :3]
+                    color_img = np.array(color_data)[:, :, :3]
 
                 if color_img.dtype in [np.float32, np.float64]:
                     color_img = (color_img * 255).astype(np.uint8)
@@ -375,11 +371,9 @@ class LeRobotRecorder(Functor):
                 if is_stereo:
                     color_right_data = obs["sensor"][camera_name]["color_right"]
                     if isinstance(color_right_data, torch.Tensor):
-                        color_right_img = (
-                            color_right_data[env_id][:, :, :3].cpu().numpy()
-                        )
+                        color_right_img = color_right_data[:, :, :3].cpu().numpy()
                     else:
-                        color_right_img = np.array(color_right_data)[env_id][:, :, :3]
+                        color_right_img = np.array(color_right_data)[:, :, :3]
 
                     if color_right_img.dtype in [np.float32, np.float64]:
                         color_right_img = (color_right_img * 255).astype(np.uint8)
@@ -389,25 +383,37 @@ class LeRobotRecorder(Functor):
         # Add state
         qpos = obs["robot"][JointType.QPOS.value]
         if isinstance(qpos, torch.Tensor):
-            state_data = qpos[env_id].cpu().numpy().astype(np.float32)
+            state_data = qpos.cpu().numpy().astype(np.float32)
         else:
-            state_data = np.array(qpos)[env_id].astype(np.float32)
+            state_data = np.array(qpos).astype(np.float32)
 
         frame["observation.state"] = state_data
 
         # Add action
         if isinstance(action, torch.Tensor):
-            action_data = action[env_id, :arm_dofs].cpu().numpy()
+            action_data = action[:arm_dofs].cpu().numpy()
         elif isinstance(action, np.ndarray):
-            action_data = action[env_id, :arm_dofs]
+            action_data = action[:arm_dofs]
         elif isinstance(action, dict):
-            action_data = action.get("action", action.get("arm_action", action))
-            if isinstance(action_data, torch.Tensor):
-                action_data = action_data[env_id, :arm_dofs].cpu().numpy()
-            elif isinstance(action_data, np.ndarray):
-                action_data = action_data[env_id, :arm_dofs]
+            # Extract qpos from action dict
+            action_tensor = action.get(
+                "qpos", action.get("delta_qpos", action.get("action", None))
+            )
+            if action_tensor is None:
+                # Fallback to first tensor value
+                for v in action.values():
+                    if isinstance(v, (torch.Tensor, np.ndarray)):
+                        action_tensor = v
+                        break
+
+            if isinstance(action_tensor, torch.Tensor):
+                action_data = action_tensor[:arm_dofs].cpu().numpy()
+            elif isinstance(action_tensor, np.ndarray):
+                action_data = action_tensor[:arm_dofs]
+            else:
+                action_data = np.array(action_tensor)[:arm_dofs]
         else:
-            action_data = np.array(action)[env_id, :arm_dofs]
+            action_data = np.array(action)[:arm_dofs]
 
         frame["action"] = action_data
 

@@ -239,7 +239,14 @@ class Trainer:
             ep_ret = torch.zeros(num_envs_eval, dtype=torch.float32, device=self.device)
             while not done_any.any():
                 actions, _, _ = self.policy.get_action(obs, deterministic=True)
-                obs, reward, terminated, truncated, info = self.eval_env.step(actions)
+
+                # Wrap action as dict for env processing
+                action_type = getattr(self.eval_env, "action_type", "delta_qpos")
+                action_dict = {action_type: actions}
+
+                obs, reward, terminated, truncated, info = self.eval_env.step(
+                    action_dict
+                )
 
                 # Flatten dict observation from step
                 if isinstance(obs, dict):

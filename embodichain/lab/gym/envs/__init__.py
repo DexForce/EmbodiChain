@@ -16,10 +16,12 @@
 
 from .base_env import *
 from .embodied_env import *
+from .rl_env import *
 from .tasks import *
 from .wrapper import *
 
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.rl_env import RLEnv
 
 # Specific task environments
 from embodichain.lab.gym.envs.tasks.tableware.pour_water.pour_water import (

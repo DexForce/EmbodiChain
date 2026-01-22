@@ -5,14 +5,19 @@
 
 The {class}`~envs.EmbodiedEnv` is the core environment class in EmbodiChain designed for complex Embodied AI tasks. It adopts a **configuration-driven** architecture, allowing users to define robots, sensors, objects, lighting, and automated behaviors (events) purely through configuration classes, minimizing the need for boilerplate code.
 
+For **Reinforcement Learning** tasks, EmbodiChain provides {class}`~envs.RLEnv`, a specialized subclass that extends {class}`~envs.EmbodiedEnv` with RL-specific utilities such as flexible action preprocessing, goal management, and standardized info structure.
+
 ## Core Architecture
 
-Unlike the standard {class}`~envs.BaseEnv`, the {class}`~envs.EmbodiedEnv` integrates several manager systems to handle the complexity of simulation:
+EmbodiChain provides a hierarchy of environment classes for different task types:
 
-* **Scene Management**: Automatically loads and manages robots, sensors, and scene objects defined in the configuration.
-* **Event Manager**: Handles automated behaviors such as domain randomization, scene setup, and dynamic asset swapping.
-* **Observation Manager**: Allows flexible extension of observation spaces without modifying the environment code.
-* **Dataset Manager**: Built-in support for collecting demonstration data during simulation steps.
+* **{class}`~envs.BaseEnv`**: Minimal environment for simple tasks with custom simulation logic.
+* **{class}`~envs.EmbodiedEnv`**: Feature-rich environment for Embodied AI tasks (IL, custom control). Integrates manager systems:
+  * **Scene Management**: Automatically loads and manages robots, sensors, and scene objects.
+  * **Event Manager**: Domain randomization, scene setup, and dynamic asset swapping.
+  * **Observation Manager**: Flexible observation space extensions.
+  * **Dataset Manager**: Built-in support for demonstration data collection.
+* **{class}`~envs.RLEnv`**: Specialized environment for RL tasks, extending {class}`~envs.EmbodiedEnv` with action preprocessing, goal management, and standardized reward/info structure.
 
 ## Configuration System
 
@@ -77,7 +82,7 @@ The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional paramet
   Dataset collection settings. Defaults to None, in which case no dataset collection is performed. Please refer to the {class}`~envs.managers.DatasetManager` class for more details.
 
 * **extensions** (Union[Dict[str, Any], None]): 
-  Task-specific extension parameters that are automatically bound to the environment instance. This allows passing custom parameters (e.g., ``episode_length``, ``obs_mode``, ``action_scale``) without modifying the base configuration class. These parameters are accessible as instance attributes after environment initialization. For example, if ``extensions = {"episode_length": 500}``, you can access it via ``self.episode_length``. Defaults to None.
+  Task-specific extension parameters that are automatically bound to the environment instance. This allows passing custom parameters (e.g., ``episode_length``, ``action_type``, ``action_scale``) without modifying the base configuration class. These parameters are accessible as instance attributes after environment initialization. For example, if ``extensions = {"episode_length": 500}``, you can access it via ``self.episode_length``. Defaults to None.
 
 * **filter_visual_rand** (bool): 
   Whether to filter out visual randomization functors. Useful for debugging motion and physics issues when visual randomization interferes with the debugging process. Defaults to ``False``.
@@ -108,7 +113,8 @@ class MyTaskEnvCfg(EmbodiedEnvCfg):
     # 4. Task Extensions
     extensions = {       # Task-specific parameters
         "episode_length": 500,
-        "obs_mode": "state",
+        "action_type": "delta_qpos",
+        "action_scale": 0.1,
     }
 ```
 
@@ -165,45 +171,94 @@ The manager operates in a single mode ``"save"`` which handles both recording an
 
 The dataset manager is called automatically during {meth}`~envs.Env.step()`, ensuring all observation-action pairs are recorded without additional user code.
 
+## Reinforcement Learning Environment
+
+For RL tasks, EmbodiChain provides {class}`~envs.RLEnv`, a specialized base class that extends {class}`~envs.EmbodiedEnv` with RL-specific utilities:
+
+* **Action Preprocessing**: Flexible action transformation supporting delta_qpos, absolute qpos, joint velocity, joint force, and end-effector pose (with IK).
+* **Goal Management**: Built-in goal pose tracking and visualization with axis markers.
+* **Standardized Info Structure**: Template methods for computing task-specific success/failure conditions and metrics.
+* **Episode Management**: Configurable episode length and truncation logic.
+
+### Configuration Extensions for RL
+
+RL environments use the ``extensions`` field to pass task-specific parameters:
+
+```python
+extensions = {
+    "action_type": "delta_qpos",      # Action type: delta_qpos, qpos, qvel, qf, eef_pose
+    "action_scale": 0.1,              # Scaling factor applied to all actions
+    "episode_length": 100,            # Maximum episode length
+    "success_threshold": 0.1,         # Task-specific success threshold (optional)
+}
+```
+
 ## Creating a Custom Task
 
-To create a new task, inherit from {class}`~envs.EmbodiedEnv` and implement the task-specific logic.
+### For Reinforcement Learning Tasks
+
+Inherit from {class}`~envs.RLEnv` and implement the task-specific logic:
+
+```python
+from embodichain.lab.gym.envs import RLEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.utils.registration import register_env
+
+@register_env("MyRLTask-v0", max_episode_steps=100)
+class MyRLTaskEnv(RLEnv):
+    def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
+        super().__init__(cfg, **kwargs)
+
+    def compute_task_state(self, **kwargs):
+        # Required: Compute task-specific success/failure and metrics
+        # Returns: Tuple[success, fail, metrics]
+        #   - success: torch.Tensor of shape (num_envs,) with boolean values
+        #   - fail: torch.Tensor of shape (num_envs,) with boolean values
+        #   - metrics: Dict of metric tensors for logging
+        
+        is_success = ...  # Compute success condition
+        is_fail = torch.zeros_like(is_success)
+        metrics = {"distance": ..., "angle_error": ...}
+        
+        return is_success, is_fail, metrics
+
+    def check_truncated(self, obs, info):
+        # Optional: Override to add custom truncation conditions
+        # Default: episode_length timeout
+        is_timeout = super().check_truncated(obs, info)
+        is_fallen = ...  # Custom condition (e.g., robot fell)
+        return is_timeout | is_fallen
+```
+
+Configure rewards through the {class}`~envs.managers.RewardManager` in your environment config rather than overriding ``get_reward``.
+
+### For Imitation Learning Tasks
+
+Inherit from {class}`~envs.EmbodiedEnv` for IL tasks:
 
 ```python
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@register_env("MyTask-v0", max_episode_steps=500)
-class MyTaskEnv(EmbodiedEnv):
+@register_env("MyILTask-v0", max_episode_steps=500)
+class MyILTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
     def create_demo_action_list(self, *args, **kwargs):
-        # Optional: Implement for expert demonstration data generation (for Imitation Learning)
-        # This method is used to generate scripted demonstrations for IL data collection.
+        # Required: Generate scripted demonstrations for data collection
         # Must set self.action_length = len(action_list) if returning actions
         pass
 
     def is_task_success(self, **kwargs):
-        # Optional: Define success criteria (mainly for IL data collection)
+        # Required: Define success criteria for filtering successful episodes
         # Returns: torch.Tensor of shape (num_envs,) with boolean values
         return success_tensor
 
-    def get_reward(self, obs, action, info):
-        # Optional: Override for RL tasks
-        # Returns: torch.Tensor of shape (num_envs,)
-        return super().get_reward(obs, action, info)
-
     def get_info(self, **kwargs):
         # Optional: Override to add custom info fields
-        # Should include "success" and "fail" keys for termination
         info = super().get_info(**kwargs)
         info["custom_metric"] = ...
         return info
-```
-
-```{note}
-The {meth}`~envs.EmbodiedEnv.create_demo_action_list` method is specifically designed for expert demonstration data generation in Imitation Learning scenarios. For Reinforcement Learning tasks, you should override the {meth}`~envs.EmbodiedEnv.get_reward` method instead.
 ```
 
 For a complete example of a modular environment setup, please refer to the {ref}`tutorial_modular_env` tutorial.
@@ -212,7 +267,8 @@ For a complete example of a modular environment setup, please refer to the {ref}
 
 - {ref}`tutorial_create_basic_env` - Creating basic environments
 - {ref}`tutorial_modular_env` - Advanced modular environment setup
-- {doc}`/api_reference/embodichain/embodichain.lab.gym.envs` - Complete API reference for EmbodiedEnv and EmbodiedEnvCfg
+- {ref}`tutorial_rl` - Reinforcement learning training guide
+- {doc}`/api_reference/embodichain/embodichain.lab.gym.envs` - Complete API reference for EmbodiedEnv, RLEnv, and configurations
 
 ```{toctree}
 :maxdepth: 1
