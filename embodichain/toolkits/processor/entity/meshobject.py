@@ -11,7 +11,7 @@ from embodichain.toolkits.processor.component import EntityComponent
 from embodichain.toolkits.processor.component import (
     OrientedBoundingBox,
     ScaleComponent,
-    SpatializationComponenet,
+    SpatializationComponent,
     TriangleComponent,
     AxisAlignedBoundingBox,
     TriangleComponent,
@@ -25,7 +25,7 @@ class MeshEntity(EntityBase):
         self,
         name: str,
         triangle_comp: TriangleComponent = None,
-        spatialization_comp: SpatializationComponenet = None,
+        spatialization_comp: SpatializationComponent = None,
         visual_comp: VisualComponent = None,
     ) -> None:
         super().__init__(name)
@@ -37,7 +37,7 @@ class MeshEntity(EntityBase):
 
         # init with default component
         if spatialization_comp is None:
-            spatialization_comp = SpatializationComponenet()
+            spatialization_comp = SpatializationComponent()
         # add the initial component
         self.add_component(spatialization_comp)
 
@@ -57,9 +57,9 @@ class MeshEntity(EntityBase):
                 self.triangle_comp = comp
                 # remove the old bounding box component
                 if self.has_component(AxisAlignedBoundingBox):
-                    self.remove_componenet(AxisAlignedBoundingBox)
+                    self.remove_component(AxisAlignedBoundingBox)
                 if self.has_component(OrientedBoundingBox):
-                    self.remove_componenet(OrientedBoundingBox)
+                    self.remove_component(OrientedBoundingBox)
                 # add default visual component
                 if not self.has_component(VisualComponent):
                     self.add_component(VisualComponent())
@@ -76,8 +76,8 @@ class MeshEntity(EntityBase):
             o3d.utility.Vector3dVector(vertices * scale),
             o3d.utility.Vector3iVector(triangle_comp.triangles),
         )
-        spatial_comp: SpatializationComponenet = self.get_component(
-            SpatializationComponenet
+        spatial_comp: SpatializationComponent = self.get_component(
+            SpatializationComponent
         )
         o3d_mesh.transform(spatial_comp.get_pose())
         aabbox_o3d = o3d_mesh.get_axis_aligned_bounding_box()
