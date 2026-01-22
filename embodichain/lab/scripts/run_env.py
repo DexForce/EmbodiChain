@@ -34,7 +34,9 @@ from embodichain.utils.logger import log_warning, log_info, log_error
 
 def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
 
-    action_list = env.get_wrapper_attr("create_demo_action_list")(action_sentence=idx, **kwargs)
+    action_list = env.get_wrapper_attr("create_demo_action_list")(
+        action_sentence=idx, **kwargs
+    )
 
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
@@ -86,7 +88,9 @@ def generate_function(
     while True:
         ret = []
         for trajectory_idx in range(num_traj):
-            valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode, **kwargs)
+            valid = generate_and_execute_action_list(
+                env, trajectory_idx, debug_mode, **kwargs
+            )
 
             if not valid:
                 _, _ = env.reset()
