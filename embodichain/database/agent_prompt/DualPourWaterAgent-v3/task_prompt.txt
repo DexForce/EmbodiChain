@@ -1,5 +1,0 @@
-Task:
-Use both arms to pour water from the bottle into the cup.
-First, grasp the bottle with right arm and the cup with left arm simultaneously. Then lift the cup by 0.10 m, and then move it to [0.55, 0.05] to prepare for pouring.
-Then hold the bottle at a relative offset of [0.05, −0.10, 0.125] with respect to the cup for starting pouring.
-After pouring, place the bottle to [0.7, −0.1] and place the cup at [0.6, 0.1] simultaneously.
