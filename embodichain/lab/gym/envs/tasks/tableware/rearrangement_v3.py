@@ -93,5 +93,5 @@ class RearrangementAgentEnv3(BaseAgentEnv, RearrangementEnv3):
         # spoon and fork should with the y range of tolerance related to plate.
         return (
             abs(spoon_y - spoon_place_target_y) <= tolerance
-            or abs(fork_y - fork_place_target_y) <= tolerance
+            and abs(fork_y - fork_place_target_y) <= tolerance
         )
