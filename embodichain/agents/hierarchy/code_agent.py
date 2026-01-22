@@ -18,22 +18,13 @@ from embodichain.agents.hierarchy.agent_base import AgentBase
 from langchain_core.prompts import ChatPromptTemplate
 import os
 import numpy as np
-import functools
-from typing import Dict, Tuple, Any
-from embodichain.toolkits.code_generation import (
-    ExecutableOutputParser,
-    OutputFormatting,
-)
-from embodichain.toolkits.toolkits import ToolkitsBase
+from typing import Dict, Tuple
 from embodichain.agents.mllm.prompt import CodePrompt
 from embodichain.data import database_agent_prompt_dir
 from pathlib import Path
 import re
 import importlib.util
-from langchain_core.messages import HumanMessage
 from datetime import datetime
-from embodichain.utils.utility import encode_image
-import base64
 
 
 def format_execution_history(execution_history):

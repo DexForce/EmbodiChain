@@ -19,7 +19,7 @@ from langchain_core.prompts import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
 )
-from embodichain.utils.utility import encode_image, encode_image_from_path
+from embodichain.utils.utility import encode_image
 
 
 class CodePrompt:

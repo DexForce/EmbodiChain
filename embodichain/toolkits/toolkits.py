@@ -16,7 +16,6 @@
 
 from abc import ABCMeta, abstractmethod
 import os
-import cv2
 from embodichain.utils.utility import load_json
 
 

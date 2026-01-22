@@ -18,19 +18,12 @@ from typing import List, Dict, Tuple
 from embodichain.agents.hierarchy.agent_base import AgentBase
 from langchain_core.prompts import ChatPromptTemplate
 from embodichain.data import database_2d_dir
-from embodichain.utils.utility import load_txt, encode_image
+from embodichain.utils.utility import load_txt
 from embodichain.agents.mllm.prompt import TaskPrompt
 from embodichain.data import database_agent_prompt_dir
 from pathlib import Path
-from langchain_core.messages import HumanMessage
 import numpy as np
-
-# from openai import OpenAI
-import os
 import time
-import cv2
-import glob
-import json
 import re
 
 USEFUL_INFO = """The error may be caused by: 

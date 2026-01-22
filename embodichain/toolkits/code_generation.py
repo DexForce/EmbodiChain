@@ -14,11 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import List, Dict, Tuple, Any
+from typing import Dict, Tuple
 from langchain_core.output_parsers import BaseOutputParser
-from pygments import highlight
-from pygments.lexers import PythonLexer
-from pygments.formatters import TerminalFormatter
 
 import numpy as np
 
@@ -80,11 +77,6 @@ class ExecutableOutputParser(BaseOutputParser):
 
         gvars = merge_dicts([self._fixed_vars, self.variable_vars])
         lvars = None
-
-        #
-        # banned_phrases = ["import", "__"]
-        # for phrase in banned_phrases:
-        #     assert phrase not in code_str
 
         if gvars is None:
             gvars = {}
