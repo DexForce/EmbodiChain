@@ -1,165 +1,81 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
 #
-# All rights reserved.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ----------------------------------------------------------------------------
 
 import gymnasium
 import numpy as np
 import argparse
-import os
 import torch
 
-from threading import Thread
-from tqdm import tqdm
 from embodichain.utils.utility import load_json
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import (
     config_to_cfg,
 )
-from embodichain.lab.scripts.generate_video import visualize_data_dict
-from embodichain.data.data_engine.online.online_generator import (
-    OnlineGenerator,
-)
 from embodichain.utils.logger import log_warning, log_info, log_error
-from embodichain.lab.sim.cfg import MarkerCfg
 
 
 def generate_function(
     env,
-    time_id: int = 0,
-    online_training: bool = False,
-    save_path: str = "",
-    save_video: bool = False,
     debug_mode: bool = False,
     regenerate: bool = True,
-    **kwargs,
 ):
     """
     Generate and execute a sequence of actions in the environment.
 
-    This function resets the environment, generates and executes action trajectories,
-    collects data, and optionally saves videos of the episodes. It supports both online
-    and offline data generation modes.
+    This function resets the environment, generates and executes action trajectories.
+    Data is automatically saved by the DatasetManager using lerobot format.
 
     Args:
         env: The environment instance.
-        time_id (int, optional): Identifier for the current time step or episode.
-        online_training (bool, optional): Whether to use online data generation.
-        save_path (str, optional): Path to save generated videos.
-        save_video (bool, optional): Whether to save episode videos.
-        debug_mode (bool, optional): Enable debug mode for visualization and logging.
-        regenerate (bool, optional): Whether enable regenerating if existed.
-        **kwargs: Additional keyword arguments for data generation.
+        debug_mode: Enable debug mode for visualization and logging.
+        regenerate: Whether to regenerate code if already existed.
 
     Returns:
-        list or bool: Returns a list of data dicts if online_training is True,
-                      otherwise returns True if generation is successful.
+        bool: Returns True if generation is successful.
     """
-
-    def wait_for_threads(threads):
-        for t in threads:
-            t.join()
-
-    vis_threads = []
-
     while True:  # repeat until success
         env.reset()
-
-        ret = []
-        trajectory_idx = 0
 
         # Access the wrapped environment's method
         env.get_wrapper_attr("create_demo_action_list")(regenerate=regenerate)
 
-        # ---------------------------------------------------------
-        # SUCCESS CASE
-        # ---------------------------------------------------------
+        # Check if task is successful
         if not debug_mode and env.get_wrapper_attr("is_task_success")().item():
-
-            dataset_id = f"time_{time_id}_trajectory_{trajectory_idx}"
-
-            # online training: dataset may not be saved every iteration
-            if online_training:
-                dataset_id += "_online_generated"
-                num_samples = kwargs.get("num_samples", 0)
-                is_save_dataset = time_id < num_samples
-
-                data_dict = env.get_wrapper_attr("to_dataset")(
-                    id=dataset_id if is_save_dataset else None
-                )
-                ret.append(data_dict)
-            else:
-                data_dict = env.get_wrapper_attr("to_dataset")(id=dataset_id)
-
-            # episode id
-            try:
-                episode = env.get_wrapper_attr("get_current_episode")()
-            except AttributeError:
-                episode = time_id
-
-            # video saving
-            if save_video:
-                video_path = os.path.join(save_path, f"episode_{episode}")
-                if online_training:
-                    vis_thread = Thread(
-                        target=visualize_data_dict,
-                        args=(data_dict["data"], video_path),
-                        daemon=True,
-                    )
-                    vis_thread.start()
-                    vis_threads.append(vis_thread)
-                else:
-                    visualize_data_dict(data_dict["data"], video_path)
-
+            # Data is automatically saved by DatasetManager in lerobot format
             break  # success
-
-        # ---------------------------------------------------------
-        # FAILURE CASE
-        # ---------------------------------------------------------
         else:
             log_warning("Task fail, Skip to next generation and retry.")
             continue  # retry until success
 
-    wait_for_threads(vis_threads)
-    return ret if online_training else True
+    return True
 
 
 def main(args, env, gym_config):
-    is_online_training = os.path.exists(args.online_config)
-    if is_online_training:
-
-        log_info("Start online data generation.", color="green")
-        assert os.path.exists(args.online_config), "{} does not exist.".format(
-            args.online_config
-        )
-
-        online_config = load_json(args.online_config)
-        online_callback = OnlineGenerator(**online_config)
-
-        generator_func = lambda time_id, **kwargs: generate_function(
+    """Main function to run data generation episodes."""
+    log_info("Start data generation with lerobot format.", color="green")
+    
+    max_episodes = gym_config.get("max_episodes", 1)
+    for episode_id in range(max_episodes):
+        log_info(f"Generating episode {episode_id + 1}/{max_episodes}", color="blue")
+        generate_function(
             env,
-            time_id,
-            online_training=is_online_training,
-            save_path=args.save_path,
-            save_video=args.save_video,
+            debug_mode=args.debug_mode,
             regenerate=args.regenerate,
-            **kwargs,
         )
-        online_callback.generator(generator_func, **online_config)
-    else:
-        log_info("Start offline data generation.", color="green")
-        for i in range(gym_config["max_episodes"]):
-            generate_function(
-                env,
-                i,
-                online_training=is_online_training,
-                save_path=args.save_path,
-                save_video=args.save_video,
-                debug_mode=args.debug_mode,
-                regenerate=args.regenerate,
-            )
 
     if args.headless:
         env.reset(options={"final": True})
@@ -207,15 +123,6 @@ if __name__ == "__main__":
         type=int,
     )
     parser.add_argument(
-        "--save_video",
-        help="Whether to save data as video.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--save_path", help="path", default="./outputs/thirdviewvideo", type=str
-    )
-    parser.add_argument(
         "--debug_mode",
         help="Enable debug mode.",
         default=False,
@@ -228,34 +135,45 @@ if __name__ == "__main__":
         action="store_true",
     )
 
-    parser.add_argument("--online_config", type=str, help="online_config", default="")
-    parser.add_argument("--gym_config", type=str, help="gym_config", default="")
     parser.add_argument(
-        "--task_name", type=str, help="Name of the task.", required=True
+        "--gym_config",
+        type=str,
+        help="Path to the gym configuration file.",
+        required=True,
     )
-
-    # Agent related configs
     parser.add_argument(
-        "--agent_config", type=str, help="agent_config", default=None, required=True
+        "--task_name",
+        type=str,
+        help="Name of the task.",
+        required=True,
+    )
+    parser.add_argument(
+        "--agent_config",
+        type=str,
+        help="Path to the agent configuration file.",
+        required=True,
     )
     parser.add_argument(
         "--regenerate",
-        type=bool,
-        help="Whether regenerate code if already existed.",
+        action="store_true",
+        help="Whether to regenerate code if already existed.",
         default=False,
     )
 
     args = parser.parse_args()
 
+    # Validate arguments
     if args.num_envs != 1:
         log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+        exit(1)
 
+    # Load configurations
     gym_config = load_json(args.gym_config)
-    cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)
-    cfg.filter_visual_rand = args.filter_visual_rand
-
     agent_config = load_json(args.agent_config)
 
+    # Build environment configuration
+    cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)
+    cfg.filter_visual_rand = args.filter_visual_rand
     cfg.num_envs = args.num_envs
     cfg.sim_cfg = SimulationManagerCfg(
         headless=args.headless,
@@ -264,10 +182,13 @@ if __name__ == "__main__":
         gpu_id=args.gpu_id,
     )
 
+    # Create environment
     env = gymnasium.make(
         id=gym_config["id"],
         cfg=cfg,
         agent_config=agent_config,
         task_name=args.task_name,
     )
+
+    # Run main function
     main(args, env, gym_config)

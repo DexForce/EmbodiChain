@@ -1,18 +1,5 @@
 import torch
 from embodichain.utils import logger
-import traceback
-from embodichain.data import database_agent_prompt_dir
-from pathlib import Path
-import tempfile
-import numpy as np
-import random
-import os
-from embodichain.toolkits.interfaces import extract_drive_calls, draw_axis
-from embodichain.agents.hierarchy.code_agent import format_execution_history
-from embodichain.agents.hierarchy.validation_agent import (
-    save_obs_image,
-    get_obj_position_info,
-)
 
 
 class BaseAgentEnv:
@@ -22,7 +9,6 @@ class BaseAgentEnv:
         from embodichain.agents.hierarchy.code_agent import CodeAgent
         from embodichain.agents.hierarchy.validation_agent import ValidationAgent
         from embodichain.agents.hierarchy.llm import (
-            create_llm,
             task_llm,
             code_llm,
             validation_llm,
@@ -207,54 +193,3 @@ class BaseAgentEnv:
         )
         action_list = self.code_agent.act(code_file_path, **kwargs)
         return action_list
-
-    def to_dataset(
-        self,
-        id: str = None,
-        obs_list: list = None,
-        action_list: list = None,
-    ):
-        from embodichain.data.data_engine.data_dict_extractor import (
-            fetch_imitation_dataset,
-        )
-
-        from embodichain.lab.gym.robots.interface import LearnableRobot
-
-        # Get episode data from env if not provided
-        if obs_list is None:
-            obs_list = getattr(self, "_episode_obs_list", [])
-        if action_list is None:
-            action_list = getattr(self, "_episode_action_list", [])
-
-        if len(obs_list) == 0 or len(action_list) == 0:
-            logger.log_warning("No episode data found. Returning empty dataset.")
-            return {
-                "data_path": None,
-                "id": id,
-                "current_episode": getattr(self, "curr_episode", 0),
-                "data": None,
-                "save_path": None,
-            }
-
-        dataset_path = self.metadata["dataset"].get("save_path", None)
-        if dataset_path is None:
-            from embodichain.data import database_demo_dir
-
-            dataset_path = database_demo_dir
-
-        # TODO: create imitation dataset folder with name "{task_name}_{robot_type}_{num_episodes}"
-        from embodichain.lab.gym.utils.misc import camel_to_snake
-
-        if not hasattr(self, "folder_name") or self.curr_episode == 0:
-            robot_class_name = (
-                self.robot.__class__.__name__
-                if hasattr(self, "robot") and self.robot is not None
-                else "Robot"
-            )
-            self.folder_name = f"{camel_to_snake(self.__class__.__name__)}_{camel_to_snake(robot_class_name)}"
-            if os.path.exists(os.path.join(dataset_path, self.folder_name)):
-                self.folder_name = f"{self.folder_name}_{random.randint(0, 1000)}"
-
-        return fetch_imitation_dataset(
-            self, obs_list, action_list, id, self.folder_name
-        )

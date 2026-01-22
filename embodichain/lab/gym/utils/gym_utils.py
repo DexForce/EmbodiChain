@@ -452,9 +452,14 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
         for dataset_name, dataset_params in config["env"]["dataset"].items():
             dataset_params_modified = deepcopy(dataset_params)
 
+            # Extract function name if format is "module:ClassName"
+            func_name = dataset_params["func"]
+            if ":" in func_name:
+                func_name = func_name.split(":")[-1]
+
             # Find the function from multiple modules using the utility function
             dataset_func = find_function_from_modules(
-                dataset_params["func"],
+                func_name,
                 dataset_modules,
                 raise_if_not_found=True,
             )
