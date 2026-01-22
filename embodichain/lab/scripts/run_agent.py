@@ -67,7 +67,7 @@ def generate_function(
 def main(args, env, gym_config):
     """Main function to run data generation episodes."""
     log_info("Start data generation with lerobot format.", color="green")
-    
+
     max_episodes = gym_config.get("max_episodes", 1)
     for episode_id in range(max_episodes):
         log_info(f"Generating episode {episode_id + 1}/{max_episodes}", color="blue")

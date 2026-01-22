@@ -82,7 +82,7 @@ class ValidationAgent(metaclass=ABCMeta):
                 "Example:\n"
                 "  export AZURE_OPENAI_ENDPOINT='https://your-endpoint.openai.azure.com/'\n"
                 "  export AZURE_OPENAI_API_KEY='your-api-key'"
-        )
+            )
         self.llm = llm
 
     def validate(self, step_names, problematic_code, error_message, image_files):
