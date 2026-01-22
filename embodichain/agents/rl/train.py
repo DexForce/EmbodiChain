@@ -282,6 +282,20 @@ def train_from_config(config_path: str):
                 wandb.finish()
             except Exception:
                 pass
+
+        # Clean up environments to prevent resource leaks
+        try:
+            if env is not None:
+                env.close()
+        except Exception as e:
+            logger.log_warning(f"Failed to close training environment: {e}")
+
+        try:
+            if eval_env is not None:
+                eval_env.close()
+        except Exception as e:
+            logger.log_warning(f"Failed to close evaluation environment: {e}")
+
         logger.log_info("Training finished")
 
 
