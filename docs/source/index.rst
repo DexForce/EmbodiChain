@@ -36,6 +36,7 @@ Table of Contents
    :caption: Features
    :glob:
 
+   features/agents.md
    features/workspace_analyzer/index*
 
 .. toctree::
