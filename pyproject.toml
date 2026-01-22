@@ -39,7 +39,7 @@ dependencies = [
   "polars==1.31.0",
   "PyYAML>=6.0",
   "accelerate>=1.10.0",
-  "wandb==0.20.1",
+  "wandb>=0.22.3",
   "tensorboard>=2.20.0",
   "transformers>=4.53.0",
   "diffusers>=0.32.1",

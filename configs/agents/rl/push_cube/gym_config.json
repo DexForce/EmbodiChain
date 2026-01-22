@@ -117,31 +117,6 @@
             "episode_length": 100,
             "action_scale": 0.1,
             "success_threshold": 0.1
-        },
-        "dataset": {
-            "lerobot": {
-                "func": "LeRobotRecorder",
-                "mode": "save",
-                "params": {
-                    "robot_meta": {
-                        "robot_type": "UR10_DH_Gripper",
-                        "control_freq": 25,
-                        "arm_dofs": 6,
-                        "observation": {
-                            "vision": {}
-                        }
-                    },
-                    "instruction": {
-                        "lang": "push_cube_to_target"
-                    },
-                    "extra": {
-                        "scene_type": "tabletop",
-                        "task_description": "push_cube_rl"
-                    },
-                    "use_videos": true,
-                    "export_success_only": false
-                }
-            }
         }
     },
     "robot": {
