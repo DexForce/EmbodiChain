@@ -326,12 +326,7 @@ class EmbodiedEnv(BaseEnv):
                 # Check if this environment succeeded
                 if "success" in info:
                     success_value = info["success"]
-                    if isinstance(success_value, torch.Tensor):
-                        self.episode_success_status[env_id] = success_value[
-                            env_id
-                        ].item()
-                    else:
-                        self.episode_success_status[env_id] = bool(success_value)
+                    self.episode_success_status[env_id] = success_value[env_id].item()
                 else:
                     self.episode_success_status[env_id] = task_success[env_id].item()
 
