@@ -67,7 +67,6 @@ class LeRobotRecorder(Functor):
                 - use_videos: Whether to save videos
                 - image_writer_threads: Number of threads for image writing
                 - image_writer_processes: Number of processes for image writing
-                - export_success_only: Whether to export only successful episodes
             env: The environment instance
         """
         if not LEROBOT_AVAILABLE:
@@ -90,7 +89,6 @@ class LeRobotRecorder(Functor):
         self.instruction = params.get("instruction", None)
         self.extra = params.get("extra", {})
         self.use_videos = params.get("use_videos", False)
-        self.export_success_only = params.get("export_success_only", False)
 
         # LeRobot dataset instance
         self.dataset: Optional[LeRobotDataset] = None
@@ -114,52 +112,34 @@ class LeRobotRecorder(Functor):
         self,
         env: EmbodiedEnv,
         env_ids: Union[torch.Tensor, None],
-        obs: EnvObs,
-        action: EnvAction,
-        dones: torch.Tensor,
-        terminateds: torch.Tensor,
-        info: Dict[str, Any],
         save_path: Optional[str] = None,
-        id: Optional[str] = None,
         robot_meta: Optional[Dict] = None,
         instruction: Optional[str] = None,
         extra: Optional[Dict] = None,
         use_videos: bool = False,
-        export_success_only: bool = False,
     ) -> None:
         """Main entry point for the recorder functor.
 
-        This method is called by DatasetManager.apply(mode="save") with runtime arguments
-        as positional parameters and configuration parameters from cfg.params.
+        This method is called by DatasetManager.apply(mode="save") to save completed episodes.
+        It reads data from the environment's episode buffers.
 
         Args:
             env: The environment instance.
-            env_ids: Environment IDs (for consistency with EventManager pattern).
-            obs: Observation from the environment.
-            action: Action applied to the environment.
-            dones: Boolean tensor indicating which envs completed episodes.
-            terminateds: Termination flags (success/fail).
-            info: Info dict containing success/fail information.
-            save_path: Root directory (already set in __init__).
-            id: Dataset identifier (already set in __init__).
-            robot_meta: Robot metadata (already set in __init__).
-            instruction: Task instruction (already set in __init__).
-            extra: Extra metadata (already set in __init__).
-            use_videos: Whether to save videos (already set in __init__).
-            export_success_only: Whether to export only successful episodes (already set in __init__).
+            env_ids: Environment IDs to save. If None, attempts to save all environments.
         """
+        # If env_ids is None, check all environments for completed episodes
+        if env_ids is None:
+            env_ids = torch.arange(env.num_envs, device=env.device)
+        elif isinstance(env_ids, (list, range)):
+            env_ids = torch.tensor(list(env_ids), device=env.device)
 
-        # Check if any episodes are done and save them
-        done_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
-        if len(done_env_ids) > 0:
-            # Save completed episodes
-            self._save_episodes(done_env_ids, terminateds, info)
+        # Save episodes for specified environments
+        if len(env_ids) > 0:
+            self._save_episodes(env_ids)
 
     def _save_episodes(
         self,
         env_ids: torch.Tensor,
-        terminateds: Optional[torch.Tensor] = None,
-        info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Save completed episodes for specified environments."""
         task = self.instruction.get("lang", "unknown_task")
@@ -187,19 +167,6 @@ class LeRobotRecorder(Functor):
             self.total_time += current_episode_time
             episode_extra_info["total_time"] = self.total_time
             self._update_dataset_info({"extra": episode_extra_info})
-            is_success = False
-            if info is not None and "success" in info:
-                success_tensor = info["success"]
-                if isinstance(success_tensor, torch.Tensor):
-                    is_success = success_tensor[env_id].item()
-                else:
-                    is_success = success_tensor
-            elif terminateds is not None:
-                is_success = terminateds[env_id].item()
-
-            if self.export_success_only and not is_success:
-                logger.log_info(f"Skipping failed episode for env {env_id}")
-                continue
 
             try:
                 for obs, action in zip(obs_list, action_list):
@@ -210,8 +177,7 @@ class LeRobotRecorder(Functor):
 
                 logger.log_info(
                     f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
-                    f"  Episode {self.curr_episode} (env {env_id}): "
-                    f"{'successful' if is_success else 'failed'}, {len(obs_list)} frames"
+                    f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
                 )
 
                 self.curr_episode += 1

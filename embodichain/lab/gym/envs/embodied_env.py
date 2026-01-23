@@ -317,19 +317,6 @@ class EmbodiedEnv(BaseEnv):
             self.episode_obs_buffer[env_id].append(single_obs)
             self.episode_action_buffer[env_id].append(single_action)
 
-        # Call dataset manager with mode="save": it will record and auto-save if dones=True
-        if self.cfg.dataset:
-            if "save" in self.dataset_manager.available_modes:
-                self.dataset_manager.apply(
-                    mode="save",
-                    env_ids=None,
-                    obs=obs,
-                    action=action,
-                    dones=dones,
-                    terminateds=terminateds,
-                    info=info,
-                )
-
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
             obs = self.observation_manager.compute(obs)
@@ -368,6 +355,16 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
+        save_data = kwargs.get("save_data", True)
+
+        # Save dataset before clearing buffers for environments that are being reset
+        if save_data and self.cfg.dataset:
+            if "save" in self.dataset_manager.available_modes:
+                self.dataset_manager.apply(
+                    mode="save",
+                    env_ids=env_ids,
+                )
+
         # Clear episode buffers for environments that are being reset
         if env_ids is None:
             env_ids = range(self.num_envs)
@@ -571,27 +568,11 @@ class EmbodiedEnv(BaseEnv):
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
 
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        """Check if the episode is truncated.
-
-        Args:
-            obs: The observation from the environment.
-            info: The info dictionary.
-
-        Returns:
-            A boolean tensor indicating truncation for each environment in the batch.
-        """
-        # Check if action sequence has reached its end
-        if self.action_length > 0:
-            return self._elapsed_steps >= self.action_length
-
-        return super().check_truncated(obs, info)
-
     def close(self) -> None:
         """Close the environment and release resources."""
         # Finalize dataset if present
         if self.cfg.dataset:
             self.dataset_manager.apply(mode="save")
             self.dataset_manager.finalize()
-        
+
         self.sim.destroy()
