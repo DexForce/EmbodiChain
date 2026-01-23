@@ -314,7 +314,6 @@ class EmbodiedEnv(BaseEnv):
         **kwargs,
     ):
         # Extract and append data for each environment
-        task_success = self.is_task_success()
         for env_id in range(self.num_envs):
             single_obs = self._extract_single_env_data(obs, env_id)
             single_action = self._extract_single_env_data(action, env_id)
@@ -323,12 +322,9 @@ class EmbodiedEnv(BaseEnv):
 
             # Update success status if episode is done
             if dones[env_id].item():
-                # Check if this environment succeeded
                 if "success" in info:
                     success_value = info["success"]
                     self.episode_success_status[env_id] = success_value[env_id].item()
-                else:
-                    self.episode_success_status[env_id] = task_success[env_id].item()
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -381,11 +377,17 @@ class EmbodiedEnv(BaseEnv):
         # Save dataset before clearing buffers for environments that are being reset
         if save_data and self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
+
+                current_task_success = self.is_task_success()
+
                 # Filter to only save successful episodes
                 successful_env_ids = [
                     env_id
                     for env_id in env_ids_to_process
-                    if self.episode_success_status.get(env_id, False)
+                    if (
+                        self.episode_success_status.get(env_id, False)
+                        or current_task_success[env_id].item()
+                    )
                 ]
 
                 if successful_env_ids:
