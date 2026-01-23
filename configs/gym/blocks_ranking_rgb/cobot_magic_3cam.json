@@ -63,10 +63,12 @@
                 "mode": "startup",
                 "params": {
                     "entity_cfg": {"uid": "block_1"},
-                    "base_color": [1.0, 0.0, 0.0, 1.0],
-                    "metallic": 0.0,
-                    "roughness": 0.5,
-                    "uid": "red_block_mat"
+                    "mat_cfg": {
+                        "uid": "red_block_mat",
+                        "base_color": [1.0, 0.0, 0.0, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    }
                 }
             },
             "set_block_2_color": {
@@ -74,10 +76,12 @@
                 "mode": "startup",
                 "params": {
                     "entity_cfg": {"uid": "block_2"},
-                    "base_color": [0.0, 1.0, 0.0, 1.0],
-                    "metallic": 0.0,
-                    "roughness": 0.5,
-                    "uid": "green_block_mat"
+                    "mat_cfg": {
+                        "uid": "green_block_mat",
+                        "base_color": [0.0, 1.0, 0.0, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    }
                 }
             },
             "set_block_3_color": {
@@ -85,10 +89,12 @@
                 "mode": "startup",
                 "params": {
                     "entity_cfg": {"uid": "block_3"},
-                    "base_color": [0.0, 0.0, 1.0, 1.0],
-                    "metallic": 0.0,
-                    "roughness": 0.5,
-                    "uid": "blue_block_mat"
+                    "mat_cfg": {
+                        "uid": "blue_block_mat",
+                        "base_color": [0.0, 0.0, 1.0, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    }
                 }
             }
         },
