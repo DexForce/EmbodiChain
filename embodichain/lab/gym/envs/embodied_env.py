@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from math import log
 import os
 import torch
 import numpy as np
@@ -176,6 +177,9 @@ class EmbodiedEnv(BaseEnv):
         self.episode_action_buffer: Dict[int, List[EnvAction]] = {
             i: [] for i in range(self.num_envs)
         }
+        self.episode_success_status: Dict[int, bool] = {
+            i: False for i in range(self.num_envs)
+        }
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -317,18 +321,11 @@ class EmbodiedEnv(BaseEnv):
             self.episode_obs_buffer[env_id].append(single_obs)
             self.episode_action_buffer[env_id].append(single_action)
 
-        # Call dataset manager with mode="save": it will record and auto-save if dones=True
-        if self.cfg.dataset:
-            if "save" in self.dataset_manager.available_modes:
-                self.dataset_manager.apply(
-                    mode="save",
-                    env_ids=None,
-                    obs=obs,
-                    action=action,
-                    dones=dones,
-                    terminateds=terminateds,
-                    info=info,
-                )
+            # Update success status if episode is done
+            if dones[env_id].item():
+                if "success" in info:
+                    success_value = info["success"]
+                    self.episode_success_status[env_id] = success_value[env_id].item()
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -368,14 +365,49 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
-        # Clear episode buffers for environments that are being reset
+        save_data = kwargs.get("save_data", True)
+
+        # Determine which environments to process
         if env_ids is None:
-            env_ids = range(self.num_envs)
-        for env_id in env_ids:
-            # Convert to int if it's a tensor
-            env_id = int(env_id) if isinstance(env_id, torch.Tensor) else env_id
+            env_ids_to_process = list(range(self.num_envs))
+        elif isinstance(env_ids, torch.Tensor):
+            env_ids_to_process = env_ids.cpu().tolist()
+        else:
+            env_ids_to_process = list(env_ids)
+
+        # Save dataset before clearing buffers for environments that are being reset
+        if save_data and self.cfg.dataset:
+            if "save" in self.dataset_manager.available_modes:
+
+                current_task_success = self.is_task_success()
+
+                # Filter to only save successful episodes
+                successful_env_ids = [
+                    env_id
+                    for env_id in env_ids_to_process
+                    if (
+                        self.episode_success_status.get(env_id, False)
+                        or current_task_success[env_id].item()
+                    )
+                ]
+
+                if successful_env_ids:
+                    # Convert back to tensor if needed
+                    successful_env_ids_tensor = torch.tensor(
+                        successful_env_ids, device=self.device
+                    )
+                    self.dataset_manager.apply(
+                        mode="save",
+                        env_ids=successful_env_ids_tensor,
+                    )
+                else:
+                    logger.log_warning("No successful episodes to save.")
+
+        # Clear episode buffers and reset success status for environments being reset
+        for env_id in env_ids_to_process:
             self.episode_obs_buffer[env_id].clear()
             self.episode_action_buffer[env_id].clear()
+            self.episode_success_status[env_id] = False
 
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
@@ -570,22 +602,6 @@ class EmbodiedEnv(BaseEnv):
         """
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        """Check if the episode is truncated.
-
-        Args:
-            obs: The observation from the environment.
-            info: The info dictionary.
-
-        Returns:
-            A boolean tensor indicating truncation for each environment in the batch.
-        """
-        # Check if action sequence has reached its end
-        if self.action_length > 0:
-            return self._elapsed_steps >= self.action_length
-
-        return super().check_truncated(obs, info)
 
     def close(self) -> None:
         """Close the environment and release resources."""

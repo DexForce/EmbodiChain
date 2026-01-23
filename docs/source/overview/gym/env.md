@@ -167,7 +167,6 @@ The manager operates in a single mode ``"save"`` which handles both recording an
  * ``robot_meta``: Robot metadata dictionary (required for LeRobot format).
  * ``instruction``: Task instruction dictionary.
  * ``use_videos``: Whether to save video recordings of episodes.
- * ``export_success_only``: Filter to save only successful episodes (based on ``info["success"]``).
 
 The dataset manager is called automatically during {meth}`~envs.Env.step()`, ensuring all observation-action pairs are recorded without additional user code.
 

@@ -89,26 +89,12 @@ def generate_function(
             valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
 
             if not valid:
-                _, _ = env.reset()
+                # Failed execution: reset without saving invalid data
+                _, _ = env.reset(options={"save_data": False})
                 break
 
-            # Check task success for all environments
-            if not debug_mode:
-                success = env.get_wrapper_attr("is_task_success")()
-                # For multiple environments, check if all succeeded
-                all_success = (
-                    success.all().item() if success.numel() > 1 else success.item()
-                )
-                if all_success:
-                    pass
-                    # TODO: Add data saving and online data streaming logic here.
-                else:
-                    log_warning(f"Task fail, Skip to next generation.")
-                    valid = False
-                    break
-            else:
-                # In debug mode, skip success check
-                pass
+            # Successful execution: reset and save data
+            _, _ = env.reset()
 
         if valid:
             break
