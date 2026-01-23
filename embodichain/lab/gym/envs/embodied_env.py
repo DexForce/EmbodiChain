@@ -176,6 +176,9 @@ class EmbodiedEnv(BaseEnv):
         self.episode_action_buffer: Dict[int, List[EnvAction]] = {
             i: [] for i in range(self.num_envs)
         }
+        self.episode_success_status: Dict[int, bool] = {
+            i: False for i in range(self.num_envs)
+        }
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -317,6 +320,21 @@ class EmbodiedEnv(BaseEnv):
             self.episode_obs_buffer[env_id].append(single_obs)
             self.episode_action_buffer[env_id].append(single_action)
 
+            # Update success status if episode is done
+            if dones[env_id].item():
+                # Check if this environment succeeded
+                if "success" in info:
+                    success_value = info["success"]
+                    if isinstance(success_value, torch.Tensor):
+                        self.episode_success_status[env_id] = success_value[
+                            env_id
+                        ].item()
+                    else:
+                        self.episode_success_status[env_id] = bool(success_value)
+                else:
+                    # If no success info, consider terminated as success
+                    self.episode_success_status[env_id] = terminateds[env_id].item()
+
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
             obs = self.observation_manager.compute(obs)
@@ -357,22 +375,39 @@ class EmbodiedEnv(BaseEnv):
     ) -> None:
         save_data = kwargs.get("save_data", True)
 
+        # Determine which environments to process
+        if env_ids is None:
+            env_ids_to_process = list(range(self.num_envs))
+        elif isinstance(env_ids, torch.Tensor):
+            env_ids_to_process = env_ids.cpu().tolist()
+        else:
+            env_ids_to_process = list(env_ids)
+
         # Save dataset before clearing buffers for environments that are being reset
         if save_data and self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
-                self.dataset_manager.apply(
-                    mode="save",
-                    env_ids=env_ids,
-                )
+                # Filter to only save successful episodes
+                successful_env_ids = [
+                    env_id
+                    for env_id in env_ids_to_process
+                    if self.episode_success_status.get(env_id, False)
+                ]
 
-        # Clear episode buffers for environments that are being reset
-        if env_ids is None:
-            env_ids = range(self.num_envs)
-        for env_id in env_ids:
-            # Convert to int if it's a tensor
-            env_id = int(env_id) if isinstance(env_id, torch.Tensor) else env_id
+                if successful_env_ids:
+                    # Convert back to tensor if needed
+                    successful_env_ids_tensor = torch.tensor(
+                        successful_env_ids, device=self.device
+                    )
+                    self.dataset_manager.apply(
+                        mode="save",
+                        env_ids=successful_env_ids_tensor,
+                    )
+
+        # Clear episode buffers and reset success status for environments being reset
+        for env_id in env_ids_to_process:
             self.episode_obs_buffer[env_id].clear()
             self.episode_action_buffer[env_id].clear()
+            self.episode_success_status[env_id] = False
 
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
