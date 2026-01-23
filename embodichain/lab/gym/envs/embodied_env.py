@@ -531,6 +531,7 @@ class EmbodiedEnv(BaseEnv):
         """Close the environment and release resources."""
         # Finalize dataset if present
         if self.cfg.dataset:
+            self.dataset_manager.apply(mode="save")
             self.dataset_manager.finalize()
-
+        
         self.sim.destroy()
