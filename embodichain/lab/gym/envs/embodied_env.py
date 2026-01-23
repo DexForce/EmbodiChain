@@ -402,6 +402,8 @@ class EmbodiedEnv(BaseEnv):
                         mode="save",
                         env_ids=successful_env_ids_tensor,
                     )
+                else:
+                    logger.log_warning("No successful episodes to save.")
 
         # Clear episode buffers and reset success status for environments being reset
         for env_id in env_ids_to_process:
@@ -607,7 +609,6 @@ class EmbodiedEnv(BaseEnv):
         """Close the environment and release resources."""
         # Finalize dataset if present
         if self.cfg.dataset:
-            self.dataset_manager.apply(mode="save")
             self.dataset_manager.finalize()
 
         self.sim.destroy()
