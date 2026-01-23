@@ -46,6 +46,7 @@ Table of Contents
 
    resources/robot/index*
    resources/task/index*
+   resources/toolkits/index*
    resources/roadmap.md
 
 .. toctree::
