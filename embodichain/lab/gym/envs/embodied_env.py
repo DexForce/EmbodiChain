@@ -314,6 +314,7 @@ class EmbodiedEnv(BaseEnv):
         **kwargs,
     ):
         # Extract and append data for each environment
+        task_success = self.is_task_success()
         for env_id in range(self.num_envs):
             single_obs = self._extract_single_env_data(obs, env_id)
             single_action = self._extract_single_env_data(action, env_id)
@@ -332,8 +333,7 @@ class EmbodiedEnv(BaseEnv):
                     else:
                         self.episode_success_status[env_id] = bool(success_value)
                 else:
-                    # If no success info, consider terminated as success
-                    self.episode_success_status[env_id] = terminateds[env_id].item()
+                    self.episode_success_status[env_id] = task_success[env_id].item()
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
