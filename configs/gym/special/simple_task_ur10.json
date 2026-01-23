@@ -52,8 +52,7 @@
                         "task_description": "Oscillatory motion",
                         "data_type": "sim"
                     },
-                    "use_videos": false,
-                    "export_success_only": false
+                    "use_videos": false
                 }
             }
         }

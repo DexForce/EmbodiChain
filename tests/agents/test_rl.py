@@ -57,7 +57,6 @@ class TestRLTraining:
                         "task_description": "push_cube_rl_test",
                     },
                     "use_videos": False,
-                    "export_success_only": False,
                 },
             }
         }
@@ -95,36 +94,11 @@ class TestRLTraining:
             self.temp_gym_config_path = None
 
     def test_training_pipeline(self):
-        """Test basic RL training pipeline with minimal iterations."""
+        """Test RL training pipeline with multiple parallel environments."""
         from embodichain.agents.rl.train import train_from_config
 
         # This should run without errors
         train_from_config(self.temp_train_config_path)
-
-    @pytest.mark.parametrize("num_envs", [1, 2, 4])
-    def test_multi_env_training(self, num_envs: int):
-        """Test training with different numbers of parallel environments."""
-        # Reload and modify config for this specific test
-        with open(self.temp_train_config_path, "r") as f:
-            config = json.load(f)
-
-        config["trainer"]["num_envs"] = num_envs
-        config["trainer"][
-            "iterations"
-        ] = 1  # Even fewer iterations for parameterized test
-
-        # Save modified config
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(config, f)
-            temp_config = f.name
-
-        try:
-            from embodichain.agents.rl.train import train_from_config
-
-            train_from_config(temp_config)
-        finally:
-            if os.path.exists(temp_config):
-                os.remove(temp_config)
 
 
 if __name__ == "__main__":

@@ -61,8 +61,7 @@ class DatasetManager(ManagerBase):
         >>>                 "robot_meta": {...},
         >>>                 "instruction": {"lang": "pick and place"},
         >>>                 "extra": {"scene_type": "kitchen"},
-        >>>                 "save_path": "/data/datasets",
-        >>>                 "export_success_only": True,
+        >>>                 "save_path": "/data/datasets"
         >>>             }
         >>>         )
         >>>     }
