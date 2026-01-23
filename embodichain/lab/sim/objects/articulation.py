@@ -128,6 +128,9 @@ class ArticulationData:
             if self.device.type == "cuda"
             else self.dof
         )
+        self._target_qpos = torch.zeros(
+            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+        )
         self._qpos = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
@@ -247,6 +250,34 @@ class ArticulationData:
                 data_type=ArticulationGPUAPIReadType.JOINT_POSITION,
             )
             return self._qpos[:, : self.dof].clone()
+
+    @property
+    def target_qpos(self) -> torch.Tensor:
+        """Get the target positions (target_qpos) of the articulation.
+
+        Returns:
+            torch.Tensor: The target positions of the articulation with shape of (num_instances, dof).
+        """
+        if self.device.type == "cpu":
+            # Fetch target_qpos from CPU entities
+            return torch.as_tensor(
+                # TODO: cpu get joint target position
+                np.array(
+                    [
+                        entity.get_current_qpos(is_target=True)
+                        for entity in self.entities
+                    ],
+                ),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            self.ps.gpu_fetch_joint_data(
+                data=self._target_qpos,
+                gpu_indices=self.gpu_indices,
+                data_type=ArticulationGPUAPIReadType.JOINT_TARGET_POSITION,
+            )
+            return self._target_qpos[:, : self.dof].clone()
 
     @property
     def qvel(self) -> torch.Tensor:
@@ -979,7 +1010,7 @@ class Articulation(BatchEntity):
                 self.body_data.qpos
 
             indices = self.body_data.gpu_indices[local_env_ids]
-            qpos_set = self.body_data._qpos[local_env_ids]
+            qpos_set = self.body_data._target_qpos[local_env_ids]
             qpos_set[:, local_joint_ids] = qpos
             self._ps.gpu_apply_joint_data(
                 data=qpos_set,
@@ -1187,6 +1218,9 @@ class Articulation(BatchEntity):
         max_dof = self._ps.gpu_get_articulation_max_dof()
         max_num_links = self._ps.gpu_get_articulation_max_link_count()
         self._data._qpos = torch.zeros(
+            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+        )
+        self._data._target_qpos = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
         self._data._qvel = torch.zeros(
