@@ -1007,7 +1007,7 @@ class Articulation(BatchEntity):
         else:
             # TODO: trigger qpos getter to sync data, otherwise crash
             if joint_ids is not None:
-                self.body_data.qpos
+                self.body_data.target_qpos
 
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set = self.body_data._target_qpos[local_env_ids]
