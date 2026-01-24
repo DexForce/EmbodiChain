@@ -15,16 +15,18 @@
 # ----------------------------------------------------------------------------
 
 import torch
+from typing import Dict, Optional
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import logger
 
+from embodichain.lab.gym.envs.tasks.tableware.base_agent_env import BaseAgentEnv
 from embodichain.lab.gym.envs.tasks.tableware.pour_water.action_bank import (
     PourWaterActionBank,
 )
 
-__all__ = ["PourWaterEnv"]
+__all__ = ["PourWaterEnv", "PourWaterAgentEnv"]
 
 
 @register_env("PourWater-v3", max_episode_steps=600)
@@ -146,3 +148,14 @@ class PourWaterEnv(EmbodiedEnv):
         # Compute angle and check if fallen
         angle = torch.arccos(dot_product)
         return angle >= torch.pi / 4
+
+@register_env("PourWaterAgent-v3", max_episode_steps=600)
+class PourWaterAgentEnv(BaseAgentEnv, PourWaterEnv):
+    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+        super().__init__(cfg, **kwargs)
+        super()._init_agents(**kwargs)
+
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
+        obs, info = super().reset(seed=seed, options=options)
+        super().get_states()
+        return obs, info
