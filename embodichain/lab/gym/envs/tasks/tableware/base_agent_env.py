@@ -103,17 +103,17 @@ class BaseAgentEnv:
     def get_obs_for_agent(self):
         obs = self.get_obs(get_valid_sensor_data=True)
         rgb = obs["sensor"]["cam_high"]["color"].squeeze(0)
-        
+
         # Dynamically detect validation cameras created by add_validation_cameras functor
         sensor_dict = obs["sensor"]
         valid_cameras = sorted(
             [name for name in sensor_dict.keys() if name.startswith("valid_cam")],
-            key=lambda x: int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 0
+            key=lambda x: int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 0,
         )
-        
+
         # Create zero tensors for each validation camera
         valid_rgbs = [torch.zeros_like(rgb) for _ in valid_cameras]
-        
+
         # Build return dictionary dynamically
         result = {"rgb": rgb}
         for i, valid_rgb in enumerate(valid_rgbs, start=1):

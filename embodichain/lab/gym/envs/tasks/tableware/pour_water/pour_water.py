@@ -149,6 +149,7 @@ class PourWaterEnv(EmbodiedEnv):
         angle = torch.arccos(dot_product)
         return angle >= torch.pi / 4
 
+
 @register_env("PourWaterAgent-v3", max_episode_steps=600)
 class PourWaterAgentEnv(BaseAgentEnv, PourWaterEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
