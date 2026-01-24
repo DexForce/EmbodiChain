@@ -103,23 +103,23 @@ class BaseAgentEnv:
     def get_obs_for_agent(self):
         obs = self.get_obs(get_valid_sensor_data=True)
         rgb = obs["sensor"]["cam_high"]["color"].squeeze(0)
-        valid_rgb_1 = obs["sensor"]["valid_cam_1"]["color"].squeeze(0)
-        valid_rgb_2 = obs["sensor"]["valid_cam_2"]["color"].squeeze(0)
-        valid_rgb_3 = obs["sensor"]["valid_cam_3"]["color"].squeeze(0)
+        
+        # Dynamically detect validation cameras created by add_validation_cameras functor
+        sensor_dict = obs["sensor"]
+        valid_cameras = sorted(
+            [name for name in sensor_dict.keys() if name.startswith("valid_cam")],
+            key=lambda x: int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 0
+        )
+        
+        # Create zero tensors for each validation camera
+        valid_rgbs = [torch.zeros_like(rgb) for _ in valid_cameras]
+        
+        # Build return dictionary dynamically
+        result = {"rgb": rgb}
+        for i, valid_rgb in enumerate(valid_rgbs, start=1):
+            result[f"valid_rgb_{i}"] = valid_rgb
 
-        # obs_image_path = save_obs_image(obs_image=self.get_obs_for_agent()["rgb_1"], save_dir='./', step_id=0)
-
-        return {
-            "rgb": rgb,
-            "valid_rgb_1": valid_rgb_1,
-            "valid_rgb_2": valid_rgb_2,
-            "valid_rgb_3": valid_rgb_3,
-        }
-
-        # depth = obs["sensor"]["cam_high"]["depth"].squeeze(0)
-        # mask = obs["sensor"]["cam_high"]["mask"].squeeze(0)
-        # semantic_mask = obs["sensor"]["cam_high"]["semantic_mask_l"].squeeze(0)
-        # return {"rgb": rgb, "depth": depth, "mask": mask, "semantic_mask": semantic_mask}
+        return result
 
     def get_current_qpos_agent(self):
         return self.left_arm_current_qpos, self.right_arm_current_qpos
@@ -189,7 +189,7 @@ class BaseAgentEnv:
         return code_file_path, kwargs, code
 
     # -------------------- get action list --------------------
-    def create_demo_action_list(self, regenerate=False):
+    def create_demo_action_list(self, regenerate=False, *args, **kwargs):
         code_file_path, kwargs, _ = self.generate_code_for_actions(
             regenerate=regenerate
         )
