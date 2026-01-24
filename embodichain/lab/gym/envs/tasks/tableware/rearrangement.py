@@ -4,23 +4,16 @@
 # All rights reserved.
 # ----------------------------------------------------------------------------
 
-import os
-import torch
-import numpy as np
-from copy import deepcopy
-from typing import Dict, Union, Optional, Sequence, Tuple, List
-
+from typing import Dict, Optional
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.utils import configclass, logger
-
 from embodichain.lab.gym.envs.tasks.tableware.base_agent_env import BaseAgentEnv
 
-__all__ = ["RearrangementEnv3"]
+__all__ = ["RearrangementEnv", "RearrangementAgentEnv"]
 
 
 @register_env("Rearrangement-v3", max_episode_steps=600)
-class RearrangementEnv3(EmbodiedEnv):
+class RearrangementEnv(EmbodiedEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
         super().__init__(cfg, **kwargs)
 
@@ -63,7 +56,7 @@ class RearrangementEnv3(EmbodiedEnv):
 
 
 @register_env("RearrangementAgent-v3", max_episode_steps=600)
-class RearrangementAgentEnv3(BaseAgentEnv, RearrangementEnv3):
+class RearrangementAgentEnv(BaseAgentEnv, RearrangementEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
         super().__init__(cfg, **kwargs)
         super()._init_agents(**kwargs)
