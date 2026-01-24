@@ -19,7 +19,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "block_1"},
-                    "position_range": [[0.445, -0.08, 0.86], [1.005, 0.05, 0.86]],
+                    "position_range": [[0.60, -0.12, 0.9], [0.65, -0.06, 0.9]],
                     "rotation_range": [[0, 0, -43.0], [0, 0, 43.0]],
                     "relative_position": false
                 }
@@ -29,7 +29,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "block_2"},
-                    "position_range": [[0.445, -0.08, 0.86], [1.005, 0.05, 0.86]],
+                    "position_range": [[0.65, -0.02, 0.9], [0.70, 0.02, 0.9]],
                     "rotation_range": [[0, 0, -43.0], [0, 0, 43.0]],
                     "relative_position": false
                 }
@@ -39,7 +39,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "block_3"},
-                    "position_range": [[0.445, -0.08, 0.86], [1.005, 0.05, 0.86]],
+                    "position_range": [[0.70, 0.06, 0.9], [0.75, 0.12, 0.9]],
                     "rotation_range": [[0, 0, -43.0], [0, 0, 43.0]],
                     "relative_position": false
                 }
