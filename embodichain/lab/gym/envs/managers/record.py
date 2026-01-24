@@ -235,3 +235,48 @@ class record_camera_data_async(record_camera_data):
             video_name = f"ep{self._ep_idx[0]-1}_{self._name}_allenvs"
             images_to_video(big_frames, save_path, video_name, fps=20)
             self._pending_env_episodes.clear()
+
+
+class add_validation_cameras(Functor):
+    """This functor is used to add cameras for validation and evaluation purposes."""
+
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        super().__init__(cfg, env)
+
+        # Extract camera configurations from params
+        cameras_cfg = cfg.params.get("cameras", [])
+
+        # Store cameras
+        self.cameras = []
+
+        # Create each camera
+        for cam_cfg in cameras_cfg:
+            uid = cam_cfg.get("uid", "validation_camera")
+            width = cam_cfg.get("width", 1280)
+            height = cam_cfg.get("height", 960)
+            enable_mask = cam_cfg.get("enable_mask", False)
+            intrinsics = cam_cfg.get("intrinsics", [1400, 1400, 640, 480])
+            extrinsics_cfg = cam_cfg.get("extrinsics", {})
+            extrinsics = CameraCfg.ExtrinsicsCfg(**extrinsics_cfg)
+
+            camera = env.sim.add_sensor(
+                sensor_cfg=CameraCfg(
+                    uid=uid,
+                    width=width,
+                    height=height,
+                    enable_mask=enable_mask,
+                    extrinsics=extrinsics,
+                    intrinsics=intrinsics,
+                )
+            )
+            self.cameras.append(camera)
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: Union[torch.Tensor, None],
+        cameras: List[dict] = None,
+    ):
+
+        # This method exists for functor interface compatibility
+        pass
