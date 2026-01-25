@@ -287,16 +287,18 @@ class Robot(Articulation):
                 target=target,
             )
 
-    def get_qpos(self, name: str | None = None) -> torch.Tensor:
+    def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:
         """Get the joint positions (qpos) of the robot.
 
         Args:
             name (str | None): The name of the control part to get the qpos for. If None, the default part is used.
+            target (bool): If True, gets target positions for simulation. If False, gets current positions.
+
         Returns:
             torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
         """
 
-        qpos = super().get_qpos()
+        qpos = super().get_qpos(target=target)
         if name is None:
             return qpos
         else:

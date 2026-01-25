@@ -949,13 +949,16 @@ class Articulation(BatchEntity):
             link_pose[:, :3, :3] = mat
         return link_pose
 
-    def get_qpos(self) -> torch.Tensor:
-        """Get the current positions (qpos) of the articulation.
+    def get_qpos(self, target: bool = False) -> torch.Tensor:
+        """Get the current positions (qpos) or target positions (target_qpos) of the articulation.
+
+        Args:
+            target (bool): If True, gets target positions for simulation. If False, gets current positions.
 
         Returns:
             torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
         """
-        return self.body_data.qpos
+        return self.body_data.qpos if not target else self.body_data.target_qpos
 
     def set_qpos(
         self,
@@ -1027,13 +1030,11 @@ class Articulation(BatchEntity):
                 else ArticulationGPUAPIWriteType.JOINT_POSITION
             )
 
-            if joint_ids is not None:
-                if target:
-                    self.body_data.target_qpos
-                    qpos_set = self.body_data._target_qpos[local_env_ids]
-                else:
-                    self.body_data.qpos
-                    qpos_set = self.body_data._qpos[local_env_ids]
+            # Always fetch the latest data to avoid stale values
+            if target:
+                qpos_set = self.body_data._target_qpos[local_env_ids]
+            else:
+                qpos_set = self.body_data._qpos[local_env_ids]
 
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set[:, local_joint_ids] = qpos
@@ -1102,13 +1103,11 @@ class Articulation(BatchEntity):
                 else ArticulationGPUAPIWriteType.JOINT_VELOCITY
             )
 
-            if joint_ids is not None:
-                if target:
-                    self.body_data.target_qvel
-                    qvel_set = self.body_data._target_qvel[local_env_ids]
-                else:
-                    self.body_data.qvel
-                    qvel_set = self.body_data._qvel[local_env_ids]
+            # Always fetch the latest data to avoid stale values
+            if target:
+                qvel_set = self.body_data._target_qvel[local_env_ids]
+            else:
+                qvel_set = self.body_data._qvel[local_env_ids]
 
             indices = self.body_data.gpu_indices[local_env_ids]
             qvel_set[:, local_joint_ids] = qvel
