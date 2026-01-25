@@ -292,7 +292,7 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qpos for. If None, the default part is used.
-            target (bool): If True, gets target positions for simulation. If False, gets current positions.
+            target (bool): If True, gets target positions for simulation. If False, gets current positions. The default is False.
 
         Returns:
             torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
@@ -352,16 +352,18 @@ class Robot(Articulation):
                 target=target,
             )
 
-    def get_qvel(self, name: str | None = None) -> torch.Tensor:
+    def get_qvel(self, name: str | None = None, target: bool = False) -> torch.Tensor:
         """Get the joint velocities (qvel) of the robot.
 
         Args:
             name (str | None): The name of the control part to get the qvel for. If None, the default part is used.
+            target (bool): If True, gets target velocities for simulation. If False, gets current velocities. The default is False.
+
         Returns:
             torch.Tensor: Joint velocities with shape (N, dof), where N is the number of environments.
         """
 
-        qvel = super().get_qvel()
+        qvel = super().get_qvel(target=target)
         if name is None:
             return qvel
         else:

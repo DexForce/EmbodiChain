@@ -1044,13 +1044,16 @@ class Articulation(BatchEntity):
                 data_type=data_type,
             )
 
-    def get_qvel(self) -> torch.Tensor:
-        """Get the current velocities (qvel) of the articulation.
+    def get_qvel(self, target: bool = False) -> torch.Tensor:
+        """Get the current velocities (qvel) or target velocities (target_qvel) of the articulation.
+
+        Args:
+            target (bool): If True, gets target velocities for simulation. If False, gets current velocities. The default is False.
 
         Returns:
             torch.Tensor: The current velocities of the articulation.
         """
-        return self.body_data.qvel
+        return self.body_data.qvel if not target else self.body_data.target_qvel
 
     def set_qvel(
         self,
