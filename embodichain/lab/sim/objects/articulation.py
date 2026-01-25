@@ -134,6 +134,9 @@ class ArticulationData:
         self._qpos = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
+        self._target_qvel = torch.zeros(
+            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+        )
         self._qvel = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
@@ -261,7 +264,6 @@ class ArticulationData:
         if self.device.type == "cpu":
             # Fetch target_qpos from CPU entities
             return torch.as_tensor(
-                # TODO: cpu get joint target position
                 np.array(
                     [
                         entity.get_current_qpos(is_target=True)
@@ -300,6 +302,32 @@ class ArticulationData:
                 data_type=ArticulationGPUAPIReadType.JOINT_VELOCITY,
             )
             return self._qvel[:, : self.dof].clone()
+
+    @property
+    def target_qvel(self) -> torch.Tensor:
+        """Get the target velocities (target_qvel) of the articulation.
+        Returns:
+            torch.Tensor: The target velocities of the articulation with shape of (num_instances, dof).
+        """
+        if self.device.type == "cpu":
+            # Fetch target_qvel from CPU entities
+            return torch.as_tensor(
+                np.array(
+                    [
+                        entity.get_current_qvel(is_target=True)
+                        for entity in self.entities
+                    ],
+                ),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            self.ps.gpu_fetch_joint_data(
+                data=self._target_qvel,
+                gpu_indices=self.gpu_indices,
+                data_type=ArticulationGPUAPIReadType.JOINT_TARGET_VELOCITY,
+            )
+            return self._target_qvel[:, : self.dof].clone()
 
     @property
     def qacc(self) -> torch.Tensor:
@@ -947,6 +975,11 @@ class Articulation(BatchEntity):
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qpos`.
         """
+        # TODO: Refactor this part to use a more generic and extensible approach,
+        # such as a class decorator that can automatically convert ndarray to torch.Tensor
+        # and handle dimension padding for specified member functions.
+        # This will make the codebase cleaner and reduce repetitive type checks/conversions.
+        # (e.g., support specifying which methods should be decorated for auto-conversion.)
         if not isinstance(qpos, torch.Tensor):
             qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
 
@@ -963,38 +996,15 @@ class Articulation(BatchEntity):
 
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        # TODO: Refactor this part to use a more generic and extensible approach,
-        # such as a class decorator that can automatically convert ndarray to torch.Tensor
-        # and handle dimension padding for specified member functions.
-        # This will make the codebase cleaner and reduce repetitive type checks/conversions.
-        # (e.g., support specifying which methods should be decorated for auto-conversion.)
-        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
-
-        if self.device.type == "cuda":
-            limits = self.body_data.qpos_limits[0].T
-            # clamp qpos to limits
-            lower_limits = limits[0][local_joint_ids]
-            upper_limits = limits[1][local_joint_ids]
-            qpos = qpos.clamp(lower_limits, upper_limits)
-
         # Make sure qpos is 2D tensor
         if qpos.dim() == 1:
             qpos = qpos.unsqueeze(0)
-        # If only one qpos is provided, repeat it for all envs
-        if len(qpos) == 1 and len(local_env_ids) > 1:
-            qpos = qpos.repeat(len(local_env_ids), 1)
 
         if len(local_env_ids) != len(qpos):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match qpos length {len(qpos)}. "
                 f"env_ids: {local_env_ids}, qpos.shape: {qpos.shape}"
             )
-
-        data_type = (
-            ArticulationGPUAPIWriteType.JOINT_TARGET_POSITION
-            if target
-            else ArticulationGPUAPIWriteType.JOINT_POSITION
-        )
 
         if self.device.type == "cpu":
             for i, env_idx in enumerate(local_env_ids):
@@ -1005,12 +1015,27 @@ class Articulation(BatchEntity):
                 )
                 setter(qpos[i].numpy(), local_joint_ids.numpy())
         else:
-            # TODO: trigger qpos getter to sync data, otherwise crash
+            limits = self.body_data.qpos_limits[0].T
+            # clamp qpos to limits
+            lower_limits = limits[0][local_joint_ids]
+            upper_limits = limits[1][local_joint_ids]
+            qpos = qpos.clamp(lower_limits, upper_limits)
+
+            data_type = (
+                ArticulationGPUAPIWriteType.JOINT_TARGET_POSITION
+                if target
+                else ArticulationGPUAPIWriteType.JOINT_POSITION
+            )
+
             if joint_ids is not None:
-                self.body_data.target_qpos
+                if target:
+                    self.body_data.target_qpos
+                    qpos_set = self.body_data._target_qpos[local_env_ids]
+                else:
+                    self.body_data.qpos
+                    qpos_set = self.body_data._qpos[local_env_ids]
 
             indices = self.body_data.gpu_indices[local_env_ids]
-            qpos_set = self.body_data._target_qpos[local_env_ids]
             qpos_set[:, local_joint_ids] = qpos
             self._ps.gpu_apply_joint_data(
                 data=qpos_set,
@@ -1051,14 +1076,18 @@ class Articulation(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match qvel length {len(qvel)}."
             )
 
-        data_type = (
-            ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY
-            if target
-            else ArticulationGPUAPIWriteType.JOINT_VELOCITY
-        )
+        if joint_ids is None:
+            local_joint_ids = torch.arange(
+                self.dof, device=self.device, dtype=torch.int32
+            )
+        elif not isinstance(joint_ids, torch.Tensor):
+            local_joint_ids = torch.as_tensor(
+                joint_ids, dtype=torch.int32, device=self.device
+            )
+        else:
+            local_joint_ids = joint_ids
 
         if self.device.type == "cpu":
-            local_joint_ids = np.arange(self.dof) if joint_ids is None else joint_ids
             for i, env_idx in enumerate(local_env_ids):
                 setter = (
                     self._entities[env_idx].set_current_qvel
@@ -1067,14 +1096,22 @@ class Articulation(BatchEntity):
                 )
                 setter(qvel[i].numpy(), local_joint_ids)
         else:
+            data_type = (
+                ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY
+                if target
+                else ArticulationGPUAPIWriteType.JOINT_VELOCITY
+            )
+
+            if joint_ids is not None:
+                if target:
+                    self.body_data.target_qvel
+                    qvel_set = self.body_data._target_qvel[local_env_ids]
+                else:
+                    self.body_data.qvel
+                    qvel_set = self.body_data._qvel[local_env_ids]
+
             indices = self.body_data.gpu_indices[local_env_ids]
-            if joint_ids is None:
-                qvel_set = self.body_data._qvel[local_env_ids]
-                qvel_set[:, : self.dof] = qvel
-            else:
-                self.body_data.qvel
-                qvel_set = self.body_data._qvel[local_env_ids]
-                qvel_set[:, joint_ids] = qvel
+            qvel_set[:, local_joint_ids] = qvel
             self._ps.gpu_apply_joint_data(
                 data=qvel_set,
                 gpu_indices=indices,
