@@ -571,7 +571,7 @@ class Articulation(BatchEntity):
         self.device = device
 
         # Store all indices for batch operations
-        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
         if device.type == "cuda":
             self._world.update(0.001)
@@ -1032,12 +1032,12 @@ class Articulation(BatchEntity):
 
             # Always fetch the latest data to avoid stale values
             if target:
-                qpos_set = self.body_data._target_qpos[local_env_ids]
+                qpos_set = self.body_data._target_qpos
             else:
-                qpos_set = self.body_data._qpos[local_env_ids]
+                qpos_set = self.body_data._qpos
 
             indices = self.body_data.gpu_indices[local_env_ids]
-            qpos_set[:, local_joint_ids] = qpos
+            qpos_set[local_env_ids[:, None], local_joint_ids] = qpos
             self._ps.gpu_apply_joint_data(
                 data=qpos_set,
                 gpu_indices=indices,
@@ -1108,12 +1108,12 @@ class Articulation(BatchEntity):
 
             # Always fetch the latest data to avoid stale values
             if target:
-                qvel_set = self.body_data._target_qvel[local_env_ids]
+                qvel_set = self.body_data._target_qvel
             else:
-                qvel_set = self.body_data._qvel[local_env_ids]
+                qvel_set = self.body_data._qvel
 
             indices = self.body_data.gpu_indices[local_env_ids]
-            qvel_set[:, local_joint_ids] = qvel
+            qvel_set[local_env_ids[:, None], local_joint_ids] = qvel
             self._ps.gpu_apply_joint_data(
                 data=qvel_set,
                 gpu_indices=indices,
@@ -1231,6 +1231,7 @@ class Articulation(BatchEntity):
             zero_joint_data = np.zeros((len(local_env_ids), self.dof), dtype=np.float32)
             for i, env_idx in enumerate(local_env_ids):
                 self._entities[env_idx].set_qvel(zero_joint_data[i])
+                self._entities[env_idx].set_current_qvel(zero_joint_data[i])
                 self._entities[env_idx].set_current_qf(zero_joint_data[i])
         else:
             zeros = torch.zeros(
@@ -1241,6 +1242,11 @@ class Articulation(BatchEntity):
                 data=zeros,
                 gpu_indices=indices,
                 data_type=ArticulationGPUAPIWriteType.JOINT_VELOCITY,
+            )
+            self._ps.gpu_apply_joint_data(
+                data=zeros,
+                gpu_indices=indices,
+                data_type=ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY,
             )
             self._ps.gpu_apply_joint_data(
                 data=zeros,
@@ -1263,6 +1269,9 @@ class Articulation(BatchEntity):
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
         self._data._qvel = torch.zeros(
+            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+        )
+        self._data._target_qvel = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
         self._data._qacc = torch.zeros(
@@ -1292,6 +1301,7 @@ class Articulation(BatchEntity):
             dtype=torch.float32,
             device=self.device,
         )
+        self.reset()
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
