@@ -238,19 +238,27 @@ class record_camera_data_async(record_camera_data):
 
 
 class add_validation_cameras(Functor):
-    """This functor is used to add cameras for validation and evaluation purposes."""
+    """This functor is used to add cameras for validation purposes."""
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
+        # Store camera configurations
+        self.cameras_cfg = cfg.params.get("cameras", [])
+        # Track if cameras have been added
+        self.cameras_added = False
 
-        # Extract camera configurations from params
-        cameras_cfg = cfg.params.get("cameras", [])
-
-        # Store cameras
-        self.cameras = []
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: Union[torch.Tensor, None],
+        cameras: List[dict] = None,
+    ):
+        # Only add cameras once when the functor is triggered
+        if self.cameras_added:
+            return
 
         # Create each camera
-        for cam_cfg in cameras_cfg:
+        for cam_cfg in self.cameras_cfg:
             uid = cam_cfg.get("uid", "validation_camera")
             width = cam_cfg.get("width", 1280)
             height = cam_cfg.get("height", 960)
@@ -269,14 +277,7 @@ class add_validation_cameras(Functor):
                     intrinsics=intrinsics,
                 )
             )
-            self.cameras.append(camera)
+            # Add camera to env.sensors
+            env.sensors.setdefault(uid, camera)
 
-    def __call__(
-        self,
-        env: EmbodiedEnv,
-        env_ids: Union[torch.Tensor, None],
-        cameras: List[dict] = None,
-    ):
-
-        # This method exists for functor interface compatibility
-        pass
+        self.cameras_added = True

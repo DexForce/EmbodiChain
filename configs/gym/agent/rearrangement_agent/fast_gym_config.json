@@ -190,7 +190,7 @@
             },
             "add_validation_cameras": {
                 "func": "add_validation_cameras",
-                "mode": "reset",
+                "mode": "trigger",
                 "params": {
                     "cameras": [
                         {
