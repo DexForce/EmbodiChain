@@ -4,7 +4,7 @@
         "gym_config": "configs/agents/rl/push_t/gym_config.json",
         "seed": 42,
         "device": "cuda:0",
-        "headless": false,
+        "headless": true,
         "enable_rt": false,
         "gpu_id": 0,
         "num_envs": 8,

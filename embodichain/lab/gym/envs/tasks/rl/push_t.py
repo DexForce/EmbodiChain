@@ -102,23 +102,23 @@ class PushTEnv(EmbodiedEnv):
         return ee_pose[:, :3, 3]
 
     def get_info(self, **kwargs) -> Dict[str, Any]:
-        cube = self.sim.get_rigid_object("cube")
-        cube_pos = cube.body_data.pose[:, :3]
+        t_obj = self.sim.get_rigid_object("t")
+        t_pos = t_obj.body_data.pose[:, :3]
         ee_pos = self._get_eef_pos()
 
         if self.goal_pose is not None:
             goal_pos = self.goal_pose[:, :3, 3]
-            xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
+            xy_distance = torch.norm(t_pos[:, :2] - goal_pos[:, :2], dim=1)
             is_success = xy_distance < self.success_threshold
             if self.require_on_table:
-                is_success = is_success & (cube_pos[:, 2] >= self.table_height - 1e-3)
+                is_success = is_success & (t_pos[:, 2] >= self.table_height - 1e-3)
         else:
             xy_distance = torch.zeros(self.cfg.num_envs, device=self.device)
             is_success = torch.zeros(
                 self.cfg.num_envs, device=self.device, dtype=torch.bool
             )
 
-        ee_to_cube = torch.norm(ee_pos - cube_pos, dim=1)
+        ee_to_t = torch.norm(ee_pos - t_pos, dim=1)
         info = {
             "success": is_success,
             "fail": torch.zeros(
@@ -129,16 +129,16 @@ class PushTEnv(EmbodiedEnv):
         }
         info["metrics"] = {
             "distance_to_goal": xy_distance,
-            "eef_to_cube": ee_to_cube,
-            "cube_height": cube_pos[:, 2],
+            "eef_to_t": ee_to_t,
+            "t_height": t_pos[:, 2],
         }
         return info
 
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         is_timeout = self._elapsed_steps >= self.episode_length
-        cube = self.sim.get_rigid_object("cube")
-        cube_pos = cube.body_data.pose[:, :3]
-        is_fallen = cube_pos[:, 2] < -0.1
+        t_obj = self.sim.get_rigid_object("t")
+        t_pos = t_obj.body_data.pose[:, :3]
+        is_fallen = t_pos[:, 2] < -0.1
         return is_timeout | is_fallen
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
