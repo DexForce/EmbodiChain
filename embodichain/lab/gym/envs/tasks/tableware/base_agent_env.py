@@ -41,11 +41,6 @@ class BaseAgentEnv:
             atom_actions=self.code_agent.prompt_kwargs.get("atom_actions")["content"],
         )
 
-    def _init_sim_state(self, **kwargs):
-        super()._init_sim_state(**kwargs)
-        # Trigger add_validation_cameras functor using trigger mode
-        self.event_manager.apply(mode="trigger")
-
     def get_states(self):
         # TODO: only support num_env = 1 for now
         # store robot states in each env.reset
@@ -109,23 +104,10 @@ class BaseAgentEnv:
         obs = self.get_obs()
         rgb = obs["sensor"]["cam_high"]["color"].squeeze(0)
 
-        # Dynamically detect validation cameras created by add_validation_cameras functor
-        sensor_dict = obs["sensor"]
-        valid_cameras = sorted(
-            [name for name in sensor_dict.keys() if name.startswith("valid_cam")],
-            key=lambda x: int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 0,
-        )
-
-        # Get RGB images from each validation camera
-        valid_rgbs = []
-        for cam_name in valid_cameras:
-            valid_rgb = sensor_dict[cam_name]["color"].squeeze(0)
-            valid_rgbs.append(valid_rgb)
-
-        # Build return dictionary dynamically
+        # Get validation camera data
+        camera_data = self.event_manager.get_functor("validation_cameras")(self, None)
         result = {"rgb": rgb}
-        for i, valid_rgb in enumerate(valid_rgbs, start=1):
-            result[f"valid_rgb_{i}"] = valid_rgb
+        result.update({k: v.squeeze(0) for k, v in camera_data.items()})
         return result
 
     def get_current_qpos_agent(self):

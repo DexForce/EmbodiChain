@@ -203,8 +203,8 @@
                     "target": [0.5, 0, 1]
                 }
             },
-            "add_validation_cameras": {
-                "func": "add_validation_cameras",
+            "validation_cameras": {
+                "func": "validation_cameras",
                 "mode": "reset",
                 "params": {
                     "cameras": [
