@@ -38,6 +38,8 @@ This is the official list of EmbodiChain developers and contributors. We sincere
 
 * Runyi Zhao
 * Lihao Zheng
+* GuiLong Li
+* Chen Yang
 
 
 
