@@ -287,8 +287,7 @@
                         "task_description": "Pour water",
                         "data_type": "sim"
                     },
-                    "use_videos": true,
-                    "export_success_only": false
+                    "use_videos": true
                 }
             }
         }
