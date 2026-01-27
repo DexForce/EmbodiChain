@@ -16,35 +16,12 @@
 import numpy as np
 
 from copy import deepcopy
-from typing import List
 
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.misc import validation_with_process_from_name
 
 
 """Node Generation Utils"""
-
-
-def get_control_part_joint_ids(env, key: str) -> List[int]:
-    from embodichain.data.enum import (
-        ControlParts,
-        ControlPartsMappingW1,
-    )
-    from embodichain.lab.gym.envs.action_bank.configurable_action import (
-        get_control_part,
-    )
-
-    control_part = get_control_part(env, key)
-    if control_part == ControlParts.WAIST.value:
-        waist_joint_id = env.robot.get_joint_ids(name=ControlParts.TORSO.value)[
-            ControlPartsMappingW1.WAIST_IN_TORSO.value
-        ]
-        if not isinstance(waist_joint_id, (list)):
-            return [waist_joint_id]
-        return waist_joint_id
-
-    else:
-        return env.robot.get_joint_ids(name=control_part, remove_mimic=True)
 
 
 def generate_affordance_from_src(
