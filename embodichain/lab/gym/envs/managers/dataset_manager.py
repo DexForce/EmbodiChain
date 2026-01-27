@@ -86,20 +86,28 @@ class DatasetManager(ManagerBase):
         super().__init__(cfg, env)
 
         ## TODO: fix configurable_action.py to avoid getting env.metadata['dataset']
-        # Extract robot_meta from first functor and add to env.metadata for backward compatibility
+        # Extract robot_meta and instruction from first functor and add to env.metadata for backward compatibility
         # This allows legacy code (like action_bank) to access robot_meta via env.metadata["dataset"]["robot_meta"]
         for mode_cfgs in self._mode_functor_cfgs.values():
             for functor_cfg in mode_cfgs:
-                if "robot_meta" in functor_cfg.params:
+                if (
+                    "robot_meta" in functor_cfg.params
+                    or "instruction" in functor_cfg.params
+                ):
                     if not hasattr(env, "metadata"):
                         env.metadata = {}
                     if "dataset" not in env.metadata:
                         env.metadata["dataset"] = {}
-                    env.metadata["dataset"]["robot_meta"] = functor_cfg.params[
-                        "robot_meta"
-                    ]
+                    if "robot_meta" in functor_cfg.params:
+                        env.metadata["dataset"]["robot_meta"] = functor_cfg.params[
+                            "robot_meta"
+                        ]
+                    if "instruction" in functor_cfg.params:
+                        env.metadata["dataset"]["instruction"] = functor_cfg.params[
+                            "instruction"
+                        ]
                     logger.log_info(
-                        "Added robot_meta to env.metadata for backward compatibility"
+                        "Added robot_meta and instruction to env.metadata for backward compatibility"
                     )
                     break
             else:

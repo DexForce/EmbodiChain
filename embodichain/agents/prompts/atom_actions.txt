@@ -1,0 +1,136 @@
+### Atom Functions for Robot Arm Control
+Each atomic function returns a list of joint-space trajectories (list[np.ndarray]).
+All functions support an optional argument:
+
+force_valid: bool
+    If True, the system will automatically correct an invalid target pose by
+    projecting it to the nearest valid pose. Use this option carefully:
+    enable it only for actions where small spatial deviations are acceptable
+    and will not compromise task correctness. Default is False.
+
+Use the following functions exactly as defined. Do not invent new APIs or parameters.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Moves the specified arm to the target object’s affordance-based grasp pose and executes a grasp by closing the gripper.
+
+    The function plans a two-stage trajectory:
+    (1) from the current pose to a pre-grasp pose offset from the object, and
+    (2) from the pre-grasp pose to the final grasp pose, followed by gripper closure.
+
+    Upon completion, the gripper is closed and the target object is expected to be stably held by the gripper.
+
+    Example:
+        grasp(robot_name='right_arm', obj_name='bottle', pre_grasp_dis=0.10)  # Moves the right arm to a pre-grasp pose 10 cm from the bottle, then to the grasp pose and closes the gripper to grasp the bottle.
+
+"place_on_table":
+    def place_on_table(robot_name: str, obj_name: str, x: float, y: float, pre_place_dis: float, **kwargs) -> list[np.ndarray]
+
+    Moves the specified robot arm with the target object to the desired [x, y] location on the table and opens the gripper to place the object.
+    The z-coordinate is automatically adjusted based on the table height and the object’s dimensions.
+    This function assumes that the robot is already holding the object and that the task is to place it on the table at the specified coordinates.
+    Remember that when you need to place some objects on the table at specific coordinates, use this function without using other movement atom actions.
+    Otherwise, **if you need to place some objects relative to some place, then use "move_relative_to_object" first to move to the desired position, then use "open_gripper" to release the object.**
+
+    Example:
+        place_on_table(robot_name='right_arm', obj_name='bottle', x=0.1, y=0.5, pre_place_dis=0.08)  #  Moves the right arm to a pre-place position 8 cm from the table, then places the bottle at the specified [0.1, 0.5] location on the table and opens the gripper.
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str, obj_name: str,
+                                x_offset=0, y_offset=0, z_offset=0,
+                                **kwargs) -> list[np.ndarray]
+    Moves the end-effector to a pose defined relative to the target object:
+        target = object_position + [x_offset, y_offset, z_offset]
+    Orientation is preserved.
+    Example:
+        move_relative_to_object(robot_name='right_arm', obj_name='cup',
+                                x_offset=0.05, y_offset=0.10, z_offset=0.10)  # Moves the right arm’s end-effector to a spot located 5 cm forward, 10 cm to the left, and 10 cm above the cup, while preserving the current gripper orientation.
+        move_relative_to_object(robot_name='right_arm', obj_name='cup',
+                                x_offset=-0.05, y_offset=-0.10, z_offset=0.10)  # Moves the right arm’s end-effector to a spot located 5 cm backward, 10 cm to the right, and 10 cm above the cup, while preserving the current gripper orientation.
+
+"move_to_absolute_position":
+    def move_to_absolute_position(robot_name: str,
+                                  x=None, y=None, z=None,
+                                  **kwargs) -> list[np.ndarray]
+    Moves the end-effector to an absolute (x, y, z) position in world coordinates.
+    Any coordinate set to None remains unchanged.
+    Orientation is preserved.
+    Example:
+        move_to_absolute_position(robot_name='right_arm', x=0.10, y=0.10, z=None)  # Moves the end-effector to the absolute world position (x=0.10 m, y=0.10 m) while leaving z unchanged, and preserves the orientation.
+
+"move_by_relative_offset":
+    def move_by_relative_offset(robot_name: str,
+                                dx=0.0, dy=0.0, dz=0.0, mode='extrinsic',
+                                **kwargs) -> list[np.ndarray]
+    Moves the end-effector by a relative translation:
+        new_position = current_position + [dx, dy, dz]
+    The offset is applied along the specified axes using the given mode, while preserving the original end-effector orientation.
+    Mode can be 'extrinsic' (world frame) or 'intrinsic' (end-effector frame). If you want to move along the world axes, use 'extrinsic'. If you want to move along the end-effector’s local axes, use "intrinsic".
+    Example:
+        move_by_relative_offset(robot_name='right_arm', dx=0.05, dy=-0.10, dz=0.20, mode='extrinsic')  # Translates the end-effector by +5 cm in x (front), −10 cm in y (right), +20 cm in z (above) in the world coordinate, relative to its current position, with orientation preserved.
+        move_by_relative_offset(robot_name='right_arm', dx=0, dy=0, dz=0.1, mode='intrinsic')  # Translates the end-effector by +10 cm in z (forward) in the EEF coordinate, meaning that it moves forward relative to its current facing direction, with orientation preserved.
+
+"rotate_eef"
+    def rotate_eef(robot_name: str, degree: float, **kwargs) -> list[np.ndarray]
+    Rotates the wrist roll joint (joint index 5) of the specified arm by the
+    given number of degrees. End-effector position is preserved.
+    Example:
+        rotate_eef(robot_name='right_arm', degree=-90)  # Rotates the right arm’s wrist-roll joint by −45° (counterclockwise), while keeping the end-effector position unchanged. This is a joint-level rotation, not a full orientation override.
+        rotate_eef(robot_name='right_arm', degree=90)  # Rotates the right arm’s wrist-roll joint by 45° (clockwise), while keeping the end-effector position unchanged. This is a joint-level rotation, not a full orientation override.
+    Typical use cases:
+        Pouring or tilting a grasped object.
+        Rotating the gripper around its forward axis without translating the end effector.
+        After rotating, you typically need to apply an opposite rotation back to return to the original pose.
+    Usage notes:
+        Rotation sign convention: negative = counterclockwise, positive = clockwise, viewed along the end-effector forward axis.
+        For pouring with the right arm, a common pattern is: first apply a negative rotation to start pouring, then apply a positive rotation to return.
+        For the left arm, the sign convention is typically reversed.
+
+"orient_eef":
+    def orient_eef(robot_name: str,
+                   direction: str = 'front',   # 'front' or 'down'
+                   **kwargs) -> list[np.ndarray]
+    Reorients the end-effector to a predefined canonical orientation in the
+    WORLD coordinate frame, while keeping the EE’s current position fixed.
+    This function replaces the entire 3×3 orientation matrix of the current
+    end-effector pose.
+    Usage notes:
+        This function should only be used when you explicitly need to override the end-effector’s full orientation.
+        This differs from rotate_eef(). orient_eef performs a full orientation override of the end-effector, not a single-joint rotation. For tasks like pouring, no need to use it.
+        For general wrist rotation, prefer using rotate_eef instead.
+        For aligning tasks, use "front" or "down" orientations as needed.
+    Supported orientations:
+        • 'front' : Align the end-effector so its direction faces forward.
+        • 'down'  : Align the end-effector so its direction faces downward.
+    Example:
+        orient_eef(robot_name='right_arm', direction='front')  # Reorients the right arm’s end-effector so it faces forward
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+    Returns the specified arm to its predefined initial joint configuration
+    stored in the environment.
+    Example:
+        back_to_initial_pose(robot_name='right_arm')  # Returns the right arm back to its predefined initial joint configuration stored in the environment, regardless of its current pose.
+
+"close_gripper":
+    def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+    Closes the arm’s gripper using a short (10-step) gripper-only trajectory.
+    Example:
+        close_gripper(robot_name='right_arm')  # Closes the right gripper using a short, smooth 10-step gripper-only trajectory.
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+    Opens the arm’s gripper using a short (10-step) gripper-only trajectory.
+    Example:
+        open_gripper(robot_name='right_arm')  # Opens the right gripper using a 10-step gripper-only trajectory.
+
+### Drive Function (Trajectory Synchronization)
+"drive":
+    def drive(left_arm_action=None, right_arm_action=None, **kwargs) -> list[torch.Tensor]
+    Wraps one or two arm trajectories into synchronized full-robot actions.
+    • If only one arm action is provided, the other arm stays idle.
+    • If both are provided, they are temporally aligned and executed together.
+    • The actions are obtained from the output of the above functions.
+    Example:
+        drive(left_arm_action=left_actions, right_arm_action=right_actions)

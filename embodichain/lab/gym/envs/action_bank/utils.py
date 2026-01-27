@@ -16,17 +16,12 @@
 import numpy as np
 
 from copy import deepcopy
-from typing import List
 
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.misc import validation_with_process_from_name
 
 
 """Node Generation Utils"""
-
-
-def get_init_affordance(scope: str, tag: str = "init") -> str:
-    return "{}_{}_qpos".format(scope, tag)
 
 
 def generate_affordance_from_src(

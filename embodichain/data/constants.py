@@ -22,3 +22,6 @@ EMBODICHAIN_DOWNLOAD_PREFIX = (
 )
 EMBODICHAIN_DEFAULT_DATA_ROOT = str(Path.home() / ".cache" / "embodichain_data")
 EMBODICHAIN_DEFAULT_DATASET_ROOT = str(Path.home() / ".cache" / "embodichain_datasets")
+EMBODICHAIN_DEFAULT_DATABASE_ROOT = str(
+    Path.home() / ".cache" / "embodichain" / "database"
+)

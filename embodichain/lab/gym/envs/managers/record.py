@@ -235,3 +235,53 @@ class record_camera_data_async(record_camera_data):
             video_name = f"ep{self._ep_idx[0]-1}_{self._name}_allenvs"
             images_to_video(big_frames, save_path, video_name, fps=20)
             self._pending_env_episodes.clear()
+
+
+class validation_cameras(Functor):
+    """
+    This functor creates validation cameras during initialization and captures
+    their data when called. The cameras are created once and reused for subsequent calls.
+    """
+
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        super().__init__(cfg, env)
+        # Store camera configurations
+        self.cameras_cfg = cfg.params.get("cameras", [])
+        # Create each camera in __init__
+        self.camera_uids = []
+        for cam_cfg in self.cameras_cfg:
+            uid = cam_cfg.get("uid", "validation_camera")
+            width = cam_cfg.get("width", 1280)
+            height = cam_cfg.get("height", 960)
+            enable_mask = cam_cfg.get("enable_mask", False)
+            intrinsics = cam_cfg.get("intrinsics", [1400, 1400, 640, 480])
+            extrinsics_cfg = cam_cfg.get("extrinsics", {})
+            extrinsics = CameraCfg.ExtrinsicsCfg(**extrinsics_cfg)
+
+            camera = env.sim.add_sensor(
+                sensor_cfg=CameraCfg(
+                    uid=uid,
+                    width=width,
+                    height=height,
+                    enable_mask=enable_mask,
+                    extrinsics=extrinsics,
+                    intrinsics=intrinsics,
+                )
+            )
+            if camera is not None:
+                self.camera_uids.append(uid)
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: Union[torch.Tensor, None],
+    ):
+        """Update cameras and return their data."""
+        camera_data = {}
+        for i, cam_uid in enumerate(self.camera_uids, start=1):
+            camera = env.sim.get_sensor(cam_uid)
+            camera.update()
+            data = camera.get_data()
+            camera_data[f"valid_rgb_{i}"] = data["color"]
+
+        return camera_data

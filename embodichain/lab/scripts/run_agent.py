@@ -1,0 +1,146 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+import gymnasium
+import numpy as np
+import argparse
+import torch
+
+from embodichain.utils.utility import load_json
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.gym.envs import EmbodiedEnvCfg
+from embodichain.lab.gym.utils.gym_utils import (
+    config_to_cfg,
+)
+from embodichain.utils.logger import log_warning, log_info, log_error
+from .run_env import main
+
+
+if __name__ == "__main__":
+    np.set_printoptions(5, suppress=True)
+    torch.set_printoptions(precision=5, sci_mode=False)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--num_envs",
+        help="The number of environments to run in parallel.",
+        default=1,
+        type=int,
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
+    )
+    parser.add_argument(
+        "--headless",
+        help="Whether to perform the simulation in headless mode.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--enable_rt",
+        help="Whether to use RTX rendering backend for the simulation.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--render_backend",
+        help="The rendering backend to use for the simulation.",
+        default="egl",
+        type=str,
+    )
+    parser.add_argument(
+        "--gpu_id",
+        help="The GPU ID to use for the simulation.",
+        default=0,
+        type=int,
+    )
+    parser.add_argument(
+        "--debug_mode",
+        help="Enable debug mode.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--filter_visual_rand",
+        help="Whether to filter out visual randomization.",
+        default=False,
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--gym_config",
+        type=str,
+        help="Path to the gym configuration file.",
+        required=True,
+    )
+    parser.add_argument(
+        "--task_name",
+        type=str,
+        help="Name of the task.",
+        required=True,
+    )
+    parser.add_argument(
+        "--agent_config",
+        type=str,
+        help="Path to the agent configuration file.",
+        required=True,
+    )
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="Whether to regenerate code if already existed.",
+        default=False,
+    )
+
+    args = parser.parse_args()
+
+    # Validate arguments
+    if args.num_envs != 1:
+        log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+        exit(1)
+
+    # Load configurations
+    gym_config = load_json(args.gym_config)
+    agent_config = load_json(args.agent_config)
+
+    # Build environment configuration
+    cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)
+    cfg.filter_visual_rand = args.filter_visual_rand
+    cfg.num_envs = args.num_envs
+    cfg.sim_cfg = SimulationManagerCfg(
+        headless=args.headless,
+        sim_device=args.device,
+        enable_rt=args.enable_rt,
+        gpu_id=args.gpu_id,
+    )
+
+    # Create environment
+    env = gymnasium.make(
+        id=gym_config["id"],
+        cfg=cfg,
+        agent_config=agent_config,
+        agent_config_path=args.agent_config,
+        task_name=args.task_name,
+    )
+
+    # Run main function
+    main(args, env, gym_config)
+
+    if args.headless:
+        env.reset(options={"final": True})

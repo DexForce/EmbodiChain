@@ -14,27 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base_env import *
-from .embodied_env import *
-from .rl_env import *
-from .tasks import *
-from .wrapper import *
+from abc import ABCMeta, abstractmethod
+import os
+from embodichain.utils.utility import load_json
 
-from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
-from embodichain.lab.gym.envs.rl_env import RLEnv
 
-# Specific task environments
-from embodichain.lab.gym.envs.tasks.tableware.pour_water.pour_water import (
-    PourWaterEnv,
-    PourWaterAgentEnv,
-)
-from embodichain.lab.gym.envs.tasks.tableware.scoop_ice import ScoopIce
-from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
-    RearrangementEnv,
-    RearrangementAgentEnv,
-)
+class ToolkitsBase(metaclass=ABCMeta):
+    @classmethod
+    def from_config(cls, path: str):
+        assert (
+            os.path.basename(path).split(".")[-1] == "json"
+        ), "only json file is supported."
+        config = load_json(path)
+        return config["ToolKits"][cls.__name__]
 
-# Reinforcement learning environments
-from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
-
-from embodichain.lab.gym.envs.tasks.special.simple_task import SimpleTaskEnv
+    @abstractmethod
+    def call(self, **kwargs):
+        pass

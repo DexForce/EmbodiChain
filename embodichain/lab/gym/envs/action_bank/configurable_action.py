@@ -30,7 +30,7 @@ from embodichain.utils.logger import log_info, log_warning, log_error
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.gym.utils.misc import resolve_env_params, data_key_to_control_part
 from embodichain.data.enum import Hints, EefExecute
-from .utils import generate_affordance_from_src, get_init_affordance
+from .utils import generate_affordance_from_src
 
 
 # https://stackoverflow.com/questions/41834530/how-to-make-python-decorators-work-like-a-tag-to-make-function-calls-by-tag
@@ -580,10 +580,10 @@ class ActionBank:
             if given_qpos is None:
                 log_warning(
                     "No given_qpos is provided for initialize_with_given_qpos. Using {}.".format(
-                        get_init_affordance(executor)
+                        "{}_{}_qpos".format(executor, "init")
                     )
                 )
-                given_qpos = env.affordance_datas[get_init_affordance(executor)]
+                given_qpos = env.affordance_datas["{}_{}_qpos".format(executor, "init")]
 
             executor_qpos_dim = action_list[executor].shape[0]
             given_qpos = np.asarray(given_qpos)
@@ -914,7 +914,7 @@ class ActionBank:
 
         # After node initialization, check if env.affordance_datas contains updated initial value for each executor.
         for executor in scope.keys():
-            init_node_name = get_init_affordance(executor)
+            init_node_name = "{}_{}_qpos".format(executor, "init")
             if (
                 not hasattr(env, "affordance_datas")
                 or init_node_name not in env.affordance_datas

@@ -1,0 +1,42 @@
+The environment uses a right-handed world coordinate system, where 1 unit equals 1 meter.
+All robot poses are represented as 4×4 homogeneous transformation matrices.
+
+The robot base coordinate frame is the ONLY authoritative frame for all spatial reasoning, planning, and action generation.
+
+CAMERA AND IMAGE INTERPRETATION
+
+The camera is positioned in front of the robot, facing the robot arm and looking toward the robot base.
+Because of this viewpoint, the rendered image is horizontally mirrored relative to the robot base frame.
+This mirroring affects LEFT–RIGHT only. There is NO vertical or depth inversion.
+
+Mirror mapping (image → robot base frame):
+
+* Image left corresponds to robot right
+* Image right corresponds to robot left
+* Image up corresponds to robot up
+* Image down corresponds to robot down
+
+REQUIRED REASONING PERSPECTIVE (NON-NEGOTIABLE)
+
+You must ignore the camera and rendered image orientation when reasoning.
+All spatial reasoning must be performed as if you are physically located at the robot base, looking outward along the robot’s +x (forward) direction.
+
+Do NOT reason from the camera viewpoint.
+Do NOT trust left/right as shown in the image.
+Always remap image left/right before reasoning.
+
+ROBOT BASE COORDINATE DEFINITIONS
+
+All directions below are defined strictly in the robot base frame:
+
+* Moving forward increases x
+* Moving backward decreases x
+* Moving left increases y (appears as right in the image)
+* Moving right decreases y (appears as left in the image)
+* Moving up increases z
+* Moving down decreases z
+
+ROBOT INITIALIZATION AND TERMINATION
+
+Both robot arms start in predefined initial configurations with their end-effectors open.
+At task completion, both arms must be returned to their initial poses.
