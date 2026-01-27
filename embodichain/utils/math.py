@@ -2196,3 +2196,53 @@ def generate_random_transformation_matrix(
     T[:3, 3] = translation
 
     return T
+
+
+def get_offset_pose(
+    pose_to_change: torch.Tensor,
+    offset_value: float,
+    direction: str = "z",
+    mode: str = "intrinsic",
+) -> torch.Tensor:
+    """Offset a pose by a given value along a specified direction.
+
+    Args:
+        pose_to_change: Input pose tensor of shape (4, 4).
+        offset_value: The offset distance.
+        direction: Direction string ("x", "y", "z") or a 3D vector tensor.
+        mode: "extrinsic" or "intrinsic" transformation mode.
+
+    Returns:
+        Offset pose tensor of shape (4, 4).
+    """
+    from embodichain.utils.logger import log_error
+
+    device = pose_to_change.device
+    dtype = pose_to_change.dtype
+
+    if isinstance(direction, str):
+        if direction == "x":
+            direction_vec = torch.tensor([1.0, 0.0, 0.0], device=device, dtype=dtype)
+        elif direction == "y":
+            direction_vec = torch.tensor([0.0, 1.0, 0.0], device=device, dtype=dtype)
+        elif direction == "z":
+            direction_vec = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=dtype)
+        else:
+            log_error(f"Invalid direction '{direction}'. Must be 'x', 'y', or 'z'.")
+            return pose_to_change
+    else:
+        direction_vec = torch.as_tensor(direction, device=device, dtype=dtype)
+
+    direction_vec = direction_vec / torch.linalg.norm(direction_vec)
+    offset_matrix = torch.eye(4, device=device, dtype=dtype)
+    offset_matrix[:3, 3] = offset_value * direction_vec
+
+    if mode == "extrinsic":
+        offset_pose = offset_matrix @ pose_to_change
+    elif mode == "intrinsic":
+        offset_pose = pose_to_change @ offset_matrix
+    else:
+        log_error(f"Invalid mode '{mode}'. Must be 'extrinsic' or 'intrinsic'.")
+        return pose_to_change
+
+    return offset_pose

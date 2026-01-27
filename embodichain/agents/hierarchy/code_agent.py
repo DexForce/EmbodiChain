@@ -210,16 +210,16 @@ class CodeAgent(AgentBase):
             "kwargs": kwargs,  # Make kwargs available for injection
         }
 
-        # Import toolkit functions into namespace
+        # Import atom action functions into namespace
         try:
             exec(
-                "from embodichain.toolkits.interfaces import *",
+                "from embodichain.lab.sim.atom_actions import *",
                 ns,
                 ns,
             )
         except Exception as e:
             raise RuntimeError(
-                "Failed to import embodichain.toolkits.interfaces"
+                "Failed to import embodichain.lab.sim.atom_actions"
             ) from e
 
         # Parse code to check if it defines a function or contains module-level calls
