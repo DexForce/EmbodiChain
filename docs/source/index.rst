@@ -37,6 +37,7 @@ Table of Contents
    :glob:
 
    features/workspace_analyzer/index*
+   features/interaction/index*
 
 .. toctree::
    :maxdepth: 1
@@ -45,6 +46,7 @@ Table of Contents
 
    resources/robot/index*
    resources/task/index*
+   resources/toolkits/index*
    resources/roadmap.md
 
 .. toctree::

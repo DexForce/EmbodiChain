@@ -61,8 +61,7 @@ class DatasetManager(ManagerBase):
         >>>                 "robot_meta": {...},
         >>>                 "instruction": {"lang": "pick and place"},
         >>>                 "extra": {"scene_type": "kitchen"},
-        >>>                 "save_path": "/data/datasets",
-        >>>                 "export_success_only": True,
+        >>>                 "save_path": "/data/datasets"
         >>>             }
         >>>         )
         >>>     }
@@ -177,26 +176,16 @@ class DatasetManager(ManagerBase):
         self,
         mode: str,
         env_ids: Union[Sequence[int], torch.Tensor, None] = None,
-        obs: Optional[EnvObs] = None,
-        action: Optional[EnvAction] = None,
-        dones: Optional[torch.Tensor] = None,
-        terminateds: Optional[torch.Tensor] = None,
-        info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Apply dataset functors for the specified mode.
 
-        This method follows the same pattern as EventManager.apply() for consistency.
-        Currently only supports mode="save" which handles both recording and auto-saving.
+        This method saves completed episodes by reading data from the environment's
+        episode buffers. It should be called before clearing the buffers during reset.
 
         Args:
             mode: The mode to apply (currently only "save" is supported).
             env_ids: The indices of the environments to apply the functor to.
                 Defaults to None, in which case the functor is applied to all environments.
-            obs: Observation from the environment (batched for all envs).
-            action: Action applied to the environment (batched for all envs).
-            dones: Boolean tensor indicating which envs completed episodes.
-            terminateds: Boolean tensor indicating termination (success/fail).
-            info: Info dict containing success/fail information.
         """
         # check if mode is valid
         if mode not in self._mode_functor_names:
@@ -210,11 +199,6 @@ class DatasetManager(ManagerBase):
             functor_cfg.func(
                 self._env,
                 env_ids,
-                obs,
-                action,
-                dones,
-                terminateds,
-                info,
                 **functor_cfg.params,
             )
 

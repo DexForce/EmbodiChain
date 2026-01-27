@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from math import log
 import os
 import torch
 import numpy as np
@@ -110,10 +111,9 @@ class EmbodiedEnvCfg(EnvCfg):
     
     This field can be used to pass additional parameters that are specific to certain environments
     or tasks without modifying the base configuration class. For example:
-    - obs_mode: Observation mode (e.g., "state", "image")
     - episode_length: Maximum episode length
-    - joint_limits: Joint limit constraints
     - action_scale: Action scaling factor
+    - action_type: Action type (e.g., "delta_qpos", "qpos", "qvel")
     - vr_joint_mapping: VR joint mapping for teleoperation
     - control_frequency: Control frequency for VR teleoperation
     """
@@ -170,6 +170,16 @@ class EmbodiedEnv(BaseEnv):
         self.dataset_manager: DatasetManager | None = None
 
         super().__init__(cfg, **kwargs)
+
+        self.episode_obs_buffer: Dict[int, List[EnvObs]] = {
+            i: [] for i in range(self.num_envs)
+        }
+        self.episode_action_buffer: Dict[int, List[EnvAction]] = {
+            i: [] for i in range(self.num_envs)
+        }
+        self.episode_success_status: Dict[int, bool] = {
+            i: False for i in range(self.num_envs)
+        }
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -272,6 +282,29 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
+    def _extract_single_env_data(self, data: Any, env_id: int) -> Any:
+        """Extract single environment data from batched data.
+
+        Args:
+            data: Batched data (dict, tensor, list, or primitive)
+            env_id: Environment index
+
+        Returns:
+            Data for the specified environment
+        """
+        if isinstance(data, dict):
+            return {
+                k: self._extract_single_env_data(v, env_id) for k, v in data.items()
+            }
+        elif isinstance(data, torch.Tensor):
+            return data[env_id] if data.ndim > 0 else data
+        elif isinstance(data, (list, tuple)):
+            return type(data)(
+                self._extract_single_env_data(item, env_id) for item in data
+            )
+        else:
+            return data
+
     def _hook_after_sim_step(
         self,
         obs: EnvObs,
@@ -281,18 +314,18 @@ class EmbodiedEnv(BaseEnv):
         info: Dict,
         **kwargs,
     ):
-        # Call dataset manager with mode="save": it will record and auto-save if dones=True
-        if self.cfg.dataset:
-            if "save" in self.dataset_manager.available_modes:
-                self.dataset_manager.apply(
-                    mode="save",
-                    env_ids=None,
-                    obs=obs,
-                    action=action,
-                    dones=dones,
-                    terminateds=terminateds,
-                    info=info,
-                )
+        # Extract and append data for each environment
+        for env_id in range(self.num_envs):
+            single_obs = self._extract_single_env_data(obs, env_id)
+            single_action = self._extract_single_env_data(action, env_id)
+            self.episode_obs_buffer[env_id].append(single_obs)
+            self.episode_action_buffer[env_id].append(single_action)
+
+            # Update success status if episode is done
+            if dones[env_id].item():
+                if "success" in info:
+                    success_value = info["success"]
+                    self.episode_success_status[env_id] = success_value[env_id].item()
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -332,6 +365,50 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
+        save_data = kwargs.get("save_data", True)
+
+        # Determine which environments to process
+        if env_ids is None:
+            env_ids_to_process = list(range(self.num_envs))
+        elif isinstance(env_ids, torch.Tensor):
+            env_ids_to_process = env_ids.cpu().tolist()
+        else:
+            env_ids_to_process = list(env_ids)
+
+        # Save dataset before clearing buffers for environments that are being reset
+        if save_data and self.cfg.dataset:
+            if "save" in self.dataset_manager.available_modes:
+
+                current_task_success = self.is_task_success()
+
+                # Filter to only save successful episodes
+                successful_env_ids = [
+                    env_id
+                    for env_id in env_ids_to_process
+                    if (
+                        self.episode_success_status.get(env_id, False)
+                        or current_task_success[env_id].item()
+                    )
+                ]
+
+                if successful_env_ids:
+                    # Convert back to tensor if needed
+                    successful_env_ids_tensor = torch.tensor(
+                        successful_env_ids, device=self.device
+                    )
+                    self.dataset_manager.apply(
+                        mode="save",
+                        env_ids=successful_env_ids_tensor,
+                    )
+                else:
+                    logger.log_warning("No successful episodes to save.")
+
+        # Clear episode buffers and reset success status for environments being reset
+        for env_id in env_ids_to_process:
+            self.episode_obs_buffer[env_id].clear()
+            self.episode_action_buffer[env_id].clear()
+            self.episode_success_status[env_id] = False
+
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
@@ -344,16 +421,31 @@ class EmbodiedEnv(BaseEnv):
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
 
+        Supports multiple action formats:
+        1. torch.Tensor: Interpreted as qpos (joint positions)
+        2. Dict with keys:
+           - "qpos": Joint positions
+           - "qvel": Joint velocities
+           - "qf": Joint forces/torques
+
         Args:
             action: The action applied to the robot agent.
 
         Returns:
             The action return.
         """
-        # TODO: Support data structure action input such as struct.
-        qpos = action
-
-        self.robot.set_qpos(qpos=qpos)
+        if isinstance(action, dict):
+            # Support multiple control modes simultaneously
+            if "qpos" in action:
+                self.robot.set_qpos(qpos=action["qpos"])
+            if "qvel" in action:
+                self.robot.set_qvel(qvel=action["qvel"])
+            if "qf" in action:
+                self.robot.set_qf(qf=action["qf"])
+        elif isinstance(action, torch.Tensor):
+            self.robot.set_qpos(qpos=action)
+        else:
+            logger.error(f"Unsupported action type: {type(action)}")
 
         return action
 
@@ -510,22 +602,6 @@ class EmbodiedEnv(BaseEnv):
         """
 
         return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        """Check if the episode is truncated.
-
-        Args:
-            obs: The observation from the environment.
-            info: The info dictionary.
-
-        Returns:
-            A boolean tensor indicating truncation for each environment in the batch.
-        """
-        # Check if action sequence has reached its end
-        if self.action_length > 0:
-            return self._elapsed_steps >= self.action_length
-
-        return super().check_truncated(obs, info)
 
     def close(self) -> None:
         """Close the environment and release resources."""

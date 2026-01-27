@@ -39,12 +39,20 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
 
-def main():
+def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to JSON config")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    with open(args.config, "r") as f:
+
+def train_from_config(config_path: str):
+    """Run training from a config file path.
+
+    Args:
+        config_path: Path to the JSON config file
+    """
+    with open(config_path, "r") as f:
         cfg_json = json.load(f)
 
     trainer_cfg = cfg_json["trainer"]
@@ -274,7 +282,27 @@ def main():
                 wandb.finish()
             except Exception:
                 pass
+
+        # Clean up environments to prevent resource leaks
+        try:
+            if env is not None:
+                env.close()
+        except Exception as e:
+            logger.log_warning(f"Failed to close training environment: {e}")
+
+        try:
+            if eval_env is not None:
+                eval_env.close()
+        except Exception as e:
+            logger.log_warning(f"Failed to close evaluation environment: {e}")
+
         logger.log_info("Training finished")
+
+
+def main():
+    """Main entry point for command-line training."""
+    args = parse_args()
+    train_from_config(args.config)
 
 
 if __name__ == "__main__":
