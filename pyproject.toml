@@ -51,8 +51,6 @@ dependencies = [
   "black==24.3.0",
   "fvcore",
   "h5py",
-  "zmq==0.0.0",
-  "pycocotools",
 ]
 
 [project.optional-dependencies]
