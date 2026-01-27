@@ -24,17 +24,17 @@ import inspect
 import open3d as o3d
 
 from copy import deepcopy
-from functools import partial, wraps, lru_cache
+from functools import wraps
 from collections import OrderedDict
 from importlib import import_module
 from scipy.spatial.transform import Rotation as R
-from typing import Any, Dict, List, Tuple, Union, Sequence, Callable, Mapping, Optional
+from typing import Any, Dict, List, Tuple, Union, Sequence, Callable, Mapping
 
 import numpy as np
 
 from embodichain.lab.sim.objects import Robot
 from embodichain.utils.utility import inv_transform
-from embodichain.utils.logger import log_info, log_warning, log_error
+from embodichain.utils.logger import log_warning, log_error
 
 
 def no_validation(*args, **kwargs):
@@ -1390,42 +1390,3 @@ def is_stereocam(sensor) -> bool:
 
     return isinstance(sensor, StereoCamera)
 
-
-def _data_key_to_control_part(robot, control_parts, data_key: str) -> Optional[str]:
-    # TODO: Temporary workaround, should be removed after refactoring data dict extractor.
-    # @lru_cache(max_size=None) # NOTE: no way to pass a hashable parameter
-    def is_eef_hand_func(robot, control_parts) -> bool:
-        # TODO: This is a temporary workaround, should be used a more general method to check
-        # whether the end-effector is a hand.
-        for part in control_parts:
-            if "eef" in part:
-                joint_ids = robot.get_joint_ids(part, remove_mimic=True)
-                return len(joint_ids) >= 2
-        return False
-
-    from embodichain.data.enum import (
-        ControlParts,
-        EndEffector,
-        ActionMode,
-        JointType,
-        EefType,
-    )
-
-    is_eef_hand = is_eef_hand_func(robot, control_parts)
-
-    for control_part in ControlParts:
-        if EndEffector.DEXTROUSHAND.value in data_key and is_eef_hand:
-            return data_key.replace(EndEffector.DEXTROUSHAND.value, "")
-        elif EndEffector.DEXTROUSHAND.value in data_key and not is_eef_hand:
-            continue
-        elif EndEffector.GRIPPER.value in data_key and not is_eef_hand:
-            return data_key.replace(EndEffector.GRIPPER.value, "")
-        elif EndEffector.GRIPPER.value in data_key and is_eef_hand:
-            continue
-        elif ActionMode.RELATIVE.value + JointType.QPOS.value in data_key:
-            continue
-        elif EefType.POSE.value in data_key:
-            continue
-        elif control_part.value in data_key:
-            return control_part.value
-    return None
