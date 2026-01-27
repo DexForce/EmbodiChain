@@ -64,18 +64,18 @@ class SoftBodyData:
         self.ps = ps
         self.num_instances = len(entities)
 
-        softbodies = [
+        self.softbodies = [
             self.entities[i].get_physical_body() for i in range(self.num_instances)
         ]
-        self.n_collision_vertices = softbodies[0].get_num_vertices()
-        self.n_sim_vertices = softbodies[0].get_num_sim_vertices()
+        self.n_collision_vertices = self.softbodies[0].get_num_vertices()
+        self.n_sim_vertices = self.softbodies[0].get_num_sim_vertices()
 
         self._rest_position_buffer = torch.empty(
             (self.num_instances, self.n_collision_vertices, 4),
             device=self.device,
             dtype=torch.float32,
         )
-        for i, softbody in enumerate(softbodies):
+        for i, softbody in enumerate(self.softbodies):
             self._rest_position_buffer[i] = softbody.get_position_inv_mass_buffer()
 
         self._rest_sim_position_buffer = torch.empty(
@@ -84,7 +84,7 @@ class SoftBodyData:
             dtype=torch.float32,
         )
 
-        for i, softbody in enumerate(softbodies):
+        for i, softbody in enumerate(self.softbodies):
             self._rest_sim_position_buffer[i] = (
                 softbody.get_sim_position_inv_mass_buffer()
             )
