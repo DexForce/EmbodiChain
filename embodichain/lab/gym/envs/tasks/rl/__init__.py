@@ -19,6 +19,7 @@ from __future__ import annotations
 from copy import deepcopy
 from embodichain.lab.gym.utils import registration as env_registry
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
+from embodichain.lab.gym.envs.tasks.rl import push_t
 
 
 def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):

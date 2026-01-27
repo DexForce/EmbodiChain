@@ -19,13 +19,14 @@ from typing import Dict, Any, Sequence
 import torch
 
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnvCfg
+from embodichain.lab.gym.envs.rl_env import RLEnv
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 
 
 @register_env("PushTRL", max_episode_steps=50, override=True)
-class PushTEnv(EmbodiedEnv):
+class PushTEnv(RLEnv):
     """Push-T task.
 
     The task requires pushing a T-shaped block to a goal position on the tabletop.
@@ -72,17 +73,6 @@ class PushTEnv(EmbodiedEnv):
     ) -> None:
         super()._initialize_episode(env_ids=env_ids, **kwargs)
         # self._draw_goal_marker()
-
-    def _step_action(self, action: EnvAction) -> EnvAction:
-        scaled_action = action * self.action_scale
-        scaled_action = torch.clamp(
-            scaled_action, -self.joint_limits, self.joint_limits
-        )
-        current_qpos = self.robot.body_data.qpos
-        target_qpos = current_qpos.clone()
-        target_qpos[:, :6] += scaled_action[:, :6]
-        self.robot.set_qpos(qpos=target_qpos)
-        return scaled_action
 
     def _get_eef_pos(self) -> torch.Tensor:
         """Get end-effector position using FK."""
@@ -144,6 +134,6 @@ class PushTEnv(EmbodiedEnv):
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         info = self.get_info(**kwargs)
         return {
-            "success": info["success"][0].item(),
+            "success": info["success"],
             "distance_to_goal": info["metrics"]["distance_to_goal"],
         }
