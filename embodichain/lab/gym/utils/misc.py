@@ -757,13 +757,6 @@ def resolve_env_attr(obj: Any, env: Any) -> Any:
 _EXPR = re.compile(r"\$\{([^}]+)\}")  # For searching ${...} marker
 
 
-def is_binocularcam(sensor):
-    from dexsim.sensor import BinocularCam
-    from embodichain.lab.sim.sensors import StereoCamera
-
-    return isinstance(sensor, BinocularCam) or isinstance(sensor, StereoCamera)
-
-
 def resolve_formatted_string(obj, local_vars=None, global_vars=None):
     """Given a dict carrys "${...}"-like strings , `eval` the "${...}$" values while keep the dict structure.
 
