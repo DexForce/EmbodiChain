@@ -72,5 +72,3 @@ class EefType(Enum):
 class ActionMode(Enum):
     ABSOLUTE = ""
     RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
-
-

@@ -1382,4 +1382,3 @@ def is_stereocam(sensor) -> bool:
     from embodichain.lab.sim.sensors import StereoCamera
 
     return isinstance(sensor, StereoCamera)
-

@@ -26,7 +26,7 @@ from embodichain.lab.sim.planners.motion_generator import MotionGenerator
 
 def draw_axis(env, pose):
     """Draw an axis marker in the simulation for debugging/visualization.
-    
+
     Args:
         env: The simulation environment.
         pose: The pose (4x4 matrix) where to draw the axis.
@@ -47,11 +47,11 @@ def draw_axis(env, pose):
 
 def get_arm_states(env, robot_name):
     """Get the current state of the specified robot arm.
-    
+
     Args:
         env: The simulation environment.
         robot_name: Name of the robot arm (should contain "left" or "right").
-        
+
     Returns:
         Tuple of (is_left, select_arm, current_qpos, current_pose, current_gripper_state):
             - is_left: bool, whether this is the left arm
@@ -99,13 +99,13 @@ def get_arm_states(env, robot_name):
 
 def find_nearest_valid_pose(env, select_arm, pose, xpos_resolution=0.1):
     """Find the nearest valid pose using reachability validation.
-    
+
     Args:
         env: The simulation environment.
         select_arm: Arm identifier ("left_arm" or "right_arm").
         pose: Target pose (4x4 matrix).
         xpos_resolution: Resolution for reachability checking.
-        
+
     Returns:
         torch.Tensor: The nearest valid pose (4x4 matrix).
     """
@@ -134,7 +134,7 @@ def find_nearest_valid_pose(env, select_arm, pose, xpos_resolution=0.1):
 
 def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=""):
     """Solve inverse kinematics to get joint positions for a given pose.
-    
+
     Args:
         env: The simulation environment.
         is_left: bool, whether this is the left arm.
@@ -143,7 +143,7 @@ def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=
         qpos_seed: Seed joint positions for IK solving.
         force_valid: If True, use nearest valid pose if IK fails.
         name: Name for logging purposes.
-        
+
     Returns:
         Joint positions (qpos) corresponding to the target pose.
     """
@@ -177,7 +177,7 @@ def plan_trajectory(
     ee_state_list_select,
 ):
     """Plan a trajectory between joint positions and append to trajectory lists.
-    
+
     Args:
         env: The simulation environment.
         select_arm: Arm identifier ("left_arm" or "right_arm").
@@ -214,7 +214,7 @@ def plan_gripper_trajectory(
     ee_state_list_select,
 ):
     """Plan a gripper trajectory (opening or closing) and append to trajectory lists.
-    
+
     Args:
         env: The simulation environment.
         is_left: bool, whether this is the left arm.
@@ -242,11 +242,11 @@ def plan_gripper_trajectory(
 
 def finalize_actions(select_qpos_traj, ee_state_list_select):
     """Format trajectory data into action format.
-    
+
     Args:
         select_qpos_traj: List of joint positions.
         ee_state_list_select: List of gripper states.
-        
+
     Returns:
         np.ndarray: Formatted actions array with joint positions and gripper states.
     """
@@ -264,10 +264,10 @@ def finalize_actions(select_qpos_traj, ee_state_list_select):
 
 def extract_drive_calls(code_str: str) -> List[str]:
     """Extract all drive() function calls from a code string.
-    
+
     Args:
         code_str: Python code string to parse.
-        
+
     Returns:
         List of code blocks containing drive() calls.
     """
