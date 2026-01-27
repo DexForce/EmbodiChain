@@ -15,8 +15,6 @@
 # ----------------------------------------------------------------------------
 
 from enum import Enum, IntEnum
-import torch
-import numpy as np
 
 
 class SemanticMask(IntEnum):
@@ -32,18 +30,6 @@ class SemanticMask(IntEnum):
     BACKGROUND = 0
     FOREGROUND = 1
     ROBOT = 2
-
-
-class Modality(Enum):
-    STATES = "states"
-    STATE_INDICATOR = "state_indicator"
-    ACTIONS = "actions"
-    ACTION_INDICATOR = "action_indicator"
-    IMAGES = "images"
-    LANG = "lang"
-    LANG_INDICATOR = "lang_indicator"
-    GEOMAP = "geomap"  # e.g., depth, point cloud, etc.
-    VISION_LANGUAGE = "vision_language"  # e.g., image + lang
 
 
 class EndEffector(Enum):
@@ -63,16 +49,6 @@ class ControlParts(Enum):
     RIGHT_EEF = "right_eef"
     HEAD = "head"
     WAIST = "waist"
-
-
-class ControlPartsMappingW1(Enum):
-    ANKLE_IN_TORSO = 0
-    KNEE_IN_TORSO = 1
-    BUTTOCK_IN_TORSO = 2
-    WAIST_IN_TORSO = 3
-
-    NECK1_IN_HEAD = 0
-    NECK2_IN_HEAD = 1
 
 
 class Hints(Enum):
@@ -98,31 +74,3 @@ class ActionMode(Enum):
     RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
 
 
-class PrivilegeType(Enum):
-    EXTEROCEPTION = "exteroception"
-    MASK = "mask"
-    STATE = "state"
-    PROGRESS = "progress"
-
-
-SUPPORTED_PROPRIO_TYPES = [
-    ControlParts.LEFT_ARM.value + EefType.POSE.value,
-    ControlParts.RIGHT_ARM.value + EefType.POSE.value,
-    ControlParts.LEFT_ARM.value + JointType.QPOS.value,
-    ControlParts.RIGHT_ARM.value + JointType.QPOS.value,
-    ControlParts.LEFT_EEF.value + EndEffector.DEXTROUSHAND.value,
-    ControlParts.RIGHT_EEF.value + EndEffector.DEXTROUSHAND.value,
-    ControlParts.LEFT_EEF.value + EndEffector.GRIPPER.value,
-    ControlParts.RIGHT_EEF.value + EndEffector.GRIPPER.value,
-    ControlParts.HEAD.value + JointType.QPOS.value,
-    ControlParts.WAIST.value + JointType.QPOS.value,
-]
-SUPPORTED_ACTION_TYPES = SUPPORTED_PROPRIO_TYPES + [
-    ControlParts.LEFT_ARM.value + ActionMode.RELATIVE.value + JointType.QPOS.value,
-    ControlParts.RIGHT_ARM.value + ActionMode.RELATIVE.value + JointType.QPOS.value,
-]
-SUPPORTED_EXTRA_VISION_TYPES = [
-    Modality.GEOMAP.value,
-    PrivilegeType.EXTEROCEPTION.value,
-    PrivilegeType.MASK.value,
-]
