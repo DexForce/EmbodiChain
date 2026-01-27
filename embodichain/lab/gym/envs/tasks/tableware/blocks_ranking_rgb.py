@@ -68,10 +68,9 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         base_y = b2_pos[:, 1]
         base_z = b2_pos[:, 2]
 
-        # Place targets: Red < Green < Blue, the green block is kept in place, only the red and blue blocks are moved
         tgt_green = b2_pos  # not moved, kept for reference
-        tgt_red = torch.stack([base_x - 0.05, base_y, base_z], dim=1)
-        tgt_blue = torch.stack([base_x + 0.05, base_y, base_z], dim=1)
+        tgt_red = torch.stack([base_x - 0.12, base_y, base_z], dim=1)
+        tgt_blue = torch.stack([base_x + 0.10, base_y, base_z], dim=1)
 
         # Right arm / right hand
         right_arm_ids = self.robot.get_joint_ids(name="right_arm")
@@ -141,16 +140,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                 )
                 action_list.append(action)
 
-        def _append_move(
-            qpos_start: torch.Tensor,
-            qpos_end: torch.Tensor,
-            num_steps: int,
-            gripper_state: torch.Tensor,
-        ):
-            raise NotImplementedError(
-                "Use _append_move_for_arm with指定 motion_generator / ids"
-            )
-
         def _append_move_for_arm(
             qpos_start: torch.Tensor,
             qpos_end: torch.Tensor,
@@ -198,12 +187,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             motion_gen: MotionGenerator,
             tag: str,
         ):
-            # Waypoints in task frame; keep orientation same as initial arm
-            approach = init_arm_xpos.clone()
-            approach[:, :3, 3] = block_pos + torch.tensor(
-                [0.02, 0.0, 0.10], dtype=torch.float32, device=self.device
-            ).unsqueeze(0)
-
             pick = init_arm_xpos.clone()
             pick[:, :3, 3] = block_pos + torch.tensor(
                 [0.02, 0.0, -0.025], dtype=torch.float32, device=self.device
@@ -212,53 +195,32 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             lift = pick.clone()
             lift[:, 2, 3] += 0.15
 
-            approach_place = init_arm_xpos.clone()
-            approach_place[:, :3, 3] = place_pos + torch.tensor(
-                [0.025, 0.0, 0.08], dtype=torch.float32, device=self.device
-            ).unsqueeze(0)
-
             place = init_arm_xpos.clone()
             place[:, :3, 3] = place_pos + torch.tensor(
                 [0.025, 0.0, 0.02], dtype=torch.float32, device=self.device
             ).unsqueeze(0)
 
-            retract = approach_place.clone()
-            retract[:, 2, 3] += 0.10
-
-            q_approach = _ik_to_qpos(approach, seed_qpos, arm_name, f"{tag}_approach")
-            q_pick = _ik_to_qpos(pick, q_approach, arm_name, f"{tag}_pick")
+            # inverse kinematics for three key poses
+            q_pick = _ik_to_qpos(pick, seed_qpos, arm_name, f"{tag}_pick")
             q_lift = _ik_to_qpos(lift, q_pick, arm_name, f"{tag}_lift")
-            q_ap = _ik_to_qpos(
-                approach_place, q_lift, arm_name, f"{tag}_approach_place"
-            )
-            q_place = _ik_to_qpos(place, q_ap, arm_name, f"{tag}_place")
-            q_ret = _ik_to_qpos(retract, q_place, arm_name, f"{tag}_retract")
+            q_place = _ik_to_qpos(place, q_lift, arm_name, f"{tag}_place")
 
-            # Execute segments
+            # execution segments: seed -> pick(open gripper) -> lift -> place(close gripper)
             _append_move_for_arm(
-                seed_qpos, q_approach, 25, gripper_open, arm_ids, eef_ids, motion_gen
+                seed_qpos, q_pick, 20, gripper_open, arm_ids, eef_ids, motion_gen
+            )
+            _append_hold(q_pick, 5, gripper_close, arm_ids, eef_ids)  # close gripper
+            _append_move_for_arm(
+                q_pick, q_lift, 20, gripper_close, arm_ids, eef_ids, motion_gen
             )
             _append_move_for_arm(
-                q_approach, q_pick, 20, gripper_open, arm_ids, eef_ids, motion_gen
+                q_lift, q_place, 30, gripper_close, arm_ids, eef_ids, motion_gen
             )
-            _append_hold(q_pick, 10, gripper_close, arm_ids, eef_ids)  # close gripper
-            _append_move_for_arm(
-                q_pick, q_lift, 25, gripper_close, arm_ids, eef_ids, motion_gen
-            )
-            _append_move_for_arm(
-                q_lift, q_ap, 35, gripper_close, arm_ids, eef_ids, motion_gen
-            )
-            _append_move_for_arm(
-                q_ap, q_place, 20, gripper_close, arm_ids, eef_ids, motion_gen
-            )
-            _append_hold(q_place, 10, gripper_open, arm_ids, eef_ids)  # open gripper
-            _append_move_for_arm(
-                q_place, q_ret, 25, gripper_open, arm_ids, eef_ids, motion_gen
-            )
+            _append_hold(q_place, 5, gripper_open, arm_ids, eef_ids)  # open gripper
 
-            return q_ret
+            return q_place
 
-        # 1. Right hand handles the red block (place it on the left of the green block)
+        # 1. Right hand handles the red block
         current_seed_right = init_right_arm_qpos
         current_seed_right = _pick_and_place(
             b1_pos,
@@ -271,10 +233,10 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             motion_gen_right,
             "red",
         )
-        # Update the default pose of the right arm in subsequent actions to avoid the right hand "jumping back to the initial position" when the left hand moves
+
         init_qpos[:, right_arm_ids] = current_seed_right
 
-        # 2. Left hand handles the blue block (place it on the right of the green block)
+        # 2. Left hand handles the blue block
         current_seed_left = init_left_arm_qpos
         current_seed_left = _pick_and_place(
             b3_pos,
@@ -296,7 +258,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         """Determine if the task is successfully completed.
 
         The task is successful if:
-        1. Three blocks are arranged in RGB order from left to right:
+        1. Three blocks are arranged in RGB order from front to back:
            - Red block (block_1) x < Green block (block_2) x < Blue block (block_3) x
         2. All blocks are close together (within tolerance)
 
