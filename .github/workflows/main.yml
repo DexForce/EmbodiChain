@@ -3,6 +3,8 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main]
+    tag:
+      - 'v*'  # Match tags starting with v, e.g., v1.0.0
   pull_request:
     branches: [main]
 
