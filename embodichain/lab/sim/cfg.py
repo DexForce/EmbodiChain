@@ -393,6 +393,7 @@ class JointDrivePropertiesCfg:
 
     If the drive type is "force", then the joint is driven by a force and the acceleration is computed based on the force applied.
     If the drive type is "acceleration", then the joint is driven by an acceleration and the force is computed based on the acceleration applied.
+    If the drive type is "none", then no force will be applied to joint.
     """
 
     stiffness: Union[Dict[str, float], float] = 1e4
