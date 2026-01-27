@@ -64,6 +64,41 @@ class CobotMagicArm(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
+class CobotMagicArmV3(EmbodiChainDataset):
+    """Dataset class for the Cobot Magic Arm robot.
+
+    Reference:
+        https://global.agilex.ai/products/cobot-magic
+
+    Directory structure:
+        CobotMagicArm/
+            CobotMagicNoGripper.urdf
+            CobotMagicWithGripperV70.urdf
+            CobotMagicWithGripperV70NewUV.urdf
+            CobotMagicWithGripperV70NoMaterial.urdf
+            CobotMagicWithGripperV100.urdf
+            CobotMagicWithGripperV100NewUV.urdf
+            CobotMagicWithGripperV100NoMaterial.urdf
+
+    Example usage:
+        >>> from embodichain.data.robot_dataset import CobotMagicArmV3
+        >>> dataset = CobotMagicArmV3()
+        or
+        >>> from dexechain.data import get_data_path
+        >>> print(get_data_path("CobotMagicArmV3/CobotMagicWithGripperV100.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            EMBODICHAIN_DOWNLOAD_PREFIX + "CobotMagicArmV3.zip",
+            "a644707aaddde778806078c173542a6a",
+        )
+        prefix = "CobotMagicArmV3"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
 class RidgeBack(EmbodiChainDataset):
     """Dataset class for the RidgeBack wheeled robot.
 
