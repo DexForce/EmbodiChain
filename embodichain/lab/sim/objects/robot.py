@@ -855,9 +855,9 @@ class Robot(Articulation):
 
         drive_pros = self.cfg.drive_pros
         if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type", None)
+            drive_type = drive_pros.get("drive_type", "force")
         else:
-            drive_type = getattr(drive_pros, "drive_type", None)
+            drive_type = getattr(drive_pros, "drive_type", "force")
 
         # Apply drive parameters to all articulations in the batch
         self.set_drive(

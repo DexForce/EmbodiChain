@@ -32,7 +32,7 @@ The `drive_props` parameter controls the joint physics behavior. It is defined u
 | `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
 | `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
 | `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
-| `drive_type` | `str` | `"force"` | Drive mode: `"force"` or `"acceleration"`. |
+| `drive_type` | `str` | `"force"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
 
 ### Setup & Initialization
 
