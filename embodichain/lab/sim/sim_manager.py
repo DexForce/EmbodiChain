@@ -220,7 +220,8 @@ class SimulationManager:
         self._is_registered_window_control = False
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            self._register_default_window_control()
+            # TODO: To be fixed.
+            # self._register_default_window_control()
 
         fps = int(1.0 / sim_config.physics_dt)
         self._world.set_physics_fps(fps)
@@ -581,7 +582,8 @@ class SimulationManager:
         """Open the simulation window."""
         self._world.open_window()
         self._window = self._world.get_windows()
-        self._register_default_window_control()
+        # TODO: To be fixed.
+        #self._register_default_window_control()
         self.is_window_opened = True
 
     def close_window(self) -> None:
