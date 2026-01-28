@@ -138,7 +138,11 @@ class Trainer:
             self._collect_rollout()
             losses = self.algorithm.update()
             self._log_train(losses)
-            if self.global_step % self.eval_freq == 0:
+            if (
+                self.eval_freq > 0
+                and self.eval_env is not None
+                and self.global_step % self.eval_freq == 0
+            ):
                 self._eval_once(num_episodes=self.num_eval_episodes)
             if self.global_step % self.save_freq == 0:
                 self.save_checkpoint()
