@@ -132,11 +132,7 @@ def run_simulation(sim: SimulationManager):
             if step_count % 100 == 0:
                 current_time = time.time()
                 elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
+                fps = (step_count - last_step) / elapsed if elapsed > 0 else 0
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count

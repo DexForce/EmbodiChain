@@ -194,11 +194,7 @@ def run_simulation(sim, camera):
             if step_count % 1000 == 0:
                 current_time = time.time()
                 elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
+                fps = (step_count - last_step) / elapsed if elapsed > 0 else 0
 
                 # Get camera pose for debugging
                 if sim.has_gizmo("gizmo_camera"):

@@ -111,28 +111,6 @@ def main():
     )
     robot = sim.add_robot(cfg=robot_cfg)
 
-    # Set initial joint positions for both arms
-    left_arm_qpos = torch.tensor(
-        [
-            [0, 0, -np.pi / 4, np.pi / 4, -np.pi / 2, 0.0, np.pi / 4, 0.0]
-        ],  # WAIST + LEFT_J[1-7]
-        dtype=torch.float32,
-        device="cpu",
-    )
-    right_arm_qpos = torch.tensor(
-        [
-            [0, 0, np.pi / 4, -np.pi / 4, np.pi / 2, 0.0, -np.pi / 4, 0.0]
-        ],  # WAIST + RIGHT_J[1-7]
-        dtype=torch.float32,
-        device="cpu",
-    )
-
-    left_joint_ids = robot.get_joint_ids("left_arm")
-    right_joint_ids = robot.get_joint_ids("right_arm")
-
-    robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
-    robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
-
     # Create a rigid object (cube) positioned to the side of the robot
     cube_cfg = RigidObjectCfg(
         uid="interactive_cube",
@@ -165,26 +143,37 @@ def main():
     )
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
+    # Wait for all objects to be initialized before enabling gizmos
+    time.sleep(0.2)
+
     # Enable gizmo for all assets after all are created and initialized
+    logger.log_info("Enabling left arm gizmo...")
     sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
     if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
         logger.log_error("Failed to enable left arm gizmo!")
         return
+    logger.log_info("Left arm gizmo enabled successfully")
 
+    logger.log_info("Enabling right arm gizmo...")
     sim.enable_gizmo(uid="w1_gizmo_test", control_part="right_arm")
     if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
         logger.log_error("Failed to enable right arm gizmo!")
         return
+    logger.log_info("Right arm gizmo enabled successfully")
 
+    logger.log_info("Enabling cube gizmo...")
     sim.enable_gizmo(uid="interactive_cube")
     if not sim.has_gizmo("interactive_cube"):
         logger.log_error("Failed to enable gizmo for cube!")
         return
+    logger.log_info("Cube gizmo enabled successfully")
 
+    logger.log_info("Enabling camera gizmo...")
     sim.enable_gizmo(uid="scene_camera")
     if not sim.has_gizmo("scene_camera"):
         logger.log_error("Failed to enable gizmo for camera!")
         return
+    logger.log_info("Camera gizmo enabled successfully")
 
     sim.open_window()
 
@@ -236,11 +225,7 @@ def run_simulation(sim: SimulationManager):
             if step_count % 100 == 0:
                 current_time = time.time()
                 elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
+                fps = (step_count - last_step) / elapsed if elapsed > 0 else 0
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count

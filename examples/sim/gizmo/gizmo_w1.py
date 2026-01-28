@@ -104,31 +104,6 @@ def main():
     )
     robot = sim.add_robot(cfg=robot_cfg)
 
-    # Set initial joint positions for both arms
-    # Left arm: 8 joints (WAIST + 7 LEFT_J), Right arm: 8 joints (WAIST + 7 RIGHT_J)
-    left_arm_qpos = torch.tensor(
-        [
-            [0, 0, -np.pi / 4, np.pi / 4, -np.pi / 2, 0.0, np.pi / 4, 0.0]
-        ],  # WAIST + LEFT_J[1-7]
-        dtype=torch.float32,
-        device="cpu",
-    )
-    right_arm_qpos = torch.tensor(
-        [
-            [0, 0, np.pi / 4, -np.pi / 4, np.pi / 2, 0.0, -np.pi / 4, 0.0]
-        ],  # WAIST + RIGHT_J[1-7]
-        dtype=torch.float32,
-        device="cpu",
-    )
-
-    left_joint_ids = robot.get_joint_ids("left_arm")
-    right_joint_ids = robot.get_joint_ids("right_arm")
-
-    robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
-    robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
-
-    time.sleep(0.2)  # Wait for a moment to ensure everything is set up
-
     # Enable gizmo for both arms using the new API
     sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
     if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
@@ -163,11 +138,7 @@ def run_simulation(sim: SimulationManager):
             if step_count % 100 == 0:
                 current_time = time.time()
                 elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
+                fps = (step_count - last_step) / elapsed if elapsed > 0 else 0
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count

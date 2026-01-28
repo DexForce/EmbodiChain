@@ -103,7 +103,6 @@ def main():
         sim.enable_gizmo(uid="cube2")
 
     logger.log_info("Scene setup complete!")
-    logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     if not args.headless:
         if sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")
@@ -128,6 +127,7 @@ def run_simulation(sim: SimulationManager):
     try:
         last_time = time.time()
         last_step = 0
+        gizmo_enabled = True
         while True:
             sim.update(step=1)
 
@@ -137,20 +137,17 @@ def run_simulation(sim: SimulationManager):
             step_count += 1
 
             # Disable gizmo after 200000 steps (example)
-            if step_count == 200000 and gizmo_enabled:
+            if step_count == 100000 and gizmo_enabled:
                 logger.log_info("Disabling gizmo at step 200000")
-                sim.disable_gizmo("cube")
+                sim.disable_gizmo("cube1")
+                sim.disable_gizmo("cube2")
                 gizmo_enabled = False
 
             # Print FPS every second
-            if step_count % 1000 == 0:
+            if step_count % 10000 == 0:
                 current_time = time.time()
                 elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
+                fps = (step_count - last_step) / elapsed if elapsed > 0 else 0
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
