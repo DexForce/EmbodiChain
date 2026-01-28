@@ -158,13 +158,19 @@ class record_camera_data(Functor):
 
 
 class record_camera_data_async(record_camera_data):
-    """Record camera data for multiple environments, merge and save as a single video at episode end."""
+    """Record camera data for multiple environments with lazy merging strategy.
+    
+    Strategy:
+    1. During recording: Save each environment's video independently (fast, no blocking)
+    2. After evaluation: Merge videos into grid layout, then delete individual videos
+    """
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
         self._num_envs = min(4, getattr(env, "num_envs", 1))
         self._frames_list = [[] for _ in range(self._num_envs)]
         self._ep_idx = [0 for _ in range(self._num_envs)]
+        self._saved_videos = []  # Track saved videos for merging
 
     def __call__(
         self,
@@ -201,40 +207,143 @@ class record_camera_data_async(record_camera_data):
             elapsed_np = elapsed.cpu().numpy()
         else:
             elapsed_np = elapsed
-        # Only check reset for the first 4 environments
+        # Check which environments just completed an episode
         ready_envs = [
             i
             for i in range(self._num_envs)
             if elapsed_np[i] == 1 and len(self._frames_list[i]) > 1
         ]
-        # Used to temporarily store episode frames for each env
-        if not hasattr(self, "_pending_env_episodes"):
-            self._pending_env_episodes = {}
+        
+        # Save completed episodes immediately (lazy merge mode)
         for i in ready_envs:
-            if i not in self._pending_env_episodes:
-                self._pending_env_episodes[i] = self._frames_list[i][:-1]
-                self._frames_list[i] = [
-                    self._frames_list[i][-1]
-                ]  # Only keep the first frame after reset
+            frames = self._frames_list[i][:-1]  # Exclude reset frame
+            if len(frames) > 0:
+                # Save individual video
+                video_name = f"env{i}_ep{self._ep_idx[i]}_{self._name}"
+                video_path = os.path.join(save_path, f"{video_name}.mp4")
+                images_to_video(frames, save_path, video_name, fps=20)
+                
+                # Track for later merging
+                self._saved_videos.append({
+                    'env_id': i,
+                    'episode': self._ep_idx[i],
+                    'path': video_path,
+                    'name': video_name
+                })
+                
+                # Reset frame list
+                self._frames_list[i] = [self._frames_list[i][-1]]
                 self._ep_idx[i] += 1
-        # If all specified envs have collected frames, concatenate and save
-        if len(self._pending_env_episodes) == self._num_envs:
-            min_len = min(len(frames) for frames in self._pending_env_episodes.values())
-            big_frames = []
-            for j in range(min_len):
-                frames = [
-                    self._pending_env_episodes[i][j] for i in range(self._num_envs)
-                ]
-                frames_tensor = torch.from_numpy(np.stack(frames)).to(torch.uint8)
-                big_frame = (
-                    self._draw_frames_into_one_image(frames_tensor)[..., :3]
-                    .cpu()
-                    .numpy()
-                )
-                big_frames.append(big_frame)
-            video_name = f"ep{self._ep_idx[0]-1}_{self._name}_allenvs"
-            images_to_video(big_frames, save_path, video_name, fps=20)
-            self._pending_env_episodes.clear()
+
+
+    def flush(self, save_path: str = "./outputs/videos"):
+        """Save any remaining frames (called at evaluation end)."""
+        for i in range(self._num_envs):
+            if len(self._frames_list[i]) > 1:  # Has unsaved frames
+                frames = self._frames_list[i]
+                video_name = f"env{i}_ep{self._ep_idx[i]}_{self._name}_final"
+                video_path = os.path.join(save_path, f"{video_name}.mp4")
+                images_to_video(frames, save_path, video_name, fps=20)
+                
+                self._saved_videos.append({
+                    'env_id': i,
+                    'episode': self._ep_idx[i],
+                    'path': video_path,
+                    'name': video_name
+                })
+                
+                self._frames_list[i] = []
+                self._ep_idx[i] += 1
+    
+    def finalize(self, save_path: str = "./outputs/videos"):
+        """Merge individual videos into grid layout, then delete individual files."""
+        # Group videos by episode
+        episodes = {}
+        for video in self._saved_videos:
+            ep = video['episode']
+            if ep not in episodes:
+                episodes[ep] = []
+            episodes[ep].append(video)
+        
+        # Merge each episode's videos into grid
+        for ep_idx, videos in episodes.items():
+            if len(videos) == self._num_envs:
+                # All environments have this episode, merge to grid
+                output_name = f"eval_ep{ep_idx}_{self._name}_grid"
+                output_path = os.path.join(save_path, f"{output_name}.mp4")
+                
+                video_paths = [v['path'] for v in sorted(videos, key=lambda x: x['env_id'])]
+                
+                try:
+                    self._merge_videos_to_grid(video_paths, output_path)
+                    
+                    # Always remove individual videos after successful merge
+                    for path in video_paths:
+                        if os.path.exists(path):
+                            os.remove(path)
+                except Exception as e:
+                    print(f"Warning: Failed to merge episode {ep_idx}: {e}")
+                    # Keep individual videos on failure
+    
+    def _merge_videos_to_grid(self, video_paths: list, output_path: str):
+        """Merge multiple videos into grid layout using numpy/cv2."""
+        import cv2
+        
+        # Read all videos
+        caps = [cv2.VideoCapture(path) for path in video_paths]
+        
+        if not all(cap.isOpened() for cap in caps):
+            for cap in caps:
+                cap.release()
+            raise RuntimeError("Failed to open some videos")
+        
+        # Get video properties from first video
+        fps = int(caps[0].get(cv2.CAP_PROP_FPS))
+        width = int(caps[0].get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(caps[0].get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Calculate grid layout
+        n = len(caps)
+        cols = int(np.ceil(np.sqrt(n)))
+        rows = int(np.ceil(n / cols))
+        
+        # Output dimensions
+        out_width = width * cols
+        out_height = height * rows
+        
+        # Create video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (out_width, out_height))
+        
+        # Read and merge frames
+        while True:
+            frames = []
+            for cap in caps:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+            
+            if len(frames) < n:
+                break
+            
+            # Create grid
+            grid_frame = np.zeros((out_height, out_width, 3), dtype=np.uint8)
+            for idx, frame in enumerate(frames):
+                row = idx // cols
+                col = idx % cols
+                y1 = row * height
+                y2 = y1 + height
+                x1 = col * width
+                x2 = x1 + width
+                grid_frame[y1:y2, x1:x2] = frame
+            
+            out.write(grid_frame)
+        
+        # Cleanup
+        for cap in caps:
+            cap.release()
+        out.release()
 
 
 class validation_cameras(Functor):
