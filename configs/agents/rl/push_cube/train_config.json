@@ -10,6 +10,7 @@
         "num_envs": 64,
         "iterations": 1000,
         "rollout_steps": 1024,
+        "enable_eval": false,
         "num_eval_episodes": 3,
         "eval_freq": 200,
         "save_freq": 200,
