@@ -262,6 +262,19 @@ class Trainer:
                         self.eval_event_manager.apply(mode="interval")
 
             returns.extend(ep_ret.detach().cpu().tolist())
+        
+        # Flush and finalize video recording
+        if hasattr(self, "eval_event_manager"):
+            for functor_cfg in self.eval_event_manager._mode_functors.get("interval", []):
+                functor = functor_cfg.func
+                # Flush remaining frames
+                if hasattr(functor, "flush"):
+                    save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
+                    functor.flush(save_path)
+                # Merge videos to grid
+                if hasattr(functor, "finalize"):
+                    functor.finalize(save_path)
+        
         if self.writer and len(returns) > 0:
             self.writer.add_scalar(
                 "eval/avg_reward", float(np.mean(returns)), self.global_step
