@@ -14,14 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from abc import ABCMeta, abstractmethod
+import os
+from embodichain.utils.utility import load_json
 
-from pathlib import Path
 
-EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/"
-)
-EMBODICHAIN_DEFAULT_DATA_ROOT = str(Path.home() / ".cache" / "embodichain_data")
-EMBODICHAIN_DEFAULT_DATASET_ROOT = str(Path.home() / ".cache" / "embodichain_datasets")
-EMBODICHAIN_DEFAULT_DATABASE_ROOT = str(
-    Path.home() / ".cache" / "embodichain" / "database"
-)
+class ToolkitsBase(metaclass=ABCMeta):
+    @classmethod
+    def from_config(cls, path: str):
+        assert (
+            os.path.basename(path).split(".")[-1] == "json"
+        ), "only json file is supported."
+        config = load_json(path)
+        return config["ToolKits"][cls.__name__]
+
+    @abstractmethod
+    def call(self, **kwargs):
+        pass

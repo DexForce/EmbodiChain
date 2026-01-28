@@ -26,8 +26,13 @@ from embodichain.lab.gym.envs.rl_env import RLEnv
 # Specific task environments
 from embodichain.lab.gym.envs.tasks.tableware.pour_water.pour_water import (
     PourWaterEnv,
+    PourWaterAgentEnv,
 )
 from embodichain.lab.gym.envs.tasks.tableware.scoop_ice import ScoopIce
+from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
+    RearrangementEnv,
+    RearrangementAgentEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
