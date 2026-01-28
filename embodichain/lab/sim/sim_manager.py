@@ -1515,6 +1515,11 @@ class SimulationManager:
         """Register default window controls for better simulation interaction."""
         from dexsim.types import InputKey
 
+        # TODO: window control has stucking issue with extra sensor under Raster renderer backend.
+        # Will be fixed in next dexsim release.
+        if self.is_rt_enabled is False:
+            return
+
         if self._is_registered_window_control:
             return
 
