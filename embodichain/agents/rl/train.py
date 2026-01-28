@@ -67,6 +67,7 @@ def train_from_config(config_path: str):
     rollout_steps = int(trainer_cfg.get("rollout_steps", 2048))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
+    num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
     headless = bool(trainer_cfg.get("headless", True))
     enable_rt = bool(trainer_cfg.get("enable_rt", False))
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
@@ -256,6 +257,7 @@ def train_from_config(config_path: str):
         eval_env=eval_env,
         event_cfg=train_event_cfg,
         eval_event_cfg=eval_event_cfg,
+        num_eval_episodes=num_eval_episodes,
     )
 
     logger.log_info("Generic training initialized")

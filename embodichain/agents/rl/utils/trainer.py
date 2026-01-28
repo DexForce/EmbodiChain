@@ -47,6 +47,7 @@ class Trainer:
         eval_env=None,
         event_cfg=None,
         eval_event_cfg=None,
+        num_eval_episodes: int = 5,
     ):
         self.policy = policy
         self.env = env
@@ -60,6 +61,7 @@ class Trainer:
         self.checkpoint_dir = checkpoint_dir
         self.exp_name = exp_name
         self.use_wandb = use_wandb
+        self.num_eval_episodes = num_eval_episodes
 
         if event_cfg is not None:
             self.event_manager = EventManager(event_cfg, env=self.env)
@@ -137,7 +139,7 @@ class Trainer:
             losses = self.algorithm.update()
             self._log_train(losses)
             if self.global_step % self.eval_freq == 0:
-                self._eval_once()
+                self._eval_once(num_episodes=self.num_eval_episodes)
             if self.global_step % self.save_freq == 0:
                 self.save_checkpoint()
 
@@ -262,19 +264,23 @@ class Trainer:
                         self.eval_event_manager.apply(mode="interval")
 
             returns.extend(ep_ret.detach().cpu().tolist())
-        
+
         # Flush and finalize video recording
         if hasattr(self, "eval_event_manager"):
-            for functor_cfg in self.eval_event_manager._mode_functors.get("interval", []):
+            for functor_cfg in self.eval_event_manager._mode_functor_cfgs.get(
+                "interval", []
+            ):
                 functor = functor_cfg.func
                 # Flush remaining frames
                 if hasattr(functor, "flush"):
-                    save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
+                    save_path = functor_cfg.params.get(
+                        "save_path", "./outputs/videos/eval"
+                    )
                     functor.flush(save_path)
                 # Merge videos to grid
                 if hasattr(functor, "finalize"):
                     functor.finalize(save_path)
-        
+
         if self.writer and len(returns) > 0:
             self.writer.add_scalar(
                 "eval/avg_reward", float(np.mean(returns)), self.global_step
