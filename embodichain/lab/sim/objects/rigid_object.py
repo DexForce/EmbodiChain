@@ -80,6 +80,13 @@ class RigidBodyData:
         self._ang_vel = torch.zeros(
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
+        # center of mass pose in format (x, y, z, qw, qx, qy, qz)
+        self.default_com_pose = torch.zeros(
+            (self.num_instances, 7), dtype=torch.float32, device=self.device
+        )
+        self._com_pose = torch.zeros(
+            (self.num_instances, 7), dtype=torch.float32, device=self.device
+        )
 
     @property
     def pose(self) -> torch.Tensor:
@@ -154,6 +161,23 @@ class RigidBodyData:
         """
         return torch.cat((self.lin_vel, self.ang_vel), dim=-1)
 
+    @property
+    def com_pose(self) -> torch.Tensor:
+        """Get the center of mass pose of the rigid bodies.
+
+        Returns:
+            torch.Tensor: The center of mass pose with shape (N, 7).
+        """
+        for i, entity in enumerate(self.entities):
+            pos, quat = entity.get_physical_body().get_cmass_local_pose()
+            self._com_pose[i, :3] = torch.as_tensor(
+                pos, dtype=torch.float32, device=self.device
+            )
+            self._com_pose[i, 3:7] = torch.as_tensor(
+                quat, dtype=torch.float32, device=self.device
+            )
+        return self._com_pose
+
 
 class RigidObject(BatchEntity):
     """RigidObject represents a batch of rigid body in the simulation.
@@ -197,6 +221,10 @@ class RigidObject(BatchEntity):
 
         # set default collision filter
         self._set_default_collision_filter()
+
+        # update default center of mass pose (only for non-static bodies with body data).
+        if self.body_data is not None:
+            self.body_data.default_com_pose = self.body_data.com_pose.clone()
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
@@ -625,6 +653,60 @@ class RigidObject(BatchEntity):
                 self._entities[env_idx].set_body_scale(*scale)
         else:
             logger.log_error(f"Setting body scale on GPU is not supported yet.")
+
+    def set_com_pose(
+        self, com_pose: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set the center of mass pose of the rigid body. The pose format is (x, y, z, qw, qx, qy, qz).
+
+        Args:
+            com_pose (torch.Tensor): The center of mass pose to set with shape (N, 7).
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        if self.is_non_dynamic:
+            logger.log_warning(
+                "Cannot set center of mass pose for non-dynamic rigid body."
+            )
+            return
+
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(com_pose):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match com_pose length {len(com_pose)}."
+            )
+
+        com_pose = com_pose.cpu().numpy()
+        for i, env_idx in enumerate(local_env_ids):
+            pos = com_pose[i, :3]
+            quat = com_pose[i, 3:7]
+            self._entities[env_idx].get_physical_body().set_cmass_local_pose(pos, quat)
+
+    def set_body_type(self, body_type: str) -> None:
+        """Set the body type of the rigid object.
+
+        Note:
+            Only 'dynamic' and 'kinematic' body types are supported and can be changed at runtime.
+
+        Args:
+            body_type (str): The body type to set. Must be one of 'dynamic', or 'kinematic'.
+        """
+        from dexsim.types import ActorType
+
+        if body_type not in ("dynamic", "kinematic"):
+            logger.log_error(
+                f"Invalid body type {body_type}. Must be one of 'dynamic', or 'kinematic'."
+            )
+
+        if body_type == "dynamic":
+            actor_type = ActorType.DYNAMIC
+        else:
+            actor_type = ActorType.KINEMATIC
+
+        for entity in self._entities:
+            entity.set_actor_type(actor_type)
+
+        self.body_type = body_type
 
     def get_vertices(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """

@@ -17,11 +17,12 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING, Union, List
+from typing import TYPE_CHECKING
 
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.utils.math import sample_uniform
+from embodichain.utils import logger
 
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 def randomize_rigid_object_mass(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, List[int]],
+    env_ids: torch.Tensor | list[int],
     entity_cfg: SceneEntityCfg,
     mass_range: tuple[float, float],
     relative: bool = False,
@@ -39,7 +40,7 @@ def randomize_rigid_object_mass(
 
     Args:
         env (EmbodiedEnv): The environment instance.
-        env_ids (Union[torch.Tensor, List[int]]): The environment IDs to apply the randomization.
+        env_ids (torch.Tensor | list[int]): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration for the scene entity.
         mass_range (tuple[float, float]): The range (min, max) to sample the mass from.
         relative (bool): Whether to apply the mass change relative to the initial mass. Defaults to False.
@@ -61,3 +62,43 @@ def randomize_rigid_object_mass(
         sampled_masses = init_mass + sampled_masses
 
     rigid_object.set_mass(sampled_masses, env_ids=env_ids)
+
+
+def randomize_rigid_object_center_of_mass(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | list[int],
+    entity_cfg: SceneEntityCfg,
+    com_pos_offset_range: tuple[list[float], list[float]],
+) -> None:
+    """Randomize the center of mass of rigid objects in the environment.
+
+    Args:
+        env (EmbodiedEnv): The environment instance.
+        env_ids (torch.Tensor | list[int]): The environment IDs to apply the randomization.
+        entity_cfg (SceneEntityCfg): The configuration for the scene entity.
+        com_pos_offset_range (tuple[list[float], list[float]]): The range (min, max) to sample the center of mass offset from.
+    """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return
+
+    rigid_object: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
+    if rigid_object.is_non_dynamic:
+        logger.log_warning(
+            f"Cannot randomize center of mass for non-dynamic rigid object '{entity_cfg.uid}'."
+        )
+        return
+
+    num_instance = len(env_ids)
+
+    sampled_com_pos_offsets = sample_uniform(
+        lower=com_pos_offset_range[0],
+        upper=com_pos_offset_range[1],
+        size=(num_instance, 3),
+    )
+
+    com = rigid_object.body_data.default_com_pose[env_ids]
+    updated_com = com.clone()
+    updated_com[:, 0:3] += sampled_com_pos_offsets
+
+    rigid_object.set_com_pose(updated_com, env_ids=env_ids)
