@@ -222,8 +222,9 @@ class RigidObject(BatchEntity):
         # set default collision filter
         self._set_default_collision_filter()
 
-        # update default center of mass pose.
-        self.body_data.default_com_pose = self.body_data.com_pose.clone()
+        # update default center of mass pose (only for non-static bodies with body data).
+        if self.body_data is not None:
+            self.body_data.default_com_pose = self.body_data.com_pose.clone()
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
@@ -662,6 +663,12 @@ class RigidObject(BatchEntity):
             com_pose (torch.Tensor): The center of mass pose to set with shape (N, 7).
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
+        if self.is_non_dynamic:
+            logger.log_warning(
+                "Cannot set center of mass pose for non-dynamic rigid body."
+            )
+            return
+
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         if len(local_env_ids) != len(com_pose):
