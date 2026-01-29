@@ -185,8 +185,8 @@ class record_camera_data_async(record_camera_data):
         self._num_envs = min(4, total_envs)
         self._frames_list = [[] for _ in range(self._num_envs)]
         self._ep_idx = [0 for _ in range(self._num_envs)]
-        self._saved_videos = []  # Track saved videos for merging
-        self._fps = cfg.params.get("fps", 20)  # Configurable FPS
+        self._saved_videos = []
+        self._fps = cfg.params.get("fps", 20)
 
     def __call__(
         self,
@@ -205,6 +205,7 @@ class record_camera_data_async(record_camera_data):
         ),
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
+        fps: int = 20,
     ):
         self.camera.update(fetch_only=self.camera.is_rt_enabled)
         data = self.camera.get_data()
