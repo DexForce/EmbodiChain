@@ -43,13 +43,7 @@
             "components": [
                 {
                     "component_type": "arm",
-                    "urdf_path": "CartPole/cart_pole.urdf",
-                    "transform": [
-                        [1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0]
-                    ]
+                    "urdf_path": "CartPole/cart_pole.urdf"
                 }
             ]
         },
