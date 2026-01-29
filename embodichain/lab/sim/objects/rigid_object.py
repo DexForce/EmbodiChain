@@ -675,6 +675,32 @@ class RigidObject(BatchEntity):
             quat = com_pose[i, 3:7]
             self._entities[env_idx].get_physical_body().set_cmass_local_pose(pos, quat)
 
+    def set_body_type(self, body_type: str) -> None:
+        """Set the body type of the rigid object.
+
+        Note:
+            Only 'dynamic' and 'kinematic' body types are supported and can be changed at runtime.
+
+        Args:
+            body_type (str): The body type to set. Must be one of 'dynamic', or 'kinematic'.
+        """
+        from dexsim.types import ActorType
+
+        if body_type not in ("dynamic", "kinematic"):
+            logger.log_error(
+                f"Invalid body type {body_type}. Must be one of 'dynamic', or 'kinematic'."
+            )
+
+        if body_type == "dynamic":
+            actor_type = ActorType.DYNAMIC
+        else:
+            actor_type = ActorType.KINEMATIC
+
+        for entity in self._entities:
+            entity.set_actor_type(actor_type)
+
+        self.body_type = body_type
+
     def get_vertices(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """
         Retrieve the vertices of the rigid objects.
