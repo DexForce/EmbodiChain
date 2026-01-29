@@ -489,6 +489,24 @@ class randomize_visual_material(Functor):
                 self.entity_cfg.link_names = link_names
                 self.entity.set_visual_material(mat, link_names=link_names)
 
+    @staticmethod
+    def gen_random_base_color_texture(width: int, height: int) -> torch.Tensor:
+        """Generate a random base color texture.
+
+        Args:
+            width: The width of the texture.
+            height: The height of the texture.
+
+        Returns:
+            A torch tensor representing the random base color texture with shape (height, width, 4).
+        """
+        # Generate random RGB values
+        rgb = torch.ones((height, width, 3), dtype=torch.float32)
+        rgb *= torch.rand((1, 1, 3), dtype=torch.float32)
+        rgba = torch.cat((rgb, torch.ones((height, width, 1))), dim=2)
+        rgba = (rgba * 255).to(torch.uint8)
+        return rgba
+
     def _randomize_texture(self, mat_inst: VisualMaterialInst) -> None:
         if len(self.textures) > 0:
             # Randomly select a texture from the preloaded textures
@@ -502,17 +520,21 @@ class randomize_visual_material(Functor):
         random_texture_prob: float,
         idx: int = 0,
     ) -> None:
-
         # randomize texture or base color based on the probability.
         if random.random() < random_texture_prob and len(self.textures) != 0:
-            self._randomize_texture(mat_inst)
-        else:
-            # randomize the material instance pbr properties based on the plan.
             for key, value in plan.items():
                 if key == "base_color":
                     mat_inst.set_base_color(value[idx].tolist())
                 else:
                     getattr(mat_inst, f"set_{key}")(value[idx].item())
+
+            self._randomize_texture(mat_inst)
+        else:
+            # set a random base color instead.
+            random_color_texture = (
+                randomize_visual_material.gen_random_base_color_texture(2, 2)
+            )
+            mat_inst.set_base_color_texture(texture_data=random_color_texture)
 
     def __call__(
         self,
