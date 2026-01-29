@@ -18,7 +18,7 @@
 from pathlib import Path
 
 EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://huggingface.co/datasets/dexforce/embodichain_data/resolve/main/"
+    "https://hf-mirror.com/datasets/dexforce/embodichain_data/resolve/main/"
 )
 EMBODICHAIN_DEFAULT_DATA_ROOT = str(Path.home() / ".cache" / "embodichain_data")
 EMBODICHAIN_DEFAULT_DATASET_ROOT = str(Path.home() / ".cache" / "embodichain_datasets")
