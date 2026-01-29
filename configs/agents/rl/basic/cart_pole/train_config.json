@@ -13,7 +13,7 @@
         "eval_freq": 200,
         "save_freq": 200,
         "use_wandb": false,
-        "wandb_project_name": "embodychain-push_cube",
+        "wandb_project_name": "embodychain-cart_pole",
         "events": {
             "eval": {
                 "record_camera": {

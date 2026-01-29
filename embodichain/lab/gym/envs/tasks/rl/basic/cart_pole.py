@@ -25,16 +25,40 @@ from embodichain.lab.sim.types import EnvObs
 
 @register_env("CartPoleRL", max_episode_steps=50, override=True)
 class CartPoleEnv(RLEnv):
-    """Push cube task for reinforcement learning.
+    """
+    CartPole balancing task for reinforcement learning.
 
-    The task involves pushing a cube to a target goal position using a robotic arm.
-    The reward consists of reaching reward, placing reward, action penalty, and success bonus.
+    The agent controls a cart (robot hand joint) to keep a pole balanced near the upright
+    position by regulating its angle and angular velocity. Episodes are considered
+    successful when the pole remains close to vertical with low velocity, and they
+    terminate either when a maximum number of steps is reached or when the pole falls
+    beyond an allowed tilt threshold.
     """
 
     def __init__(self, cfg=None, **kwargs):
         if cfg is None:
             cfg = EmbodiedEnvCfg()
         super().__init__(cfg, **kwargs)
+
+    def get_reward(self, obs, action, info):
+        """Get the reward for the current step (pole upward reward).
+
+        Each SimulationManager env must implement its own get_reward function to define the reward function for the task, If the
+        env is considered for RL/IL training.
+
+        Args:
+            obs: The observation from the environment.
+            action: The action applied to the robot agent.
+            info: The info dictionary.
+
+        Returns:
+            The reward for the current step.
+        """
+        pole_qpos = self.robot.get_qpos(name="hand").reshape(-1)  # [num_envs, ]
+
+        normalized_upward = torch.abs(pole_qpos) / torch.pi
+        reward = 1.0 - normalized_upward
+        return reward
 
     def compute_task_state(
         self, **kwargs

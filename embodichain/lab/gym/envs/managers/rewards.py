@@ -658,18 +658,3 @@ def incremental_distance_to_target(
     env._reward_states[state_key] = current_dist.clone()
 
     return reward
-
-
-def pole_upward(
-    env: EmbodiedEnv,
-    obs: dict,
-    action: torch.Tensor | dict,
-    info: dict,
-    object_cfg: SceneEntityCfg = None,
-):
-    robot = env.robot
-    pole_qpos = robot.get_qpos(name="hand").reshape(-1)  # [num_envs, ]
-
-    normalized_upward = torch.abs(pole_qpos) / torch.pi
-    reward = 1.0 - normalized_upward
-    return reward

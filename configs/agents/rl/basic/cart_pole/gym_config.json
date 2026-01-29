@@ -14,12 +14,6 @@
             }
         },
         "rewards": {
-            "upward_reward": {
-                "func": "pole_upward",
-                "mode": "add",
-                "weight": 1.0,
-                "params": {}
-            },
             "velocity_penalty": {
                 "func": "joint_velocity_penalty",
                 "mode": "add",
