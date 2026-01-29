@@ -156,4 +156,3 @@ def randomize_rigid_object_body_scale(
         scale_factor_range=scale_range,
         same_scale_all_axes=same_scale_all_axes,
     )
-

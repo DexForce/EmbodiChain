@@ -83,10 +83,10 @@ def set_rigid_object_visual_material(
         mat_cfg = VisualMaterialCfg.from_dict(mat_cfg)
 
     mat_cfg = copy.deepcopy(mat_cfg)
-    
+
     if not mat_cfg.uid or mat_cfg.uid == "default_mat":
         mat_cfg.uid = f"{entity_cfg.uid}_mat"
-    
+
     mat = env.sim.create_visual_material(mat_cfg)
     obj: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
     obj.set_visual_material(mat, env_ids=env_ids)

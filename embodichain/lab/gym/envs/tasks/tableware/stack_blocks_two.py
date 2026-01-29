@@ -60,21 +60,21 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         # Get block positions
         block1_pose = block1.get_local_pose(to_matrix=True)
         block2_pose = block2.get_local_pose(to_matrix=True)
-        
+
         block1_pos = block1_pose[:, :3, 3]  # (num_envs, 3)
         block2_pos = block2_pose[:, :3, 3]  # (num_envs, 3)
 
         right_arm_ids = self.robot.get_joint_ids(name="right_arm")
         right_eef_ids = self.robot.get_joint_ids(name="right_eef")
-        
+
         init_qpos = self.robot.get_qpos()
-        init_right_arm_qpos = init_qpos[:, right_arm_ids]  
-        
+        init_right_arm_qpos = init_qpos[:, right_arm_ids]
+
         init_right_arm_xpos = self.robot.compute_fk(
             qpos=init_right_arm_qpos, name="right_arm", to_matrix=True
-        ) 
+        )
 
-        # 1. Approach block_2 
+        # 1. Approach block_2
         approach_block2_xpos = init_right_arm_xpos.clone()
         approach_block2_xpos[:, :3, 3] = block2_pos + torch.tensor(
             [0.02, 0.0, 0.1], dtype=torch.float32, device=self.device
@@ -90,7 +90,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         lift_block2_xpos = pick_block2_xpos.clone()
         lift_block2_xpos[:, 2, 3] += 0.15
 
-        # 4. Approach block_1 
+        # 4. Approach block_1
         approach_block1_xpos = init_right_arm_xpos.clone()
         target_place_pos = block1_pos.clone()
         target_place_pos[:, 2] += 0.05  # block_1 height + block_2 height
@@ -106,7 +106,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
 
         # 6. Retract
         retract_xpos = approach_block1_xpos.clone()
-        
+
         retract_xpos[:, 2, 3] += 0.1
 
         # Compute IK for each waypoint
@@ -121,18 +121,20 @@ class StackBlocksTwoEnv(EmbodiedEnv):
 
         qpos_waypoints = []
         current_qpos = init_right_arm_qpos
-        
+
         for waypoint_name, waypoint_xpos in waypoints:
             is_success, qpos = self.robot.compute_ik(
                 pose=waypoint_xpos, joint_seed=current_qpos, name="right_arm"
             )
-            
+
             # Check IK success
-            success_flag = is_success.all() if isinstance(is_success, torch.Tensor) else is_success
+            success_flag = (
+                is_success.all() if isinstance(is_success, torch.Tensor) else is_success
+            )
             if not success_flag:
                 logger.log_warning(f"IK failed for {waypoint_name}")
                 qpos = current_qpos
-            
+
             qpos_waypoints.append(qpos)
             current_qpos = qpos
 
@@ -146,24 +148,28 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         )
 
         action_list = []
-        
-        gripper_open = torch.tensor([0.05, 0.05], dtype=torch.float32, device=self.device)
-        gripper_close = torch.tensor([0.0, 0.0], dtype=torch.float32, device=self.device)
-        
+
+        gripper_open = torch.tensor(
+            [0.05, 0.05], dtype=torch.float32, device=self.device
+        )
+        gripper_close = torch.tensor(
+            [0.0, 0.0], dtype=torch.float32, device=self.device
+        )
+
         # Convert waypoints to numpy for motion generator
         qpos_waypoints_np = [q[0].cpu().numpy() for q in qpos_waypoints]
-        
+
         # Generate trajectory segments
         segments = [
-            (0, 1, 30, gripper_open),   
-            (1, 1, 10, gripper_close),  
-            (1, 2, 30, gripper_close),   
-            (2, 3, 40, gripper_close),  
-            (3, 4, 30, gripper_close),   
-            (4, 4, 10, gripper_open),   
-            (4, 5, 30, gripper_open),    
+            (0, 1, 30, gripper_open),
+            (1, 1, 10, gripper_close),
+            (1, 2, 30, gripper_close),
+            (2, 3, 40, gripper_close),
+            (3, 4, 30, gripper_close),
+            (4, 4, 10, gripper_open),
+            (4, 5, 30, gripper_open),
         ]
-        
+
         for start_idx, end_idx, num_steps, gripper_state in segments:
             if start_idx == end_idx:
                 # Hold position (for gripper action)
@@ -178,7 +184,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             else:
                 # Generate smooth trajectory between waypoints
                 qpos_list = [qpos_waypoints_np[start_idx], qpos_waypoints_np[end_idx]]
-                
+
                 out_qpos_list, _ = motion_gen.create_discrete_trajectory(
                     qpos_list=qpos_list,
                     is_linear=False,
@@ -186,21 +192,23 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                     sample_num=num_steps,
                     is_use_current_qpos=False,
                 )
-                
+
                 # Convert to torch and add to action list
                 for qpos_item in out_qpos_list:
-                    qpos = torch.as_tensor(qpos_item, dtype=torch.float32, device=self.device)
-                    
+                    qpos = torch.as_tensor(
+                        qpos_item, dtype=torch.float32, device=self.device
+                    )
+
                     qpos = qpos.flatten()
-                    
+
                     if qpos.shape[0] != len(right_arm_ids):
                         logger.log_warning(
                             f"Qpos shape mismatch: got {qpos.shape[0]}, expected {len(right_arm_ids)}"
                         )
                         continue
-                    
+
                     qpos = qpos.unsqueeze(0).expand(self.num_envs, -1)
-                    
+
                     action = init_qpos.clone()
                     action[:, right_arm_ids] = qpos
                     action[:, right_eef_ids] = gripper_state.unsqueeze(0).expand(

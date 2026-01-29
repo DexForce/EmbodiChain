@@ -107,7 +107,9 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         gripper_open = torch.tensor(
             [0.05, 0.05], dtype=torch.float32, device=self.device
         )
-        gripper_close = torch.tensor([0.0, 0.0], dtype=torch.float32, device=self.device)
+        gripper_close = torch.tensor(
+            [0.0, 0.0], dtype=torch.float32, device=self.device
+        )
 
         action_list = []
 
@@ -161,7 +163,9 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                 is_use_current_qpos=False,
             )
             for qpos_item in out_qpos_list:
-                qpos = torch.as_tensor(qpos_item, dtype=torch.float32, device=self.device)
+                qpos = torch.as_tensor(
+                    qpos_item, dtype=torch.float32, device=self.device
+                )
                 qpos = qpos.flatten()
                 if qpos.shape[0] != len(arm_ids):
                     logger.log_warning(
