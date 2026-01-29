@@ -451,9 +451,14 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
 
             # Check if this is a functor configuration (has "func" field) or a plain config
             if "func" in dataset_params:
+                # Extract function name if format is "module:ClassName"
+                func_name = dataset_params["func"]
+                if ":" in func_name:
+                    func_name = func_name.split(":")[-1]
+
                 # Find the function from multiple modules using the utility function
                 dataset_func = find_function_from_modules(
-                    dataset_params["func"],
+                    func_name,
                     dataset_modules,
                     raise_if_not_found=True,
                 )
@@ -478,6 +483,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             "embodichain.lab.gym.envs.managers.randomization",
             "embodichain.lab.gym.envs.managers.record",
             "embodichain.lab.gym.envs.managers.events",
+            "embodichain.lab.gym.envs.managers.real2sim",
         ]
 
         # parser env events config

@@ -39,12 +39,20 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
 
-def main():
+def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to JSON config")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    with open(args.config, "r") as f:
+
+def train_from_config(config_path: str):
+    """Run training from a config file path.
+
+    Args:
+        config_path: Path to the JSON config file
+    """
+    with open(config_path, "r") as f:
         cfg_json = json.load(f)
 
     trainer_cfg = cfg_json["trainer"]
@@ -57,8 +65,10 @@ def main():
     device_str = trainer_cfg.get("device", "cpu")
     iterations = int(trainer_cfg.get("iterations", 250))
     rollout_steps = int(trainer_cfg.get("rollout_steps", 2048))
+    enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
+    num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
     headless = bool(trainer_cfg.get("headless", True))
     enable_rt = bool(trainer_cfg.get("enable_rt", False))
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
@@ -151,11 +161,17 @@ def main():
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
 
-    eval_gym_env_cfg = deepcopy(gym_env_cfg)
-    eval_gym_env_cfg.num_envs = 4
-    eval_gym_env_cfg.sim_cfg.headless = True
-
-    eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
+    # Create evaluation environment only if enabled
+    eval_env = None
+    num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
+    if enable_eval:
+        eval_gym_env_cfg = deepcopy(gym_env_cfg)
+        eval_gym_env_cfg.num_envs = num_eval_envs
+        eval_gym_env_cfg.sim_cfg.headless = True
+        eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
+        logger.log_info(
+            f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
+        )
 
     # Build Policy via registry
     policy_name = policy_block["name"]
@@ -218,21 +234,22 @@ def main():
             params=params,
             interval_step=interval_step,
         )
-    # Parse eval events
-    for event_name, event_info in events_dict.get("eval", {}).items():
-        event_func_str = event_info.get("func")
-        mode = event_info.get("mode", "interval")
-        params = event_info.get("params", {})
-        interval_step = event_info.get("interval_step", 1)
-        event_func = find_function_from_modules(
-            event_func_str, event_modules, raise_if_not_found=True
-        )
-        eval_event_cfg[event_name] = EventCfg(
-            func=event_func,
-            mode=mode,
-            params=params,
-            interval_step=interval_step,
-        )
+    # Parse eval events (only if evaluation is enabled)
+    if enable_eval:
+        for event_name, event_info in events_dict.get("eval", {}).items():
+            event_func_str = event_info.get("func")
+            mode = event_info.get("mode", "interval")
+            params = event_info.get("params", {})
+            interval_step = event_info.get("interval_step", 1)
+            event_func = find_function_from_modules(
+                event_func_str, event_modules, raise_if_not_found=True
+            )
+            eval_event_cfg[event_name] = EventCfg(
+                func=event_func,
+                mode=mode,
+                params=params,
+                interval_step=interval_step,
+            )
     trainer = Trainer(
         policy=policy,
         env=env,
@@ -240,14 +257,15 @@ def main():
         num_steps=rollout_steps,
         batch_size=algo_cfg["batch_size"],
         writer=writer,
-        eval_freq=eval_freq,
+        eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
         save_freq=save_freq,
         checkpoint_dir=checkpoint_dir,
         exp_name=exp_name,
         use_wandb=use_wandb,
-        eval_env=eval_env,
+        eval_env=eval_env,  # None if enable_eval=False
         event_cfg=train_event_cfg,
-        eval_event_cfg=eval_event_cfg,
+        eval_event_cfg=eval_event_cfg if enable_eval else {},
+        num_eval_episodes=num_eval_episodes,
     )
 
     logger.log_info("Generic training initialized")
@@ -274,7 +292,27 @@ def main():
                 wandb.finish()
             except Exception:
                 pass
+
+        # Clean up environments to prevent resource leaks
+        try:
+            if env is not None:
+                env.close()
+        except Exception as e:
+            logger.log_warning(f"Failed to close training environment: {e}")
+
+        try:
+            if eval_env is not None:
+                eval_env.close()
+        except Exception as e:
+            logger.log_warning(f"Failed to close evaluation environment: {e}")
+
         logger.log_info("Training finished")
+
+
+def main():
+    """Main entry point for command-line training."""
+    args = parse_args()
+    train_from_config(args.config)
 
 
 if __name__ == "__main__":

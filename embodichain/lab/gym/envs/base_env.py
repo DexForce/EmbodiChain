@@ -482,6 +482,22 @@ class BaseEnv(gym.Env):
 
         return rewards
 
+    def _preprocess_action(self, action: EnvAction) -> EnvAction:
+        """Preprocess action before sending to robot.
+
+        Override this method to add custom preprocessing like:
+        - Action scaling
+        - Coordinate transformation (e.g., EEF pose to joint positions)
+        - Action space conversion
+
+        Args:
+            action: Raw action from policy
+
+        Returns:
+            Preprocessed action
+        """
+        return action
+
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
 
@@ -536,7 +552,7 @@ class BaseEnv(gym.Env):
         """
         self._elapsed_steps += 1
 
-        # TODO: may be add hook for action preprocessing.
+        action = self._preprocess_action(action=action)
         action = self._step_action(action=action)
         self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
         self._update_sim_state(**kwargs)

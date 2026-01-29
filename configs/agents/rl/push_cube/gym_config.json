@@ -2,8 +2,6 @@
     "id": "PushCubeRL",
     "max_episodes": 5,
     "env": {
-        "num_envs": 128,
-        "sim_steps_per_control": 4,
         "events": {
             "randomize_cube": {
                 "func": "randomize_rigid_object_pose",
@@ -113,9 +111,8 @@
             }
         },
         "extensions": {
-            "obs_mode": "state",
+            "action_type": "delta_qpos",
             "episode_length": 100,
-            "joint_limits": 0.5,
             "action_scale": 0.1,
             "success_threshold": 0.1
         }

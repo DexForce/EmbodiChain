@@ -32,9 +32,11 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.utils.logger import log_warning, log_info, log_error
 
 
-def generate_and_execute_action_list(env, idx, debug_mode):
+def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
 
-    action_list = env.get_wrapper_attr("create_demo_action_list")(action_sentence=idx)
+    action_list = env.get_wrapper_attr("create_demo_action_list")(
+        action_sentence=idx, **kwargs
+    )
 
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
@@ -86,29 +88,17 @@ def generate_function(
     while True:
         ret = []
         for trajectory_idx in range(num_traj):
-            valid = generate_and_execute_action_list(env, trajectory_idx, debug_mode)
+            valid = generate_and_execute_action_list(
+                env, trajectory_idx, debug_mode, **kwargs
+            )
 
             if not valid:
-                _, _ = env.reset()
+                # Failed execution: reset without saving invalid data
+                _, _ = env.reset(options={"save_data": False})
                 break
 
-            # Check task success for all environments
-            if not debug_mode:
-                success = env.get_wrapper_attr("is_task_success")()
-                # For multiple environments, check if all succeeded
-                all_success = (
-                    success.all().item() if success.numel() > 1 else success.item()
-                )
-                if all_success:
-                    pass
-                    # TODO: Add data saving and online data streaming logic here.
-                else:
-                    log_warning(f"Task fail, Skip to next generation.")
-                    valid = False
-                    break
-            else:
-                # In debug mode, skip success check
-                pass
+            # Successful execution: reset and save data
+            _, _ = env.reset()
 
         if valid:
             break
@@ -124,14 +114,15 @@ def main(args, env, gym_config):
     log_info("Start offline data generation.", color="green")
     # TODO: Support multiple trajectories per episode generation.
     num_traj = 1
-    for i in range(gym_config["max_episodes"]):
+    for i in range(gym_config.get("max_episodes", 1)):
         generate_function(
             env,
             num_traj,
             i,
-            save_path=args.save_path,
-            save_video=args.save_video,
+            save_path=getattr(args, "save_path", ""),
+            save_video=getattr(args, "save_video", False),
             debug_mode=args.debug_mode,
+            regenerate=getattr(args, "regenerate", False),
         )
 
 

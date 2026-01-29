@@ -9,8 +9,6 @@ EmbodiChain
 .. image:: ../../assets/imgs/teaser.jpg
    :alt: teaser
 
-📘 `Documentation <https://dexforce.github.io/EmbodiChain/introduction.html>`_
-
 ---
 
 EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, real-to-sim data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.

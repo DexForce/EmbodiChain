@@ -287,16 +287,18 @@ class Robot(Articulation):
                 target=target,
             )
 
-    def get_qpos(self, name: str | None = None) -> torch.Tensor:
+    def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:
         """Get the joint positions (qpos) of the robot.
 
         Args:
             name (str | None): The name of the control part to get the qpos for. If None, the default part is used.
+            target (bool): If True, gets target positions for simulation. If False, gets current positions. The default is False.
+
         Returns:
             torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.
         """
 
-        qpos = super().get_qpos()
+        qpos = super().get_qpos(target=target)
         if name is None:
             return qpos
         else:
@@ -350,16 +352,18 @@ class Robot(Articulation):
                 target=target,
             )
 
-    def get_qvel(self, name: str | None = None) -> torch.Tensor:
+    def get_qvel(self, name: str | None = None, target: bool = False) -> torch.Tensor:
         """Get the joint velocities (qvel) of the robot.
 
         Args:
             name (str | None): The name of the control part to get the qvel for. If None, the default part is used.
+            target (bool): If True, gets target velocities for simulation. If False, gets current velocities. The default is False.
+
         Returns:
             torch.Tensor: Joint velocities with shape (N, dof), where N is the number of environments.
         """
 
-        qvel = super().get_qvel()
+        qvel = super().get_qvel(target=target)
         if name is None:
             return qvel
         else:
@@ -851,9 +855,9 @@ class Robot(Articulation):
 
         drive_pros = self.cfg.drive_pros
         if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type", None)
+            drive_type = drive_pros.get("drive_type", "force")
         else:
-            drive_type = getattr(drive_pros, "drive_type", None)
+            drive_type = getattr(drive_pros, "drive_type", "force")
 
         # Apply drive parameters to all articulations in the batch
         self.set_drive(

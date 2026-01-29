@@ -14,7 +14,12 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
 | `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
+| `init_qpos` | `List[float]` | `None` | Initial joint positions. |
+| `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
+| `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
 | `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
+| `attrs` | `RigidBodyAttributesCfg` | `...` | Rigid body attributes configuration. |
+
 
 ### Drive Configuration
 
@@ -27,7 +32,7 @@ The `drive_props` parameter controls the joint physics behavior. It is defined u
 | `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
 | `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
 | `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
-| `drive_type` | `str` | `"force"` | Drive mode: `"force"` or `"acceleration"`. |
+| `drive_type` | `str` | `"force"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
 
 ### Setup & Initialization
 
@@ -52,11 +57,12 @@ art_cfg = ArticulationCfg(
 # Note: The method is 'add_articulation'
 articulation: Articulation = sim.add_articulation(cfg=art_cfg)
 
-# 4. Initialize Physics
+# 4. Reset Simulation
+# This performs a global reset of the simulation state
 sim.reset_objects_state()
 ```
 ## Articulation Class
-State Data (Observation)
+
 State data is accessed via getter methods that return batched tensors.
 
 | Property | Shape | Description |
@@ -91,6 +97,7 @@ articulation.set_qpos(target_qpos, target=True)
 # Important: Step simulation to apply control
 sim.update()
 ```
+
 ### Drive Configuration
 Dynamically adjust drive properties.
 
@@ -101,6 +108,7 @@ articulation.set_drive(
     damping=torch.tensor([10.0], device=device)
 )
 ```
+
 ### Kinematics
 Supports differentiable Forward Kinematics (FK) and Jacobian computation.
 ```python

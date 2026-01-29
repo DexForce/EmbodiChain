@@ -61,8 +61,7 @@ class DatasetManager(ManagerBase):
         >>>                 "robot_meta": {...},
         >>>                 "instruction": {"lang": "pick and place"},
         >>>                 "extra": {"scene_type": "kitchen"},
-        >>>                 "save_path": "/data/datasets",
-        >>>                 "export_success_only": True,
+        >>>                 "save_path": "/data/datasets"
         >>>             }
         >>>         )
         >>>     }
@@ -87,23 +86,31 @@ class DatasetManager(ManagerBase):
         super().__init__(cfg, env)
 
         ## TODO: fix configurable_action.py to avoid getting env.metadata['dataset']
-        # Extract robot_meta from functor params or plain config and add to env.metadata for backward compatibility
+        # Extract robot_meta and instruction from functor params or plain config and add to env.metadata for backward compatibility
         # This allows legacy code (like action_bank) to access robot_meta via env.metadata["dataset"]["robot_meta"]
         robot_meta_found = False
 
         # First, try to extract from functor params
         for mode_cfgs in self._mode_functor_cfgs.values():
             for functor_cfg in mode_cfgs:
-                if "robot_meta" in functor_cfg.params:
+                if (
+                    "robot_meta" in functor_cfg.params
+                    or "instruction" in functor_cfg.params
+                ):
                     if not hasattr(env, "metadata"):
                         env.metadata = {}
                     if "dataset" not in env.metadata:
                         env.metadata["dataset"] = {}
-                    env.metadata["dataset"]["robot_meta"] = functor_cfg.params[
-                        "robot_meta"
-                    ]
+                    if "robot_meta" in functor_cfg.params:
+                        env.metadata["dataset"]["robot_meta"] = functor_cfg.params[
+                            "robot_meta"
+                        ]
+                    if "instruction" in functor_cfg.params:
+                        env.metadata["dataset"]["instruction"] = functor_cfg.params[
+                            "instruction"
+                        ]
                     logger.log_info(
-                        "Added robot_meta to env.metadata for backward compatibility"
+                        "Added robot_meta and instruction to env.metadata for backward compatibility"
                     )
                     robot_meta_found = True
                     break
@@ -200,26 +207,16 @@ class DatasetManager(ManagerBase):
         self,
         mode: str,
         env_ids: Union[Sequence[int], torch.Tensor, None] = None,
-        obs: Optional[EnvObs] = None,
-        action: Optional[EnvAction] = None,
-        dones: Optional[torch.Tensor] = None,
-        terminateds: Optional[torch.Tensor] = None,
-        info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Apply dataset functors for the specified mode.
 
-        This method follows the same pattern as EventManager.apply() for consistency.
-        Currently only supports mode="save" which handles both recording and auto-saving.
+        This method saves completed episodes by reading data from the environment's
+        episode buffers. It should be called before clearing the buffers during reset.
 
         Args:
             mode: The mode to apply (currently only "save" is supported).
             env_ids: The indices of the environments to apply the functor to.
                 Defaults to None, in which case the functor is applied to all environments.
-            obs: Observation from the environment (batched for all envs).
-            action: Action applied to the environment (batched for all envs).
-            dones: Boolean tensor indicating which envs completed episodes.
-            terminateds: Boolean tensor indicating termination (success/fail).
-            info: Info dict containing success/fail information.
         """
         # check if mode is valid
         if mode not in self._mode_functor_names:
@@ -233,11 +230,6 @@ class DatasetManager(ManagerBase):
             functor_cfg.func(
                 self._env,
                 env_ids,
-                obs,
-                action,
-                dones,
-                terminateds,
-                info,
                 **functor_cfg.params,
             )
 

@@ -73,6 +73,8 @@ def get_dexsim_drive_type(drive_type: str) -> DriveType:
         return DriveType.FORCE
     elif drive_type == "acceleration":
         return DriveType.ACCELERATION
+    elif drive_type == "none":
+        return DriveType.NONE
     else:
         logger.error(f"Invalid dexsim drive type: {drive_type}")
 
@@ -97,6 +99,8 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
         drive_type = DriveType.FORCE
     elif drive_type == "acceleration":
         drive_type = DriveType.ACCELERATION
+    elif drive_type == "none":
+        return DriveType.NONE
     else:
         logger.log_error(f"Unknow drive type {drive_type}")
 

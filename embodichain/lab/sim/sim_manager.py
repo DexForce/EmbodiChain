@@ -47,8 +47,8 @@ from dexsim.types import (
 )
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
-from dexsim.render import Light as _Light, LightType
-from dexsim.engine import GizmoController
+from dexsim.render import Light as _Light, LightType, Windows
+from dexsim.engine import GizmoController, ObjectManipulator
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -215,7 +215,10 @@ class SimulationManager:
 
         # Initialize warp runtime context before creating the world.
         wp.init()
-        self._world = dexsim.World(world_config)
+        self._world: dexsim.World = dexsim.World(world_config)
+
+        self._window: Windows | None = None
+        self._is_registered_window_control = False
 
         fps = int(1.0 / sim_config.physics_dt)
         self._world.set_physics_fps(fps)
@@ -276,6 +279,10 @@ class SimulationManager:
         self.set_manual_update(True)
 
         self._build_multiple_arenas(sim_config.num_envs)
+
+        if sim_config.headless is False:
+            self._window = self._world.get_windows()
+            self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -575,6 +582,8 @@ class SimulationManager:
     def open_window(self) -> None:
         """Open the simulation window."""
         self._world.open_window()
+        self._window = self._world.get_windows()
+        self._register_default_window_control()
         self.is_window_opened = True
 
     def close_window(self) -> None:
@@ -1502,6 +1511,52 @@ class SimulationManager:
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
+
+    def _register_default_window_control(self) -> None:
+        """Register default window controls for better simulation interaction."""
+        from dexsim.types import InputKey
+
+        # TODO: window control has stucking issue with extra sensor under Raster renderer backend.
+        # Will be fixed in next dexsim release.
+        if self.is_rt_enabled is False:
+            return
+
+        if self._is_registered_window_control:
+            return
+
+        class WindowDefaultEvent(ObjectManipulator):
+
+            def on_key_down(self, key):
+                if key == InputKey.SCANCODE_C.value:
+                    print(f"Raycast distance: {self.selected_distance}")
+                    print(f"Hit position: {self.selected_position}")
+
+        manipulator = WindowDefaultEvent()
+        manipulator.enable_selection_cache(True)
+        self._window.add_input_control(manipulator)
+
+        self._is_registered_window_control = True
+
+    def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
+        """Add one or more custom window input controls.
+
+        This method registers additional :class:`ObjectManipulator` instances
+        with the simulation window so they can handle input events alongside
+        any default controls.
+
+        Args:
+            controls (list[ObjectManipulator]): A list of initialized
+                ObjectManipulator instances to add to the current window.
+                Each control will be registered via ``window.add_input_control``.
+                If no window is available, the controls are not added and a
+                warning is logged.
+        """
+        if self._window is None:
+            logger.log_warning("No window available to add custom controls.")
+            return
+
+        for control in controls:
+            self._window.add_input_control(control)
 
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.

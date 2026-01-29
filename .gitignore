@@ -179,7 +179,8 @@ materials
 embodichain/toolkits/outputs/*
 embodichain/toolkits/outputs/*
 
-embodichain/database/*
+embodichain/database/tmp/*
+embodichain/database/train/*
 
 3rdparty/
 Log/
