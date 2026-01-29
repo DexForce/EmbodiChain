@@ -23,8 +23,8 @@
                     "params": {
                         "name": "main_cam",
                         "resolution": [640, 480],
-                        "eye": [-1.4, 1.4, 2.0],
-                        "target": [0, 0, 0],
+                        "eye": [-1.4, 1.4, 2.5],
+                        "target": [0, 0, 0.7],
                         "up": [0, 0, 1],
                         "intrinsics": [600, 600, 320, 240],
                         "save_path": "./outputs/videos/eval"

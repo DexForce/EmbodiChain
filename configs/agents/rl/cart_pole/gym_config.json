@@ -53,9 +53,9 @@
                 }
             ]
         },
-        "init_pos": [0.0, 0.0, 0.0],
+        "init_pos": [0.0, 0.0, 0.5],
         "init_rot": [0.0, 0.0, 0.0],
-        "init_qpos": [0.0, 0.3],
+        "init_qpos": [-0.2, 0.07],
         "drive_pros": {
             "stiffness": {
                 "slider_to_cart": 1e1,

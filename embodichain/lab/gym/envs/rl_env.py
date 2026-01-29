@@ -244,8 +244,9 @@ class RLEnv(EmbodiedEnv):
             "success": success,
             "fail": fail,
             "elapsed_steps": self._elapsed_steps,
-            "goal_pose": self.goal_pose,
         }
+        if hasattr(self, "_goal_pose") and self._goal_pose is not None:
+            info["goal_pose"] = self._goal_pose
         info["metrics"] = metrics
         return info
 
