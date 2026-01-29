@@ -11,6 +11,7 @@
         "iterations": 1000,
         "rollout_steps": 1024,
         "enable_eval": true,
+        "num_eval_envs": 16,
         "num_eval_episodes": 3,
         "eval_freq": 2,
         "save_freq": 200,

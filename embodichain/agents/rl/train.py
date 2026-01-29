@@ -163,12 +163,15 @@ def train_from_config(config_path: str):
 
     # Create evaluation environment only if enabled
     eval_env = None
+    num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
     if enable_eval:
         eval_gym_env_cfg = deepcopy(gym_env_cfg)
-        eval_gym_env_cfg.num_envs = 4
+        eval_gym_env_cfg.num_envs = num_eval_envs
         eval_gym_env_cfg.sim_cfg.headless = True
         eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
-        logger.log_info("Evaluation environment created (num_envs=4, headless=True)")
+        logger.log_info(
+            f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
+        )
 
     # Build Policy via registry
     policy_name = policy_block["name"]
