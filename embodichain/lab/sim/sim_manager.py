@@ -158,7 +158,6 @@ class SimulationManager:
             - physics simulation management, eg. time step, manual update, etc.
             - interactive control via gizmo and window callbacks events.
 
-    This class implements the singleton pattern to ensure only one instance exists at a time.
 
     Args:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().

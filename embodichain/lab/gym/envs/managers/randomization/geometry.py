@@ -157,26 +157,3 @@ def randomize_rigid_object_body_scale(
         same_scale_all_axes=same_scale_all_axes,
     )
 
-
-def randomize_rigid_objects_body_scale_sync(
-    env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
-    entity_cfgs: List[SceneEntityCfg],
-    scale_range: tuple[list[float], list[float]] | None = None,
-    same_scale_all_axes: bool = True,
-) -> None:
-    """Deprecated. Use `randomize_rigid_objects_scale(shared_sample=True)` + `scale_factor_range`."""
-    if scale_range is not None:
-        logger.log_warning(
-            "`randomize_rigid_objects_body_scale_sync` is deprecated. "
-            "Please migrate to `randomize_rigid_objects_scale` with `shared_sample=true` "
-            "and `scale_factor_range`."
-        )
-    return randomize_rigid_objects_scale(
-        env=env,
-        env_ids=env_ids,
-        entity_cfgs=entity_cfgs,
-        scale_factor_range=scale_range,
-        same_scale_all_axes=same_scale_all_axes,
-        shared_sample=True,
-    )
