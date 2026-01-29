@@ -278,10 +278,10 @@ def randomize_target_pose(
     reference_entity_cfg: SceneEntityCfg | None = None,
     store_key: str = "target_pose",
 ) -> None:
-    """Randomize a virtual target pose and store in env state for use in get_info().
+    """Randomize a virtual target pose and store in env state.
 
     This function generates random target poses without requiring a physical object in the scene.
-    The generated poses are stored in env and should be exposed in get_info() for reward functors.
+    The generated poses are stored as a public attribute in env for use by observations and rewards.
 
     Args:
         env (EmbodiedEnv): The environment instance.
@@ -294,7 +294,7 @@ def randomize_target_pose(
         reference_entity_cfg (SceneEntityCfg | None): The reference entity for relative randomization.
             If None and relative mode is True, uses world origin.
         store_key (str): The key to store the target pose in env state. Default is "target_pose".
-            The pose will be stored in env._{store_key}s and should be exposed in info[store_key].
+            The pose will be stored as a public attribute env.{store_key}.
     """
     num_instance = len(env_ids)
 
@@ -338,14 +338,12 @@ def randomize_target_pose(
         relative_rotation=relative_rotation,
     )
 
-    # Store in env state (to be exposed via get_info)
-    state_attr = f"_{store_key}"
-    if not hasattr(env, state_attr):
+    if not hasattr(env, store_key):
         setattr(
             env,
-            state_attr,
+            store_key,
             torch.zeros(env.num_envs, 4, 4, device=env.device, dtype=torch.float32),
         )
 
-    target_poses = getattr(env, state_attr)
+    target_poses = getattr(env, store_key)
     target_poses[env_ids] = pose

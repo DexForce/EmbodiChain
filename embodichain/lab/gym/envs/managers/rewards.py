@@ -444,14 +444,14 @@ def reaching_behind_object(
     obj = env.sim.get_rigid_object(object_cfg.uid)
     obj_pos = obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
-    # get goal position from info
-    if target_pose_key not in info:
+    # get goal position from env (set by randomize_target_pose event)
+    if not hasattr(env, target_pose_key):
         raise ValueError(
-            f"Target pose '{target_pose_key}' not found in info dict. "
-            f"Make sure to provide it in get_info()."
+            f"Target pose '{target_pose_key}' not found in env (env.{target_pose_key}). "
+            f"Make sure to add a randomize_target_pose event with store_key='{target_pose_key}' in your config."
         )
 
-    target_poses = info[target_pose_key]
+    target_poses = getattr(env, target_pose_key)
     if target_poses.dim() == 2:  # (num_envs, 3)
         goal_pos = target_poses
     else:  # (num_envs, 4, 4)
@@ -524,14 +524,14 @@ def distance_to_target(
     source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
     source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
-    # get target position from info
-    if target_pose_key not in info:
+    # get target position from env (set by randomize_target_pose event)
+    if not hasattr(env, target_pose_key):
         raise ValueError(
-            f"Target pose '{target_pose_key}' not found in info dict. "
-            f"Make sure to provide it in get_info()."
+            f"Target pose '{target_pose_key}' not found in env (env.{target_pose_key}). "
+            f"Make sure to add a randomize_target_pose event with store_key='{target_pose_key}' in your config."
         )
 
-    target_poses = info[target_pose_key]
+    target_poses = getattr(env, target_pose_key)
     if target_poses.dim() == 2:  # (num_envs, 3)
         target_pos = target_poses
     else:  # (num_envs, 4, 4)
@@ -574,7 +574,8 @@ def incremental_distance_to_target(
 
     Args:
         source_entity_cfg: Configuration for the object (e.g., {"uid": "cube"})
-        target_pose_key: Key in info dict for target pose (default: "target_pose")
+        target_pose_key: Key for target pose in env (default: "target_pose")
+                        Reads from env._{target_pose_key} set by randomize_target_pose event
                         Can be (num_envs, 3) position or (num_envs, 4, 4) transform
         tanh_scale: Scaling for tanh normalization (higher = more sensitive, default: 10.0)
         positive_weight: Multiplier for reward when getting closer (default: 1.0)
@@ -611,14 +612,14 @@ def incremental_distance_to_target(
     source_obj = env.sim.get_rigid_object(source_entity_cfg.uid)
     source_pos = source_obj.get_local_pose(to_matrix=True)[:, :3, 3]
 
-    # get target position from info
-    if target_pose_key not in info:
+    # get target position from env (set by randomize_target_pose event)
+    if not hasattr(env, target_pose_key):
         raise ValueError(
-            f"Target pose '{target_pose_key}' not found in info dict. "
-            f"Make sure to provide it in get_info()."
+            f"Target pose '{target_pose_key}' not found in env (env.{target_pose_key}). "
+            f"Make sure to add a randomize_target_pose event with store_key='{target_pose_key}' in your config."
         )
 
-    target_poses = info[target_pose_key]
+    target_poses = getattr(env, target_pose_key)
     if target_poses.dim() == 2:  # (num_envs, 3)
         target_pos = target_poses
     else:  # (num_envs, 4, 4)

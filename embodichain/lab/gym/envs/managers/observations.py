@@ -289,12 +289,29 @@ def target_position(
     obs: EnvObs,
     target_pose_key: str = "goal_pose",
 ) -> torch.Tensor:
-    """Get virtual target position from env state."""
-    state_attr = f"_{target_pose_key}s"
-    if hasattr(env, state_attr):
-        target_poses = getattr(env, state_attr)
+    """Get virtual target position from env state.
+
+    Reads target pose from env.{target_pose_key} (set by randomize_target_pose event).
+    Returns zeros if not yet initialized (e.g., during env initialization before reset).
+
+    Args:
+        env: The environment instance
+        obs: Observation dict (unused, for API compatibility)
+        target_pose_key: Key for target pose in env (default: "goal_pose")
+
+    Returns:
+        Target position tensor of shape (num_envs, 3).
+        Returns zeros if target_pose_key is not found (e.g., before first reset).
+    """
+    if not hasattr(env, target_pose_key):
+        # Return zeros during initialization (before reset event triggers)
+        return torch.zeros(env.num_envs, 3, device=env.device)
+
+    target_poses = getattr(env, target_pose_key)
+    if target_poses.dim() == 2:  # (num_envs, 3)
+        return target_poses
+    else:  # (num_envs, 4, 4)
         return target_poses[:, :3, 3]
-    return torch.zeros(env.num_envs, 3, device=env.device)
 
 
 class compute_exteroception(Functor):

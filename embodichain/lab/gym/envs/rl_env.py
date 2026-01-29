@@ -32,9 +32,12 @@ class RLEnv(EmbodiedEnv):
     """Base class for reinforcement learning tasks.
 
     Provides common utilities for RL tasks:
-    - Goal pose management and visualization
     - Flexible action preprocessing (scaling, IK, normalization)
     - Standardized info dictionary structure
+
+    Optional attributes (can be set by subclasses):
+    - action_scale: Scaling factor for actions (default: 1.0)
+    - episode_length: Maximum episode length (default: 1000)
     """
 
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
@@ -47,37 +50,6 @@ class RLEnv(EmbodiedEnv):
             self.action_scale = 1.0
         if not hasattr(self, "episode_length"):
             self.episode_length = 1000
-
-    @property
-    def goal_pose(self) -> Optional[torch.Tensor]:
-        """Get current goal poses (4x4 matrices) for all environments."""
-        return self._goal_pose
-
-    def draw_goal_marker(self, env_ids: Sequence[int] | None = None):
-        """Draw axis markers at goal positions for visualization.
-
-        Args:
-            env_ids: Environment IDs to draw markers for (None = all envs)
-        """
-        if self.goal_pose is None:
-            return
-
-        if env_ids is None:
-            env_ids = range(self.num_envs)
-
-        for arena_idx in env_ids:
-            marker_name = f"goal_marker_{arena_idx}"
-            self.sim.remove_marker(marker_name)
-            goal_pose = self.goal_pose[arena_idx].detach().cpu().numpy()
-            marker_cfg = MarkerCfg(
-                name=marker_name,
-                marker_type="axis",
-                axis_xpos=[goal_pose],
-                axis_size=0.003,
-                axis_len=0.02,
-                arena_index=arena_idx,
-            )
-            self.sim.draw_marker(cfg=marker_cfg)
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action for RL tasks with flexible transformation.
@@ -236,7 +208,7 @@ class RLEnv(EmbodiedEnv):
         Subclasses should override compute_task_state() instead of this method.
 
         Returns:
-            Info dictionary with success, fail, elapsed_steps, goal_pose, metrics
+            Info dictionary with success, fail, elapsed_steps, metrics
         """
         success, fail, metrics = self.compute_task_state(**kwargs)
 
@@ -244,9 +216,9 @@ class RLEnv(EmbodiedEnv):
             "success": success,
             "fail": fail,
             "elapsed_steps": self._elapsed_steps,
-            "goal_pose": self.goal_pose,
+            "metrics": metrics,
         }
-        info["metrics"] = metrics
+
         return info
 
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
