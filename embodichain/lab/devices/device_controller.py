@@ -71,9 +71,20 @@ class DeviceController:
         # Joint mapping state: maps device joint name -> robot joint index
         self._joint_mapping: Dict[str, int] = {}
         self._mapping_initialized = False
+        self._binary_control_keys = set()  # Device keys that need binary control
 
         logger.log_info(f"Device Controller initialized for robot: {robot.uid}")
         logger.log_info(f"  Robot has {len(robot.joint_names)} joints")
+
+    def _get_gripper_joints(self) -> List[str]:
+        """Get gripper joint names from control_parts."""
+        if self.robot.control_parts:
+            gripper_joints = []
+            for part_name, joint_names in self.robot.control_parts.items():
+                if "eef" in part_name.lower():
+                    gripper_joints.extend(joint_names)
+            return gripper_joints
+        return []
 
     def add_device(
         self, device: Device, device_name: str, set_active: bool = False
@@ -165,28 +176,54 @@ class DeviceController:
         try:
             robot_joint_names = self.robot.joint_names
 
-            # Build joint mapping on first call
             if not self._mapping_initialized:
                 self._build_joint_mapping(device_data, robot_joint_names)
+
+            # Get robot joint limits
+            qpos_limits = self.robot.body_data.qpos_limits[0]  # [num_joints, 2]
 
             # Extract joint values based on mapping
             joint_values = []
             joint_indices = []
             mapped_joints = {}
 
-            for device_joint, robot_idx in self._joint_mapping.items():
+            gripper_threshold = 0.99
+
+            for device_joint, robot_indices in self._joint_mapping.items():
                 if device_joint in device_data:
-                    value = device_data[device_joint]
-                    joint_values.append(value)
-                    joint_indices.append(robot_idx)
-                    mapped_joints[robot_joint_names[robot_idx]] = value
+                    vr_value = device_data[device_joint]
+
+                    # Binary control for grippers, direct value for other joints
+                    if device_joint in self._binary_control_keys:
+                        idx = robot_indices[0]
+                        joint_min, joint_max = (
+                            qpos_limits[idx, 0].item(),
+                            qpos_limits[idx, 1].item(),
+                        )
+                        robot_value = (
+                            joint_min if vr_value >= gripper_threshold else joint_max
+                        )
+
+                        # Log state change
+                        state = "CLOSE" if vr_value >= gripper_threshold else "OPEN"
+                        if not hasattr(self, "_last_gripper_state"):
+                            self._last_gripper_state = {}
+                        if self._last_gripper_state.get(device_joint) != state:
+                            logger.log_info(
+                                f"{device_joint}: VR={vr_value:.3f} -> {state} (robot={robot_value:.3f}, limit=[{joint_min:.3f}, {joint_max:.3f}])"
+                            )
+                            self._last_gripper_state[device_joint] = state
+                    else:
+                        robot_value = vr_value
+
+                    # One device value may correspond to multiple robot joints (e.g., two fingers of gripper)
+                    for robot_idx in robot_indices:
+                        joint_values.append(robot_value)
+                        joint_indices.append(robot_idx)
+                        mapped_joints[robot_joint_names[robot_idx]] = robot_value
 
             if len(joint_indices) == 0:
                 return None
-
-            # Return as dict if requested
-            if as_dict:
-                return mapped_joints
 
             # Convert to tensor and create full action
             device_tensor = torch.tensor(
@@ -210,30 +247,65 @@ class DeviceController:
 
         except Exception as e:
             logger.log_error(f"Error mapping device data to robot action: {e}")
+            import traceback
+
+            logger.log_error(traceback.format_exc())
             return None
 
     def _build_joint_mapping(
         self, device_data: Dict[str, float], robot_joint_names: List[str]
     ) -> None:
-        """Build mapping from device joints to robot joints.
-
-        Args:
-            device_data: Device joint data to determine available joints.
-            robot_joint_names: Robot joint names.
-        """
+        """Build mapping from device joints to robot joints."""
+        # Store: device_joint_name -> [robot_joint_indices]
         self._joint_mapping = {}
 
+        logger.log_info("=" * 60)
+        logger.log_info("Building joint mapping...")
+        logger.log_info(
+            f"VR device data keys ({len(device_data)} total): {sorted(device_data.keys())}"
+        )
+        logger.log_info(
+            f"Robot joint names ({len(robot_joint_names)} total): {robot_joint_names}"
+        )
+        logger.log_info(f"Robot control_parts: {self.robot.control_parts}")
+
+        # Direct name matching
         for robot_idx, robot_joint in enumerate(robot_joint_names):
-            # Direct name matching (can be extended with more sophisticated mapping)
             if robot_joint in device_data:
-                self._joint_mapping[robot_joint] = robot_idx
+                self._joint_mapping.setdefault(robot_joint, []).append(robot_idx)
+
+        # Special gripper mapping: LEFT_GRIPPER/RIGHT_GRIPPER -> multiple finger joints
+        # Only for parallel grippers (< 5 joints), not dexterous hands (>= 5 joints)
+        if self.robot.control_parts:
+            for part_name, joint_names in self.robot.control_parts.items():
+                if "eef" in part_name.lower() and len(joint_names) < 5:
+                    device_key = (
+                        f"{'LEFT' if 'left' in part_name.lower() else 'RIGHT'}_GRIPPER"
+                    )
+                    if (
+                        device_key in device_data
+                        and device_key not in robot_joint_names
+                    ):
+                        indices = [
+                            robot_joint_names.index(j)
+                            for j in joint_names
+                            if j in robot_joint_names
+                        ]
+                        if indices:
+                            self._joint_mapping[device_key] = indices
+                            self._binary_control_keys.add(device_key)
+                            logger.log_info(
+                                f"  Gripper mapping: '{device_key}' -> {joint_names} (indices: {indices})"
+                            )
 
         self._mapping_initialized = True
 
+        total_mappings = sum(len(v) for v in self._joint_mapping.values())
         logger.log_info(
-            f"Joint mapping initialized: {len(self._joint_mapping)} joints mapped"
+            f"Joint mapping initialized: {len(self._joint_mapping)} device joints mapped to {total_mappings} robot joints"
         )
-        logger.log_info(f"  Mapped joints: {list(self._joint_mapping.keys())}")
+        logger.log_info(f"  Device joints: {list(self._joint_mapping.keys())}")
+        logger.log_info("=" * 60)
 
     def _enforce_joint_limits(self, action: torch.Tensor) -> torch.Tensor:
         """Enforce robot joint limits on action.
@@ -257,6 +329,7 @@ class DeviceController:
         # Reset mapping
         self._joint_mapping = {}
         self._mapping_initialized = False
+        self._binary_control_keys.clear()
 
         logger.log_info("Device Controller reset")
 
