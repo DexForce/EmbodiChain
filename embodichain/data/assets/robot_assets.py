@@ -469,3 +469,35 @@ class RainbowY1(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class CartPole(EmbodiChainDataset):
+    """Dataset class for the CartPole.
+
+    Directory structure:
+        cart_pole/
+            cart_pole.urdf
+            cart.mtl
+            cart.obj
+            pole.mtl
+            pole.obj
+            slide_bar.mtl
+            slide_bar.obj
+
+    Example usage:
+        >>> from embodichain.data.robot_dataset import CartPole
+        >>> dataset = CartPole()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("CartPole/cart_pole.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "cart_pole.zip"),
+            "9d185eb18b19f9c95153e01943c5b0a2",
+        )
+        prefix = "cart_pole"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)

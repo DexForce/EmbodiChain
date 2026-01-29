@@ -1,7 +1,7 @@
 { 
     "trainer": {
         "exp_name": "push_cube_ppo",
-        "gym_config": "configs/agents/rl/cart_pole/gym_config.json",
+        "gym_config": "configs/agents/rl/basic/cart_pole/gym_config.json",
         "seed": 42,
         "device": "cuda:0",
         "headless": true,
