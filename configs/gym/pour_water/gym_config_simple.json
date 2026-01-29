@@ -149,7 +149,7 @@
                 "interval_step": 10,
                 "params": {
                     "entity_cfg": {"uid": "table"},
-                    "random_texture_prob": 0.0,
+                    "random_texture_prob": 0.5,
                     "texture_path": "CocoBackground/coco",
                     "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }
@@ -160,7 +160,7 @@
                 "interval_step": 10,
                 "params": {
                     "entity_cfg": {"uid": "cup"},
-                    "random_texture_prob": 0.0,
+                    "random_texture_prob": 0.5,
                     "texture_path": "CocoBackground/coco",
                     "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }
@@ -171,7 +171,7 @@
                 "interval_step": 10,
                 "params": {
                     "entity_cfg": {"uid": "bottle"},
-                    "random_texture_prob": 0.0,
+                    "random_texture_prob": 0.5,
                     "texture_path": "CocoBackground/coco",
                     "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]
                 }
