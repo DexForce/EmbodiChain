@@ -477,6 +477,64 @@ def reaching_behind_object(
     return reward
 
 
+def reaching_object(
+    env: EmbodiedEnv,
+    obs: dict,
+    action: torch.Tensor | dict,
+    info: dict,
+    object_cfg: SceneEntityCfg = None,
+    distance_scale: float = 5.0,
+    part_name: str | None = None,
+    height_offset: float | None = None,
+) -> torch.Tensor:
+    """Reward for positioning end-effector close to an object (no target pose).
+
+    This is a simpler variant of :func:`reaching_behind_object` that does not
+    require a goal/target pose in ``info``. It only encourages the end-effector
+    to approach the object itself, which is useful for pure reaching or
+    pre-contact phases where no explicit goal is defined.
+
+    Args:
+        object_cfg: Configuration for the object to reach (e.g., {"uid": "stick"}).
+        distance_scale: Scaling factor for tanh shaping (higher = more sensitive).
+        part_name: Robot part name for FK computation (e.g., "arm").
+        height_offset: Optional height offset added to the object position in z.
+                       If provided, the effective target point is
+                       ``obj_pos + [0, 0, height_offset]``.
+
+    Returns:
+        Reward tensor of shape (num_envs,). Ranges from 0 to 1 approximately.
+        - 1.0: End-effector at the target position
+        - 0.0: End-effector far from the target
+    """
+    # get end effector position from robot FK
+    robot = env.robot
+    joint_ids = robot.get_joint_ids(part_name)
+    qpos = robot.get_qpos()[:, joint_ids]
+    ee_pose = robot.compute_fk(name=part_name, qpos=qpos, to_matrix=True)
+    ee_pos = ee_pose[:, :3, 3]
+
+    # get object position
+    obj = env.sim.get_rigid_object(object_cfg.uid)
+    obj_pos = obj.get_local_pose(to_matrix=True)[:, :3, 3]
+
+    if height_offset is not None:
+        height_vec = torch.tensor(
+            [0.0, 0.0, height_offset], device=env.device, dtype=torch.float32
+        )
+        target_pos = obj_pos + height_vec
+    else:
+        target_pos = obj_pos
+
+    # distance to target position
+    ee_to_target_dist = torch.norm(ee_pos - target_pos, dim=-1)
+
+    # tanh-shaped reward (1.0 when at target, 0.0 when far)
+    reward = 1.0 - torch.tanh(distance_scale * ee_to_target_dist)
+
+    return reward
+
+
 def distance_to_target(
     env: "EmbodiedEnv",
     obs: dict,

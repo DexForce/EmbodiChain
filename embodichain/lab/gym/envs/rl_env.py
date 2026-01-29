@@ -42,6 +42,10 @@ class RLEnv(EmbodiedEnv):
             cfg = EmbodiedEnvCfg()
         super().__init__(cfg, **kwargs)
 
+        # Goal pose for all environments
+        if not hasattr(self, "_goal_pose"):
+            self._goal_pose = None
+
         # Set default values for common RL parameters
         if not hasattr(self, "action_scale"):
             self.action_scale = 1.0

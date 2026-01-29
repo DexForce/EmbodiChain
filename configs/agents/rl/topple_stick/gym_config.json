@@ -1,0 +1,157 @@
+{
+    "id": "ToppleStickRL",
+    "max_episodes": 5,
+    "env": {
+        "events": {
+            "randomize_box": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {
+                        "uid": "stick"
+                    },
+                    "position_range": [
+                        [-0.2, -0.2, 0.0],
+                        [0.2, 0.2, 0.0]
+                    ],
+                    "relative_position": true
+                }
+            }
+        },
+        "observations": {
+            "robot_qpos": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [0, 1, 2, 3, 4, 5]
+                }
+            },
+            "robot_qvel": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qvel",
+                "params": {
+                    "joint_ids": [0, 1, 2, 3, 4, 5],
+                    "limit": "qvel_limits"
+                }
+            },
+            "robot_ee_pos": {
+                "func": "get_robot_eef_pose",
+                "mode": "add",
+                "name": "robot/ee_pos",
+                "params": {
+                    "part_name": "arm"
+                }
+            },
+            "box_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "object/box_pose",
+                "params": {
+                    "entity_cfg": {
+                        "uid": "stick"
+                    }
+                }
+            }
+        },
+        "rewards": {
+            "reaching_reward": {
+                "func": "reaching_object",
+                "mode": "add",
+                "weight": 1.0,
+                "params": {
+                    "object_cfg": {
+                        "uid": "stick"
+                    },
+                    "distance_scale": 5.0,
+                    "part_name": "arm",
+                    "height_offset": 0.08
+                }
+            },
+            "success_bonus": {
+                "func": "success_reward",
+                "mode": "add",
+                "weight": 10.0,
+                "params": {}
+            }
+        },
+        "extensions": {
+            "action_type": "delta_qpos",
+            "episode_length": 100,
+            "action_scale": 0.1,
+            "success_threshold": 60.0
+        }
+    },
+    "robot": {
+        "uid": "Manipulator",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+                }
+            ]
+        },
+        "init_pos": [0.0, 0.0, 0.0],
+        "init_rot": [0.0, 0.0, 0.0],
+        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.04, 0.04],
+        "drive_pros": {
+            "drive_type": "force",
+            "stiffness": 100000.0,
+            "damping": 1000.0,
+            "max_velocity": 2.0,
+            "max_effort": 500.0
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "control_parts": {
+            "arm": ["JOINT[1-6]"]
+        }
+    },
+    "sensor": [],
+    "light": {},
+    "background": [],
+    "rigid_object": [
+        {
+            "uid": "stick",
+            "shape": {
+                "shape_type": "Cube",
+                "size": [0.06, 0.06, 0.24]
+            },
+            "body_type": "dynamic",
+            "init_pos": [-0.6, -0.4, 0.12],
+            "attrs": {
+                "mass": 5.0,
+                "static_friction": 2.0,
+                "dynamic_friction": 1.5,
+                "linear_damping": 1.0,
+                "angular_damping": 1.0,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 10.0,
+                "max_linear_velocity": 1.0,
+                "max_angular_velocity": 1.0
+            }
+        }
+    ],
+    "rigid_object_group": [],
+    "articulation": []
+}
+

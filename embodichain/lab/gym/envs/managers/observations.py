@@ -80,8 +80,14 @@ def normalize_robot_joint_data(
 
     robot = env.robot
 
-    # shape of target_limits: (num_envs, len(joint_ids), 2)
-    target_limits = getattr(robot.body_data, limit)[:, joint_ids, :]
+    raw_limits = getattr(robot.body_data, limit)
+    
+    if raw_limits.ndim == 3:
+        target_limits = raw_limits[:, joint_ids, :]
+    elif raw_limits.ndim == 2:
+        max_lim = raw_limits[:, joint_ids]
+        min_lim = -max_lim
+        target_limits = torch.stack([min_lim, max_lim], dim=-1)
 
     # normalize the joint data to the range of [0, 1]
     data[:, joint_ids] = (data[:, joint_ids] - target_limits[:, :, 0]) / (
