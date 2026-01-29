@@ -275,6 +275,7 @@ class validation_cameras(Functor):
         self,
         env: EmbodiedEnv,
         env_ids: Union[torch.Tensor, None],
+        cameras=None,
     ):
         """Update cameras and return their data."""
         camera_data = {}

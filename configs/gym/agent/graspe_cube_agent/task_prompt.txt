@@ -1,0 +1,13 @@
+Task:
+Use a single robotic arm to Graspe_cube: pick up the cube on the table and place it into the container.
+
+1. Move the end-effector to the cube and grasp it firmly, ensuring a safe approach that avoids collisions with the table and the container.
+
+3. Lift the grasped cube vertically by about 0.10 m so that the cube is safely above the container walls and any surrounding objects.
+
+4. Move the cube to a pose directly above the center of the container, maintaining a relative offset of [0.0, 0.0, 0.15] from the container pose to prepare for placing.
+
+5. Open the gripper to release the cube into the container without further lowering, avoiding any collision with the container.
+
+6. After releasing the cube, move the gripper back to a safe neutral pose above the table. At the end of the episode, the cube should remain stably inside the container, without touching or leaning on the gripper.
+

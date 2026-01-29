@@ -33,6 +33,10 @@ from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
     RearrangementEnv,
     RearrangementAgentEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.Graspe_cube import (
+    GraspeCubeEnv,
+    GraspeCubeAgentEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
