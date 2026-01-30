@@ -66,7 +66,7 @@ class CartPoleEnv(RLEnv):
         qpos = self.robot.get_qpos(name="hand").reshape(-1)  # [num_envs, ]
         qvel = self.robot.get_qvel(name="hand").reshape(-1)  # [num_envs, ]
         upward_distance = torch.abs(qpos)
-        is_success = torch.logical_and(upward_distance < 0.05, torch.abs(qvel) < 0.1)
+        is_success = torch.logical_and(upward_distance < 0.02, torch.abs(qvel) < 0.05)
         is_fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         metrics = {"distance_to_goal": upward_distance}
         return is_success, is_fail, metrics

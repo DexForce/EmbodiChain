@@ -17,7 +17,7 @@
             "velocity_penalty": {
                 "func": "joint_velocity_penalty",
                 "mode": "add",
-                "weight": 0.01,
+                "weight": 0.005,
                 "params": {
                     "robot_uid": "Cart",
                     "part_name": "hand"
