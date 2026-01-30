@@ -1,0 +1,72 @@
+{ 
+    "id": "CartPoleRL",
+    "max_episodes": 5,
+    "env": {
+        "events": {},
+        "observations": {
+            "robot_qpos": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [0, 1]
+                }
+            }
+        },
+        "rewards": {
+            "velocity_penalty": {
+                "func": "joint_velocity_penalty",
+                "mode": "add",
+                "weight": 0.005,
+                "params": {
+                    "robot_uid": "Cart",
+                    "part_name": "hand"
+                }
+            }
+        },
+        "extensions": {
+            "action_type": "delta_qpos",
+            "episode_length": 500,
+            "action_scale": 0.1,
+            "success_threshold": 0.1
+        }
+    },
+    "robot": {
+        "uid": "Cart",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "CartPole/cart_pole.urdf"
+                }
+            ]
+        },
+        "init_pos": [0.0, 0.0, 0.5],
+        "init_rot": [0.0, 0.0, 0.0],
+        "init_qpos": [-0.2, 0.07],
+        "drive_pros": {
+            "stiffness": {
+                "slider_to_cart": 1e1,
+                "cart_to_pole":1e-2
+            },
+            "damping": {
+                "slider_to_cart": 1e0,
+                "cart_to_pole":1e-3
+            },
+            "max_effort": {
+                "slider_to_cart": 1e2,
+                "cart_to_pole":1e-1
+            }
+        },
+        "control_parts": {
+            "arm": ["slider_to_cart"],
+            "hand": ["cart_to_pole"]
+        }
+    },
+    "sensor": [],
+    "light": {},
+    "background": [],
+    "rigid_object": [],
+    "rigid_object_group": [],
+    "articulation": []
+}
