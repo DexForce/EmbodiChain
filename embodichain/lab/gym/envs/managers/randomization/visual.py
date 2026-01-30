@@ -22,7 +22,12 @@ import random
 import copy
 from typing import TYPE_CHECKING, Literal, Union, Dict
 
-from embodichain.lab.sim.objects import Light, RigidObject, Articulation
+from embodichain.lab.sim.objects import (
+    Light,
+    RigidObject,
+    Articulation,
+    RigidObjectGroup,
+)
 from embodichain.lab.sim.sensors import Camera, StereoCamera
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
@@ -49,6 +54,7 @@ __all__ = [
     "randomize_light",
     "randomize_camera_intrinsics",
     "set_rigid_object_visual_material",
+    "set_rigid_object_group_visual_material",
     "randomize_visual_material",
 ]
 
@@ -89,6 +95,45 @@ def set_rigid_object_visual_material(
 
     mat = env.sim.create_visual_material(mat_cfg)
     obj: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
+    obj.set_visual_material(mat, env_ids=env_ids)
+
+
+def set_rigid_object_group_visual_material(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    entity_cfg: SceneEntityCfg,
+    mat_cfg: VisualMaterialCfg | Dict,
+) -> None:
+    """Set a rigid object group's visual material (deterministic, non-random).
+
+    This helper exists to support configs that want fixed colors/materials during reset.
+
+    Args:
+        env: Environment instance.
+        env_ids: Target env ids. If None, applies to all envs.
+        entity_cfg: Scene entity config (must point to a rigid object).
+        mat_cfg: Visual material configuration. Can be a VisualMaterialCfg object or a dict.
+            If a dict is provided, it will be converted to VisualMaterialCfg using from_dict().
+            If uid is not specified in mat_cfg, it will default to "{entity_uid}_mat".
+    """
+    if entity_cfg.uid not in env.sim.get_rigid_object_group_uid_list():
+        return
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device="cpu")
+    else:
+        env_ids = env_ids.cpu()
+
+    if isinstance(mat_cfg, dict):
+        mat_cfg = VisualMaterialCfg.from_dict(mat_cfg)
+
+    mat_cfg = copy.deepcopy(mat_cfg)
+
+    if not mat_cfg.uid or mat_cfg.uid == "default_mat":
+        mat_cfg.uid = f"{entity_cfg.uid}_mat"
+
+    mat = env.sim.create_visual_material(mat_cfg)
+    obj: RigidObjectGroup = env.sim.get_rigid_object_group(entity_cfg.uid)
     obj.set_visual_material(mat, env_ids=env_ids)
 
 

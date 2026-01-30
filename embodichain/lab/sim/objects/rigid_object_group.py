@@ -461,6 +461,10 @@ class RigidObjectGroup(BatchEntity):
     ) -> None:
         """Set visual material for the rigid object group.
 
+        Note:
+            For each entity in the rigid object group, a unique material instance will be created and shared
+            among all objects in that entity.
+
         Args:
             mat (VisualMaterial): The material to set.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
@@ -468,8 +472,8 @@ class RigidObjectGroup(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         for i, env_idx in enumerate(local_env_ids):
+            mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
             for j, entity in enumerate(self._entities[env_idx]):
-                mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}_{j}")
                 entity.set_material(mat_inst.mat)
 
         # Note: The rigid object group is not supported to change the visual material once created.
