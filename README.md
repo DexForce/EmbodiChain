@@ -3,10 +3,10 @@
 ![teaser](assets/imgs/teaser.jpg)
 
 [![License](https://img.shields.io/github/license/DexForce/EmbodiChain)](LICENSE)
-[![Website](https://img.shields.io/badge/website-dexforce.com-green?logo=google-chrome&logoColor=white)](https://dexforce.com/embodichain/index.html#/)
+[![Website](https://img.shields.io/badge/website-dexforce.com-yellow?logo=google-chrome&logoColor=white)](https://dexforce.com/embodichain/index.html#/)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-docs-blue?logo=github&logoColor=white)](https://dexforce.github.io/EmbodiChain/introduction.html)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/DexForce/EmbodiChain/releases)
+[![Version](https://img.shields.io/github/v/release/DexForce/EmbodiChain?label=version)](https://github.com/DexForce/EmbodiChain/releases)
 ---
 
 EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, real-to-sim data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.

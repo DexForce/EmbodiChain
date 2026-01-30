@@ -44,7 +44,16 @@ After pulling the Docker image, you can run a container with the provided [scrip
 
 > **We strongly recommend using a virtual environment to avoid dependency conflicts.**
 
-Clone the EmbodiChain repository:
+To install EmbodiChain from pypi, run:
+
+```bash
+pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+
+# Or install with the lerobot extras:
+pip install embodichain[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+```
+
+To install the Embodichain from source, clone the EmbodiChain repository:
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
 ```
@@ -71,4 +80,3 @@ python scripts/tutorials/sim/create_scene.py
 python scripts/tutorials/sim/create_scene.py --headless
 ```
 ---
-
