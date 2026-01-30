@@ -72,11 +72,11 @@ If you find EmbodiChain helpful for your research, please consider citing our wo
 
 .. code-block:: bibtex
 
-@inproceedings{Sim2RealVLA,
-    title = {Sim2Real {VLA}: Zero-Shot Generalization of Synthesized Skills to Realistic Manipulation},
-    author = {Runyi Zhao, Sheng Xu, Ruixing Jin, Yueci Deng, Yunxin Tai, Kui Jia, Guiliang Liu},
-    booktitle = {The Fourteenth International Conference on Learning Representations, ICLR},
-    year = {2026},
-    url = {https://openreview.net/forum?id=H4SyKHjd4c}
-}
+   @inproceedings{Sim2RealVLA,
+       title = {Sim2Real {VLA}: Zero-Shot Generalization of Synthesized Skills to Realistic Manipulation},
+       author = {Runyi Zhao, Sheng Xu, Ruixing Jin, Yueci Deng, Yunxin Tai, Kui Jia, Guiliang Liu},
+       booktitle = {The Fourteenth International Conference on Learning Representations, ICLR},
+       year = {2026},
+       url = {https://openreview.net/forum?id=H4SyKHjd4c}
+   }
 
