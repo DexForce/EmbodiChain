@@ -15,6 +15,11 @@
 # ----------------------------------------------------------------------------
 
 import abc  # for abstract base class definitions
+from typing import TYPE_CHECKING, Optional, Dict
+import torch
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
 
 
 class Device(metaclass=abc.ABCMeta):
@@ -42,3 +47,17 @@ class Device(metaclass=abc.ABCMeta):
     def get_controller_state(self):
         """Returns the current state of the device, a dictionary of pos, orn, grasp, and reset."""
         raise NotImplementedError
+
+    def map_to_robot(
+        self, robot: "Robot", device_data: Dict[str, float]
+    ) -> Optional[torch.Tensor]:
+        """Map device input to robot action (optional, device-specific).
+
+        Args:
+            robot: Robot instance to control.
+            device_data: Device input data.
+
+        Returns:
+            Robot action tensor [num_envs, num_joints], or None if not implemented.
+        """
+        return None  # Default: no custom mapping
