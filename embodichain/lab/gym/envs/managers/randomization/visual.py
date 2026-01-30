@@ -19,6 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
+import copy
 from typing import TYPE_CHECKING, Literal, Union, Dict
 
 from embodichain.lab.sim.objects import Light, RigidObject, Articulation
@@ -41,6 +42,54 @@ from embodichain.data import get_data_path
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+
+__all__ = [
+    "randomize_camera_extrinsics",
+    "randomize_light",
+    "randomize_camera_intrinsics",
+    "set_rigid_object_visual_material",
+    "randomize_visual_material",
+]
+
+
+def set_rigid_object_visual_material(
+    env: EmbodiedEnv,
+    env_ids: Union[torch.Tensor, None],
+    entity_cfg: SceneEntityCfg,
+    mat_cfg: Union[VisualMaterialCfg, Dict],
+) -> None:
+    """Set a rigid object's visual material (deterministic, non-random).
+
+    This helper exists to support configs that want fixed colors/materials during reset.
+
+    Args:
+        env: Environment instance.
+        env_ids: Target env ids. If None, applies to all envs.
+        entity_cfg: Scene entity config (must point to a rigid object).
+        mat_cfg: Visual material configuration. Can be a VisualMaterialCfg object or a dict.
+            If a dict is provided, it will be converted to VisualMaterialCfg using from_dict().
+            If uid is not specified in mat_cfg, it will default to "{entity_uid}_mat".
+    """
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device="cpu")
+    else:
+        env_ids = env_ids.cpu()
+
+    if isinstance(mat_cfg, dict):
+        mat_cfg = VisualMaterialCfg.from_dict(mat_cfg)
+
+    mat_cfg = copy.deepcopy(mat_cfg)
+
+    if not mat_cfg.uid or mat_cfg.uid == "default_mat":
+        mat_cfg.uid = f"{entity_cfg.uid}_mat"
+
+    mat = env.sim.create_visual_material(mat_cfg)
+    obj: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
+    obj.set_visual_material(mat, env_ids=env_ids)
 
 
 def randomize_camera_extrinsics(
@@ -440,6 +489,24 @@ class randomize_visual_material(Functor):
                 self.entity_cfg.link_names = link_names
                 self.entity.set_visual_material(mat, link_names=link_names)
 
+    @staticmethod
+    def gen_random_base_color_texture(width: int, height: int) -> torch.Tensor:
+        """Generate a random base color texture.
+
+        Args:
+            width: The width of the texture.
+            height: The height of the texture.
+
+        Returns:
+            A torch tensor representing the random base color texture with shape (height, width, 4).
+        """
+        # Generate random RGB values
+        rgb = torch.ones((height, width, 3), dtype=torch.float32)
+        rgb *= torch.rand((1, 1, 3), dtype=torch.float32)
+        rgba = torch.cat((rgb, torch.ones((height, width, 1))), dim=2)
+        rgba = (rgba * 255).to(torch.uint8)
+        return rgba
+
     def _randomize_texture(self, mat_inst: VisualMaterialInst) -> None:
         if len(self.textures) > 0:
             # Randomly select a texture from the preloaded textures
@@ -453,17 +520,21 @@ class randomize_visual_material(Functor):
         random_texture_prob: float,
         idx: int = 0,
     ) -> None:
-
         # randomize texture or base color based on the probability.
         if random.random() < random_texture_prob and len(self.textures) != 0:
-            self._randomize_texture(mat_inst)
-        else:
-            # randomize the material instance pbr properties based on the plan.
             for key, value in plan.items():
                 if key == "base_color":
                     mat_inst.set_base_color(value[idx].tolist())
                 else:
                     getattr(mat_inst, f"set_{key}")(value[idx].item())
+
+            self._randomize_texture(mat_inst)
+        else:
+            # set a random base color instead.
+            random_color_texture = (
+                randomize_visual_material.gen_random_base_color_texture(2, 2)
+            )
+            mat_inst.set_base_color_texture(texture_data=random_color_texture)
 
     def __call__(
         self,

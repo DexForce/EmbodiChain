@@ -42,8 +42,10 @@ class PushCubeEnv(RLEnv):
         cube = self.sim.get_rigid_object("cube")
         cube_pos = cube.get_local_pose(to_matrix=True)[:, :3, 3]
 
-        if self.goal_pose is not None:
-            goal_pos = self.goal_pose[:, :3, 3]
+        # Check if goal_pose is defined (set by randomize_target_pose event)
+        goal_pose = getattr(self, "goal_pose", None)
+        if goal_pose is not None:
+            goal_pos = goal_pose[:, :3, 3]
             xy_distance = torch.norm(cube_pos[:, :2] - goal_pos[:, :2], dim=1)
             is_success = xy_distance < self.success_threshold
         else:

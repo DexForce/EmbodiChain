@@ -47,6 +47,7 @@ class Trainer:
         eval_env=None,
         event_cfg=None,
         eval_event_cfg=None,
+        num_eval_episodes: int = 5,
     ):
         self.policy = policy
         self.env = env
@@ -60,6 +61,7 @@ class Trainer:
         self.checkpoint_dir = checkpoint_dir
         self.exp_name = exp_name
         self.use_wandb = use_wandb
+        self.num_eval_episodes = num_eval_episodes
 
         if event_cfg is not None:
             self.event_manager = EventManager(event_cfg, env=self.env)
@@ -136,8 +138,12 @@ class Trainer:
             self._collect_rollout()
             losses = self.algorithm.update()
             self._log_train(losses)
-            if self.global_step % self.eval_freq == 0:
-                self._eval_once()
+            if (
+                self.eval_freq > 0
+                and self.eval_env is not None
+                and self.global_step % self.eval_freq == 0
+            ):
+                self._eval_once(num_episodes=self.num_eval_episodes)
             if self.global_step % self.save_freq == 0:
                 self.save_checkpoint()
 
@@ -224,47 +230,79 @@ class Trainer:
 
     @torch.no_grad()
     def _eval_once(self, num_episodes: int = 5):
+        """Run evaluation for specified number of episodes.
+
+        Each episode runs all parallel environments until completion, allowing
+        environments to finish at different times.
+
+        Args:
+            num_episodes: Number of episodes to evaluate
+        """
         self.policy.eval()
-        returns = []
+        episode_returns = []
+        episode_lengths = []
+
         for _ in range(num_episodes):
+            # Reset and initialize episode tracking
             obs, _ = self.eval_env.reset()
             obs = flatten_dict_observation(obs)
+            num_envs = obs.shape[0] if obs.ndim == 2 else 1
 
-            done_any = torch.zeros(
-                obs.shape[0] if obs.ndim == 2 else 1,
-                dtype=torch.bool,
-                device=self.device,
+            done_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
+            cumulative_reward = torch.zeros(
+                num_envs, dtype=torch.float32, device=self.device
             )
-            num_envs_eval = obs.shape[0] if obs.ndim == 2 else 1
-            ep_ret = torch.zeros(num_envs_eval, dtype=torch.float32, device=self.device)
-            while not done_any.any():
-                actions, _, _ = self.policy.get_action(obs, deterministic=True)
+            step_count = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
 
-                # Wrap action as dict for env processing
+            # Run episode until all environments complete
+            while not done_mask.all():
+                # Get deterministic actions from policy
+                actions, _, _ = self.policy.get_action(obs, deterministic=True)
                 action_type = getattr(self.eval_env, "action_type", "delta_qpos")
                 action_dict = {action_type: actions}
 
+                # Environment step
                 obs, reward, terminated, truncated, info = self.eval_env.step(
                     action_dict
                 )
+                obs = flatten_dict_observation(obs) if isinstance(obs, dict) else obs
 
-                # Flatten dict observation from step
-                if isinstance(obs, dict):
-                    obs = flatten_dict_observation(obs)
-
+                # Update statistics only for still-running environments
                 done = terminated | truncated
-                reward = reward.float()
-                done_any = done
-                ep_ret += reward
+                still_running = ~done_mask
+                cumulative_reward[still_running] += reward[still_running].float()
+                step_count[still_running] += 1
+                done_mask |= done
 
+                # Trigger evaluation events (e.g., video recording)
                 if hasattr(self, "eval_event_manager"):
                     if "interval" in self.eval_event_manager.available_modes:
                         self.eval_event_manager.apply(mode="interval")
 
-            returns.extend(ep_ret.detach().cpu().tolist())
-        if self.writer and len(returns) > 0:
+            # Collect episode statistics
+            episode_returns.extend(cumulative_reward.cpu().tolist())
+            episode_lengths.extend(step_count.cpu().tolist())
+
+        # Finalize evaluation functors (e.g., video recording)
+        if hasattr(self, "eval_event_manager"):
+            for functor_cfg in self.eval_event_manager._mode_functor_cfgs.get(
+                "interval", []
+            ):
+                functor = functor_cfg.func
+                save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
+
+                if hasattr(functor, "flush"):
+                    functor.flush(save_path)
+                if hasattr(functor, "finalize"):
+                    functor.finalize(save_path)
+
+        # Log evaluation metrics
+        if self.writer and episode_returns:
             self.writer.add_scalar(
-                "eval/avg_reward", float(np.mean(returns)), self.global_step
+                "eval/avg_reward", float(np.mean(episode_returns)), self.global_step
+            )
+            self.writer.add_scalar(
+                "eval/avg_length", float(np.mean(episode_lengths)), self.global_step
             )
 
     def save_checkpoint(self):

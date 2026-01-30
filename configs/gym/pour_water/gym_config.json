@@ -359,7 +359,8 @@
             "uid": "table",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "CircleTableSimple/circle_table_simple.ply"
+                "fpath": "CircleTableSimple/circle_table_simple.ply",
+                "compute_uv": true
             },
             "attrs" : {
                 "mass": 10.0,
@@ -378,7 +379,8 @@
             "uid":"cup",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "PaperCup/paper_cup.ply"
+                "fpath": "PaperCup/paper_cup.ply",
+                "compute_uv": true
             },
             "attrs" : {
                 "mass": 0.01,
@@ -397,7 +399,8 @@
             "uid":"bottle",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "ScannedBottle/kashijia_processed.ply"
+                "fpath": "ScannedBottle/kashijia_processed.ply",
+                "compute_uv": true
             },
             "attrs" : {
                 "mass": 0.01,

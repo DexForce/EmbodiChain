@@ -437,11 +437,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
-    # load dataset config
-    env_cfg.dataset = config["env"].get("dataset", None)
-
-    # TODO: support more env events, eg, grasp pose generation, mesh preprocessing, etc.
-
     env_cfg.dataset = ComponentCfg()
     if "dataset" in config["env"]:
         # Define modules to search for dataset functions
@@ -452,25 +447,32 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
         for dataset_name, dataset_params in config["env"]["dataset"].items():
             dataset_params_modified = deepcopy(dataset_params)
 
-            # Extract function name if format is "module:ClassName"
-            func_name = dataset_params["func"]
-            if ":" in func_name:
-                func_name = func_name.split(":")[-1]
+            # Check if this is a functor configuration (has "func" field) or a plain config
+            if "func" in dataset_params:
+                # Extract function name if format is "module:ClassName"
+                func_name = dataset_params["func"]
+                if ":" in func_name:
+                    func_name = func_name.split(":")[-1]
 
-            # Find the function from multiple modules using the utility function
-            dataset_func = find_function_from_modules(
-                func_name,
-                dataset_modules,
-                raise_if_not_found=True,
-            )
+                # Find the function from multiple modules using the utility function
+                dataset_func = find_function_from_modules(
+                    func_name,
+                    dataset_modules,
+                    raise_if_not_found=True,
+                )
 
-            dataset = DatasetFunctorCfg(
-                func=dataset_func,
-                mode=dataset_params_modified["mode"],
-                params=dataset_params_modified["params"],
-            )
+                from embodichain.lab.gym.envs.managers import DatasetFunctorCfg
 
-            setattr(env_cfg.dataset, dataset_name, dataset)
+                dataset = DatasetFunctorCfg(
+                    func=dataset_func,
+                    mode=dataset_params_modified["mode"],
+                    params=dataset_params_modified["params"],
+                )
+
+                setattr(env_cfg.dataset, dataset_name, dataset)
+            else:
+                # Plain configuration (e.g., robot_meta), set directly
+                setattr(env_cfg.dataset, dataset_name, dataset_params_modified)
 
     env_cfg.events = ComponentCfg()
     if "events" in config["env"]:
@@ -479,7 +481,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             "embodichain.lab.gym.envs.managers.randomization",
             "embodichain.lab.gym.envs.managers.record",
             "embodichain.lab.gym.envs.managers.events",
-            "embodichain.lab.gym.envs.managers.real2sim",
         ]
 
         # parser env events config
@@ -490,6 +491,12 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                     **event_params_modified["params"]["entity_cfg"]
                 )
                 event_params_modified["params"]["entity_cfg"] = entity_cfg
+            if "entity_cfgs" in event_params["params"]:
+                entity_cfgs = [
+                    SceneEntityCfg(**cfg)
+                    for cfg in event_params_modified["params"]["entity_cfgs"]
+                ]
+                event_params_modified["params"]["entity_cfgs"] = entity_cfgs
 
             # Find the function from multiple modules using the utility function
             event_func = find_function_from_modules(
