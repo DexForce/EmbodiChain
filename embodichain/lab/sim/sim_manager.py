@@ -969,6 +969,14 @@ class SimulationManager:
             return None
         return self._rigid_object_groups[uid]
 
+    def get_rigid_object_group_uid_list(self) -> List[str]:
+        """Get current rigid body group uid list
+
+        Returns:
+            List[str]: list of rigid body group uid.
+        """
+        return list(self._rigid_object_groups.keys())
+
     @cached_property
     def arena_offsets(self) -> torch.Tensor:
         """Get the arena offsets for all arenas.
