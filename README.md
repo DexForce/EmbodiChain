@@ -57,12 +57,22 @@ If you find EmbodiChain helpful for your research, please consider citing our wo
 ```
 
 ```bibtex
-@misc{GS-World,
-  author = {Liu, G., Deng, Y., Liu, Z., and Jia, K},
-  title = {GS-World: An Efficient, Engine-driven Learning Paradigm for Pursuing Embodied Intelligence using World
-   Models of Generative Simulation},
-  month = {October},
-  year = {2025},
-  journal = {TechRxiv}
+   @misc{GS-World,
+   author = {Guiliang Liu and Yueci Deng and Zhen Liu and Kui Jia},
+   title = {GS-World: An Efficient, Engine-driven Learning Paradigm for Pursuing Embodied Intelligence using World
+      Models of Generative Simulation},
+   month = {October},
+   year = {2025},
+   journal = {TechRxiv}
+   }
+```
+
+```bibtex
+@inproceedings{Sim2RealVLA,
+    title = {Sim2Real {VLA}: Zero-Shot Generalization of Synthesized Skills to Realistic Manipulation},
+    author = {Runyi Zhao, Sheng Xu, Ruixing Jin, Yueci Deng, Yunxin Tai, Kui Jia, Guiliang Liu},
+    booktitle = {The Fourteenth International Conference on Learning Representations, ICLR},
+    year = {2026},
+    url = {https://openreview.net/forum?id=H4SyKHjd4c}
 }
 ```
