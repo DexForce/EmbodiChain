@@ -248,6 +248,15 @@ class Camera(BaseSensor):
         """
         return is_rt_enabled()
 
+    @cached_property
+    def group_id(self) -> int:
+        """Get the camera group ID in the dexsim world.
+
+        Returns:
+            int: The camera group ID.
+        """
+        return self._frame_buffer.get_group_id()
+
     def update(self, **kwargs) -> None:
         """Update the sensor data.
 
