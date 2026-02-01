@@ -534,6 +534,24 @@ class randomize_visual_material(Functor):
                 self.entity_cfg.link_names = link_names
                 self.entity.set_visual_material(mat, link_names=link_names)
 
+        # ground plane only has one instance.
+        self._mat_insts = None
+        if self.entity_cfg.uid == "default_plane":
+            self._mat_insts = env.sim.get_visual_material(
+                "plane_mat"
+            ).get_default_instance()
+            return
+        elif isinstance(self.entity, RigidObject):
+            self._mat_insts = self.entity.get_visual_material_inst()
+            if self.entity.is_shared_visual_material:
+                self._mat_insts = self._mat_insts[:1]
+        elif isinstance(self.entity, Articulation):
+            self._mat_insts = self.entity.get_visual_material_inst(
+                link_names=self.entity_cfg.link_names,
+            )
+            if self.entity.is_shared_visual_material:
+                self._mat_insts = self._mat_insts[:1]
+
     @staticmethod
     def gen_random_base_color_texture(width: int, height: int) -> torch.Tensor:
         """Generate a random base color texture.
@@ -643,8 +661,6 @@ class randomize_visual_material(Functor):
             )
             randomize_plan["ior"] = ior
 
-        # ground plane only has one instance.
-        mat_insts = None
         if self.entity_cfg.uid == "default_plane":
             mat_inst = env.sim.get_visual_material("plane_mat").get_default_instance()
             self._randomize_mat_inst(
@@ -654,15 +670,8 @@ class randomize_visual_material(Functor):
                 idx=0,
             )
             return
-        elif isinstance(self.entity, RigidObject):
-            mat_insts = self.entity.get_visual_material_inst(env_ids=env_ids)
-        elif isinstance(self.entity, Articulation):
-            mat_insts = self.entity.get_visual_material_inst(
-                env_ids=env_ids,
-                link_names=self.entity_cfg.link_names,
-            )
 
-        for i, data in enumerate(mat_insts):
+        for i, data in enumerate(self._mat_insts):
             if isinstance(self.entity, RigidObject):
                 # For RigidObject, data is the material instance directly
                 mat: VisualMaterialInst = data
