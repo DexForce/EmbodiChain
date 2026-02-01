@@ -209,6 +209,7 @@ class RigidObject(BatchEntity):
 
         # For rendering purposes, each instance can have its own material.
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
+        self.is_shared_visual_material = False
 
         for entity in entities:
             entity.set_body_scale(*cfg.body_scale)
@@ -566,20 +567,39 @@ class RigidObject(BatchEntity):
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
 
     def set_visual_material(
-        self, mat: VisualMaterial, env_ids: Sequence[int] | None = None
+        self,
+        mat: VisualMaterial,
+        env_ids: Sequence[int] | None = None,
+        shared: bool = False,
     ) -> None:
         """Set visual material for the rigid object.
+
+        Note:
+            If `shared` is True, the same material instance will be used for all specified environment indices.
+            If `shared` is False, a unique material instance will be created for each specified environment index.
 
         Args:
             mat (VisualMaterial): The material to set.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+            shared (bool, optional): Whether to share the material instance among all specified environment indices. Defaults to False.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        for i, env_idx in enumerate(local_env_ids):
-            mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
-            self._entities[env_idx].set_material(mat_inst.mat)
-            self._visual_material[env_idx] = mat_inst
+        if shared:
+            if len(local_env_ids) != self.num_instances:
+                logger.log_error(f"Cannot share material instance for partial env_ids.")
+
+            mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}")
+            for env_idx in local_env_ids:
+                self._entities[env_idx].set_material(mat_inst.mat)
+                self._visual_material[env_idx] = mat_inst
+            self.is_shared_visual_material = True
+        else:
+            for i, env_idx in enumerate(local_env_ids):
+                mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
+                self._entities[env_idx].set_material(mat_inst.mat)
+                self._visual_material[env_idx] = mat_inst
+            self.is_shared_visual_material = False
 
     def get_visual_material_inst(
         self, env_ids: Sequence[int] | None = None
