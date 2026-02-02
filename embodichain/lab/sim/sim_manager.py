@@ -218,9 +218,6 @@ class SimulationManager:
 
         self._window: Windows | None = None
         self._is_registered_window_control = False
-        if sim_config.headless is False:
-            self._window = self._world.get_windows()
-            self._register_default_window_control()
 
         fps = int(1.0 / sim_config.physics_dt)
         self._world.set_physics_fps(fps)
@@ -281,6 +278,10 @@ class SimulationManager:
         self.set_manual_update(True)
 
         self._build_multiple_arenas(sim_config.num_envs)
+
+        if sim_config.headless is False:
+            self._window = self._world.get_windows()
+            self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -968,6 +969,14 @@ class SimulationManager:
             return None
         return self._rigid_object_groups[uid]
 
+    def get_rigid_object_group_uid_list(self) -> List[str]:
+        """Get current rigid body group uid list
+
+        Returns:
+            List[str]: list of rigid body group uid.
+        """
+        return list(self._rigid_object_groups.keys())
+
     @cached_property
     def arena_offsets(self) -> torch.Tensor:
         """Get the arena offsets for all arenas.
@@ -1513,6 +1522,11 @@ class SimulationManager:
     def _register_default_window_control(self) -> None:
         """Register default window controls for better simulation interaction."""
         from dexsim.types import InputKey
+
+        # TODO: window control has stucking issue with extra sensor under Raster renderer backend.
+        # Will be fixed in next dexsim release.
+        if self.is_rt_enabled is False:
+            return
 
         if self._is_registered_window_control:
             return

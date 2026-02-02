@@ -15,8 +15,6 @@
 # ----------------------------------------------------------------------------
 
 from enum import Enum, IntEnum
-import torch
-import numpy as np
 
 
 class SemanticMask(IntEnum):

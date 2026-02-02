@@ -379,13 +379,17 @@ class ManagerBase(ABC):
             functor_name: The name of the functor.
             functor_cfg: The functor configuration.
         """
-        for key, value in functor_cfg.params.items():
+
+        def _resolve_scene_entities(value, key_path: str):
+            # Resolve SceneEntityCfg anywhere in nested params (dict/list/tuple).
             if isinstance(value, SceneEntityCfg):
                 # load the entity
                 try:
                     value.resolve(self._env.sim)
                 except ValueError as e:
-                    raise ValueError(f"Error while parsing '{functor_name}:{key}'. {e}")
+                    raise ValueError(
+                        f"Error while parsing '{functor_name}:{key_path}'. {e}"
+                    )
                 # log the entity for checking later
                 msg = f"[{functor_cfg.__class__.__name__}:{functor_name}] Found entity '{value.uid}'."
                 if value.joint_ids is not None:
@@ -394,8 +398,27 @@ class ManagerBase(ABC):
                     msg += f"\n\tBody names: {value.body_names} [{value.body_ids}]"
                 # print the information
                 print(f"[INFO]: {msg}")
+                return value
+            if isinstance(value, list):  # recursively resolve the list
+                return [
+                    _resolve_scene_entities(v, f"{key_path}[{i}]")
+                    for i, v in enumerate(value)
+                ]
+            if isinstance(value, tuple):  # recursively resolve the tuple
+                return tuple(
+                    _resolve_scene_entities(v, f"{key_path}[{i}]")
+                    for i, v in enumerate(value)
+                )
+            if isinstance(value, dict):  # recursively resolve the dict
+                return {
+                    k: _resolve_scene_entities(v, f"{key_path}.{k}")
+                    for k, v in value.items()
+                }
+            return value
+
+        for key, value in list(functor_cfg.params.items()):
             # store the entity
-            functor_cfg.params[key] = value
+            functor_cfg.params[key] = _resolve_scene_entities(value, key)
 
         # initialize the functor if it is a class
         if inspect.isclass(functor_cfg.func):
