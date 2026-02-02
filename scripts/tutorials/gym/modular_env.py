@@ -219,9 +219,8 @@ if __name__ == "__main__":
     # Create the Gym environment
     env = gym.make("ModularEnv-v1", cfg=env_cfg)
 
-    while True:
-        obs, info = env.reset()
+    obs, info = env.reset()
 
-        for i in range(100):
-            action = torch.zeros(env.action_space.shape, dtype=torch.float32)
-            obs, reward, done, truncated, info = env.step(action)
+    for i in range(10):
+        action = torch.zeros(env.action_space.shape, dtype=torch.float32)
+        obs, reward, done, truncated, info = env.step(action)

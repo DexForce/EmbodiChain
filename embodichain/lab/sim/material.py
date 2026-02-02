@@ -165,7 +165,8 @@ class VisualMaterial:
         Returns:
             VisualMaterialInst: The created material instance.
         """
-        inst = VisualMaterialInst(uid, self._mat)
+        mat_inst = self._mat.get_inst(uid)
+        inst = VisualMaterialInst(uid, mat_inst)
         # TODO: Support change default properties for material.
         # This will improve the instance creation efficiency.
         self.set_default_properties(inst, self.cfg)
@@ -197,9 +198,9 @@ class VisualMaterial:
 class VisualMaterialInst:
     """Instance of a visual material in the simulation environment."""
 
-    def __init__(self, uid: str, mat: Material):
+    def __init__(self, uid: str, mat_inst: MaterialInst):
         self.uid = uid
-        self._mat = mat
+        self._mat = mat_inst
 
         # Init properties with default values
         self.base_color = [0.5, 0.5, 0.5, 1.0]
@@ -217,7 +218,7 @@ class VisualMaterialInst:
 
     @property
     def mat(self) -> MaterialInst:
-        return self._mat.get_inst(self.uid)
+        return self._mat
 
     def set_base_color(self, color: list) -> None:
         """Set base color/diffuse color."""
@@ -227,22 +228,19 @@ class VisualMaterialInst:
     def set_metallic(self, metallic: float) -> None:
         """Set metallic factor."""
         self.metallic = metallic
-        inst = self._mat.get_inst(self.uid)
-        inst.set_metallic(metallic)
+        self.mat.set_metallic(metallic)
 
     def set_roughness(self, roughness: float) -> None:
         """Set surface roughness."""
         self.roughness = roughness
-        inst = self._mat.get_inst(self.uid)
-        inst.set_roughness(roughness)
+        self.mat.set_roughness(roughness)
 
     def set_emissive(self, emissive: list) -> None:
         """Set emissive color."""
         self.emissive = emissive
         value = np.zeros(4)
         value[0:3] = emissive
-        inst = self._mat.get_inst(self.uid)
-        inst.set_emissive(value)
+        self.mat.set_emissive(value)
 
     def set_emissive_intensity(self, intensity: float) -> None:
         """Set emissive intensity multiplier."""
@@ -264,11 +262,10 @@ class VisualMaterialInst:
 
         if texture_path is not None:
             self.base_color_texture = texture_path
-            inst = self._mat.get_inst(self.uid)
-            inst.set_base_color_map(texture_path)
+            self.mat.set_base_color_map(texture_path)
         elif texture_data is not None:
             self.base_color_texture = texture_data
-            inst = self._mat.get_inst(self.uid)
+            self.mat.set_base_color_map(texture_data)
 
             # TODO: Optimize texture creation method.
             world = dexsim.default_world()
@@ -276,7 +273,7 @@ class VisualMaterialInst:
             color_texture = env.create_color_texture(
                 texture_data.cpu().numpy(), has_alpha=True
             )
-            inst.set_base_color_map(color_texture)
+            self.mat.set_base_color_map(color_texture)
 
     def set_metallic_texture(
         self, texture_path: str = None, texture_data: torch.Tensor | None = None
@@ -294,11 +291,9 @@ class VisualMaterialInst:
 
         if texture_path is not None:
             self.metallic_texture = texture_path
-            inst = self._mat.get_inst(self.uid)
-            inst.set_metallic_map(texture_path)
+            self.mat.set_metallic_map(texture_path)
         elif texture_data is not None:
             self.metallic_texture = texture_data
-            inst = self._mat.get_inst(self.uid)
 
             # TODO: Optimize texture creation method.
             world = dexsim.default_world()
@@ -306,7 +301,7 @@ class VisualMaterialInst:
             metallic_texture = env.create_color_texture(
                 texture_data.cpu().numpy(), has_alpha=False
             )
-            inst.set_metallic_map(metallic_texture)
+            self.mat.set_metallic_map(metallic_texture)
 
     def set_roughness_texture(
         self, texture_path: str = None, texture_data: torch.Tensor | None = None
@@ -324,11 +319,9 @@ class VisualMaterialInst:
 
         if texture_path is not None:
             self.roughness_texture = texture_path
-            inst = self._mat.get_inst(self.uid)
-            inst.set_roughness_map(texture_path)
+            self.mat.set_roughness_map(texture_path)
         elif texture_data is not None:
             self.roughness_texture = texture_data
-            inst = self._mat.get_inst(self.uid)
 
             # TODO: Optimize texture creation method.
             world = dexsim.default_world()
@@ -336,7 +329,7 @@ class VisualMaterialInst:
             roughness_texture = env.create_color_texture(
                 texture_data.cpu().numpy(), has_alpha=False
             )
-            inst.set_roughness_map(roughness_texture)
+            self.mat.set_roughness_map(roughness_texture)
 
     def set_normal_texture(
         self, texture_path: str = None, texture_data: torch.Tensor | None = None
@@ -354,11 +347,9 @@ class VisualMaterialInst:
 
         if texture_path is not None:
             self.normal_texture = texture_path
-            inst = self._mat.get_inst(self.uid)
-            inst.set_normal_map(texture_path)
+            self.mat.set_normal_map(texture_path)
         elif texture_data is not None:
             self.normal_texture = texture_data
-            inst = self._mat.get_inst(self.uid)
 
             # TODO: Optimize texture creation method.
             world = dexsim.default_world()
@@ -366,7 +357,7 @@ class VisualMaterialInst:
             normal_texture = env.create_color_texture(
                 texture_data.cpu().numpy(), has_alpha=False
             )
-            inst.set_normal_map(normal_texture)
+            self.mat.set_normal_map(normal_texture)
 
     def set_ao_texture(
         self, texture_path: str = None, texture_data: torch.Tensor | None = None
@@ -384,11 +375,9 @@ class VisualMaterialInst:
 
         if texture_path is not None:
             self.ao_texture = texture_path
-            inst = self._mat.get_inst(self.uid)
-            inst.set_ao_map(texture_path)
+            self.mat.set_ao_map(texture_path)
         elif texture_data is not None:
             self.ao_texture = texture_data
-            inst = self._mat.get_inst(self.uid)
 
             # TODO: Optimize texture creation method.
             world = dexsim.default_world()
@@ -396,7 +385,7 @@ class VisualMaterialInst:
             ao_texture = env.create_color_texture(
                 texture_data.cpu().numpy(), has_alpha=False
             )
-            inst.set_ao_map(ao_texture)
+            self.mat.set_ao_map(ao_texture)
 
     def set_ior(self, ior: float) -> None:
         """Set index of refraction."""
@@ -404,5 +393,4 @@ class VisualMaterialInst:
             logger.log_debug("Ray Tracing rendering not enabled, ignoring IOR setting.")
             return
         self.ior = ior
-        inst = self._mat.get_inst(self.uid)
-        inst.set_rt_param("ior", ior)
+        self.mat.set_rt_param("ior", ior)

@@ -1730,3 +1730,5 @@ class Articulation(BatchEntity):
             arenas = [env]
         for i, entity in enumerate(self._entities):
             arenas[i].remove_articulation(entity)
+
+        del self._visual_material

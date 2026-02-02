@@ -900,3 +900,5 @@ class RigidObject(BatchEntity):
             arenas = [env]
         for i, entity in enumerate(self._entities):
             arenas[i].remove_actor(entity)
+
+        del self._visual_material

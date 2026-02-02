@@ -1628,6 +1628,9 @@ class SimulationManager:
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)
 
+        for uid in self.asset_uids:
+            self.remove_asset(uid)
+
         self.clean_materials()
 
         self._env.clean()
