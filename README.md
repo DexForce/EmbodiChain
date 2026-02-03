@@ -32,7 +32,6 @@ The figure below illustrates the overall architecture of EmbodiChain:
 </p>
 
 
-
 ## Getting Started
 
 To get started with EmbodiChain, follow these steps:
@@ -41,6 +40,9 @@ To get started with EmbodiChain, follow these steps:
 - [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/tutorial/index.html)
 - [API Reference](https://dexforce.github.io/EmbodiChain/api_reference/index.html)
 
+## Contribution Guide
+
+We welcome contributions! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for guidelines on how to get started.
 
 ## Citation
 
@@ -57,7 +59,7 @@ If you find EmbodiChain helpful for your research, please consider citing our wo
 ```
 
 ```bibtex
-   @misc{GS-World,
+@misc{GS-World,
    author = {Guiliang Liu and Yueci Deng and Zhen Liu and Kui Jia},
    title = {GS-World: An Efficient, Engine-driven Learning Paradigm for Pursuing Embodied Intelligence using World
       Models of Generative Simulation},
