@@ -52,6 +52,9 @@ def main():
         default=False,
         help="Enable ray tracing for better visuals",
     )
+    parser.add_argument(
+    "--num_envs", type=int, default=1, help="Number of parallel environments"
+    )
     args = parser.parse_args()
 
     # Configure the simulation

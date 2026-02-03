@@ -180,7 +180,7 @@ def press_cow(sim: SimulationManager, robot: Robot):
         approach_xpos, joint_seed=arm_start_qpos, name="arm"
     )
     is_success, press_qpos = robot.compute_ik(
-        approach_xpos, joint_seed=arm_start_qpos, name="arm"
+        press_xpos, joint_seed=arm_start_qpos, name="arm"
     )
 
     arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos, press_qpos])
