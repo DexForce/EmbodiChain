@@ -109,7 +109,7 @@ def get_sensor_pose_in_robot_frame(
             Defaults to False (left camera). Ignored for monocular cameras.
 
     Returns:
-        A tensor of shape (num_envs, 7) representing the sensor pose in robot coordinates as [x, y, z, qw, qx, qy, qz].
+        A tensor of shape (num_envs, 4, 4) representing the sensor pose in robot coordinates as a transformation matrix.
     """
     # Get robot base pose in world frame
     robot = env.sim.get_robot(robot_uid) if robot_uid else env.robot
