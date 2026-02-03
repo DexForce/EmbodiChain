@@ -24,7 +24,7 @@ from embodichain.lab.sim.types import EnvObs
 
 
 @register_env("PushBallRL", max_episode_steps=100, override=True)
-class PushBallGateEnv(RLEnv):
+class PushBallEnv(RLEnv):
     """Push Ball Gate Task Environment.
 
     The robot must push a soccer ball into a goal area.
@@ -36,15 +36,12 @@ class PushBallGateEnv(RLEnv):
             cfg = EmbodiedEnvCfg()
         super().__init__(cfg, **kwargs)
 
-    def _init_sim_state(self, **kwargs):
-        super()._init_sim_state(**kwargs)
-        self.ball = self.sim.get_rigid_object("soccer_ball")
-
     def compute_task_state(
         self, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Compute task-specific state: success, fail, and metrics."""
-        ball_pos = self.ball.body_data.pose[:, :3]
+        ball = self.sim.get_rigid_object("soccer_ball")
+        ball_pos = ball.body_data.pose[:, :3]
 
         if self.goal_pose is not None:
             goal_pos = self.goal_pose[:, :3, 3]
@@ -66,6 +63,7 @@ class PushBallGateEnv(RLEnv):
 
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
         is_timeout = self._elapsed_steps >= self.episode_length
-        ball_pos = self.ball.body_data.pose[:, :3]
+        ball = self.sim.get_rigid_object("soccer_ball")
+        ball_pos = ball.body_data.pose[:, :3]
         is_fallen = ball_pos[:, 2] < -0.1
         return is_timeout | is_fallen

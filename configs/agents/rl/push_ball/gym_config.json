@@ -2,8 +2,6 @@
     "id": "PushBallRL",
     "max_episodes": 5,
     "env": {
-        "num_envs": 128,
-        "sim_steps_per_control": 4,
         "events": {
             "randomize_ball": {
                 "func": "randomize_rigid_object_pose",
@@ -112,7 +110,6 @@
         },
         "extensions": {
             "action_type": "delta_qpos",
-            "obs_mode": "state",
             "episode_length": 100,
             "action_scale": 0.1,
             "success_threshold": 0.1
@@ -152,7 +149,7 @@
             }
         },
         "control_parts": {
-            "arm": ["Joint[1-6]"]
+            "arm": ["JOINT[1-6]"]
         }
     },
     "rigid_object": [
@@ -165,7 +162,7 @@
             "body_type": "dynamic",
             "init_pos": [0.35, 0.0, 0.05],
             "attrs": {
-                "mass": 3.0,
+                "mass": 1.0,
                 "static_friction": 3.0,
                 "dynamic_friction": 2.5,
                 "linear_damping": 1.0,
@@ -176,5 +173,9 @@
             }
         }
     ],
-    "background": []
+    "sensor": [],
+    "light": {},
+    "background": [],
+    "rigid_object_group": [],
+    "articulation": []
 }
