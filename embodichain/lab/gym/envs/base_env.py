@@ -133,6 +133,10 @@ class BaseEnv(gym.Env):
             self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
         )
 
+        self._task_success = torch.zeros(
+            self._num_envs, dtype=torch.bool, device=self.device
+        )
+
         self._init_sim_state(**kwargs)
 
         self._init_raw_obs: Dict = self.get_obs(**kwargs)
@@ -484,12 +488,12 @@ class BaseEnv(gym.Env):
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         """Check if the task is successful for each environment.
-        
+
         This method should be overridden in subclasses to implement task-specific success criteria.
-        
+
         Args:
             **kwargs: Additional keyword arguments.
-            
+
         Returns:
             A boolean tensor indicating success for each environment.
         """
@@ -544,7 +548,7 @@ class BaseEnv(gym.Env):
             "reset_ids",
             torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
         )
-        
+
         # Save task success status before resetting objects
         self._task_success = self.is_task_success()
 
