@@ -137,6 +137,9 @@ class BaseEnv(gym.Env):
 
         self._init_raw_obs: Dict = self.get_obs(**kwargs)
 
+        # The UIDs of objects that are detached from automatic reset.
+        self._detached_uids_for_reset: List[str] = []
+
         logger.log_info("[INFO]: Initialized environment:")
         logger.log_info(f"\tEnvironment device    : {self.sim.device}")
         logger.log_info(f"\tNumber of environments: {self._num_envs}")
@@ -531,7 +534,9 @@ class BaseEnv(gym.Env):
             "reset_ids",
             torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
         )
-        self.sim.reset_objects_state(env_ids=reset_ids)
+        self.sim.reset_objects_state(
+            env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
+        )
         self._elapsed_steps[reset_ids] = 0
 
         # Reset hook for user to perform any custom reset logic.
@@ -593,6 +598,14 @@ class BaseEnv(gym.Env):
             obs, _ = self.reset(options={"reset_ids": reset_env_ids})
 
         return obs, rewards, terminateds, truncateds, info
+
+    def add_detached_uids_for_reset(self, uids: List[str]) -> None:
+        """Add the UIDs of objects that are detached from automatic reset.
+
+        Args:
+            uids: The list of UIDs to be detached from automatic reset.
+        """
+        self._detached_uids_for_reset.extend(uids)
 
     def close(self) -> None:
         """Close the environment and release resources."""

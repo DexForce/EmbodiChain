@@ -21,7 +21,7 @@ import os
 import random
 
 from copy import deepcopy
-from typing import TYPE_CHECKING, List, Union, Tuple, Dict
+from typing import TYPE_CHECKING, List, Tuple, Dict
 
 from embodichain.lab.sim.objects import (
     Light,
@@ -122,7 +122,7 @@ class replace_assets_from_group(Functor):
     def __call__(
         self,
         env: EmbodiedEnv,
-        env_ids: Union[torch.Tensor, None],
+        env_ids: torch.Tensor | None,
         entity_cfg: SceneEntityCfg,
         folder_path: str,
     ) -> None:
@@ -153,7 +153,7 @@ class prepare_extra_attr(Functor):
         self.extra_attrs = {}
 
     def __call__(
-        self, env: EmbodiedEnv, env_ids: Union[torch.Tensor, None], attrs: List[Dict]
+        self, env: EmbodiedEnv, env_ids: torch.Tensor | None, attrs: List[Dict]
     ) -> None:
         """
         Processes extra attributes for the given environment.
@@ -164,7 +164,7 @@ class prepare_extra_attr(Functor):
 
         Args:
             env (EmbodiedEnv): The environment instance to which the attributes are applied.
-            env_ids (Union[torch.Tensor, None]): Optional tensor of environment IDs (not used in this method).
+            env_ids (torch.Tensor | None): Optional tensor of environment IDs (not used in this method).
             attrs (List[Dict]): A list of dictionaries containing attribute configurations.
                 Each dictionary must contain a 'name', and may contain 'entity_cfg', 'entities',
                 'mode', 'value', 'func_name', and 'func_kwargs'.
@@ -287,7 +287,7 @@ def register_entity_attrs(
 
     Args:
         env (EmbodiedEnv): The environment the entity is in.
-        env_ids (Union[torch.Tensor, None]): The ids of the envs that the entity should be registered.
+        env_ids (torch.Tensor | None): The ids of the envs that the entity should be registered.
         entity_cfg (SceneEntityCfg): The config of the entity.
         attrs (List[str]): The list of entity attributes that asked to be registered.
         registration (str, optional): The env's registration string where the attributes should be injected to.
@@ -327,10 +327,10 @@ def register_entity_attrs(
 
 def register_entity_pose(
     env: EmbodiedEnv,
-    env_ids: torch.Tensor,
+    env_ids: torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     registration: str = "affordance_datas",
-    compute_relative: Union[bool, List, str] = "all_robots",
+    compute_relative: bool | List | str = "all_robots",
     compute_pose_object_to_arena: bool = True,
     to_matrix: bool = True,
 ):
@@ -445,7 +445,7 @@ def register_entity_pose(
 
 def register_info_to_env(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: torch.Tensor | None,
     registry: List[Dict],
     registration: str = "affordance_datas",
     sim_update: bool = True,
@@ -474,10 +474,7 @@ def register_info_to_env(
             )
 
 
-"""Helper Function"""
-
-
-def resolve_uids(env: EmbodiedEnv, entity_uids: Union[List[str], str]) -> List[str]:
+def resolve_uids(env: EmbodiedEnv, entity_uids: list[str] | str) -> list[str]:
     if isinstance(entity_uids, str):
         if entity_uids == "all_objects":
             entity_uids = (
@@ -507,9 +504,6 @@ def resolve_dict(env: EmbodiedEnv, entity_dict: Dict):
         for entity_uid in entity_uids:
             entity_dict.update({entity_uid: deepcopy(entity_val)})
     return entity_dict
-
-
-EntityWithPose = Union[RigidObject, Robot]
 
 
 def get_pose(
@@ -556,7 +550,7 @@ def get_pose(
 
 def drop_rigid_object_group_sequentially(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     drop_position: List[float] = [0.0, 0.0, 1.0],
     position_range: Tuple[List[float], List[float]] = (
@@ -569,7 +563,7 @@ def drop_rigid_object_group_sequentially(
 
     Args:
         env (EmbodiedEnv): The environment instance.
-        env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
+        env_ids (torch.Tensor | None): The environment IDs to apply the event.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
         drop_position (List[float]): The base position from which to drop the objects. Default is [0.0, 0.0, 1.0].
         position_range (Tuple[List[float], List[float]]): The range for randomizing the drop position around the base position.
@@ -609,3 +603,19 @@ def drop_rigid_object_group_sequentially(
         obj_group.set_local_pose(pose=drop_pose_i, env_ids=env_ids, obj_ids=[i])
 
         env.sim.update(step=physics_step)
+
+
+def set_detached_uids_for_env_reset(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    uids: list[str],
+) -> None:
+    """Set the UIDs of objects that are detached from automatic reset in the environment.
+
+    Args:
+        env (EmbodiedEnv): The environment instance.
+        env_ids (torch.Tensor | None): The environment IDs to apply the event.
+        uids (list[str]): The list of UIDs to be detached from automatic reset.
+    """
+
+    env.add_detached_uids_for_reset(uids=uids)
