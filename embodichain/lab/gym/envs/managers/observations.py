@@ -96,6 +96,7 @@ def get_sensor_pose_in_robot_frame(
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
     robot_uid: str | None = None,
+    is_right: bool = False,
 ) -> torch.Tensor:
     """Get the pose of a sensor in the robot's base coordinate frame.
 
@@ -104,9 +105,11 @@ def get_sensor_pose_in_robot_frame(
         obs: The observation dictionary.
         entity_cfg: The configuration of the sensor entity.
         robot_uid: The uid of the robot. If None, uses the default robot from env.
+        is_right: Whether to return the right camera intrinsics for stereo cameras.
+            Defaults to False (left camera). Ignored for monocular cameras.
 
     Returns:
-        A tensor of shape (num_envs, 7) representing the sensor pose in robot coordinates as [x, y, z, qw, qx, qy, qz].
+        A tensor of shape (num_envs, 4, 4) representing the sensor pose in robot coordinates as a transformation matrix.
     """
     # Get robot base pose in world frame
     robot = env.sim.get_robot(robot_uid) if robot_uid else env.robot
@@ -120,17 +123,18 @@ def get_sensor_pose_in_robot_frame(
             f"Sensor with UID '{entity_cfg.uid}' not found in the simulation."
         )
 
-    cam_pose = sensor.get_arena_pose(to_matrix=True)
+    if isinstance(sensor, StereoCamera):
+        cam_left_pose, cam_right_pose = sensor.get_left_right_arena_pose()
+        if is_right:
+            cam_in_robot = torch.matmul(robot_pose_inv, cam_right_pose)
+        else:
+            cam_in_robot = torch.matmul(robot_pose_inv, cam_left_pose)
 
-    # Compute sensor pose in robot coordinate frame: T_robot_cam = inv(T_world_robot) @ T_world_cam
-    cam_in_robot = torch.matmul(robot_pose_inv, cam_pose)
-
-    # Convert (num_envs, 4, 4) to (num_envs, 7): [x, y, z, qw, qx, qy, qz]
-    xyz = cam_in_robot[:, :3, 3]
-    quat = quat_from_matrix(cam_in_robot[:, :3, :3])
-    pose = torch.cat([xyz, quat], dim=-1)
-
-    return pose
+    else:
+        cam_pose = sensor.get_arena_pose(to_matrix=True)
+        # Compute sensor pose in robot coordinate frame: T_robot_cam = inv(T_world_robot) @ T_world_cam
+        cam_in_robot = torch.matmul(robot_pose_inv, cam_pose)
+    return cam_in_robot
 
 
 def get_sensor_intrinsics(
