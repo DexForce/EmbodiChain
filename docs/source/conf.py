@@ -40,6 +40,8 @@ extensions = [
     "sphinx_autodoc_typehints",  # optional, shows type hints
     "sphinx_design",
     "myst_parser",  # if you prefer Markdown pages
+    "sphinx_copybutton",
+    "sphinx_multiversion",
 ]
 # Napoleon settings if using Google/NumPy docstring style:
 napoleon_google_docstring = True
@@ -69,3 +71,11 @@ exclude_patterns = []
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
 # html_logo = "_static/logo_e.png"
+
+# -- sphinx-multiversion configuration -------------------------------------------------
+# Only build tags that look like v1.0.0 or branches like main/dev
+smv_tag_whitelist = r"^v\d+\.\d+\.\d+$"
+smv_branch_whitelist = r"^(main|dev)$"
+smv_remote_whitelist = r"^origin$"
+smv_released_pattern = r"^tags/v\d+\.\d+\.\d+$"
+smv_outputdir_format = "{ref.name}"
