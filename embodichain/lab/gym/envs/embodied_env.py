@@ -379,7 +379,8 @@ class EmbodiedEnv(BaseEnv):
         if save_data and self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
 
-                current_task_success = self.is_task_success()
+                # Use task success status saved before reset_objects_state
+                current_task_success = self._task_success
 
                 # Filter to only save successful episodes
                 successful_env_ids = [

@@ -482,6 +482,19 @@ class BaseEnv(gym.Env):
 
         return rewards
 
+    def is_task_success(self, **kwargs) -> torch.Tensor:
+        """Check if the task is successful for each environment.
+        
+        This method should be overridden in subclasses to implement task-specific success criteria.
+        
+        Args:
+            **kwargs: Additional keyword arguments.
+            
+        Returns:
+            A boolean tensor indicating success for each environment.
+        """
+        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action before sending to robot.
 
@@ -531,6 +544,10 @@ class BaseEnv(gym.Env):
             "reset_ids",
             torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
         )
+        
+        # Save task success status before resetting objects
+        self._task_success = self.is_task_success()
+
         self.sim.reset_objects_state(env_ids=reset_ids)
         self._elapsed_steps[reset_ids] = 0
 
