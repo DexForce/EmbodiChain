@@ -167,7 +167,7 @@ def main():
         # Add delay to simulate motion
         time.sleep(0.005)
 
-    embed(header="Test PinkSolver example. Press Ctrl-D to exit.")
+    embed(header="Test PinkSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":
