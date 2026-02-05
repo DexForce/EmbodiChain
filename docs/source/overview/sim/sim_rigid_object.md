@@ -73,7 +73,7 @@ sim.update()
 
 > Note: `scripts/tutorials/sim/create_scene.py` provides a minimal working example of adding a rigid cube and running the simulation loop.
 
-## Rigid Object Class — Common Methods & Observations
+## Rigid Object Class — Common Methods & Attributes
 
 Rigid objects are observed and controlled via single poses and linear/angular velocities. Key APIs include:
 

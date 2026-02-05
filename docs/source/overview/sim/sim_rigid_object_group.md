@@ -74,7 +74,8 @@ sim.update()
 
 The example `scripts/tutorials/sim/create_rigid_object_group.py` demonstrates creating and running a scene with a `RigidObjectGroup`.
 
-## Rigid Object Group — Common Methods & Observations
+## Rigid Object Group — Common Methods & Attributes
+
 
 A group provides batch operations on multiple rigid objects. Key APIs include:
 
@@ -134,9 +135,9 @@ obj_group.reset()
 sim.update()
 ```
 
-## Integration with Sensors & Gizmos
+## Integration with Sensors 
 
-Members in a group behave like normal `RigidObject`s: they can be observed by cameras, attached to contact sensors, and controlled via gizmos. You can operate on individual members or treat the group as a single unit depending on your scenario.
+Members in a group behave like normal `RigidObject`s: they can be observed by cameras, attached to contact sensors. You can operate on individual members or treat the group as a single unit depending on your scenario.
 
 ## Related Topics
 
