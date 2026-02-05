@@ -497,7 +497,11 @@ class BaseEnv(gym.Env):
         Returns:
             A boolean tensor indicating success for each environment.
         """
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+        raise NotImplementedError(
+            "BaseEnv.is_task_success must be implemented in subclasses to define "
+            "task-specific success criteria."
+        )
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action before sending to robot.

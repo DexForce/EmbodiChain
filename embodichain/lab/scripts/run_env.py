@@ -28,6 +28,7 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import (
     config_to_cfg,
+    DEFAULT_MANAGER_MODULES,
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
 
@@ -191,18 +192,9 @@ if __name__ == "__main__":
     #     log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
 
     gym_config = load_json(args.gym_config)
-
-    # Define manager modules for config parsing
-    manager_modules = [
-        "embodichain.lab.gym.envs.managers.datasets",
-        "embodichain.lab.gym.envs.managers.randomization",
-        "embodichain.lab.gym.envs.managers.record",
-        "embodichain.lab.gym.envs.managers.events",
-        "embodichain.lab.gym.envs.managers.observations",
-        "embodichain.lab.gym.envs.managers.rewards",
-    ]
-
-    cfg: EmbodiedEnvCfg = config_to_cfg(gym_config, manager_modules=manager_modules)
+    cfg: EmbodiedEnvCfg = config_to_cfg(
+        gym_config, manager_modules=DEFAULT_MANAGER_MODULES
+    )
     cfg.filter_visual_rand = args.filter_visual_rand
 
     action_config = {}

@@ -28,6 +28,16 @@ from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
+# Default manager modules for config parsing
+DEFAULT_MANAGER_MODULES = [
+    "embodichain.lab.gym.envs.managers.datasets",
+    "embodichain.lab.gym.envs.managers.randomization",
+    "embodichain.lab.gym.envs.managers.record",
+    "embodichain.lab.gym.envs.managers.events",
+    "embodichain.lab.gym.envs.managers.observations",
+    "embodichain.lab.gym.envs.managers.rewards",
+]
+
 
 def get_dtype_bounds(dtype: np.dtype):
     """Gets the min and max values of a given numpy type"""
@@ -440,14 +450,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
     # Initialize manager_modules with defaults
-    default_manager_modules = [
-        "embodichain.lab.gym.envs.managers.datasets",
-        "embodichain.lab.gym.envs.managers.randomization",
-        "embodichain.lab.gym.envs.managers.record",
-        "embodichain.lab.gym.envs.managers.events",
-        "embodichain.lab.gym.envs.managers.observations",
-        "embodichain.lab.gym.envs.managers.rewards",
-    ]
+    default_manager_modules = DEFAULT_MANAGER_MODULES.copy()
 
     # Extend with user-provided modules, skipping duplicates
     if manager_modules is not None:

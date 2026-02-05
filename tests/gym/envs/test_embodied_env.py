@@ -22,7 +22,7 @@ import gymnasium as gym
 
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.data import get_data_path
@@ -120,17 +120,9 @@ class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        # Define manager modules for config parsing
-        manager_modules = [
-            "embodichain.lab.gym.envs.managers.datasets",
-            "embodichain.lab.gym.envs.managers.randomization",
-            "embodichain.lab.gym.envs.managers.record",
-            "embodichain.lab.gym.envs.managers.events",
-            "embodichain.lab.gym.envs.managers.observations",
-            "embodichain.lab.gym.envs.managers.rewards",
-        ]
-
-        cfg: EmbodiedEnvCfg = config_to_cfg(METADATA, manager_modules=manager_modules)
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            METADATA, manager_modules=DEFAULT_MANAGER_MODULES
+        )
         cfg.num_envs = NUM_ENVS
         cfg.sim_cfg = SimulationManagerCfg(headless=True, sim_device=sim_device)
 
