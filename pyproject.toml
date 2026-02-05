@@ -36,6 +36,7 @@ dependencies = [
   "pin-pink",
   "casadi",
   "qpsolvers==4.8.1",
+  "qpsolvers[osqp]",
   "py_opw_kinematics==0.1.6",
   "pytorch_kinematics==0.7.6",
   "polars==1.31.0",
