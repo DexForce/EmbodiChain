@@ -179,11 +179,9 @@ def press_cow(sim: SimulationManager, robot: Robot):
     is_success, approach_qpos = robot.compute_ik(
         approach_xpos, joint_seed=arm_start_qpos, name="arm"
     )
-    is_success, press_qpos = robot.compute_ik(
-        press_xpos, joint_seed=arm_start_qpos, name="arm"
-    )
 
-    arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos, press_qpos])
+
+    arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos])
     interp_trajectory = interpolate_with_distance_warp(
         trajectory=arm_trajectory[None, :, :], interp_num=50, device=sim.device
     )
