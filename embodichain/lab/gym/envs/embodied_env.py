@@ -379,13 +379,6 @@ class EmbodiedEnv(BaseEnv):
         if save_data and self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
 
-                # Use task success status saved before reset_objects_state
-                if self._task_success is None:
-                    logger.log_warning("task_success is not defined, nothing to save.")
-                    self._task_success = torch.zeros(
-                        self.num_envs, dtype=torch.bool, device=self.device
-                    )
-
                 # Filter to only save successful episodes
                 successful_env_ids = [
                     env_id
