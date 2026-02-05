@@ -120,7 +120,17 @@ class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        cfg: EmbodiedEnvCfg = config_to_cfg(METADATA)
+        # Define manager modules for config parsing
+        manager_modules = [
+            "embodichain.lab.gym.envs.managers.datasets",
+            "embodichain.lab.gym.envs.managers.randomization",
+            "embodichain.lab.gym.envs.managers.record",
+            "embodichain.lab.gym.envs.managers.events",
+            "embodichain.lab.gym.envs.managers.observations",
+            "embodichain.lab.gym.envs.managers.rewards",
+        ]
+
+        cfg: EmbodiedEnvCfg = config_to_cfg(METADATA, manager_modules=manager_modules)
         cfg.num_envs = NUM_ENVS
         cfg.sim_cfg = SimulationManagerCfg(headless=True, sim_device=sim_device)
 

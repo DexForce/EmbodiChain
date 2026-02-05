@@ -133,7 +133,18 @@ def train_from_config(config_path: str):
     logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_json(str(gym_config_path))
-    gym_env_cfg = config_to_cfg(gym_config_data)
+
+    # Define manager modules for config parsing
+    manager_modules = [
+        "embodichain.lab.gym.envs.managers.datasets",
+        "embodichain.lab.gym.envs.managers.randomization",
+        "embodichain.lab.gym.envs.managers.record",
+        "embodichain.lab.gym.envs.managers.events",
+        "embodichain.lab.gym.envs.managers.observations",
+        "embodichain.lab.gym.envs.managers.rewards",
+    ]
+
+    gym_env_cfg = config_to_cfg(gym_config_data, manager_modules=manager_modules)
 
     # Override num_envs from train config if provided
     if num_envs is not None:
