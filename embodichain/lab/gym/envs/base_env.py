@@ -133,12 +133,12 @@ class BaseEnv(gym.Env):
             self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
         )
 
+        # The UIDs of objects that are detached from automatic reset.
+        self._detached_uids_for_reset: List[str] = []
+
         self._init_sim_state(**kwargs)
 
         self._init_raw_obs: Dict = self.get_obs(**kwargs)
-
-        # The UIDs of objects that are detached from automatic reset.
-        self._detached_uids_for_reset: List[str] = []
 
         logger.log_info("[INFO]: Initialized environment:")
         logger.log_info(f"\tEnvironment device    : {self.sim.device}")
