@@ -124,6 +124,8 @@ Configured via `LightCfg`.
 ```{toctree}
 :maxdepth: 1
 
+sim_rigid_object.md
+sim_rigid_object_group.md
 sim_soft_object.md
 sim_articulation.md
 sim_robot.md
