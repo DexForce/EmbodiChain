@@ -242,7 +242,7 @@ def main(visualize: bool = True):
                 )
         time.sleep(0.005)
 
-    embed(header="Test DifferentialSolver example. Press Ctrl-D to exit.")
+    embed(header="Test DifferentialSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":

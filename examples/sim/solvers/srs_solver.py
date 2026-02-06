@@ -77,7 +77,7 @@ def main():
     print("fk_xpos_list: ", fk_xpos_list)
     print("ik_xpos_list: ", ik_xpos_list)
 
-    embed(header="Test SRSSolver example. Press Ctrl-D to exit.")
+    embed(header="Test SRSSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":
