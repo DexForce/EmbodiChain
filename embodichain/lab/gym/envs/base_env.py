@@ -133,6 +133,9 @@ class BaseEnv(gym.Env):
             self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
         )
 
+        self._task_success = torch.zeros(
+            self._num_envs, dtype=torch.bool, device=self.device
+        )
         # The UIDs of objects that are detached from automatic reset.
         self._detached_uids_for_reset: List[str] = []
 
@@ -485,6 +488,20 @@ class BaseEnv(gym.Env):
 
         return rewards
 
+    def is_task_success(self, **kwargs) -> torch.Tensor:
+        """
+        Determine if the task is successfully completed. This is mainly used in the data generation process
+        of the imitation learning.
+
+        Args:
+            **kwargs: Additional arguments for task-specific success criteria.
+
+        Returns:
+            torch.Tensor: A boolean tensor indicating success for each environment in the batch.
+        """
+
+        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action before sending to robot.
 
@@ -534,6 +551,10 @@ class BaseEnv(gym.Env):
             "reset_ids",
             torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
         )
+
+        # Save task success status before resetting objects
+        self._task_success = self.is_task_success()
+
         self.sim.reset_objects_state(
             env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
         )

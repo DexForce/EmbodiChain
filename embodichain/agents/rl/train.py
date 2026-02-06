@@ -32,7 +32,7 @@ from embodichain.agents.rl.algo import build_algo, get_registered_algo_names
 from embodichain.agents.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
 from embodichain.utils.utility import load_json
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
@@ -133,11 +133,9 @@ def train_from_config(config_path: str):
     logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_json(str(gym_config_path))
-    gym_env_cfg = config_to_cfg(gym_config_data)
-
-    # Override num_envs from train config if provided
-    if num_envs is not None:
-        gym_env_cfg.num_envs = num_envs
+    gym_env_cfg = config_to_cfg(
+        gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
+    )
 
     # Ensure sim configuration mirrors runtime overrides
     if gym_env_cfg.sim_cfg is None:

@@ -28,6 +28,16 @@ from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
+# Default manager modules for config parsing
+DEFAULT_MANAGER_MODULES = [
+    "embodichain.lab.gym.envs.managers.datasets",
+    "embodichain.lab.gym.envs.managers.randomization",
+    "embodichain.lab.gym.envs.managers.record",
+    "embodichain.lab.gym.envs.managers.events",
+    "embodichain.lab.gym.envs.managers.observations",
+    "embodichain.lab.gym.envs.managers.rewards",
+]
+
 
 def get_dtype_bounds(dtype: np.dtype):
     """Gets the min and max values of a given numpy type"""
@@ -323,11 +333,13 @@ def cat_tensor_with_ids(
     return out
 
 
-def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
+def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
     Args:
         config (dict): The configuration dictionary containing robot, sensor, light, background, and interactive objects.
+        manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
+            If not provided, uses default module paths.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
@@ -437,13 +449,19 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
+    # Initialize manager_modules with defaults
+    default_manager_modules = DEFAULT_MANAGER_MODULES.copy()
+
+    # Extend with user-provided modules, skipping duplicates
+    if manager_modules is not None:
+        for module in manager_modules:
+            if module not in default_manager_modules:
+                default_manager_modules.append(module)
+
+    manager_modules = default_manager_modules
+
     env_cfg.dataset = ComponentCfg()
     if "dataset" in config["env"]:
-        # Define modules to search for dataset functions
-        dataset_modules = [
-            "embodichain.lab.gym.envs.managers.datasets",
-        ]
-
         for dataset_name, dataset_params in config["env"]["dataset"].items():
             dataset_params_modified = deepcopy(dataset_params)
 
@@ -457,7 +475,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
                 # Find the function from multiple modules using the utility function
                 dataset_func = find_function_from_modules(
                     func_name,
-                    dataset_modules,
+                    manager_modules,
                     raise_if_not_found=True,
                 )
 
@@ -476,13 +494,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
 
     env_cfg.events = ComponentCfg()
     if "events" in config["env"]:
-        # Define modules to search for event functions
-        event_modules = [
-            "embodichain.lab.gym.envs.managers.randomization",
-            "embodichain.lab.gym.envs.managers.record",
-            "embodichain.lab.gym.envs.managers.events",
-        ]
-
         # parser env events config
         for event_name, event_params in config["env"]["events"].items():
             event_params_modified = deepcopy(event_params)
@@ -500,7 +511,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
 
             # Find the function from multiple modules using the utility function
             event_func = find_function_from_modules(
-                event_params["func"], event_modules, raise_if_not_found=True
+                event_params["func"], manager_modules, raise_if_not_found=True
             )
             interval_step = event_params_modified.get("interval_step", 10)
 
@@ -514,11 +525,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
 
     env_cfg.observations = ComponentCfg()
     if "observations" in config["env"]:
-        # Define modules to search for observation functions
-        observation_modules = [
-            "embodichain.lab.gym.envs.managers.observations",
-        ]
-
         for obs_name, obs_params in config["env"]["observations"].items():
             obs_params_modified = deepcopy(obs_params)
 
@@ -531,7 +537,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             # Find the function from multiple modules using the utility function
             obs_func = find_function_from_modules(
                 obs_params["func"],
-                observation_modules,
+                manager_modules,
                 raise_if_not_found=True,
             )
 
@@ -546,11 +552,6 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
 
     env_cfg.rewards = ComponentCfg()
     if "rewards" in config["env"]:
-        # Define modules to search for reward functions
-        reward_modules = [
-            "embodichain.lab.gym.envs.managers.rewards",
-        ]
-
         for reward_name, reward_params in config["env"]["rewards"].items():
             reward_params_modified = deepcopy(reward_params)
 
@@ -573,7 +574,7 @@ def config_to_cfg(config: dict) -> "EmbodiedEnvCfg":
             # Find the function from multiple modules using the utility function
             reward_func = find_function_from_modules(
                 reward_params["func"],
-                reward_modules,
+                manager_modules,
                 raise_if_not_found=True,
             )
 

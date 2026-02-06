@@ -24,6 +24,7 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import (
     config_to_cfg,
+    DEFAULT_MANAGER_MODULES,
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
 from .run_env import main
@@ -120,7 +121,9 @@ if __name__ == "__main__":
     agent_config = load_json(args.agent_config)
 
     # Build environment configuration
-    cfg: EmbodiedEnvCfg = config_to_cfg(gym_config)
+    cfg: EmbodiedEnvCfg = config_to_cfg(
+        gym_config, manager_modules=DEFAULT_MANAGER_MODULES
+    )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.num_envs = args.num_envs
     cfg.sim_cfg = SimulationManagerCfg(
