@@ -66,15 +66,18 @@ class VLAPolicy(Policy):
         self.vla_model.to(self.device)
 
     @torch.no_grad()
-    def forward(self, tensordict: TensorDict) -> TensorDict:
+    def forward(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
         """Forward pass: generate action and value from VLA model.
 
         Args:
             tensordict: Must contain "observation" key with observation data
+            deterministic: If True, use deterministic actions (passed to VLA model)
 
         Returns:
             Same tensordict with added keys:
-                - "action": Sampled action
+                - "action": Sampled or deterministic action
                 - "sample_log_prob": Log probability of action
                 - "value": Value estimate
         """
@@ -83,7 +86,7 @@ class VLAPolicy(Policy):
         obs = tensordict["observation"]
 
         # Example: VLA model generates action and value
-        action, log_prob, value = self.vla_model(obs)
+        action, log_prob, value = self.vla_model(obs, deterministic=deterministic)
 
         tensordict["action"] = action
         tensordict["sample_log_prob"] = log_prob

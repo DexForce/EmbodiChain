@@ -24,23 +24,21 @@ from tensordict import TensorDict
 class BaseAlgorithm:
     """Base class for RL algorithms following TorchRL conventions.
 
-    Algorithms implement rollout collection and policy update using TensorDict.
-    No custom buffer classes - use TensorDict operations directly.
+    Algorithms implement policy updates using TensorDict.
+    Data collection is handled separately by Collector classes (SyncCollector/AsyncCollector).
     """
 
     device: torch.device
 
-    def collect_rollout(
-        self,
-        env,
-        policy,
-        tensordict: TensorDict,
-        buffer_size: int,
-        on_step_callback: Callable | None = None,
-    ) -> TensorDict:
-        """Collect rollout and return TensorDict with batch_size=[T, N]."""
-        raise NotImplementedError
-
     def update(self, rollout: TensorDict) -> Dict[str, float]:
-        """Update policy using collected data and return training losses."""
+        """Update policy using collected rollout data.
+
+        Args:
+            rollout: TensorDict containing collected rollout data from Collector
+                    Expected batch_size format: [T, N] for on-policy algorithms
+                    where T is trajectory length and N is number of environments
+
+        Returns:
+            Dictionary of training metrics (losses, learning stats, etc.)
+        """
         raise NotImplementedError

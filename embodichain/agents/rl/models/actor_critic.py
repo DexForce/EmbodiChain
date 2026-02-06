@@ -103,16 +103,19 @@ class ActorCritic(Policy):
             return torch.cat(obs_list, dim=-1)
 
     @torch.no_grad()
-    def forward(self, tensordict: TensorDict) -> TensorDict:
+    def forward(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
         """Forward pass: sample action and compute value (in-place modification).
 
         Args:
             tensordict: Must contain "observation" key
+            deterministic: If True, use mean instead of sampling
 
         Returns:
             Same tensordict with added keys:
-                - "action": Sampled action
-                - "sample_log_prob": Log probability of sampled action
+                - "action": Sampled or deterministic action
+                - "sample_log_prob": Log probability of action
                 - "value": Value estimate
                 - "loc": Distribution mean
                 - "scale": Distribution std
@@ -123,11 +126,17 @@ class ActorCritic(Policy):
         mean = self.actor(obs_tensor)
         log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
         std = log_std.exp().expand(mean.shape[0], -1)
+
         dist = Normal(mean, std)
 
-        # Sample action (or use mean if deterministic mode set elsewhere)
-        # For now, always sample during forward; deterministic handled by setting std=0 externally if needed
-        action = dist.sample()
+        # Sample action or use mean
+        if deterministic:
+            action = mean
+        else:
+            dist = Normal(mean, std)
+            action = dist.sample()
+
+        # Compute log probability
         log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
 
         # Critic forward - keep shape [N, 1] for consistency with reward/done

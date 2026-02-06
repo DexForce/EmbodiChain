@@ -15,10 +15,8 @@
 # ----------------------------------------------------------------------------
 
 import torch
-from typing import Dict, Any, Callable
-
 from tensordict import TensorDict
-from embodichain.agents.rl.utils import AlgorithmCfg, compute_gae, dict_to_tensordict
+from embodichain.agents.rl.utils import AlgorithmCfg, compute_gae
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
 
@@ -75,9 +73,7 @@ class PPOCfg(AlgorithmCfg):
 
 class PPO(BaseAlgorithm):
     """PPO algorithm using TensorDict for all data flow.
-
-    Following TorchRL conventions: no custom buffer class, just TensorDict operations.
-    All data I/O uses TensorDict - no tensor fallback.
+    Data collection is handled by Collector classes (SyncCollector/AsyncCollector).
     """
 
     def __init__(self, cfg: PPOCfg, policy):
@@ -86,136 +82,25 @@ class PPO(BaseAlgorithm):
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
 
-    def collect_rollout(
-        self,
-        env,
-        policy,
-        tensordict: TensorDict,
-        buffer_size: int,
-        on_step_callback: Callable | None = None,
-    ) -> TensorDict:
-        """Collect a rollout using TensorDict data flow.
+    def update(self, rollout: TensorDict) -> dict:
+        """Update the policy using collected rollout TensorDict (TorchRL style).
 
         Args:
-            env: Environment to collect from
-            policy: Policy to use for action selection
-            tensordict: Initial TensorDict with "observation" key
-            buffer_size: Number of steps to collect
-            on_step_callback: Optional callback called after each step
+            rollout: TensorDict with batch_size=[T, N] from collect_rollout()
+                    OR [size] from VLA buffer
 
         Returns:
-            TensorDict with batch_size=[T, N] containing full rollout data
+            Dictionary of training metrics
         """
-        policy.train()
-        current_td = tensordict
-        rollout_list = []
-
-        for t in range(buffer_size):
-            # Policy forward: adds "action", "sample_log_prob", "value" to tensordict
-            policy.forward(current_td)
-
-            # Extract action for environment step
-            action = current_td["action"]
-            action_type = getattr(env, "action_type", "delta_qpos")
-            action_dict = {action_type: action}
-
-            # Environment step - returns tuple (env returns dict, not TensorDict)
-            next_obs, reward, terminated, truncated, env_info = env.step(action_dict)
-
-            # Convert env dict observation to TensorDict at boundary
-            next_obs_td = dict_to_tensordict(next_obs, self.device)
-
-            # Build "next" TensorDict
-            done = terminated | truncated
-            next_obs_for_td = next_obs_td["observation"]
-
-            # Ensure batch_size consistency - use next_obs_td's batch_size
-            batch_size = next_obs_td.batch_size[0]
-
-            next_td = TensorDict(
-                {
-                    "observation": next_obs_for_td,
-                    "reward": (
-                        reward.float().unsqueeze(-1)
-                        if reward.dim() == 1
-                        else reward.float()
-                    ),
-                    "done": (
-                        done.bool().unsqueeze(-1) if done.dim() == 1 else done.bool()
-                    ),
-                    "terminated": (
-                        terminated.bool().unsqueeze(-1)
-                        if terminated.dim() == 1
-                        else terminated.bool()
-                    ),
-                    "truncated": (
-                        truncated.bool().unsqueeze(-1)
-                        if truncated.dim() == 1
-                        else truncated.bool()
-                    ),
-                },
-                batch_size=torch.Size([batch_size]),
-                device=self.device,
-            )
-
-            # Compute next value for GAE (bootstrap value)
-            with torch.no_grad():
-                next_value_td = TensorDict(
-                    {"observation": next_obs_for_td},
-                    batch_size=next_td.batch_size,
-                    device=self.device,
-                )
-                policy.get_value(next_value_td)
-                next_td["value"] = next_value_td["value"]
-
-            # Add "next" to current tensordict
-            current_td["next"] = next_td
-
-            # Store complete transition
-            rollout_list.append(current_td.clone())
-
-            # Debug: Print TensorDict structure on first step
-            if len(rollout_list) == 1:
-                print("\n" + "=" * 80)
-                print("[DEBUG] Step 0 TensorDict Structure (Tree View)")
-                print("=" * 80)
-                _print_tensordict_tree(current_td, prefix="", is_last=True)
-                print("=" * 80 + "\n")
-
-            # Callback for statistics and logging
-            if on_step_callback is not None:
-                on_step_callback(current_td, env_info)
-
-            # Prepare next iteration - use the converted TensorDict
-            current_td = next_obs_td
-
-        # Stack into [T, N, ...] TensorDict
-        rollout = torch.stack(rollout_list, dim=0)
-
-        print("\n" + "=" * 80)
-        print(
-            f"[DEBUG] Stacked Rollout (T={rollout.batch_size[0]}, N={rollout.batch_size[1]})"
-        )
-        print("=" * 80)
-        _print_tensordict_tree(rollout, prefix="", is_last=True)
-        print("=" * 80 + "\n")
+        # Ensure 2D format [T, N] for GAE computation
+        if len(rollout.batch_size) == 1:
+            rollout = rollout.unsqueeze(1)  # [size] -> [size, 1]
 
         # Compute GAE advantages and returns
         rollout = compute_gae(
             rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda
         )
 
-        return rollout
-
-    def update(self, rollout: TensorDict) -> dict:
-        """Update the policy using collected rollout TensorDict (TorchRL style).
-
-        Args:
-            rollout: TensorDict with batch_size=[T, N] from collect_rollout()
-
-        Returns:
-            Dictionary of training metrics
-        """
         # Flatten to [T*N, ...] for training
         flat_data = rollout.reshape(-1)
         total_samples = flat_data.batch_size[0]

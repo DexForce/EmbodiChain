@@ -27,6 +27,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from .helper import dict_to_tensordict, mean_scalar, pack_log_dict
+from ..collector import SyncCollector, AsyncCollector
 
 
 class Trainer:
@@ -101,12 +102,12 @@ class Trainer:
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
 
-        # Get initial observation from env (dict) and convert to TensorDict at boundary
+        # Initialize observation - will be used by collectors
         obs, _ = self.env.reset()
         self.obs_tensordict = dict_to_tensordict(obs, self.device)
         num_envs = self.obs_tensordict.batch_size[0]
 
-        # episode stats tracked on device to avoid repeated CPU round-trips
+        # Episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         self.curr_len = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
 
@@ -122,168 +123,15 @@ class Trainer:
             except Exception:
                 continue
 
-    def train(self, total_timesteps: int):
-        print(f"Start training, total steps: {total_timesteps}")
-        print(f"Model type: {self.model_type}")
-
-        if self.model_type == "vla":
-            # VLA mode: Use async collector
-            self._train_async(total_timesteps)
-        else:
-            # Standard mode: Use synchronous collection
-            self._train_sync(total_timesteps)
-
-    def _train_sync(self, total_timesteps: int):
-        """Synchronous training loop (standard PPO)."""
-        while self.global_step < total_timesteps:
-            rollout = self._collect_rollout()
-
-            # Add rollout to buffer
-            self.buffer.add(rollout)
-
-            # Train when buffer is full
-            if self.buffer.is_full():
-                data = self.buffer.get(flatten=True)
-                losses = self.algorithm.update(data)
-                self._log_train(losses)
-
-            # Evaluation
-            if (
-                self.eval_freq > 0
-                and self.eval_env is not None
-                and self.global_step % self.eval_freq == 0
-            ):
-                self._eval_once(num_episodes=self.num_eval_episodes)
-
-            # Checkpoint
-            if self.global_step % self.save_freq == 0:
-                self.save_checkpoint()
-
-    def _train_async(self, total_timesteps: int):
-        """Asynchronous training loop (VLA mode)."""
-        from .async_collector import AsyncCollector, AsyncCollectorStats
-
-        # Create statistics tracker
-        num_envs = self.obs_tensordict.batch_size[0]
-        async_stats = AsyncCollectorStats(num_envs, self.device)
-
-        # Create callback for async collector
-        def on_async_step(tensordict: TensorDict, env_info: dict):
-            """Callback for async collection statistics."""
-            # Extract reward and done
-            reward = tensordict["next"]["reward"]
-            done = tensordict["next"]["done"]
-
-            # Update statistics
-            async_stats.update(reward, done)
-
-            # Update global step
-            num_envs = tensordict.batch_size[0]
-            self.global_step += num_envs
-
-            # Log environment metrics
-            if isinstance(env_info, dict):
-                rewards_dict = env_info.get("rewards")
-                metrics_dict = env_info.get("metrics")
-                self._log_scalar_dict("rewards", rewards_dict)
-                self._log_scalar_dict("metrics", metrics_dict)
-                log_dict = {}
-                log_dict.update(pack_log_dict("rewards", rewards_dict))
-                log_dict.update(pack_log_dict("metrics", metrics_dict))
-                if log_dict and self.use_wandb:
-                    wandb.log(log_dict, step=self.global_step)
-
-        # Create and start async collector
-        collector = AsyncCollector(
-            env=self.env,
-            policy=self.policy,
-            buffer=self.buffer,
-            device=self.device,
-            on_step_callback=on_async_step,
-        )
-
-        print("[Trainer] Starting async collector...")
-        collector.start()
-
-        # Training loop: wait for buffer to fill, then train
-        last_eval_step = 0
-        last_save_step = 0
-        update_count = 0
-
-        try:
-            while self.global_step < total_timesteps:
-                # Wait for buffer to fill
-                while not self.buffer.is_full():
-                    time.sleep(0.1)  # Check every 100ms
-                    if not collector.is_running():
-                        raise RuntimeError("Async collector stopped unexpectedly")
-
-                # Get data and train
-                data = self.buffer.get(flatten=True)
-                losses = self.algorithm.update(data)
-
-                # Update episode statistics from async tracker
-                avg_ret, avg_len = async_stats.get_avg_stats()
-                if not np.isnan(avg_ret):
-                    self.ret_window.append(avg_ret)
-                if not np.isnan(avg_len):
-                    self.len_window.append(avg_len)
-
-                # Log training
-                self._log_train(losses)
-                update_count += 1
-
-                # Clear buffer for next collection (optional, depends on policy staleness tolerance)
-                # For VLA, we might keep some data for stability
-                # self.buffer.clear()
-
-                # Evaluation
-                if (
-                    self.eval_freq > 0
-                    and self.eval_env is not None
-                    and self.global_step - last_eval_step >= self.eval_freq
-                ):
-                    # Temporarily pause collection during eval
-                    print("[Trainer] Pausing collection for evaluation...")
-                    collector.stop()
-                    self._eval_once(num_episodes=self.num_eval_episodes)
-                    collector.start()
-                    print("[Trainer] Resuming collection...")
-                    last_eval_step = self.global_step
-
-                # Checkpoint
-                if self.global_step - last_save_step >= self.save_freq:
-                    self.save_checkpoint()
-                    last_save_step = self.global_step
-
-                    # Log buffer and collector stats
-                    buffer_stats = self.buffer.get_stats()
-                    collector_stats = collector.get_stats()
-                    print(f"[Trainer] Buffer: {buffer_stats}")
-                    print(f"[Trainer] Collector: {collector_stats}")
-
-        finally:
-            # Always stop collector when training ends
-            print("[Trainer] Stopping async collector...")
-            collector.stop()
-            print(f"[Trainer] Training completed ({update_count} updates)")
-
-    @torch.no_grad()
-    def _collect_rollout(self) -> TensorDict:
-        """Collect a rollout. Algorithm controls the data collection process.
+    def _create_step_callback(self) -> Callable:
+        """Create step callback for collectors.
 
         Returns:
-            TensorDict with batch_size=[T, N] containing full rollout
+            Callback function compatible with both sync and async collectors
         """
 
-        # Callback function for statistics and logging (uses TensorDict)
         def on_step(tensordict: TensorDict, env_info: dict):
-            """Callback called at each step during rollout collection.
-
-            Args:
-                tensordict: Complete transition TensorDict with "next" key
-                env_info: Environment info dict
-            """
+            """Callback called at each step during rollout collection."""
             # Extract reward and done from next subdictionary
             reward = tensordict["next"]["reward"]
             done = tensordict["next"]["done"]
@@ -306,18 +154,7 @@ class Trainer:
                 self.curr_ret[done_idx] = 0
                 self.curr_len[done_idx] = 0
 
-            # Update global step and observation TensorDict (already TensorDict from PPO)
-            next_obs = tensordict["next"]["observation"]
-            num_envs = next_obs.batch_size[0]
-
-            # Prepare next tensordict
-            self.obs_tensordict = TensorDict(
-                {"observation": next_obs},
-                batch_size=torch.Size([num_envs]),
-                device=self.device,
-            )
-            self.global_step += num_envs
-
+            # Log environment metrics
             if isinstance(env_info, dict):
                 rewards_dict = env_info.get("rewards")
                 metrics_dict = env_info.get("metrics")
@@ -329,16 +166,101 @@ class Trainer:
                 if log_dict and self.use_wandb:
                     wandb.log(log_dict, step=self.global_step)
 
-        # Algorithm controls data collection and returns TensorDict rollout
-        rollout = self.algorithm.collect_rollout(
-            env=self.env,
-            policy=self.policy,
-            tensordict=self.obs_tensordict,
-            buffer_size=self.buffer_size,
-            on_step_callback=on_step,
-        )
+        return on_step
 
-        return rollout
+    def train(self, total_timesteps: int):
+        print(f"Start training, total steps: {total_timesteps}")
+        print(f"Model type: {self.model_type}")
+
+        if self.model_type == "vla":
+            collector = AsyncCollector(
+                env=self.env,
+                policy=self.policy,
+                buffer=self.buffer,
+                device=self.device,
+                on_step_callback=self._create_step_callback(),
+            )
+            self._train_async(collector, total_timesteps)
+        else:
+            collector = SyncCollector(
+                env=self.env,
+                policy=self.policy,
+                device=self.device,
+                on_step_callback=self._create_step_callback(),
+            )
+            self._train_sync(collector, total_timesteps)
+
+    def _train_sync(self, collector: SyncCollector, total_timesteps: int):
+        """Synchronous training loop (standard PPO)."""
+        while self.global_step < total_timesteps:
+            # Collect rollout
+            rollout = collector.collect(num_steps=self.buffer_size)
+
+            # Update global step (main thread only)
+            num_steps = rollout.batch_size[0]  # T dimension
+            num_envs = rollout.batch_size[1] if len(rollout.batch_size) > 1 else 1
+            self.global_step += num_steps * num_envs
+
+            self.buffer.add(rollout)
+
+            # Train when buffer is full
+            if self.buffer.is_full():
+                data = self.buffer.get(flatten=True)
+                losses = self.algorithm.update(data)
+                self._log_train(losses)
+
+            # Evaluation
+            if (
+                self.eval_freq > 0
+                and self.eval_env is not None
+                and self.global_step % self.eval_freq == 0
+            ):
+                self._eval_once(num_episodes=self.num_eval_episodes)
+
+            # Checkpoint
+            if self.global_step % self.save_freq == 0:
+                self.save_checkpoint()
+
+    def _train_async(self, collector: AsyncCollector, total_timesteps: int):
+        """Asynchronous training loop (VLA mode)."""
+        collector.start()
+        print("[Trainer] Async collector started")
+
+        try:
+            while self.global_step < total_timesteps:
+                # Wait for buffer to fill
+                while not self.buffer.is_full():
+                    time.sleep(0.1)
+                    if not collector.is_running():
+                        raise RuntimeError("Async collector stopped unexpectedly")
+
+                # Get data and train
+                data = self.buffer.get(flatten=True)
+
+                # Update global step based on collected data (main thread only)
+                batch_size = data.batch_size[0] if len(data.batch_size) > 0 else 0
+                self.global_step += batch_size
+
+                losses = self.algorithm.update(data)
+                self._log_train(losses)
+
+                # Evaluation (pause collector during eval)
+                if (
+                    self.eval_freq > 0
+                    and self.eval_env is not None
+                    and self.global_step % self.eval_freq == 0
+                ):
+                    collector.stop()
+                    self._eval_once(num_episodes=self.num_eval_episodes)
+                    collector.start()
+
+                # Checkpoint
+                if self.global_step % self.save_freq == 0:
+                    self.save_checkpoint()
+
+        finally:
+            collector.stop()
+            print("[Trainer] Async collector stopped")
 
     def _log_train(self, losses: Dict[str, float]):
         if self.writer:
@@ -405,11 +327,9 @@ class Trainer:
 
             # Run episode until all environments complete
             while not done_mask.all():
-                # Get deterministic actions from policy (policy.forward modifies in-place)
-                # For deterministic eval, we can set a flag or use mean directly
-                # For now, use forward and extract action
+                # Get deterministic actions for evaluation
                 obs_copy = obs.clone()
-                self.policy.forward(obs_copy)
+                self.policy.forward(obs_copy, deterministic=True)
                 actions = obs_copy["action"]
 
                 action_type = getattr(self.eval_env, "action_type", "delta_qpos")

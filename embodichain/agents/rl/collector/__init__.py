@@ -14,13 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .config import AlgorithmCfg
-from .helper import dict_to_tensordict, mean_scalar, pack_log_dict, compute_gae
+from .base import BaseCollector
+from .sync_collector import SyncCollector
+from .async_collector import AsyncCollector, AsyncCollectorStats
 
 __all__ = [
-    "AlgorithmCfg",
-    "dict_to_tensordict",
-    "mean_scalar",
-    "pack_log_dict",
-    "compute_gae",
+    "BaseCollector",
+    "SyncCollector",
+    "AsyncCollector",
+    "AsyncCollectorStats",
 ]

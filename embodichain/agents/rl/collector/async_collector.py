@@ -17,16 +17,16 @@
 from __future__ import annotations
 
 import threading
-import time
 from typing import Callable, Optional
 import torch
 from tensordict import TensorDict
 from collections import deque
 
-from .helper import dict_to_tensordict
+from ..utils.helper import dict_to_tensordict
+from .base import BaseCollector
 
 
-class AsyncCollector:
+class AsyncCollector(BaseCollector):
     """Asynchronous data collector for VLA RL scenarios.
 
     Runs in a background thread to continuously collect transitions while
@@ -63,11 +63,8 @@ class AsyncCollector:
             device: Device for tensor operations
             on_step_callback: Optional callback(transition, env_info) called after each step
         """
-        self.env = env
-        self.policy = policy
+        super().__init__(env, policy, device, on_step_callback)
         self.buffer = buffer
-        self.device = device
-        self.on_step_callback = on_step_callback
 
         # Thread control
         self._running = False
@@ -78,10 +75,6 @@ class AsyncCollector:
         self._episode_count = 0
         self._step_count = 0
 
-        # Initialize observation
-        obs_dict, _ = self.env.reset()
-        self.obs_tensordict = dict_to_tensordict(obs_dict, self.device)
-
     def start(self):
         """Start background collection thread."""
         if self._running:
@@ -91,6 +84,20 @@ class AsyncCollector:
         self._thread = threading.Thread(target=self._collect_loop, daemon=True)
         self._thread.start()
         print("[AsyncCollector] Background collection started")
+
+    def collect(self, **kwargs) -> TensorDict:
+        """For AsyncCollector, data is collected continuously in background.
+
+        This method is just for interface compatibility with BaseCollector.
+        Actual data retrieval happens through buffer.get().
+
+        Returns:
+            Empty TensorDict (not used in async mode)
+        """
+        raise NotImplementedError(
+            "AsyncCollector collects data in background thread. "
+            "Use buffer.get() to retrieve data instead."
+        )
 
     def stop(self):
         """Stop background collection thread."""
