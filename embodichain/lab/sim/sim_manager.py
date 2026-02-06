@@ -1603,24 +1603,36 @@ class SimulationManager:
         self._visual_materials = {}
         self._env.clean_materials()
 
-    def reset_objects_state(self, env_ids: Sequence[int] | None = None) -> None:
-        """Reset the state of all objects in the scene.
+    def reset_objects_state(
+        self,
+        env_ids: Sequence[int] | None = None,
+        excluded_uids: Sequence[str] | None = None,
+    ) -> None:
+        """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
+            excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
         """
-        for robot in self._robots.values():
-            robot.reset(env_ids)
-        for articulation in self._articulations.values():
-            articulation.reset(env_ids)
-        for rigid_obj in self._rigid_objects.values():
-            rigid_obj.reset(env_ids)
-        for rigid_obj_group in self._rigid_object_groups.values():
-            rigid_obj_group.reset(env_ids)
-        for light in self._lights.values():
-            light.reset(env_ids)
-        for sensor in self._sensors.values():
-            sensor.reset(env_ids)
+        excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
+        for uid, robot in self._robots.items():
+            if uid not in excluded_uids:
+                robot.reset(env_ids)
+        for uid, articulation in self._articulations.items():
+            if uid not in excluded_uids:
+                articulation.reset(env_ids)
+        for uid, rigid_obj in self._rigid_objects.items():
+            if uid not in excluded_uids:
+                rigid_obj.reset(env_ids)
+        for uid, rigid_obj_group in self._rigid_object_groups.items():
+            if uid not in excluded_uids:
+                rigid_obj_group.reset(env_ids)
+        for uid, light in self._lights.items():
+            if uid not in excluded_uids:
+                light.reset(env_ids)
+        for uid, sensor in self._sensors.items():
+            if uid not in excluded_uids:
+                sensor.reset(env_ids)
 
     def destroy(self) -> None:
         """Destroy all simulated assets and release resources."""

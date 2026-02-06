@@ -379,15 +379,13 @@ class EmbodiedEnv(BaseEnv):
         if save_data and self.cfg.dataset:
             if "save" in self.dataset_manager.available_modes:
 
-                current_task_success = self.is_task_success()
-
                 # Filter to only save successful episodes
                 successful_env_ids = [
                     env_id
                     for env_id in env_ids_to_process
                     if (
                         self.episode_success_status.get(env_id, False)
-                        or current_task_success[env_id].item()
+                        or self._task_success[env_id].item()
                     )
                 ]
 
@@ -588,20 +586,6 @@ class EmbodiedEnv(BaseEnv):
         raise NotImplementedError(
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
-
-    def is_task_success(self, **kwargs) -> torch.Tensor:
-        """
-        Determine if the task is successfully completed. This is mainly used in the data generation process
-        of the imitation learning.
-
-        Args:
-            **kwargs: Additional arguments for task-specific success criteria.
-
-        Returns:
-            torch.Tensor: A boolean tensor indicating success for each environment in the batch.
-        """
-
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
 
     def close(self) -> None:
         """Close the environment and release resources."""
