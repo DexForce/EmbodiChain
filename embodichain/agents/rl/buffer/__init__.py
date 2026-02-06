@@ -14,6 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .rollout_buffer import RolloutBuffer
+"""
+Buffer module for RL training.
 
-__all__ = ["RolloutBuffer"]
+Provides two buffer implementations:
+- RolloutBuffer: Standard PPO buffer (single rollout, use and discard)
+- VLABuffer: VLA buffer (FIFO multi-rollout accumulation for slow inference)
+"""
+
+from .rollout_buffer import VLABuffer
+from .standard_buffer import RolloutBuffer
+
+__all__ = ["RolloutBuffer", "VLABuffer"]
+
+__all__ = ["TensorDictRolloutBuffer"]

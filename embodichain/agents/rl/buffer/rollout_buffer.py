@@ -16,91 +16,160 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterator
-
 import torch
+from tensordict import TensorDict
+from typing import Optional
 
 
-class RolloutBuffer:
-    """On-device rollout buffer for on-policy algorithms.
+class VLABuffer:
+    """FIFO rollout buffer for VLA RL with pre-allocated TensorDict storage.
 
-    Stores (obs, actions, rewards, dones, values, logprobs) over time.
-    After finalize(), exposes advantages/returns and minibatch iteration.
+    Uses a single pre-allocated TensorDict with circular indexing for efficient
+    high-frequency transition writes. Designed for async VLA scenarios where
+    model inference is slow but training is fast.
+
+    Key characteristics:
+    - Pre-allocated memory: Zero-copy writes via direct indexing
+    - FIFO eviction: Circular buffer automatically overwrites oldest data
+    - Transition-level storage: Each step is a separate entry
+    - High-frequency writes: Optimized for async collection (no TensorDict creation overhead)
+
+    Storage layout: Single TensorDict with shape [buffer_size, ...]
     """
 
-    def __init__(
-        self,
-        num_steps: int,
-        num_envs: int,
-        obs_dim: int,
-        action_dim: int,
-        device: torch.device,
-    ):
-        self.num_steps = num_steps
-        self.num_envs = num_envs
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
-        self.device = device
+    def __init__(self, buffer_size: int, device: torch.device):
+        """Initialize VLA buffer with lazy allocation.
 
-        T, N = num_steps, num_envs
-        self.obs = torch.zeros(T, N, obs_dim, dtype=torch.float32, device=device)
-        self.actions = torch.zeros(T, N, action_dim, dtype=torch.float32, device=device)
-        self.rewards = torch.zeros(T, N, dtype=torch.float32, device=device)
-        self.dones = torch.zeros(T, N, dtype=torch.bool, device=device)
-        self.values = torch.zeros(T, N, dtype=torch.float32, device=device)
-        self.logprobs = torch.zeros(T, N, dtype=torch.float32, device=device)
-
-        self.step = 0
-        # Container for algorithm-specific extra fields (e.g., advantages, returns)
-        self._extras: dict[str, torch.Tensor] = {}
-
-    def add(
-        self,
-        obs: torch.Tensor,
-        action: torch.Tensor,
-        reward: torch.Tensor,
-        done: torch.Tensor,
-        value: torch.Tensor,
-        logprob: torch.Tensor,
-    ) -> None:
-        t = self.step
-        self.obs[t].copy_(obs)
-        self.actions[t].copy_(action)
-        self.rewards[t].copy_(reward)
-        self.dones[t].copy_(done)
-        self.values[t].copy_(value)
-        self.logprobs[t].copy_(logprob)
-        self.step += 1
-
-    def set_extras(self, extras: dict[str, torch.Tensor]) -> None:
-        """Attach algorithm-specific tensors (shape [T, N, ...]) for batching.
-
-        Examples:
-            {"advantages": adv, "returns": ret}
+        Args:
+            buffer_size: Maximum number of transitions to store
+            device: Device to store tensors on
         """
-        self._extras = extras or {}
+        self.buffer_size = buffer_size
+        self.device = device
+        self.buffer: Optional[TensorDict] = None  # Lazy init on first add
+        self.write_pos = 0  # Current write position (circular)
+        self.size = 0  # Current valid data count
+        self._total_added = 0
+        self._initialized = False
 
-    def iterate_minibatches(self, batch_size: int) -> Iterator[Dict[str, torch.Tensor]]:
-        T, N = self.num_steps, self.num_envs
-        total = T * N
-        indices = torch.randperm(total, device=self.device)
-        for start in range(0, total, batch_size):
-            idx = indices[start : start + batch_size]
-            t_idx = idx // N
-            n_idx = idx % N
-            batch = {
-                "obs": self.obs[t_idx, n_idx],
-                "actions": self.actions[t_idx, n_idx],
-                "rewards": self.rewards[t_idx, n_idx],
-                "dones": self.dones[t_idx, n_idx],
-                "values": self.values[t_idx, n_idx],
-                "logprobs": self.logprobs[t_idx, n_idx],
-            }
-            # Slice extras if present and shape aligned to [T, N, ...]
-            for name, tensor in self._extras.items():
-                try:
-                    batch[name] = tensor[t_idx, n_idx]
-                except Exception:
-                    # Skip misaligned extras silently
-                    continue
-            yield batch
+    def _initialize_buffer(self, template: TensorDict) -> None:
+        """Initialize buffer structure from first transition template.
+
+        Args:
+            template: First transition TensorDict to infer structure from
+        """
+        if self._initialized:
+            return
+
+        # Pre-allocate buffer with buffer_size
+        # Template should be a single transition [key: shape]
+        self.buffer = template.expand(self.buffer_size).clone()
+        self._initialized = True
+
+    def add(self, transition: TensorDict) -> None:
+        """Add a single transition to buffer (high-frequency async writes).
+
+        Args:
+            transition: Single transition TensorDict (no batch dimension)
+        """
+        # Lazy initialization on first add
+        if not self._initialized:
+            self._initialize_buffer(transition.to(self.device))
+
+        # Ensure transition is on correct device
+        transition = transition.to(self.device)
+
+        # Direct index assignment (zero-copy write)
+        self.buffer[self.write_pos] = transition
+
+        # Update circular index
+        self.write_pos = (self.write_pos + 1) % self.buffer_size
+
+        # Update size (saturates at buffer_size)
+        self.size = min(self.size + 1, self.buffer_size)
+        self._total_added += 1
+
+    def add_batch(self, transitions: TensorDict) -> None:
+        """Add multiple transitions at once (batch write).
+
+        Args:
+            transitions: Batch of transitions with shape [batch_size, ...]
+        """
+        batch_size = transitions.batch_size[0]
+
+        # Lazy initialization
+        if not self._initialized:
+            self._initialize_buffer(transitions[0].to(self.device))
+
+        transitions = transitions.to(self.device)
+
+        # Handle circular write
+        for i in range(batch_size):
+            self.buffer[self.write_pos] = transitions[i]
+            self.write_pos = (self.write_pos + 1) % self.buffer_size
+            self.size = min(self.size + 1, self.buffer_size)
+            self._total_added += 1
+
+    def get(self, flatten: bool = True) -> TensorDict:
+        """Get valid data from buffer.
+
+        Args:
+            flatten: If True, return flattened [size, ...]. Currently only supports True.
+
+        Returns:
+            TensorDict with batch_size=[size, ...] containing valid data
+        """
+        if not self._initialized or self.size == 0:
+            raise ValueError("Buffer is empty")
+
+        if not flatten:
+            raise NotImplementedError("Only flatten=True is supported for VLABuffer")
+
+        # Return first 'size' elements (valid data)
+        # Note: Data is in insertion order up to write_pos, then wraps
+        if self.size < self.buffer_size:
+            # Buffer not yet full, data is [0:size]
+            return self.buffer[: self.size]
+        else:
+            # Buffer full, need to rearrange to maintain temporal order
+            # Oldest data is at write_pos, newest at write_pos-1
+            indices = (
+                torch.arange(
+                    self.write_pos,
+                    self.write_pos + self.buffer_size,
+                    device=self.device,
+                )
+                % self.buffer_size
+            )
+            return self.buffer[indices]
+
+    def clear(self) -> None:
+        """Clear buffer (reset pointers, keep pre-allocated memory)."""
+        self.write_pos = 0
+        self.size = 0
+        # Keep buffer allocated for reuse
+
+    def __len__(self) -> int:
+        """Return current number of valid transitions."""
+        return self.size
+
+    def is_full(self) -> bool:
+        """Check if buffer is at full buffer_size."""
+        return self.size >= self.buffer_size
+
+    def get_num_rollouts(self) -> int:
+        """Return 1 (buffer stores transitions, not rollouts)."""
+        return 1 if self.size > 0 else 0
+
+    def get_stats(self) -> dict:
+        """Get buffer statistics for logging."""
+        return {
+            "buffer_size": self.size,
+            "buffer_capacity": self.buffer_size,
+            "total_transitions": self.size,
+            "total_added": self._total_added,
+            "buffer_usage": (
+                self.size / self.buffer_size if self.buffer_size > 0 else 0.0
+            ),
+            "write_pos": self.write_pos,
+        }

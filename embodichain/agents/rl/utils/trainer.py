@@ -23,9 +23,10 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 import wandb
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
-from .helper import flatten_dict_observation
+from .helper import dict_to_tensordict, mean_scalar, pack_log_dict
 
 
 class Trainer:
@@ -36,7 +37,7 @@ class Trainer:
         policy,
         env,
         algorithm,
-        num_steps: int,
+        buffer_size: int,
         batch_size: int,
         writer: SummaryWriter | None,
         eval_freq: int,
@@ -48,12 +49,14 @@ class Trainer:
         event_cfg=None,
         eval_event_cfg=None,
         num_eval_episodes: int = 5,
+        # Buffer config: "standard" (default) or "vla"
+        buffer_type: str = "standard",
     ):
         self.policy = policy
         self.env = env
         self.eval_env = eval_env
         self.algorithm = algorithm
-        self.num_steps = num_steps
+        self.buffer_size = buffer_size
         self.batch_size = batch_size
         self.writer = writer
         self.eval_freq = eval_freq
@@ -62,6 +65,29 @@ class Trainer:
         self.exp_name = exp_name
         self.use_wandb = use_wandb
         self.num_eval_episodes = num_eval_episodes
+
+        # Buffer setup
+        self.buffer_type = buffer_type
+        device = (
+            algorithm.device
+            if hasattr(algorithm, "device")
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+
+        if buffer_type == "vla":
+            # VLA buffer: accumulate multiple rollouts with FIFO
+            from embodichain.agents.rl.buffer import VLABuffer
+
+            self.buffer = VLABuffer(buffer_size=buffer_size, device=device)
+        elif buffer_type == "standard":
+            # Standard PPO buffer: single rollout, use and discard
+            from embodichain.agents.rl.buffer import RolloutBuffer
+
+            self.buffer = RolloutBuffer(buffer_size=1, device=device)
+        else:
+            raise ValueError(
+                f"Unknown buffer_type: {buffer_type}. Use 'standard' or 'vla'."
+            )
 
         if event_cfg is not None:
             self.event_manager = EventManager(event_cfg, env=self.env)
@@ -75,85 +101,199 @@ class Trainer:
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
 
-        # initial obs (assume env returns torch tensors already on target device)
+        # Get initial observation from env (dict) and convert to TensorDict at boundary
         obs, _ = self.env.reset()
-
-        # Initialize algorithm's buffer
-        # Flatten dict observations from ObservationManager to tensor for RL algorithms
-        if isinstance(obs, dict):
-            obs_tensor = flatten_dict_observation(obs)
-            obs_dim = obs_tensor.shape[-1]
-            num_envs = obs_tensor.shape[0]
-            # Store flattened observation for RL training
-            self.obs = obs_tensor
-
-        action_space = getattr(self.env, "action_space", None)
-        action_dim = action_space.shape[-1] if action_space else None
-        if action_dim is None:
-            raise RuntimeError(
-                "Env must expose action_space with shape for buffer initialization."
-            )
-
-        # Algorithm manages its own buffer
-        self.algorithm.initialize_buffer(num_steps, num_envs, obs_dim, action_dim)
+        self.obs_tensordict = dict_to_tensordict(obs, self.device)
+        num_envs = self.obs_tensordict.batch_size[0]
 
         # episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         self.curr_len = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
 
     # ---- lightweight helpers for dense logging ----
-    @staticmethod
-    def _mean_scalar(x) -> float:
-        if hasattr(x, "detach"):
-            x = x.detach().cpu().numpy()
-        else:
-            x = np.asarray(x)
-        return float(np.mean(x))
-
     def _log_scalar_dict(self, prefix: str, data: dict):
         if not self.writer or not isinstance(data, dict):
             return
         for k, v in data.items():
             try:
                 self.writer.add_scalar(
-                    f"{prefix}/{k}", self._mean_scalar(v), self.global_step
+                    f"{prefix}/{k}", mean_scalar(v), self.global_step
                 )
             except Exception:
                 continue
 
-    def _pack_log_dict(self, prefix: str, data: dict) -> dict:
-        if not isinstance(data, dict):
-            return {}
-        out = {}
-        for k, v in data.items():
-            try:
-                out[f"{prefix}/{k}"] = self._mean_scalar(v)
-            except Exception:
-                continue
-        return out
-
     def train(self, total_timesteps: int):
         print(f"Start training, total steps: {total_timesteps}")
+        print(f"Using {self.buffer_type} buffer")
+
+        if self.buffer_type == "vla":
+            # VLA mode: Use async collector
+            self._train_async(total_timesteps)
+        else:
+            # Standard mode: Use synchronous collection
+            self._train_sync(total_timesteps)
+
+    def _train_sync(self, total_timesteps: int):
+        """Synchronous training loop (standard PPO)."""
         while self.global_step < total_timesteps:
-            self._collect_rollout()
-            losses = self.algorithm.update()
-            self._log_train(losses)
+            rollout = self._collect_rollout()
+
+            # Add rollout to buffer
+            self.buffer.add(rollout)
+
+            # Train when buffer is full
+            if self.buffer.is_full():
+                data = self.buffer.get(flatten=True)
+                losses = self.algorithm.update(data)
+                self._log_train(losses)
+
+            # Evaluation
             if (
                 self.eval_freq > 0
                 and self.eval_env is not None
                 and self.global_step % self.eval_freq == 0
             ):
                 self._eval_once(num_episodes=self.num_eval_episodes)
+
+            # Checkpoint
             if self.global_step % self.save_freq == 0:
                 self.save_checkpoint()
 
-    @torch.no_grad()
-    def _collect_rollout(self):
-        """Collect a rollout. Algorithm controls the data collection process."""
+    def _train_async(self, total_timesteps: int):
+        """Asynchronous training loop (VLA mode)."""
+        from .async_collector import AsyncCollector, AsyncCollectorStats
 
-        # Callback function for statistics and logging
-        def on_step(obs, actions, reward, done, info, next_obs):
-            """Callback called at each step during rollout collection."""
+        # Create statistics tracker
+        num_envs = self.obs_tensordict.batch_size[0]
+        async_stats = AsyncCollectorStats(num_envs, self.device)
+
+        # Create callback for async collector
+        def on_async_step(tensordict: TensorDict, env_info: dict):
+            """Callback for async collection statistics."""
+            # Extract reward and done
+            reward = tensordict["next"]["reward"]
+            done = tensordict["next"]["done"]
+
+            # Update statistics
+            async_stats.update(reward, done)
+
+            # Update global step
+            num_envs = tensordict.batch_size[0]
+            self.global_step += num_envs
+
+            # Log environment metrics
+            if isinstance(env_info, dict):
+                rewards_dict = env_info.get("rewards")
+                metrics_dict = env_info.get("metrics")
+                self._log_scalar_dict("rewards", rewards_dict)
+                self._log_scalar_dict("metrics", metrics_dict)
+                log_dict = {}
+                log_dict.update(pack_log_dict("rewards", rewards_dict))
+                log_dict.update(pack_log_dict("metrics", metrics_dict))
+                if log_dict and self.use_wandb:
+                    wandb.log(log_dict, step=self.global_step)
+
+        # Create and start async collector
+        collector = AsyncCollector(
+            env=self.env,
+            policy=self.policy,
+            buffer=self.buffer,
+            device=self.device,
+            on_step_callback=on_async_step,
+        )
+
+        print("[Trainer] Starting async collector...")
+        collector.start()
+
+        # Training loop: wait for buffer to fill, then train
+        last_eval_step = 0
+        last_save_step = 0
+        update_count = 0
+
+        try:
+            while self.global_step < total_timesteps:
+                # Wait for buffer to fill
+                while not self.buffer.is_full():
+                    time.sleep(0.1)  # Check every 100ms
+                    if not collector.is_running():
+                        raise RuntimeError("Async collector stopped unexpectedly")
+
+                # Get data and train
+                data = self.buffer.get(flatten=True)
+                losses = self.algorithm.update(data)
+
+                # Update episode statistics from async tracker
+                avg_ret, avg_len = async_stats.get_avg_stats()
+                if not np.isnan(avg_ret):
+                    self.ret_window.append(avg_ret)
+                if not np.isnan(avg_len):
+                    self.len_window.append(avg_len)
+
+                # Log training
+                self._log_train(losses)
+                update_count += 1
+
+                # Clear buffer for next collection (optional, depends on policy staleness tolerance)
+                # For VLA, we might keep some data for stability
+                # self.buffer.clear()
+
+                # Evaluation
+                if (
+                    self.eval_freq > 0
+                    and self.eval_env is not None
+                    and self.global_step - last_eval_step >= self.eval_freq
+                ):
+                    # Temporarily pause collection during eval
+                    print("[Trainer] Pausing collection for evaluation...")
+                    collector.stop()
+                    self._eval_once(num_episodes=self.num_eval_episodes)
+                    collector.start()
+                    print("[Trainer] Resuming collection...")
+                    last_eval_step = self.global_step
+
+                # Checkpoint
+                if self.global_step - last_save_step >= self.save_freq:
+                    self.save_checkpoint()
+                    last_save_step = self.global_step
+
+                    # Log buffer and collector stats
+                    buffer_stats = self.buffer.get_stats()
+                    collector_stats = collector.get_stats()
+                    print(f"[Trainer] Buffer: {buffer_stats}")
+                    print(f"[Trainer] Collector: {collector_stats}")
+
+        finally:
+            # Always stop collector when training ends
+            print("[Trainer] Stopping async collector...")
+            collector.stop()
+            print(f"[Trainer] Training completed ({update_count} updates)")
+
+    @torch.no_grad()
+    def _collect_rollout(self) -> TensorDict:
+        """Collect a rollout. Algorithm controls the data collection process.
+
+        Returns:
+            TensorDict with batch_size=[T, N] containing full rollout
+        """
+
+        # Callback function for statistics and logging (uses TensorDict)
+        def on_step(tensordict: TensorDict, env_info: dict):
+            """Callback called at each step during rollout collection.
+
+            Args:
+                tensordict: Complete transition TensorDict with "next" key
+                env_info: Environment info dict
+            """
+            # Extract reward and done from next subdictionary
+            reward = tensordict["next"]["reward"]
+            done = tensordict["next"]["done"]
+
+            # Squeeze if needed
+            if reward.dim() > 1:
+                reward = reward.squeeze(-1)
+            if done.dim() > 1:
+                done = done.squeeze(-1)
+
             # Episode stats (stay on device; convert only when episode ends)
             self.curr_ret += reward
             self.curr_len += 1
@@ -166,30 +306,39 @@ class Trainer:
                 self.curr_ret[done_idx] = 0
                 self.curr_len[done_idx] = 0
 
-            # Update global step and observation
-            # next_obs is already flattened in algorithm's collect_rollout
-            self.obs = next_obs
-            self.global_step += next_obs.shape[0]
+            # Update global step and observation TensorDict (already TensorDict from PPO)
+            next_obs = tensordict["next"]["observation"]
+            num_envs = next_obs.batch_size[0]
 
-            if isinstance(info, dict):
-                rewards_dict = info.get("rewards")
-                metrics_dict = info.get("metrics")
+            # Prepare next tensordict
+            self.obs_tensordict = TensorDict(
+                {"observation": next_obs},
+                batch_size=torch.Size([num_envs]),
+                device=self.device,
+            )
+            self.global_step += num_envs
+
+            if isinstance(env_info, dict):
+                rewards_dict = env_info.get("rewards")
+                metrics_dict = env_info.get("metrics")
                 self._log_scalar_dict("rewards", rewards_dict)
                 self._log_scalar_dict("metrics", metrics_dict)
                 log_dict = {}
-                log_dict.update(self._pack_log_dict("rewards", rewards_dict))
-                log_dict.update(self._pack_log_dict("metrics", metrics_dict))
+                log_dict.update(pack_log_dict("rewards", rewards_dict))
+                log_dict.update(pack_log_dict("metrics", metrics_dict))
                 if log_dict and self.use_wandb:
                     wandb.log(log_dict, step=self.global_step)
 
-        # Algorithm controls data collection
-        result = self.algorithm.collect_rollout(
+        # Algorithm controls data collection and returns TensorDict rollout
+        rollout = self.algorithm.collect_rollout(
             env=self.env,
             policy=self.policy,
-            obs=self.obs,
-            num_steps=self.num_steps,
+            tensordict=self.obs_tensordict,
+            buffer_size=self.buffer_size,
             on_step_callback=on_step,
         )
+
+        return rollout
 
     def _log_train(self, losses: Dict[str, float]):
         if self.writer:
@@ -243,10 +392,10 @@ class Trainer:
         episode_lengths = []
 
         for _ in range(num_episodes):
-            # Reset and initialize episode tracking
+            # Reset and initialize episode tracking - env returns dict, convert at boundary
             obs, _ = self.eval_env.reset()
-            obs = flatten_dict_observation(obs)
-            num_envs = obs.shape[0] if obs.ndim == 2 else 1
+            obs = dict_to_tensordict(obs, self.device)
+            num_envs = obs.batch_size[0]
 
             done_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
             cumulative_reward = torch.zeros(
@@ -256,16 +405,22 @@ class Trainer:
 
             # Run episode until all environments complete
             while not done_mask.all():
-                # Get deterministic actions from policy
-                actions, _, _ = self.policy.get_action(obs, deterministic=True)
+                # Get deterministic actions from policy (policy.forward modifies in-place)
+                # For deterministic eval, we can set a flag or use mean directly
+                # For now, use forward and extract action
+                obs_copy = obs.clone()
+                self.policy.forward(obs_copy)
+                actions = obs_copy["action"]
+
                 action_type = getattr(self.eval_env, "action_type", "delta_qpos")
                 action_dict = {action_type: actions}
 
-                # Environment step
-                obs, reward, terminated, truncated, info = self.eval_env.step(
+                # Environment step - env returns dict, convert to TensorDict at boundary
+                next_obs, reward, terminated, truncated, info = self.eval_env.step(
                     action_dict
                 )
-                obs = flatten_dict_observation(obs) if isinstance(obs, dict) else obs
+                next_obs = dict_to_tensordict(next_obs, self.device)
+                obs = next_obs
 
                 # Update statistics only for still-running environments
                 done = terminated | truncated

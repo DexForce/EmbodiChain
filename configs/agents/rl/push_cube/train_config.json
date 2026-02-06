@@ -9,11 +9,11 @@
         "gpu_id": 0,
         "num_envs": 64,
         "iterations": 1000,
-        "rollout_steps": 1024,
+        "buffer_size": 1024,
         "enable_eval": true,
         "num_eval_envs": 16,
         "num_eval_episodes": 3,
-        "eval_freq": 2,
+        "eval_freq": 200,
         "save_freq": 200,
         "use_wandb": false,
         "wandb_project_name": "embodychain-push_cube",
@@ -38,6 +38,7 @@
     },
     "policy": {
         "name": "actor_critic",
+        "action_dim": 8,
         "actor": {
             "type": "mlp",
             "network_cfg": {

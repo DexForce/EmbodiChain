@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from typing import Dict, Type
 import torch
-from gymnasium import spaces
 
 from .actor_critic import ActorCritic
 from .policy import Policy
@@ -44,13 +43,26 @@ def get_policy_class(name: str) -> Type[Policy] | None:
 
 def build_policy(
     policy_block: dict,
-    obs_space: spaces.Space,
-    action_space: spaces.Space,
+    action_dim: int,
     device: torch.device,
     actor: torch.nn.Module | None = None,
     critic: torch.nn.Module | None = None,
 ) -> Policy:
-    """Build policy strictly from json-like block: { name: ..., cfg: {...} }"""
+    """Build policy from json-like block.
+
+    With TensorDict architecture, we only need action_dim.
+    Observations are handled via TensorDict structure.
+
+    Args:
+        policy_block: Config dict with 'name' key
+        action_dim: Dimension of action space
+        device: Device to place policy on
+        actor: Actor network (required for actor_critic)
+        critic: Critic network (required for actor_critic)
+
+    Returns:
+        Initialized Policy instance
+    """
     name = policy_block["name"].lower()
     if name not in _POLICY_REGISTRY:
         available = ", ".join(get_registered_policy_names())
@@ -63,9 +75,12 @@ def build_policy(
             raise ValueError(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
-        return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
+        return policy_cls(
+            action_dim=action_dim, device=device, actor=actor, critic=critic
+        )
     else:
-        return policy_cls(obs_space, action_space, device)
+        # Other policies should also use action_dim signature
+        return policy_cls(action_dim=action_dim, device=device)
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
