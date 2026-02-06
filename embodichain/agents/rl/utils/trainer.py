@@ -49,8 +49,8 @@ class Trainer:
         event_cfg=None,
         eval_event_cfg=None,
         num_eval_episodes: int = 5,
-        # Buffer config: "standard" (default) or "vla"
-        buffer_type: str = "standard",
+        # Model type: "standard" (default PPO) or "vla"
+        model_type: str = "standard",
     ):
         self.policy = policy
         self.env = env
@@ -66,27 +66,27 @@ class Trainer:
         self.use_wandb = use_wandb
         self.num_eval_episodes = num_eval_episodes
 
-        # Buffer setup
-        self.buffer_type = buffer_type
+        # Buffer setup (depends on model_type)
+        self.model_type = model_type
         device = (
             algorithm.device
             if hasattr(algorithm, "device")
             else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
 
-        if buffer_type == "vla":
-            # VLA buffer: accumulate multiple rollouts with FIFO
+        if model_type == "vla":
+            # VLA model: accumulate multiple rollouts with FIFO buffer
             from embodichain.agents.rl.buffer import VLABuffer
 
             self.buffer = VLABuffer(buffer_size=buffer_size, device=device)
-        elif buffer_type == "standard":
-            # Standard PPO buffer: single rollout, use and discard
+        elif model_type == "standard":
+            # Standard PPO model: single rollout, use and discard
             from embodichain.agents.rl.buffer import RolloutBuffer
 
-            self.buffer = RolloutBuffer(buffer_size=1, device=device)
+            self.buffer = RolloutBuffer(buffer_size=buffer_size, device=device)
         else:
             raise ValueError(
-                f"Unknown buffer_type: {buffer_type}. Use 'standard' or 'vla'."
+                f"Unknown model_type: {model_type}. Use 'standard' or 'vla'."
             )
 
         if event_cfg is not None:
@@ -124,9 +124,9 @@ class Trainer:
 
     def train(self, total_timesteps: int):
         print(f"Start training, total steps: {total_timesteps}")
-        print(f"Using {self.buffer_type} buffer")
+        print(f"Model type: {self.model_type}")
 
-        if self.buffer_type == "vla":
+        if self.model_type == "vla":
             # VLA mode: Use async collector
             self._train_async(total_timesteps)
         else:

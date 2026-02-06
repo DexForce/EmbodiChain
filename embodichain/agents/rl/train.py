@@ -65,6 +65,7 @@ def train_from_config(config_path: str):
     device_str = trainer_cfg.get("device", "cpu")
     iterations = int(trainer_cfg.get("iterations", 250))
     buffer_size = int(trainer_cfg.get("buffer_size", 2048))
+    model_type = trainer_cfg.get("model_type", "standard")
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
@@ -222,6 +223,12 @@ def train_from_config(config_path: str):
             actor=actor,
             critic=critic,
         )
+    elif policy_name.lower() == "vla":
+        # VLA policy loads pretrained model from checkpoint
+        logger.info(
+            f"Loading VLA model from config: {policy_block.get('vla_config', {})}"
+        )
+        policy = build_policy(policy_block, action_dim=action_dim, device=device)
     else:
         policy = build_policy(policy_block, action_dim=action_dim, device=device)
 
@@ -286,6 +293,7 @@ def train_from_config(config_path: str):
         event_cfg=train_event_cfg,
         eval_event_cfg=eval_event_cfg if enable_eval else {},
         num_eval_episodes=num_eval_episodes,
+        model_type=model_type,
     )
 
     logger.log_info("Generic training initialized")

@@ -22,9 +22,7 @@ Provides two buffer implementations:
 - VLABuffer: VLA buffer (FIFO multi-rollout accumulation for slow inference)
 """
 
-from .rollout_buffer import VLABuffer
+from .vla_buffer import VLABuffer
 from .standard_buffer import RolloutBuffer
 
 __all__ = ["RolloutBuffer", "VLABuffer"]
-
-__all__ = ["TensorDictRolloutBuffer"]

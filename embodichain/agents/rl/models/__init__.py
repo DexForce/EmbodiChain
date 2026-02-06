@@ -22,6 +22,7 @@ import torch
 from .actor_critic import ActorCritic
 from .policy import Policy
 from .mlp import MLP
+from .vla_policy import VLAPolicy, build_vla_policy, load_vla_model
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -78,6 +79,8 @@ def build_policy(
         return policy_cls(
             action_dim=action_dim, device=device, actor=actor, critic=critic
         )
+    elif name == "vla":
+        return build_vla_policy(policy_block, action_dim, device)
     else:
         # Other policies should also use action_dim signature
         return policy_cls(action_dim=action_dim, device=device)
@@ -103,12 +106,16 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
 
 # default registrations
 register_policy("actor_critic", ActorCritic)
+register_policy("vla", VLAPolicy)
 
 __all__ = [
     "ActorCritic",
+    "VLAPolicy",
     "register_policy",
     "get_registered_policy_names",
     "build_policy",
+    "build_vla_policy",
+    "load_vla_model",
     "build_mlp_from_cfg",
     "get_policy_class",
     "Policy",

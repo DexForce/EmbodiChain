@@ -37,9 +37,10 @@ class RolloutBuffer:
         """Initialize standard rollout buffer.
 
         Args:
-            buffer_size: Not used (kept for interface compatibility)
+            buffer_size: Buffer size from config (for interface compatibility with VLABuffer)
             device: Device to store tensors on
         """
+        self.buffer_size = buffer_size
         self.device = device
         self._rollout: Optional[TensorDict] = None
 
@@ -110,7 +111,7 @@ class RolloutBuffer:
         """
         return {
             "buffer_size": 1 if self._rollout is not None else 0,
-            "buffer_capacity": 1,
+            "buffer_capacity": self.buffer_size,
             "total_transitions": self.get_num_transitions(),
             "buffer_usage": 1.0 if self._rollout is not None else 0.0,
         }
