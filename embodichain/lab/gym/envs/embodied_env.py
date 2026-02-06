@@ -587,20 +587,6 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def is_task_success(self, **kwargs) -> torch.Tensor:
-        """
-        Determine if the task is successfully completed. This is mainly used in the data generation process
-        of the imitation learning.
-
-        Args:
-            **kwargs: Additional arguments for task-specific success criteria.
-
-        Returns:
-            torch.Tensor: A boolean tensor indicating success for each environment in the batch.
-        """
-
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-
     def close(self) -> None:
         """Close the environment and release resources."""
         # Finalize dataset if present

@@ -489,21 +489,18 @@ class BaseEnv(gym.Env):
         return rewards
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
-        """Check if the task is successful for each environment.
-
-        This method should be overridden in subclasses to implement task-specific success criteria.
+        """
+        Determine if the task is successfully completed. This is mainly used in the data generation process
+        of the imitation learning.
 
         Args:
-            **kwargs: Additional keyword arguments.
+            **kwargs: Additional arguments for task-specific success criteria.
 
         Returns:
-            A boolean tensor indicating success for each environment.
+            torch.Tensor: A boolean tensor indicating success for each environment in the batch.
         """
 
-        raise NotImplementedError(
-            "BaseEnv.is_task_success must be implemented in subclasses to define "
-            "task-specific success criteria."
-        )
+        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action before sending to robot.
