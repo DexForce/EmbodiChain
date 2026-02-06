@@ -119,7 +119,7 @@ def main():
     else:
         robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
-    embed(header="Test PinocchioSolver example. Press Ctrl-D to exit.")
+    embed(header="Test PinocchioSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":
