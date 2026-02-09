@@ -83,20 +83,21 @@ def convert_observation_to_space(
         else:
             shape = observation.shape
         dtype = observation.dtype
-        # Convert torch dtype to numpy dtype
-        if dtype in (torch.float32, torch.float64, torch.float16):
+        # Map torch dtype to numpy dtype and reuse get_dtype_bounds for consistency
+        torch_to_numpy_dtype = {
+            torch.float16: np.float16,
+            torch.float32: np.float32,
+            torch.float64: np.float64,
+            torch.int8: np.int8,
+            torch.int16: np.int16,
+            torch.int32: np.int32,
+            torch.int64: np.int64,
+            torch.bool: np.bool_,
+        }
+        np_dtype = torch_to_numpy_dtype.get(dtype, np.float32)
+        low, high = get_dtype_bounds(np_dtype)
+        if np.issubdtype(np_dtype, np.floating):
             low, high = -np.inf, np.inf
-            np_dtype = np.float32
-        elif dtype in (torch.int32, torch.int64, torch.int16, torch.int8):
-            info = np.iinfo(np.int32)
-            low, high = info.min, info.max
-            np_dtype = np.int32
-        elif dtype == torch.bool:
-            low, high = 0, 1
-            np_dtype = np.bool_
-        else:
-            low, high = -np.inf, np.inf
-            np_dtype = np.float32
         space = spaces.Box(low, high, shape=shape, dtype=np_dtype)
     elif isinstance(observation, np.ndarray):
         if unbatched:
