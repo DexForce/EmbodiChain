@@ -20,11 +20,9 @@ import argparse
 import torch
 
 from embodichain.utils.utility import load_json
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import (
-    config_to_cfg,
-    DEFAULT_MANAGER_MODULES,
+    add_env_launcher_args_to_parser,
+    build_env_cfg_from_args,
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
 from .run_env import main
@@ -35,61 +33,7 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--num_envs",
-        help="The number of environments to run in parallel.",
-        default=1,
-        type=int,
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
-    parser.add_argument(
-        "--headless",
-        help="Whether to perform the simulation in headless mode.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--enable_rt",
-        help="Whether to use RTX rendering backend for the simulation.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--render_backend",
-        help="The rendering backend to use for the simulation.",
-        default="egl",
-        type=str,
-    )
-    parser.add_argument(
-        "--gpu_id",
-        help="The GPU ID to use for the simulation.",
-        default=0,
-        type=int,
-    )
-    parser.add_argument(
-        "--debug_mode",
-        help="Enable debug mode.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--filter_visual_rand",
-        help="Whether to filter out visual randomization.",
-        default=False,
-        action="store_true",
-    )
-
-    parser.add_argument(
-        "--gym_config",
-        type=str,
-        help="Path to the gym configuration file.",
-        required=True,
-    )
+    add_env_launcher_args_to_parser(parser)
     parser.add_argument(
         "--task_name",
         type=str,
@@ -117,26 +61,13 @@ if __name__ == "__main__":
         exit(1)
 
     # Load configurations
-    gym_config = load_json(args.gym_config)
+    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
     agent_config = load_json(args.agent_config)
-
-    # Build environment configuration
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config, manager_modules=DEFAULT_MANAGER_MODULES
-    )
-    cfg.filter_visual_rand = args.filter_visual_rand
-    cfg.num_envs = args.num_envs
-    cfg.sim_cfg = SimulationManagerCfg(
-        headless=args.headless,
-        sim_device=args.device,
-        enable_rt=args.enable_rt,
-        gpu_id=args.gpu_id,
-    )
 
     # Create environment
     env = gymnasium.make(
         id=gym_config["id"],
-        cfg=cfg,
+        cfg=env_cfg,
         agent_config=agent_config,
         agent_config_path=args.agent_config,
         task_name=args.task_name,
