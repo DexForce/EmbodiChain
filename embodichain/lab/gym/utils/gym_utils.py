@@ -77,6 +77,27 @@ def convert_observation_to_space(
         array = np.array(observation)
         dtype = array.dtype
         space = spaces.Box(-np.inf, np.inf, shape=array.shape, dtype=dtype)
+    elif isinstance(observation, torch.Tensor):
+        if unbatched:
+            shape = observation.shape[1:]
+        else:
+            shape = observation.shape
+        dtype = observation.dtype
+        # Convert torch dtype to numpy dtype
+        if dtype in (torch.float32, torch.float64, torch.float16):
+            low, high = -np.inf, np.inf
+            np_dtype = np.float32
+        elif dtype in (torch.int32, torch.int64, torch.int16, torch.int8):
+            info = np.iinfo(np.int32)
+            low, high = info.min, info.max
+            np_dtype = np.int32
+        elif dtype == torch.bool:
+            low, high = 0, 1
+            np_dtype = np.bool_
+        else:
+            low, high = -np.inf, np.inf
+            np_dtype = np.float32
+        space = spaces.Box(low, high, shape=shape, dtype=np_dtype)
     elif isinstance(observation, np.ndarray):
         if unbatched:
             shape = observation.shape[1:]
