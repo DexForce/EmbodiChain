@@ -504,3 +504,32 @@ class CartPole(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class ARX5(EmbodiChainDataset):
+    """Dataset class for the ARX5 robot.
+
+    Reference:
+        https://arx-x.com/
+
+    Directory structure:
+        ARX5/
+            X5A.urdf
+
+    Example usage:
+        >>> from embodichain.data.robot_dataset import ARX5
+        >>> dataset = ARX5()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("ARX5/X5A.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5.zip"),
+            "da207ba65e21577aa8e8f349af63e608",
+        )
+        prefix = "ARX5"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
