@@ -150,11 +150,18 @@ def preview(env: gymnasium.Env) -> None:
 
     end = False
     while end is False:
-        print("Press `p` to into embed mode to interact with the environment.")
+        print("Press `p` to enter embed mode to interact with the environment.")
         print("Press `q` to quit the simulation.")
         txt = input()
         if txt == "p":
-            from IPython import embed
+            try:
+                from IPython import embed
+            except ImportError:
+                log_error(
+                    "IPython is not installed. Preview mode requires IPython to be "
+                    "available. Please install it with `pip install ipython` and try again."
+                )
+                continue
 
             embed()
         elif txt == "q":
