@@ -106,7 +106,7 @@ def generate_function(
 
 
 def main(args, env, gym_config):
-    if args.preview:
+    if getattr(args, "preview", False):
         log_warning("Preview mode enabled. Launching environment preview...")
         preview(env)
 
@@ -134,7 +134,7 @@ def preview(env: gymnasium.Env) -> None:
     for i in range(10):
         qpos = env.robot.get_qpos()
 
-        obs, reward, done, truncated, info = env.step(qpos)
+        obs, reward, terminated, truncated, info = env.step(qpos)
 
     # reset the environment
     env.reset()

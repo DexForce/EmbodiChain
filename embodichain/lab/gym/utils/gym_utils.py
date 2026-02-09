@@ -762,7 +762,11 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         action="store_true",
     )
     parser.add_argument(
-        "--gym_config", type=str, help="Path to gym config file.", default="", required=True
+        "--gym_config",
+        type=str,
+        help="Path to gym config file.",
+        default="",
+        required=True,
     )
     parser.add_argument(
         "--action_config", type=str, help="Path to action config file.", default=None

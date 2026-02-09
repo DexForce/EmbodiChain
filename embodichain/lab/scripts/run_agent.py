@@ -24,7 +24,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
 )
-from embodichain.utils.logger import log_warning, log_info, log_error
+from embodichain.utils.logger import log_error
 from .run_env import main
 
 
