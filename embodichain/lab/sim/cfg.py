@@ -1025,7 +1025,7 @@ class ArticulationCfg(ObjectBaseCfg):
     
     Currently, the uv mapping is computed for each link with projection uv mapping method.
     """
-    
+
     use_usd_properties: bool = False
     """Whether to use physical properties from USD file instead of config.
     

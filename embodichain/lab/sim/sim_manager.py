@@ -1033,7 +1033,7 @@ class SimulationManager:
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
             # TODO: currently not supporting multiple arenas for USD
-            env=   self._env       
+            env = self._env
             results = env.import_from_usd_file(cfg.fpath, return_object=True)
             print("USD import results:", results)
 
@@ -1048,9 +1048,9 @@ class SimulationManager:
             elif len(articulations_found) > 1:
                 logger.log_error(
                     f"Multiple articulations found in USD file {cfg.fpath}. "
-                )  
+                )
             elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])  
+                obj_list.append(articulations_found[0])
         else:
             for env in env_list:
                 art = env.load_urdf(cfg.fpath)
@@ -1117,7 +1117,7 @@ class SimulationManager:
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
             # TODO: currently not supporting multiple arenas for USD
-            env=   self._env       
+            env = self._env
             results = env.import_from_usd_file(cfg.fpath, return_object=True)
             print("USD import results:", results)
 
@@ -1132,9 +1132,9 @@ class SimulationManager:
             elif len(articulations_found) > 1:
                 logger.log_error(
                     f"Multiple articulations found in USD file {cfg.fpath}. "
-                )  
+                )
             elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])                                  
+                obj_list.append(articulations_found[0])
         else:
             for env in env_list:
                 art = env.load_urdf(cfg.fpath)

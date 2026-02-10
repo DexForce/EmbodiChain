@@ -221,25 +221,25 @@ def load_mesh_objects_from_cfg(
 
         is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: currently not supporting multiple arenas for USD            
-            _env:dexsim.environment.Env = dexsim.default_world().get_env()
-            results = _env.import_from_usd_file(fpath,return_object=True)
+            # TODO: currently not supporting multiple arenas for USD
+            _env: dexsim.environment.Env = dexsim.default_world().get_env()
+            results = _env.import_from_usd_file(fpath, return_object=True)
             print(f"import usd result: {results}")
 
-            rigidbodys_found=[]
-            for key,value in results.items():
+            rigidbodys_found = []
+            for key, value in results.items():
                 if isinstance(value, dexsim.cuda.pybind.models.MeshObject):
                     rigidbodys_found.append(value)
-            if len(rigidbodys_found)==0:
+            if len(rigidbodys_found) == 0:
                 logger.log_error(f"No rigid body found in USD file: {fpath}")
-            elif len(rigidbodys_found)>1:
+            elif len(rigidbodys_found) > 1:
                 logger.log_error(f"Multiple rigid bodies found in USD file: {fpath}.")
-            elif len(rigidbodys_found)==1:
+            elif len(rigidbodys_found) == 1:
                 obj_list.append(rigidbodys_found[0])
                 return obj_list
         else:
             # non-usd file does not support this option, will be ignored if set.
-            cfg.use_usd_properties=False
+            cfg.use_usd_properties = False
 
         for i, env in enumerate(env_list):
             if max_convex_hull_num > 1:

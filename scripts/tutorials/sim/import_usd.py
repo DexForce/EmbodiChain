@@ -25,7 +25,12 @@ import time
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg,ArticulationCfg,Articulation
+from embodichain.lab.sim.objects import (
+    RigidObject,
+    RigidObjectCfg,
+    ArticulationCfg,
+    Articulation,
+)
 from dexsim.utility.path import get_resources_data_path
 
 
@@ -71,7 +76,6 @@ def main():
     if not args.headless:
         sim.open_window()
 
-
     cube: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
@@ -87,28 +91,28 @@ def main():
         )
     )
 
-    usdpath="/home/xiemh/model/004_sugar_box/004_sugar_box_xmh.usda"
+    usdpath = "/home/xiemh/model/004_sugar_box/004_sugar_box_xmh.usda"
     sugar_box: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="sugar_box",
             shape=MeshCfg(fpath=usdpath),
-            body_type="dynamic",            
+            body_type="dynamic",
             init_pos=[0.2, 0.2, 1.0],
             use_usd_properties=True,
         )
     )
 
     # Add objects to the scene
-    h1 :Articulation= sim.add_articulation(
-            cfg=ArticulationCfg(
-                uid="h1",
-                # fpath="/home/xiemh/model/Collected_ur10/ur10.usd",
-                fpath="/home/xiemh/model/Collected_h1/h1.usda",
-                build_pk_chain=False,
-                init_pos=[-0.2, -0.2, 1.0],
-                use_usd_properties=False,
-            )
+    h1: Articulation = sim.add_articulation(
+        cfg=ArticulationCfg(
+            uid="h1",
+            # fpath="/home/xiemh/model/Collected_ur10/ur10.usd",
+            fpath="/home/xiemh/model/Collected_h1/h1.usda",
+            build_pk_chain=False,
+            init_pos=[-0.2, -0.2, 1.0],
+            use_usd_properties=False,
         )
+    )
 
     print("[INFO]: Scene setup complete!")
     print("[INFO]: Press Ctrl+C to stop the simulation")

@@ -581,7 +581,7 @@ class Articulation(BatchEntity):
         self.cfg: ArticulationCfg
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
-                    
+
         if not cfg.use_usd_properties:
             # Set articulation configuration in DexSim
             set_dexsim_articulation_cfg(entities, self.cfg)
@@ -591,7 +591,10 @@ class Articulation(BatchEntity):
             dof = self._data.dof
             default_cfg = JointDrivePropertiesCfg()
             self.default_joint_damping = torch.full(
-                (num_entities, dof), default_cfg.damping, dtype=torch.float32, device=device
+                (num_entities, dof),
+                default_cfg.damping,
+                dtype=torch.float32,
+                device=device,
             )
             self.default_joint_stiffness = torch.full(
                 (num_entities, dof),
