@@ -51,6 +51,7 @@ dependencies = [
   "black==24.3.0",
   "fvcore",
   "h5py",
+  "tensordict>=0.5.0",  # For TensorDict-based RL data structures
 ]
 
 [project.optional-dependencies]

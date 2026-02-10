@@ -70,7 +70,7 @@ class TestRLTraining:
         test_train_config = train_config.copy()
         test_train_config["trainer"]["gym_config"] = self.temp_gym_config_path
         test_train_config["trainer"]["iterations"] = 2
-        test_train_config["trainer"]["rollout_steps"] = 32
+        test_train_config["trainer"]["buffer_size"] = 32
         test_train_config["trainer"]["eval_freq"] = 1000000  # Disable eval
         test_train_config["trainer"]["save_freq"] = 1000000  # Disable save
         test_train_config["trainer"]["headless"] = True

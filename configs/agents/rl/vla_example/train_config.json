@@ -1,23 +1,24 @@
-{ 
+{
     "trainer": {
-        "exp_name": "push_cube_ppo",
+        "exp_name": "vla_fine_tuning_ppo",
         "gym_config": "configs/agents/rl/push_cube/gym_config.json",
         "seed": 42,
         "device": "cuda:0",
         "headless": true,
         "enable_rt": false,
         "gpu_id": 0,
-        "num_envs": 64,
-        "iterations": 1000,
-        "buffer_size": 1024,
+        "num_envs": 32,
+        "iterations": 500,
+        "buffer_size": 2048,
+        "buffer_type": "vla",
         "enable_eval": true,
-        "num_eval_envs": 16,
+        "num_eval_envs": 8,
         "num_eval_episodes": 3,
-        "eval_freq": 200,
-        "save_freq": 200,
-        "use_wandb": false,
-        "wandb_project_name": "embodychain-push_cube",
-        "model_type": "standard",
+        "eval_freq": 100,
+        "save_freq": 100,
+        "use_wandb": true,
+        "wandb_project_name": "embodychain-vla-training",
+        "model_type": "vla",
         "events": {
             "eval": {
                 "record_camera": {
@@ -31,42 +32,39 @@
                         "target": [0, 0, 0],
                         "up": [0, 0, 1],
                         "intrinsics": [600, 600, 320, 240],
-                        "save_path": "./outputs/videos/eval"
+                        "save_path": "./outputs/videos/vla_eval"
                     }
                 }
             }
         }
     },
     "policy": {
-        "name": "actor_critic",
-        "action_dim": 8,
-        "actor": {
-            "type": "mlp",
-            "network_cfg": {
-                "hidden_sizes": [256, 256],
-                "activation": "relu"
-            }
-        },
-        "critic": {
-            "type": "mlp",
-            "network_cfg": {
-                "hidden_sizes": [256, 256],
-                "activation": "relu"
+        "name": "vla",
+        "action_dim": 7,
+        "vla_config": {
+            "model_path": "checkpoints/pretrained_vla_model.pth",
+            "model_class": "vla_models.GPTVLAModel",
+            "model_config": {
+                "vision_encoder": "resnet50",
+                "language_model": "gpt2-medium",
+                "action_head_hidden_size": 512,
+                "freeze_vision_encoder": false,
+                "freeze_language_model": false
             }
         }
     },
     "algorithm": {
         "name": "ppo",
         "cfg": {
-            "learning_rate": 0.0001,
-            "n_epochs": 10,
-            "batch_size": 8192,
+            "learning_rate": 1e-5,
+            "n_epochs": 4,
+            "batch_size": 2048,
             "gamma": 0.99,
             "gae_lambda": 0.95,
             "clip_coef": 0.2,
-            "ent_coef": 0.01,
+            "ent_coef": 0.001,
             "vf_coef": 0.5,
-            "max_grad_norm": 0.5
+            "max_grad_norm": 1.0
         }
     }
 }

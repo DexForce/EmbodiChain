@@ -18,35 +18,27 @@ from __future__ import annotations
 
 from typing import Dict, Any, Callable
 import torch
+from tensordict import TensorDict
 
 
 class BaseAlgorithm:
-    """Base class for RL algorithms.
+    """Base class for RL algorithms following TorchRL conventions.
 
-    Algorithms must implement buffer initialization, rollout collection, and
-    policy update. Trainer depends only on this interface to remain
-    algorithm-agnostic.
+    Algorithms implement policy updates using TensorDict.
+    Data collection is handled separately by Collector classes (SyncCollector/AsyncCollector).
     """
 
     device: torch.device
 
-    def initialize_buffer(
-        self, num_steps: int, num_envs: int, obs_dim: int, action_dim: int
-    ) -> None:
-        """Initialize internal buffer(s) required by the algorithm."""
-        raise NotImplementedError
+    def update(self, rollout: TensorDict) -> Dict[str, float]:
+        """Update policy using collected rollout data.
 
-    def collect_rollout(
-        self,
-        env,
-        policy,
-        obs: torch.Tensor,
-        num_steps: int,
-        on_step_callback: Callable | None = None,
-    ) -> Dict[str, Any]:
-        """Collect trajectories and return logging info (e.g., reward components)."""
-        raise NotImplementedError
+        Args:
+            rollout: TensorDict containing collected rollout data from Collector
+                    Expected batch_size format: [T, N] for on-policy algorithms
+                    where T is trajectory length and N is number of environments
 
-    def update(self) -> Dict[str, float]:
-        """Update policy using collected data and return training losses."""
+        Returns:
+            Dictionary of training metrics (losses, learning stats, etc.)
+        """
         raise NotImplementedError

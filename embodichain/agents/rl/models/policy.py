@@ -19,13 +19,15 @@
 This module defines an abstract Policy base class that all RL policies must
 inherit from. A Policy encapsulates the neural networks and exposes a uniform
 interface for RL algorithms (e.g., PPO, SAC) to interact with.
+
+All data I/O now uses TensorDict for structured, extensible data flow.
 """
 
 from __future__ import annotations
 
-from typing import Tuple
 from abc import ABC, abstractmethod
 import torch.nn as nn
+from tensordict import TensorDict
 
 import torch
 
@@ -37,6 +39,7 @@ class Policy(nn.Module, ABC):
     - Encapsulates neural networks that are trained by RL algorithms
     - Handles internal computations (e.g., network output → distribution)
     - Provides a uniform interface for algorithms (PPO, SAC, etc.)
+    - Uses TensorDict for all inputs and outputs (no tensor fallback)
     """
 
     device: torch.device
@@ -46,49 +49,54 @@ class Policy(nn.Module, ABC):
         super().__init__()
 
     @abstractmethod
-    def get_action(
-        self, obs: torch.Tensor, deterministic: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Sample an action from the policy.
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        """Forward pass that adds action to the input tensordict (in-place).
+
+        This is the main inference method following TorchRL conventions.
 
         Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
-            deterministic: If True, return the mean action; otherwise sample
+            tensordict: Input TensorDict containing at minimum:
+                - "observation": Observation tensor or nested TensorDict
 
         Returns:
-            Tuple of (action, log_prob, value):
-            - action: Sampled action tensor of shape (batch_size, action_dim)
-            - log_prob: Log probability of the action, shape (batch_size,)
-            - value: Value estimate, shape (batch_size,)
+            The same TensorDict (modified in-place) with added fields:
+                - "action": Sampled action tensor
+                - "sample_log_prob": Log probability of the sampled action
+                - "value": Value estimate (optional, for actor-critic)
+                - "loc": Distribution mean (optional, for continuous actions)
+                - "scale": Distribution std (optional, for continuous actions)
         """
         raise NotImplementedError
 
     @abstractmethod
-    def get_value(self, obs: torch.Tensor) -> torch.Tensor:
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
         """Get value estimate for given observations.
 
         Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
+            tensordict: Input TensorDict containing:
+                - "observation": Observation data
 
         Returns:
-            Value estimate tensor of shape (batch_size,)
+            TensorDict with added field:
+                - "value": Value estimate tensor
         """
         raise NotImplementedError
 
     @abstractmethod
-    def evaluate_actions(
-        self, obs: torch.Tensor, actions: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
         """Evaluate actions and compute log probabilities, entropy, and values.
 
+        Used during policy updates to recompute action probabilities.
+
         Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
-            actions: Action tensor of shape (batch_size, action_dim)
+            tensordict: Input TensorDict containing:
+                - "observation": Observation data
+                - "action": Actions to evaluate
 
         Returns:
-            Tuple of (log_prob, entropy, value):
-            - log_prob: Log probability of actions, shape (batch_size,)
-            - entropy: Entropy of the action distribution, shape (batch_size,)
-            - value: Value estimate, shape (batch_size,)
+            TensorDict with added fields:
+                - "sample_log_prob": Log probability of actions
+                - "entropy": Entropy of the action distribution
+                - "value": Value estimate
         """
         raise NotImplementedError

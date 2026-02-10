@@ -18,11 +18,11 @@ from __future__ import annotations
 
 from typing import Dict, Type
 import torch
-from gymnasium import spaces
 
 from .actor_critic import ActorCritic
 from .policy import Policy
 from .mlp import MLP
+from .vla_policy import VLAPolicy, build_vla_policy, load_vla_model
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -44,13 +44,26 @@ def get_policy_class(name: str) -> Type[Policy] | None:
 
 def build_policy(
     policy_block: dict,
-    obs_space: spaces.Space,
-    action_space: spaces.Space,
+    action_dim: int,
     device: torch.device,
     actor: torch.nn.Module | None = None,
     critic: torch.nn.Module | None = None,
 ) -> Policy:
-    """Build policy strictly from json-like block: { name: ..., cfg: {...} }"""
+    """Build policy from json-like block.
+
+    With TensorDict architecture, we only need action_dim.
+    Observations are handled via TensorDict structure.
+
+    Args:
+        policy_block: Config dict with 'name' key
+        action_dim: Dimension of action space
+        device: Device to place policy on
+        actor: Actor network (required for actor_critic)
+        critic: Critic network (required for actor_critic)
+
+    Returns:
+        Initialized Policy instance
+    """
     name = policy_block["name"].lower()
     if name not in _POLICY_REGISTRY:
         available = ", ".join(get_registered_policy_names())
@@ -63,9 +76,14 @@ def build_policy(
             raise ValueError(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
-        return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
+        return policy_cls(
+            action_dim=action_dim, device=device, actor=actor, critic=critic
+        )
+    elif name == "vla":
+        return build_vla_policy(policy_block, action_dim, device)
     else:
-        return policy_cls(obs_space, action_space, device)
+        # Other policies should also use action_dim signature
+        return policy_cls(action_dim=action_dim, device=device)
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
@@ -88,12 +106,16 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
 
 # default registrations
 register_policy("actor_critic", ActorCritic)
+register_policy("vla", VLAPolicy)
 
 __all__ = [
     "ActorCritic",
+    "VLAPolicy",
     "register_policy",
     "get_registered_policy_names",
     "build_policy",
+    "build_vla_policy",
+    "load_vla_model",
     "build_mlp_from_cfg",
     "get_policy_class",
     "Policy",

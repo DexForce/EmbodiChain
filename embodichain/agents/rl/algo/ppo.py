@@ -15,12 +15,50 @@
 # ----------------------------------------------------------------------------
 
 import torch
-from typing import Dict, Any, Tuple, Callable
-
-from embodichain.agents.rl.utils import AlgorithmCfg, flatten_dict_observation
-from embodichain.agents.rl.buffer import RolloutBuffer
+from tensordict import TensorDict
+from embodichain.agents.rl.utils import AlgorithmCfg, compute_gae
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
+
+
+def _print_tensordict_tree(td, prefix="", is_last=True, name="TensorDict"):
+    """Recursively print TensorDict structure in tree format."""
+    connector = "└── " if is_last else "├── "
+
+    # Print current node
+    batch_info = (
+        f"batch_size={list(td.batch_size)}" if hasattr(td, "batch_size") else ""
+    )
+    device_info = f"device={td.device}" if hasattr(td, "device") else ""
+    meta_info = ", ".join(filter(None, [batch_info, device_info]))
+    print(f"{prefix}{connector}{name}: TensorDict ({meta_info})")
+
+    # Prepare prefix for children
+    extension = "    " if is_last else "│   "
+    new_prefix = prefix + extension
+
+    # Get all keys
+    keys = sorted(td.keys()) if hasattr(td, "keys") else []
+
+    for i, key in enumerate(keys):
+        is_last_child = i == len(keys) - 1
+        value = td[key]
+
+        if isinstance(value, TensorDict):
+            # Recursively print nested TensorDict
+            _print_tensordict_tree(value, new_prefix, is_last_child, name=key)
+        elif isinstance(value, torch.Tensor):
+            # Print tensor info
+            child_connector = "└── " if is_last_child else "├── "
+            shape_str = "x".join(map(str, value.shape))
+            dtype_str = str(value.dtype).replace("torch.", "")
+            print(
+                f"{new_prefix}{child_connector}{key}: Tensor([{shape_str}], {dtype_str})"
+            )
+        else:
+            # Print other types
+            child_connector = "└── " if is_last_child else "├── "
+            print(f"{new_prefix}{child_connector}{key}: {type(value).__name__}")
 
 
 @configclass
@@ -34,126 +72,95 @@ class PPOCfg(AlgorithmCfg):
 
 
 class PPO(BaseAlgorithm):
-    """PPO algorithm operating via Policy and RolloutBuffer (algo-agnostic design)."""
+    """PPO algorithm using TensorDict for all data flow.
+    Data collection is handled by Collector classes (SyncCollector/AsyncCollector).
+    """
 
     def __init__(self, cfg: PPOCfg, policy):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
-        self.buffer: RolloutBuffer | None = None
-        # no per-rollout aggregation for dense logging
 
-    def _compute_gae(
-        self, rewards: torch.Tensor, values: torch.Tensor, dones: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Internal method to compute GAE. Only called by collect_rollout."""
-        T, N = rewards.shape
-        advantages = torch.zeros_like(rewards, device=self.device)
-        last_adv = torch.zeros(N, device=self.device)
-        for t in reversed(range(T)):
-            next_value = values[t + 1] if t < T - 1 else torch.zeros_like(values[0])
-            not_done = (~dones[t]).float()
-            delta = rewards[t] + self.cfg.gamma * next_value * not_done - values[t]
-            last_adv = (
-                delta + self.cfg.gamma * self.cfg.gae_lambda * not_done * last_adv
-            )
-            advantages[t] = last_adv
-        returns = advantages + values
-        return advantages, returns
+    def update(self, rollout: TensorDict) -> dict:
+        """Update the policy using collected rollout TensorDict (TorchRL style).
 
-    def initialize_buffer(
-        self, num_steps: int, num_envs: int, obs_dim: int, action_dim: int
-    ):
-        """Initialize the rollout buffer. Called by trainer before first rollout."""
-        self.buffer = RolloutBuffer(
-            num_steps, num_envs, obs_dim, action_dim, self.device
+        Args:
+            rollout: TensorDict with batch_size=[T, N] from collect_rollout()
+                    OR [size] from VLA buffer
+
+        Returns:
+            Dictionary of training metrics
+        """
+        # Ensure 2D format [T, N] for GAE computation
+        if len(rollout.batch_size) == 1:
+            rollout = rollout.unsqueeze(1)  # [size] -> [size, 1]
+
+        # Compute GAE advantages and returns
+        rollout = compute_gae(
+            rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda
         )
 
-    def collect_rollout(
-        self,
-        env,
-        policy,
-        obs: torch.Tensor,
-        num_steps: int,
-        on_step_callback: Callable | None = None,
-    ) -> Dict[str, Any]:
-        """Collect a rollout. Algorithm controls the data collection process."""
-        if self.buffer is None:
-            raise RuntimeError(
-                "Buffer not initialized. Call initialize_buffer() first."
-            )
+        # Flatten to [T*N, ...] for training
+        flat_data = rollout.reshape(-1)
+        total_samples = flat_data.batch_size[0]
 
-        policy.train()
-        self.buffer.step = 0
-        current_obs = obs
-
-        for t in range(num_steps):
-            # Get action from policy
-            actions, log_prob, value = policy.get_action(
-                current_obs, deterministic=False
-            )
-
-            # Wrap action as dict for env processing
-            action_type = getattr(env, "action_type", "delta_qpos")
-            action_dict = {action_type: actions}
-
-            # Step environment
-            result = env.step(action_dict)
-            next_obs, reward, terminated, truncated, env_info = result
-            done = terminated | truncated
-            # Light dtype normalization
-            reward = reward.float()
-            done = done.bool()
-
-            # Flatten dict observation from ObservationManager if needed
-            if isinstance(next_obs, dict):
-                next_obs = flatten_dict_observation(next_obs)
-
-            # Add to buffer
-            self.buffer.add(current_obs, actions, reward, done, value, log_prob)
-
-            # Dense logging is handled in Trainer.on_step via info; no aggregation here
-            # Call callback for statistics and logging
-            if on_step_callback is not None:
-                on_step_callback(current_obs, actions, reward, done, env_info, next_obs)
-
-            current_obs = next_obs
-
-        # Compute advantages/returns and attach to buffer extras
-        adv, ret = self._compute_gae(
-            self.buffer.rewards, self.buffer.values, self.buffer.dones
+        # Normalize advantages globally
+        advantages = flat_data["advantage"]
+        advantages_normalized = (advantages - advantages.mean()) / (
+            advantages.std() + 1e-8
         )
-        self.buffer.set_extras({"advantages": adv, "returns": ret})
-
-        # No aggregated logging results; Trainer performs dense per-step logging
-        return {}
-
-    def update(self) -> dict:
-        """Update the policy using the collected rollout buffer."""
-        if self.buffer is None:
-            raise RuntimeError("Buffer not initialized. Call collect_rollout() first.")
-
-        # Normalize advantages (optional, common default)
-        adv = self.buffer._extras.get("advantages")
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+        flat_data["advantage"] = advantages_normalized
 
         total_actor_loss = 0.0
         total_value_loss = 0.0
         total_entropy = 0.0
         total_steps = 0
+        total_clip_fraction = 0.0
+        total_approx_kl = 0.0
 
-        for _ in range(self.cfg.n_epochs):
-            for batch in self.buffer.iterate_minibatches(self.cfg.batch_size):
-                obs = batch["obs"]
-                actions = batch["actions"]
-                old_logprobs = batch["logprobs"]
-                returns = batch["returns"]
-                advantages = (
-                    (batch["advantages"] - adv.mean()) / (adv.std() + 1e-8)
-                ).detach()
+        for epoch in range(self.cfg.n_epochs):
+            # Shuffle data each epoch
+            indices = torch.randperm(total_samples, device=self.device)
+            shuffled_data = flat_data[indices]
 
-                logprobs, entropy, values = self.policy.evaluate_actions(obs, actions)
+            # Iterate over minibatches
+            num_minibatches = total_samples // self.cfg.batch_size
+            for i in range(num_minibatches):
+                start_idx = i * self.cfg.batch_size
+                end_idx = start_idx + self.cfg.batch_size
+                batch_td = shuffled_data[start_idx:end_idx]
+
+                # Extract data from TensorDict batch
+                old_logprobs = batch_td["sample_log_prob"]
+                returns = batch_td["value_target"]
+                advantages = batch_td[
+                    "advantage"
+                ]  # Note: advantages are already normalized globally before shuffling
+
+                # Evaluate actions with current policy
+                self.policy.evaluate_actions(batch_td)
+
+                # Get updated values
+                logprobs = batch_td["sample_log_prob"]
+                entropy = batch_td["entropy"]
+                values = batch_td["value"]
+
+                # Ensure shapes match (squeeze if needed)
+                if old_logprobs.dim() > 1:
+                    old_logprobs = old_logprobs.squeeze(-1)
+                if logprobs.dim() > 1:
+                    logprobs = logprobs.squeeze(-1)
+                if values.dim() > 1:
+                    values = values.squeeze(-1)
+                if returns.dim() > 1:
+                    returns = returns.squeeze(-1)
+                if advantages.dim() > 1:
+                    advantages = advantages.squeeze(-1)
+                if entropy.dim() > 1:
+                    entropy = entropy.squeeze(-1)
+
+                # PPO loss computation
                 ratio = (logprobs - old_logprobs).exp()
                 surr1 = ratio * advantages
                 surr2 = (
@@ -165,6 +172,13 @@ class PPO(BaseAlgorithm):
                 actor_loss = -torch.min(surr1, surr2).mean()
                 value_loss = torch.nn.functional.mse_loss(values, returns)
                 entropy_loss = -entropy.mean()
+
+                # Diagnostics
+                with torch.no_grad():
+                    clip_fraction = (
+                        ((ratio - 1.0).abs() > self.cfg.clip_coef).float().mean()
+                    )
+                    approx_kl = ((ratio - 1.0) - (logprobs - old_logprobs)).mean()
 
                 loss = (
                     actor_loss
@@ -179,14 +193,18 @@ class PPO(BaseAlgorithm):
                 )
                 self.optimizer.step()
 
-                bs = obs.shape[0]
+                bs = batch_td.batch_size[0]
                 total_actor_loss += actor_loss.item() * bs
                 total_value_loss += value_loss.item() * bs
                 total_entropy += (-entropy_loss.item()) * bs
+                total_clip_fraction += clip_fraction.item() * bs
+                total_approx_kl += approx_kl.item() * bs
                 total_steps += bs
 
         return {
             "actor_loss": total_actor_loss / max(1, total_steps),
             "value_loss": total_value_loss / max(1, total_steps),
             "entropy": total_entropy / max(1, total_steps),
+            "clip_fraction": total_clip_fraction / max(1, total_steps),
+            "approx_kl": total_approx_kl / max(1, total_steps),
         }

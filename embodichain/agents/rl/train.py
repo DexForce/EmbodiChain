@@ -64,7 +64,8 @@ def train_from_config(config_path: str):
     seed = int(trainer_cfg.get("seed", 1))
     device_str = trainer_cfg.get("device", "cpu")
     iterations = int(trainer_cfg.get("iterations", 250))
-    rollout_steps = int(trainer_cfg.get("rollout_steps", 2048))
+    buffer_size = int(trainer_cfg.get("buffer_size", 2048))
+    model_type = trainer_cfg.get("model_type", "standard")
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
@@ -173,13 +174,36 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
-    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic)
-    if policy_name.lower() == "actor_critic":
-        # Get observation dimension from flattened observation space
-        # flattened_observation_space returns Box space for RL training
-        obs_dim = env.flattened_observation_space.shape[-1]
-        action_dim = env.action_space.shape[-1]
 
+    # Get action_dim from config (required)
+    action_dim = policy_block.get("action_dim")
+    if action_dim is None:
+        raise ValueError(
+            "Missing 'action_dim' in policy config. "
+            "With TensorDict architecture, action dimension must be explicitly specified in config. "
+            'Example: {"policy": {"name": "actor_critic", "action_dim": 7, ...}}'
+        )
+
+    # Infer obs_dim from environment sampling (no gym space dependency)
+    # Env returns dict, we process it to infer dimensions
+    sample_obs, _ = env.reset()
+
+    # Get obs_dim by flattening observation structure (env returns dict)
+    obs_list = []
+
+    def _collect(item):
+        """Recursively collect tensors from dict or direct tensor."""
+        if hasattr(item, "keys"):  # It's a dict
+            for key in sorted(item.keys()):
+                _collect(item[key])
+        else:  # It's a Tensor
+            obs_list.append(item.flatten(start_dim=1))
+
+    _collect(sample_obs)
+    obs_dim = sum(t.shape[-1] for t in obs_list)
+
+    # Build policy based on type
+    if policy_name.lower() == "actor_critic":
         actor_cfg = policy_block.get("actor")
         critic_cfg = policy_block.get("critic")
         if actor_cfg is None or critic_cfg is None:
@@ -192,16 +216,19 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            env.flattened_observation_space,
-            env.action_space,
-            device,
+            action_dim=action_dim,
+            device=device,
             actor=actor,
             critic=critic,
         )
-    else:
-        policy = build_policy(
-            policy_block, env.flattened_observation_space, env.action_space, device
+    elif policy_name.lower() == "vla":
+        # VLA policy loads pretrained model from checkpoint
+        logger.info(
+            f"Loading VLA model from config: {policy_block.get('vla_config', {})}"
         )
+        policy = build_policy(policy_block, action_dim=action_dim, device=device)
+    else:
+        policy = build_policy(policy_block, action_dim=action_dim, device=device)
 
     # Build Algorithm via factory
     algo_name = algo_block["name"].lower()
@@ -252,7 +279,7 @@ def train_from_config(config_path: str):
         policy=policy,
         env=env,
         algorithm=algo,
-        num_steps=rollout_steps,
+        buffer_size=buffer_size,
         batch_size=algo_cfg["batch_size"],
         writer=writer,
         eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
@@ -264,6 +291,7 @@ def train_from_config(config_path: str):
         event_cfg=train_event_cfg,
         eval_event_cfg=eval_event_cfg if enable_eval else {},
         num_eval_episodes=num_eval_episodes,
+        model_type=model_type,
     )
 
     logger.log_info("Generic training initialized")
@@ -275,7 +303,7 @@ def train_from_config(config_path: str):
         f"Algorithm: {algo_name} (available: {get_registered_algo_names()})"
     )
 
-    total_steps = int(iterations * rollout_steps * env.num_envs)
+    total_steps = int(iterations * buffer_size * env.num_envs)
     logger.log_info(f"Total steps: {total_steps} (iterations≈{iterations})")
 
     try:

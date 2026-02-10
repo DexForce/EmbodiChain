@@ -14,39 +14,167 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Helper utilities for RL training.
+
+This module provides utility functions for RL algorithms.
+"""
+
 import torch
+import numpy as np
+from tensordict import TensorDict
 
 
-def flatten_dict_observation(input_dict: dict) -> torch.Tensor:
-    """
-    Flatten hierarchical dict observations from ObservationManager.
-
-    Recursively traverse nested dicts, collect all tensor values,
-    flatten each to (num_envs, -1), and concatenate in sorted key order.
+def dict_to_tensordict(obs_dict: dict, device: torch.device) -> TensorDict:
+    """Convert nested dict observation to TensorDict recursively.
 
     Args:
-        input_dict: Nested dict structure, e.g. {"robot": {"qpos": tensor, "ee_pos": tensor}, "object": {...}}
+        obs_dict: Nested observation dictionary
+        device: Device to place tensors on
 
     Returns:
-        Concatenated flat tensor of shape (num_envs, total_dim)
+        TensorDict with nested structure preserved and "observation" key
     """
-    obs_list = []
 
-    def _collect_tensors(d, prefix=""):
-        """Recursively collect tensors from nested dicts in sorted order."""
-        for key in sorted(d.keys()):
-            full_key = f"{prefix}/{key}" if prefix else key
-            value = d[key]
+    def _recursive_convert(d):
+        """Recursively convert dict to TensorDict-compatible structure."""
+        result = {}
+        for key, value in d.items():
             if isinstance(value, dict):
-                _collect_tensors(value, full_key)
+                # Recursively convert nested dicts
+                result[key] = _recursive_convert(value)
             elif isinstance(value, torch.Tensor):
-                # Flatten tensor to (num_envs, -1) shape
-                obs_list.append(value.flatten(start_dim=1))
+                result[key] = value.to(device)
+            else:
+                result[key] = torch.tensor(value, device=device)
+        return result
 
-    _collect_tensors(input_dict)
+    # Convert the observation dict structure
+    converted = _recursive_convert(obs_dict)
 
-    if not obs_list:
-        raise ValueError("No tensors found in observation dict")
+    # Infer batch_size from first tensor we find
+    def _get_first_tensor_batch_size(d):
+        """Find first tensor and get its batch dimension."""
+        for value in d.values():
+            if isinstance(value, torch.Tensor):
+                return value.shape[0]
+            elif isinstance(value, dict):
+                bs = _get_first_tensor_batch_size(value)
+                if bs is not None:
+                    return bs
+        return None
 
-    result = torch.cat(obs_list, dim=-1)
-    return result
+    batch_size = _get_first_tensor_batch_size(converted)
+    if batch_size is None:
+        batch_size = 1  # Default if no tensors found
+
+    # Wrap in TensorDict with explicit batch_size
+    obs_td = TensorDict(converted, batch_size=[batch_size], device=device)
+
+    # Wrap observation in outer TensorDict with "observation" key
+    return TensorDict({"observation": obs_td}, batch_size=[batch_size], device=device)
+
+
+def mean_scalar(x) -> float:
+    """Convert tensor or array to scalar float (mean if needed).
+
+    Args:
+        x: Tensor, array, or scalar value
+
+    Returns:
+        Float scalar value
+    """
+    if hasattr(x, "detach"):
+        x = x.detach().cpu().numpy()
+    else:
+        x = np.asarray(x)
+    return float(np.mean(x))
+
+
+def pack_log_dict(prefix: str, data: dict) -> dict:
+    """Pack data dict into logging dict with prefix.
+
+    Args:
+        prefix: Prefix for keys (e.g., "train", "eval")
+        data: Dictionary of values to pack
+
+    Returns:
+        Dictionary with prefixed keys and scalar values
+    """
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for k, v in data.items():
+        try:
+            out[f"{prefix}/{k}"] = mean_scalar(v)
+        except Exception:
+            continue
+    return out
+
+
+def compute_gae(
+    rollout: TensorDict,
+    gamma: float,
+    gae_lambda: float,
+) -> TensorDict:
+    """Compute Generalized Advantage Estimation (GAE) on rollout TensorDict.
+
+    This follows the TorchRL convention where rollout has shape [T, N, ...].
+    Computes advantage and value_target in-place and returns the modified TensorDict.
+
+    Args:
+        rollout: TensorDict with batch_size=[T, N] containing:
+            - "value": Tensor[T, N, 1] - state values
+            - "next": TensorDict with:
+                - "reward": Tensor[T, N, 1]
+                - "done": Tensor[T, N, 1]
+                - "value": Tensor[T, N, 1] - next state values (bootstrapped)
+        gamma: Discount factor
+        gae_lambda: GAE lambda parameter
+
+    Returns:
+        TensorDict with added keys:
+            - "advantage": Tensor[T, N, 1]
+            - "value_target": Tensor[T, N, 1]
+    """
+    T, N = rollout.batch_size[:2]
+    device = rollout.device
+
+    # Extract tensors - shape [T, N, 1]
+    values = rollout["value"]
+    rewards = rollout["next"]["reward"]
+    dones = rollout["next"]["done"].float()
+
+    # Bootstrap values: use next state value from rollout["next"]["value"]
+    # This is computed during collection by evaluating policy on next_obs
+    if "value" in rollout["next"]:
+        bootstrap_values = rollout["next"]["value"]
+    else:
+        # If not provided, assume 0 (terminal state)
+        bootstrap_values = torch.zeros_like(values)
+
+    # Compute GAE advantages using backward iteration
+    # advantage[t] = delta[t] + (gamma * gae_lambda) * (1 - done[t]) * advantage[t+1]
+    # where delta[t] = reward[t] + gamma * (1 - done[t]) * V(s_{t+1}) - V(s_t)
+    # V(s_{t+1}) comes from bootstrap_values[t] which was computed on next_obs[t]
+
+    advantages = torch.zeros_like(values)
+    gae = torch.zeros(N, 1, device=device)
+
+    # Iterate backwards through time
+    for t in reversed(range(T)):
+        # Compute TD error (delta)
+        # bootstrap_values[t] is V(s_{t+1}), the value of the next state after action at t
+        delta = rewards[t] + gamma * bootstrap_values[t] * (1.0 - dones[t]) - values[t]
+
+        # Compute GAE recursively
+        gae = delta + gamma * gae_lambda * (1.0 - dones[t]) * gae
+        advantages[t] = gae
+
+    # Compute value targets (for value function loss)
+    value_targets = advantages + values
+
+    # Add to rollout TensorDict (in-place)
+    rollout["advantage"] = advantages
+    rollout["value_target"] = value_targets
+
+    return rollout
