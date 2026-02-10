@@ -107,7 +107,9 @@ def generate_function(
 
 def main(args, env, gym_config):
     if getattr(args, "preview", False):
-        log_warning("Preview mode enabled. Launching environment preview...")
+        log_info(
+            "Preview mode enabled. Launching environment preview...", color="green"
+        )
         preview(env)
 
     log_info("Start offline data generation.", color="green")
