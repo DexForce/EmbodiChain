@@ -21,14 +21,9 @@ import os
 import torch
 import tqdm
 
-from threading import Thread
-
-from embodichain.utils.utility import load_json
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.gym_utils import (
-    config_to_cfg,
-    DEFAULT_MANAGER_MODULES,
+    add_env_launcher_args_to_parser,
+    build_env_cfg_from_args,
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
 
@@ -111,6 +106,9 @@ def generate_function(
 
 
 def main(args, env, gym_config):
+    if getattr(args, "preview", False):
+        log_warning("Preview mode enabled. Launching environment preview...")
+        preview(env)
 
     log_info("Start offline data generation.", color="green")
     # TODO: Support multiple trajectories per episode generation.
@@ -122,9 +120,54 @@ def main(args, env, gym_config):
             i,
             save_path=getattr(args, "save_path", ""),
             save_video=getattr(args, "save_video", False),
-            debug_mode=args.debug_mode,
+            debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
         )
+
+
+def preview(env: gymnasium.Env) -> None:
+    """
+    Run the following code to create a demonstration and perform env steps.
+
+    ```
+    # Demo version of environment rollout
+    for i in range(10):
+        qpos = env.robot.get_qpos()
+
+        obs, reward, terminated, truncated, info = env.step(qpos)
+
+    # reset the environment
+    env.reset()
+    ```
+
+    Run the following code to preview the sensor observations.
+
+    ```
+    env.preview_sensor_data("camera")
+    ```
+    """
+    _, _ = env.reset()
+
+    end = False
+    while end is False:
+        print("Press `p` to enter embed mode to interact with the environment.")
+        print("Press `q` to quit the simulation.")
+        txt = input()
+        if txt == "p":
+            try:
+                from IPython import embed
+            except ImportError:
+                log_error(
+                    "IPython is not installed. Preview mode requires IPython to be "
+                    "available. Please install it with `pip install ipython` and try again."
+                )
+                continue
+
+            embed()
+        elif txt == "q":
+            end = True
+
+    exit(0)
 
 
 if __name__ == "__main__":
@@ -132,83 +175,13 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--num_envs",
-        help="The number of environments to run in parallel.",
-        default=1,
-        type=int,
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
-    parser.add_argument(
-        "--headless",
-        help="Whether to perform the simulation in headless mode.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--enable_rt",
-        help="Whether to use RTX rendering backend for the simulation.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--gpu_id",
-        help="The GPU ID to use for the simulation.",
-        default=0,
-        type=int,
-    )
-    parser.add_argument(
-        "--save_path", help="path", default="./outputs/thirdviewvideo", type=str
-    )
-    parser.add_argument(
-        "--save_video",
-        help="Whether to save the video of the episode.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--debug_mode",
-        help="Enable debug mode.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--filter_visual_rand",
-        help="Whether to filter out visual randomization.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument("--gym_config", type=str, help="gym_config", default="")
-    parser.add_argument("--action_config", type=str, help="action_config", default=None)
+
+    add_env_launcher_args_to_parser(parser)
 
     args = parser.parse_args()
 
-    # if args.num_envs != 1:
-    #     log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
+    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
 
-    gym_config = load_json(args.gym_config)
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config, manager_modules=DEFAULT_MANAGER_MODULES
-    )
-    cfg.filter_visual_rand = args.filter_visual_rand
+    env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 
-    action_config = {}
-    if args.action_config is not None:
-        action_config = load_json(args.action_config)
-        action_config["action_config"] = action_config
-
-    cfg.num_envs = args.num_envs
-    cfg.sim_cfg = SimulationManagerCfg(
-        headless=args.headless,
-        sim_device=args.device,
-        enable_rt=args.enable_rt,
-        gpu_id=args.gpu_id,
-    )
-
-    env = gymnasium.make(id=gym_config["id"], cfg=cfg, **action_config)
     main(args, env, gym_config)
