@@ -16,6 +16,7 @@
 
 import cv2
 import torch
+import numpy as np
 
 from scipy.spatial.transform import Rotation as R
 
@@ -24,8 +25,19 @@ from embodichain.utils.logger import log_info, log_error, log_warning
 
 
 def run_keyboard_control_for_camera(
-    sensor: Camera, trans_step: float = 0.01, rot_step: float = 1.0
+    sensor: Camera,
+    trans_step: float = 0.01,
+    rot_step: float = 1.0,
+    vis_pose: bool = False,
 ) -> None:
+    """Run keyboard control loop for camera pose adjustment.
+
+    Args:
+        sensor (Camera): Camera sensor to control.
+        trans_step (float, optional): Translation step size. Defaults to 0.01.
+        rot_step (float, optional): Rotation step size in degrees. Defaults to 1.0.
+        vis_pose (bool, optional): Whether to visualize the camera pose in axis form. Defaults to False.
+    """
     if sensor.num_instances > 1:
         log_warning(
             "Multiple sensor instances detected. Keyboard control will only work for one instance."
@@ -47,6 +59,27 @@ def run_keyboard_control_for_camera(
     log_info("  ESC: Exit control mode")
 
     init_pose = sensor.get_local_pose(to_matrix=True).squeeze().numpy()
+
+    marker = None
+    if vis_pose:
+        from embodichain.lab.sim import SimulationManager
+        from embodichain.lab.sim.cfg import MarkerCfg
+
+        init_axis_pose = sensor.get_arena_pose(to_matrix=True).squeeze().numpy()
+
+        sim = SimulationManager.get_instance()
+        marker = sim.draw_marker(
+            cfg=MarkerCfg(
+                name="camera_axis",
+                marker_type="axis",
+                axis_xpos=[init_axis_pose],
+                axis_size=0.002,
+                axis_len=0.05,
+            )
+        )
+
+        # TODO: We may add node to BatchEntity object.
+        marker[0].node.attach_node(sensor._entities[0].get_node())
 
     try:
         while True:
@@ -79,6 +112,8 @@ def run_keyboard_control_for_camera(
             if key == 255:
                 continue
             elif key == 27:
+                if vis_pose:
+                    sim.remove_marker("camera_axis")
                 log_info("Exiting keyboard control mode...")
                 break
 
@@ -177,7 +212,12 @@ def run_keyboard_control_for_camera(
                 cam_pose = torch.as_tensor(cam_pose, dtype=torch.float32).unsqueeze_(0)
                 sensor.set_local_pose(cam_pose)
 
+                if vis_pose:
+                    sim.update(step=1)
+
     except KeyboardInterrupt:
+        if vis_pose:
+            sim.remove_marker("camera_axis")
         log_error("Keyboard control interrupted by user. Exiting control mode...")
     finally:
         try:
