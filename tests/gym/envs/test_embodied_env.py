@@ -119,12 +119,14 @@ METADATA = {
 class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, sim_device, enable_rt):
         cfg: EmbodiedEnvCfg = config_to_cfg(
             METADATA, manager_modules=DEFAULT_MANAGER_MODULES
         )
         cfg.num_envs = NUM_ENVS
-        cfg.sim_cfg = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        cfg.sim_cfg = SimulationManagerCfg(
+            headless=True, sim_device=sim_device, enable_rt=enable_rt
+        )
 
         self.env = gym.make(id=METADATA["id"], cfg=cfg)
 
@@ -162,10 +164,15 @@ class EmbodiedEnvTest:
 
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", enable_rt=False)
+
+
+class TestCPURT(EmbodiedEnvTest):
+    def setup_method(self):
+        self.setup_simulation("cpu", enable_rt=True)
 
 
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation("cuda")
+        self.setup_simulation("cuda", enable_rt=False)

@@ -255,7 +255,13 @@ class Camera(BaseSensor):
         Returns:
             int: The camera group ID.
         """
-        return self._frame_buffer.get_group_id()
+        if self.is_rt_enabled:
+            return self._frame_buffer.get_group_id()
+        else:
+            logger.log_warning(
+                "Camera group ID is only available for Ray Tracing renderer. Returning -1 for non-RT renderer."
+            )
+            return -1
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.
