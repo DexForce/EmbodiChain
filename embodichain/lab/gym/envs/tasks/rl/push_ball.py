@@ -36,6 +36,25 @@ class PushBallEnv(RLEnv):
             cfg = EmbodiedEnvCfg()
         super().__init__(cfg, **kwargs)
 
+    def _initialize_episode(self, env_ids=None, **kwargs):
+        super()._initialize_episode(env_ids, **kwargs)
+        if self.goal_pose is None:
+            return
+        if "goal_circle" not in self.sim.get_rigid_object_uid_list():
+            return
+        goal_circle = self.sim.get_rigid_object("goal_circle")
+        goal_pose = self.goal_pose.clone()
+        goal_pose[:, 2, 3] = 0.001
+        if env_ids is None:
+            goal_circle.set_local_pose(goal_pose)
+            return
+        if not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.tensor(list(env_ids), device=self.device)
+        env_ids = env_ids.to(dtype=torch.long)
+        current_pose = goal_circle.get_local_pose(to_matrix=True)
+        current_pose[env_ids] = goal_pose[env_ids]
+        goal_circle.set_local_pose(current_pose)
+
     def compute_task_state(
         self, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
