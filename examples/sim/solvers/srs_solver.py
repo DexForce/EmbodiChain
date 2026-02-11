@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ def main():
     print("fk_xpos_list: ", fk_xpos_list)
     print("ik_xpos_list: ", ik_xpos_list)
 
-    embed(header="Test SRSSolver example. Press Ctrl-D to exit.")
+    embed(header="Test SRSSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -328,9 +328,12 @@ class Franka(EmbodiChainDataset):
 
     Directory structure:
         Franka/
-            Panda/Panda.urdf
-            PandaHand/PandaHand.urdf
-            PandaWithHand/PandaWithHand.urdf
+            Panda/
+                Panda.urdf
+                PandaHand.urdf
+                PandaWithHand.urdf
+            FR3/
+                fr3.urdf
 
     Example usage:
         >>> from embodichain.data.robot_dataset import Franka
@@ -344,8 +347,8 @@ class Franka(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Franka.zip"),
-            "c2de367fe1da02eeb45a8129f903d0b6",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV2.zip"),
+            "f0675b9da98126bc3d4e18c98ef5e06c",
         )
         prefix = "Franka"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
@@ -498,6 +501,35 @@ class CartPole(EmbodiChainDataset):
             "9d185eb18b19f9c95153e01943c5b0a2",
         )
         prefix = "cart_pole"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class ARX5(EmbodiChainDataset):
+    """Dataset class for the ARX5 robot.
+
+    Reference:
+        https://arx-x.com/
+
+    Directory structure:
+        ARX5/
+            X5A.urdf
+
+    Example usage:
+        >>> from embodichain.data.robot_dataset import ARX5
+        >>> dataset = ARX5()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("ARX5/X5A.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5.zip"),
+            "da207ba65e21577aa8e8f349af63e608",
+        )
+        prefix = "ARX5"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
