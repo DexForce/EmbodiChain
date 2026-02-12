@@ -248,6 +248,21 @@ class Camera(BaseSensor):
         """
         return is_rt_enabled()
 
+    @cached_property
+    def group_id(self) -> int:
+        """Get the camera group ID in the dexsim world.
+
+        Returns:
+            int: The camera group ID.
+        """
+        if self.is_rt_enabled:
+            return self._frame_buffer.get_group_id()
+        else:
+            logger.log_warning(
+                "Camera group ID is only available for Ray Tracing renderer. Returning -1 for non-RT renderer."
+            )
+            return -1
+
     def update(self, **kwargs) -> None:
         """Update the sensor data.
 

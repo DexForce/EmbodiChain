@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Literal, Union, List
 
 from dexsim.utility import images_to_video
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
-from embodichain.lab.sim.sensors.camera import CameraCfg
+from embodichain.lab.sim.sensors.camera import CameraCfg, Camera
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -69,7 +69,7 @@ class record_camera_data(Functor):
             "intrinsics", (600, 600, int(resolution[0] / 2), int(resolution[1] / 2))
         )
 
-        self.camera = env.sim.add_sensor(
+        self.camera: Camera = env.sim.add_sensor(
             sensor_cfg=CameraCfg(
                 uid=self._name,
                 width=resolution[0],
@@ -78,6 +78,10 @@ class record_camera_data(Functor):
                 intrinsics=intrinsics,
             )
         )
+
+        # Add this camera's group ID to the environment for batch rendering when RT is enabled.
+        if getattr(env.sim, "is_rt_enabled", False):
+            env.add_camera_group_id(self.camera.group_id)
 
         self._current_episode = 0
         self._frames: List[np.ndarray] = []
