@@ -79,8 +79,9 @@ class record_camera_data(Functor):
             )
         )
 
-        # Add this camera's group ID to the environment for batch rendering.
-        env.add_camera_group_id(self.camera.group_id)
+        # Add this camera's group ID to the environment for batch rendering when RT is enabled.
+        if getattr(env.sim, "is_rt_enabled", False):
+            env.add_camera_group_id(self.camera.group_id)
 
         self._current_episode = 0
         self._frames: List[np.ndarray] = []
