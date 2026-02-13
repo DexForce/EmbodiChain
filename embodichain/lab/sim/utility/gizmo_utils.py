@@ -50,7 +50,9 @@ def create_gizmo_callback() -> Callable:
     return gizmo_transform_callback
 
 
-def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
+def run_gizmo_robot_control_loop(
+    robot: "Robot", control_part: str = "arm", end_link_name: str | None = None
+):
     """Run a control loop for testing gizmo controls on a robot.
 
     This function implements a control loop that allows users to manipulate a robot
@@ -59,6 +61,7 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
     Args:
         robot (Robot): The robot to control with the gizmo.
         control_part (str, optional): The part of the robot to control. Defaults to "arm".
+        end_link_name (str | None, optional): The name of the end link for FK calculations. Defaults to None.
 
     Keyboard Controls:
         Q/ESC: Exit the control loop
@@ -78,6 +81,7 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
 
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.solvers import PinkSolverCfg
 
     from embodichain.utils.logger import log_info, log_warning, log_error
 
@@ -86,6 +90,23 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
     # Enter auto-update mode.
     sim.set_manual_update(False)
 
+    # Replace robot's default solver with PinkSolver for gizmo control.
+    robot_solver = robot.get_solver(name=control_part)
+    control_part_link_names = robot.get_control_part_link_names(name=control_part)
+    end_link_name = (
+        control_part_link_names[-1] if end_link_name is None else end_link_name
+    )
+    pink_solver_cfg = PinkSolverCfg(
+        urdf_path=robot.cfg.fpath,
+        end_link_name=end_link_name,
+        root_link_name=robot_solver.root_link_name,
+        pos_eps=1e-2,
+        rot_eps=5e-2,
+        max_iterations=300,
+        dt=0.1,
+    )
+    robot.init_solver(cfg={control_part: pink_solver_cfg})
+
     # Enable gizmo for the robot
     gizmo = sim.enable_gizmo(uid=robot.uid, control_part=control_part)
 
@@ -93,7 +114,6 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
     initial_qpos = robot.get_qpos(name=control_part)
 
     gizmo_visible = True
-    step_count = 0
 
     log_info("\n=== Gizmo Robot Control ===")
     log_info("Gizmo Controls:")
@@ -115,14 +135,10 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
             return sys.stdin.read(1)
         return None
 
-    last_time = time.time()
-    last_step = 0
-
     try:
         while True:
             time.sleep(0.033)  # ~30Hz
             sim.update_gizmos()
-            step_count += 1
 
             # Check for keyboard input
             key = get_key()
@@ -132,6 +148,10 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
                 if key in ["q", "Q", "\x1b"]:  # Q or ESC
                     log_info("Exiting gizmo control loop...")
                     sim.disable_gizmo(uid=robot.uid, control_part=control_part)
+                    if robot_solver:
+                        robot.init_solver(
+                            cfg={control_part: robot_solver.cfg}
+                        )  # Restore original solver
                     break
 
                 # Print robot state
@@ -143,7 +163,14 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
                     log_info(f"Joint positions: {current_qpos.squeeze().tolist()}")
                     log_info(f"End-effector pose:\n{eef_pose.squeeze().numpy()}")
 
-                # Toggle gizmo visibility
+                    if eef_pose is None:
+                        log_info(
+                            "End-effector pose unavailable: compute_fk returned None "
+                            f"for control part '{control_part}'."
+                        )
+                    else:
+                        eef_pose_np = eef_pose.detach().cpu().numpy().squeeze()
+                        log_info(f"End-effector pose:\n{eef_pose_np}")
                 elif key in ["g", "G"]:
                     if gizmo_visible:
                         sim.set_gizmo_visibility(
@@ -181,6 +208,10 @@ def run_gizmo_robot_control_loop(robot: "Robot", control_part: str = "arm"):
 
     except KeyboardInterrupt:
         sim.disable_gizmo(uid=robot.uid, control_part=control_part)
+        if robot_solver:
+            robot.init_solver(
+                cfg={control_part: robot_solver.cfg}
+            )  # Restore original solver
         log_info("\nControl loop interrupted by user (Ctrl+C)")
 
     finally:
