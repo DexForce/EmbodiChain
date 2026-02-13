@@ -247,7 +247,7 @@
         },
         "dataset": {
             "lerobot": {
-                "func": "embodichain.lab.gym.envs.managers.datasets:LeRobotRecorder",
+                "func": "LeRobotRecorder",
                 "mode": "save",
                 "params": {
                     "robot_meta": {

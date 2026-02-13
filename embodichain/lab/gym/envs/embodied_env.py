@@ -443,7 +443,7 @@ class EmbodiedEnv(BaseEnv):
         elif isinstance(action, torch.Tensor):
             self.robot.set_qpos(qpos=action)
         else:
-            logger.error(f"Unsupported action type: {type(action)}")
+            logger.log_error(f"Unsupported action type: {type(action)}")
 
         return action
 
@@ -457,7 +457,7 @@ class EmbodiedEnv(BaseEnv):
             Robot: The robot instance added to the scene.
         """
         if self.cfg.robot is None:
-            logger.error("Robot configuration is not provided.")
+            logger.log_error("Robot configuration is not provided.")
 
         # Initialize the robot based on the configuration.
         robot: Robot = self.sim.add_robot(self.cfg.robot)
@@ -537,7 +537,7 @@ class EmbodiedEnv(BaseEnv):
         sensor = self.get_sensor(name=name)
 
         if data_type not in sensor.SUPPORTED_DATA_TYPES:
-            logger.error(
+            logger.log_error(
                 f"Data type '{data_type}' not supported by sensor '{name}'. Supported types: {sensor.SUPPORTED_DATA_TYPES}"
             )
 

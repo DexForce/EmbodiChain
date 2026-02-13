@@ -491,14 +491,9 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
             # Check if this is a functor configuration (has "func" field) or a plain config
             if "func" in dataset_params:
-                # Extract function name if format is "module:ClassName"
-                func_name = dataset_params["func"]
-                if ":" in func_name:
-                    func_name = func_name.split(":")[-1]
-
                 # Find the function from multiple modules using the utility function
                 dataset_func = find_function_from_modules(
-                    func_name,
+                    dataset_params["func"],
                     manager_modules,
                     raise_if_not_found=True,
                 )
