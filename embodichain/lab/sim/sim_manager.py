@@ -485,14 +485,17 @@ class SimulationManager:
 
         self._is_initialized_gpu_physics = True
 
-    def render_camera_group(self) -> None:
+    def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
+
+        Args:
+            group_ids (list[int]): The list of camera group ids to render.
 
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
         if self.is_rt_enabled:
-            self._world.render_camera_group()
+            self._world.render_camera_group(group_ids)
         else:
             logger.log_warning(
                 "This interface is only valid when Ray Tracing rendering backend is enabled."

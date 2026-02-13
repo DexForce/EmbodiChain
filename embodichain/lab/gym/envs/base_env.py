@@ -24,7 +24,7 @@ from functools import cached_property
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor
+from embodichain.lab.sim.sensors import BaseSensor, Camera
 from embodichain.lab.gym.utils import gym_utils
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
@@ -225,6 +225,17 @@ class BaseEnv(gym.Env):
 
         return self.sensors[name]
 
+    def add_camera_group_id(self, group_id: int) -> None:
+        """Add a camera group ID for rendering.
+
+        Args:
+            group_id: The camera group ID to be added.
+        """
+        if not hasattr(self, "_camera_group_ids"):
+            self._camera_group_ids: List[int] = []
+        if self.sim.is_rt_enabled:
+            self._camera_group_ids.append(group_id)
+
     def _setup_scene(self, **kwargs):
         # Init sim manager.
         # we want to open gui window when the scene is setup, so init sim manager in headless mode first.
@@ -250,6 +261,13 @@ class BaseEnv(gym.Env):
         self._prepare_scene(**kwargs)
 
         self.sensors = self._setup_sensors(**kwargs)
+
+        # Setup camera groups for rendering.
+        self._camera_group_ids: List[int] = []
+        if self.sim.is_rt_enabled:
+            for sensor in self.sensors.values():
+                if isinstance(sensor, Camera):
+                    self._camera_group_ids.append(sensor.group_id)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Load the robot agent, setup the controller and action space.
@@ -343,7 +361,7 @@ class BaseEnv(gym.Env):
         fetch_only = False
         if self.sim.is_rt_enabled:
             fetch_only = True
-            self.sim.render_camera_group()
+            self.sim.render_camera_group(self._camera_group_ids)
 
         for sensor_name, sensor in self.sensors.items():
             sensor.update(fetch_only=fetch_only)
