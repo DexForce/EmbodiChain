@@ -118,11 +118,18 @@ class EmbodiChainDataset(o3d.data.DownloadDataset):
         return hash_md5.hexdigest()
 
 
-def get_data_class(dataset_name: str):
+DEFAULT_DATA_MODULES = [
+    "embodichain.data",
+    "embodichain.data.assets",
+]
+
+
+def get_data_class(dataset_name: str, extra_modules: list[str] | None = None):
     """Retrieve the dataset class from the available modules.
 
     Args:
         dataset_name (str): The name of the dataset class.
+        extra_modules (list[str] | None): Optional list of additional module names to search for the dataset class.
 
     Returns:
         type: The dataset class.
@@ -130,11 +137,9 @@ def get_data_class(dataset_name: str):
     Raises:
         AttributeError: If the dataset class is not found in any module.
     """
-    module_names = [
-        "embodichain.data",
-        "embodichain.data.assets",
-        __name__,
-    ]
+    module_names = DEFAULT_DATA_MODULES + (
+        extra_modules if extra_modules is not None else []
+    )
 
     for module_name in module_names:
         try:

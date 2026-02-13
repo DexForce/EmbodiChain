@@ -519,7 +519,12 @@ class EmbodiedEnv(BaseEnv):
             self.sim.add_rigid_object_group(cfg=cfg)
 
     def preview_sensor_data(
-        self, name: str, data_type: str = "color", env_ids: int = 0, method: str = "plt"
+        self,
+        name: str,
+        data_type: str = "color",
+        env_ids: int = 0,
+        method: str = "cv2",
+        save: bool = False,
     ) -> None:
         """Preview the sensor data by matplotlib
 
@@ -531,6 +536,7 @@ class EmbodiedEnv(BaseEnv):
             data_type (str): type of the sensor data to preview.
             env_ids (int): index of the arena to preview. Defaults to 0.
             method (str): method to preview the sensor data. Currently support "plt" and "cv2". Defaults to "plt".
+            save (bool): whether to save the preview image. Defaults to False.
         """
         # TODO: this function need to be improved to support more sensor types and data types.
 
@@ -556,15 +562,25 @@ class EmbodiedEnv(BaseEnv):
         if method == "cv2":
             import cv2
 
-            cv2.imshow(
-                f"sensor_data_{data_type}", cv2.cvtColor(view, cv2.COLOR_RGB2BGR)
-            )
-            cv2.waitKey(0)
+            if save:
+                cv2.imwrite(
+                    f"sensor_data_{data_type}.png",
+                    cv2.cvtColor(view, cv2.COLOR_RGB2BGR),
+                )
+            else:
+                cv2.imshow(
+                    f"sensor_data_{data_type}", cv2.cvtColor(view, cv2.COLOR_RGB2BGR)
+                )
+                cv2.waitKey(0)
         elif method == "plt":
             from matplotlib import pyplot as plt
 
             plt.imshow(view)
             plt.savefig(f"sensor_data_{data_type}.png")
+            if not save:
+                plt.show()
+            else:
+                plt.close()
 
     def create_demo_action_list(self, *args, **kwargs) -> Sequence[EnvAction] | None:
         """Create a demonstration action list for the environment.
