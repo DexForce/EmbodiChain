@@ -1090,8 +1090,6 @@ class SimulationManager:
                     for key, value in cfg.solver_cfg.items():
                         if hasattr(value, "urdf_path") and value.urdf_path is None:
                             value.urdf_path = cfg.fpath
-                elif cfg.solver_cfg.get("urdf_path") is None:
-                    cfg.solver_cfg["urdf_path"] = cfg.fpath
 
         if uid is None:
             uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
