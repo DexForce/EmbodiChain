@@ -19,14 +19,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import numpy as np
 import torch
 
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
-from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.utils.utility import get_right_name
 from embodichain.data.enum import JointType
@@ -37,7 +36,7 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 try:
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset, HF_LEROBOT_HOME
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     LEROBOT_AVAILABLE = True
     __all__ = ["LeRobotRecorder"]
@@ -291,7 +290,8 @@ class LeRobotRecorder(Functor):
                 "names": ["state"],
             }
 
-        action_dim = self.robot_meta.get("arm_dofs", 7)
+        # Use full qpos dimension for action (includes gripper)
+        action_dim = state_dim
         features["action"] = {
             "dtype": "float32",
             "shape": (action_dim,),
@@ -315,7 +315,6 @@ class LeRobotRecorder(Functor):
         """
         frame = {"task": task}
         extra_vision_config = self.robot_meta.get("observation", {}).get("vision", {})
-        arm_dofs = self.robot_meta.get("arm_dofs", 7)
 
         # Add images
         for camera_name in extra_vision_config.keys():
@@ -355,11 +354,11 @@ class LeRobotRecorder(Functor):
 
         frame["observation.state"] = state_data
 
-        # Add action
+        # Add action (save complete qpos including gripper)
         if isinstance(action, torch.Tensor):
-            action_data = action[:arm_dofs].cpu().numpy()
+            action_data = action.cpu().numpy()
         elif isinstance(action, np.ndarray):
-            action_data = action[:arm_dofs]
+            action_data = action
         elif isinstance(action, dict):
             # Extract qpos from action dict
             action_tensor = action.get(
@@ -373,13 +372,13 @@ class LeRobotRecorder(Functor):
                         break
 
             if isinstance(action_tensor, torch.Tensor):
-                action_data = action_tensor[:arm_dofs].cpu().numpy()
+                action_data = action_tensor.cpu().numpy()
             elif isinstance(action_tensor, np.ndarray):
-                action_data = action_tensor[:arm_dofs]
+                action_data = action_tensor
             else:
-                action_data = np.array(action_tensor)[:arm_dofs]
+                action_data = np.array(action_tensor)
         else:
-            action_data = np.array(action)[:arm_dofs]
+            action_data = np.array(action)
 
         frame["action"] = action_data
 
