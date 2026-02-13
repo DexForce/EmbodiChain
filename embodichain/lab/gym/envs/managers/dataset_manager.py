@@ -26,7 +26,6 @@ import torch
 from prettytable import PrettyTable
 
 from embodichain.utils import logger
-from embodichain.lab.sim.types import EnvObs, EnvAction
 from .manager_base import ManagerBase
 from .cfg import DatasetFunctorCfg
 
@@ -196,10 +195,11 @@ class DatasetManager(ManagerBase):
         Returns:
             Empty dict (no logging info).
         """
-        # Call reset on all class functors across all modes
-        for mode_cfgs in self._mode_class_functor_cfgs.values():
+        # Call reset on all functor instances across all modes
+        for mode_cfgs in self._mode_functor_cfgs.values():
             for functor_cfg in mode_cfgs:
-                functor_cfg.func.reset(env_ids=env_ids)
+                if hasattr(functor_cfg.func, "reset"):
+                    functor_cfg.func.reset(env_ids=env_ids)
 
         return {}
 
@@ -244,8 +244,8 @@ class DatasetManager(ManagerBase):
         """
         dataset_paths = []
 
-        # Call finalize on all class functors across all modes
-        for mode_cfgs in self._mode_class_functor_cfgs.values():
+        # Call finalize on all functor instances across all modes
+        for mode_cfgs in self._mode_functor_cfgs.values():
             for functor_cfg in mode_cfgs:
                 if hasattr(functor_cfg.func, "finalize"):
                     try:

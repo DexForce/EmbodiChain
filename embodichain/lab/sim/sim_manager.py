@@ -1138,7 +1138,7 @@ class SimulationManager:
 
     def enable_gizmo(
         self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
-    ) -> None:
+    ) -> Gizmo:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
@@ -1197,6 +1197,8 @@ class SimulationManager:
             logger.log_error(
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
+
+        return gizmo
 
     def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
         """Disable and remove gizmo for a robot.
