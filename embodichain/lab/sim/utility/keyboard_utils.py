@@ -213,8 +213,9 @@ def run_keyboard_control_for_camera(
                 log_info("Reset to initial pose")
             elif key == ord("p"):
                 new_pose_print = new_pose.copy()
-                new_pose_print[:3, 1] = -new_pose_print[:3, 1]
-                new_pose_print[:3, 2] = -new_pose_print[:3, 2]
+                if sensor.is_attached is False:
+                    new_pose_print[:3, 1] = -new_pose_print[:3, 1]
+                    new_pose_print[:3, 2] = -new_pose_print[:3, 2]
                 translation = new_pose_print[:3, 3]
                 rot = R.from_matrix(new_pose_print[:3, :3])
                 quaternion = rot.as_quat()
