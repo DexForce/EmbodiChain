@@ -263,6 +263,15 @@ class Camera(BaseSensor):
             )
             return -1
 
+    @property
+    def is_attached(self) -> bool:
+        """Check if the camera is attached to a parent entity.
+
+        Returns:
+            bool: True if the camera is attached to a parent entity, False otherwise.
+        """
+        return self.cfg.extrinsics.parent is not None
+
     def update(self, **kwargs) -> None:
         """Update the sensor data.
 
