@@ -575,7 +575,7 @@ class EmbodiedEnv(BaseEnv):
                 cv2.imshow(window_name, cv2.cvtColor(view, cv2.COLOR_RGB2BGR))
                 cv2.waitKey(0)
                 cv2.destroyWindow(window_name)
-                
+
         elif method == "plt":
             from matplotlib import pyplot as plt
 
