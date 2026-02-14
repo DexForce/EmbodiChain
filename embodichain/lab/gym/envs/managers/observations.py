@@ -209,13 +209,28 @@ def compute_semantic_mask(
     else:
         mask = obs["sensor"][entity_cfg.uid]["mask"]
 
-    robot_uids = env.robot.get_user_ids()
+    left_robot_uids = torch.cat(
+        [
+            env.robot.get_user_ids(link_name)
+            for link_name in env.robot.get_control_part_link_names("left_arm")
+        ],
+        -1,
+    )
+    right_robot_uids = torch.cat(
+        [
+            env.robot.get_user_ids(link_name)
+            for link_name in env.robot.get_control_part_link_names("right_arm")
+        ],
+        -1,
+    )
 
     mask_exp = mask.unsqueeze(-1)
 
-    robot_uids_exp = robot_uids.unsqueeze_(1).unsqueeze_(1)
+    left_robot_uids_exp = left_robot_uids.unsqueeze_(1).unsqueeze_(1)
+    right_robot_uids_exp = right_robot_uids.unsqueeze_(1).unsqueeze_(1)
 
-    robot_mask = (mask_exp == robot_uids_exp).any(-1).squeeze_(-1)
+    left_robot_mask = (mask_exp == left_robot_uids_exp).any(-1).squeeze_(-1)
+    right_robot_mask = (mask_exp == right_robot_uids_exp).any(-1).squeeze_(-1)
 
     asset_uids = env.sim.asset_uids
     foreground_assets = [
@@ -239,9 +254,11 @@ def compute_semantic_mask(
 
     foreground_mask = (mask_exp == foreground_uids_exp).any(-1).squeeze_(-1)
 
-    background_mask = ~(robot_mask | foreground_mask).squeeze_(-1)
+    background_mask = ~(left_robot_mask | right_robot_mask | foreground_mask).squeeze_(
+        -1
+    )
 
-    masks = [None, None, None]
+    masks = [None, None, None, None]
     masks_ids = [member.value for member in SemanticMask]
     assert len(masks) == len(
         masks_ids
@@ -249,7 +266,8 @@ def compute_semantic_mask(
     mask_id_to_label = {
         SemanticMask.BACKGROUND.value: background_mask,
         SemanticMask.FOREGROUND.value: foreground_mask,
-        SemanticMask.ROBOT.value: robot_mask,
+        SemanticMask.ROBOT_LEFT.value: left_robot_mask,
+        SemanticMask.ROBOT_RIGHT.value: right_robot_mask,
     }
     for mask_id in masks_ids:
         masks[mask_id] = mask_id_to_label[mask_id]
