@@ -535,7 +535,7 @@ class EmbodiedEnv(BaseEnv):
             name (str): name of the sensor to preview.
             data_type (str): type of the sensor data to preview.
             env_ids (int): index of the arena to preview. Defaults to 0.
-            method (str): method to preview the sensor data. Currently support "plt" and "cv2". Defaults to "plt".
+            method (str): method to preview the sensor data. Currently support "plt" and "cv2". Defaults to "cv2".
             save (bool): whether to save the preview image. Defaults to False.
         """
         # TODO: this function need to be improved to support more sensor types and data types.
@@ -568,19 +568,23 @@ class EmbodiedEnv(BaseEnv):
                     cv2.cvtColor(view, cv2.COLOR_RGB2BGR),
                 )
             else:
-                cv2.imshow(
-                    f"sensor_data_{data_type}", cv2.cvtColor(view, cv2.COLOR_RGB2BGR)
-                )
+                window_name = f"sensor_data_{data_type}"
+                height, width = view.shape[:2]
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(window_name, width, height)
+                cv2.imshow(window_name, cv2.cvtColor(view, cv2.COLOR_RGB2BGR))
                 cv2.waitKey(0)
+                cv2.destroyWindow(window_name)
+                
         elif method == "plt":
             from matplotlib import pyplot as plt
 
             plt.imshow(view)
-            plt.savefig(f"sensor_data_{data_type}.png")
-            if not save:
-                plt.show()
-            else:
+            if save:
+                plt.savefig(f"sensor_data_{data_type}.png")
                 plt.close()
+            else:
+                plt.show()
 
     def create_demo_action_list(self, *args, **kwargs) -> Sequence[EnvAction] | None:
         """Create a demonstration action list for the environment.
