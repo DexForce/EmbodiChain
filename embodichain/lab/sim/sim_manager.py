@@ -803,6 +803,14 @@ class SimulationManager:
             return None
         return self._lights[uid]
 
+    def get_light_uid_list(self) -> List[str]:
+        """Get current light uid list
+
+        Returns:
+            List[str]: list of light uid.
+        """
+        return list(self._lights.keys())
+
     def add_rigid_object(
         self,
         cfg: RigidObjectCfg,
