@@ -212,14 +212,16 @@ def compute_semantic_mask(
     left_robot_uids = torch.cat(
         [
             env.robot.get_user_ids(link_name)
-            for link_name in env.robot.get_control_part_link_names("left_arm")
+            for link_name in env.robot.link_names
+            if link_name.startswith("left_")
         ],
         -1,
     )
     right_robot_uids = torch.cat(
         [
             env.robot.get_user_ids(link_name)
-            for link_name in env.robot.get_control_part_link_names("right_arm")
+            for link_name in env.robot.link_names
+            if link_name.startswith("right_")
         ],
         -1,
     )
