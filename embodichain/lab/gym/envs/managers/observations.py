@@ -180,10 +180,11 @@ def compute_semantic_mask(
     """Compute the semantic mask for the specified scene entity.
 
     Note:
-        The semantic mask is defined as (B, H, W, 3) where the three channels represents:
-        - robot channel: the instance id of the robot is set to 1 (0 if not robot)
+        The semantic mask is defined as (B, H, W, len(SemanticMask)) where these channels represents:
         - background channel: the instance id of the background is set to 1 (0 if not background)
         - foreground channel: the instance id of the foreground objects is set to 1 (0 if not foreground)
+        - robot left-side channel: the instance id of the robot left-side is set to 1
+        - robot right-side channel: the instance id of the robot right-side is set to 1
 
     Args:
         env: The environment instance.
