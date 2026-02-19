@@ -704,15 +704,16 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     """Add common environment launcher arguments to an existing argparse parser.
 
     This function adds the following arguments to the provided parser:
-        - --num_envs: Number of environments to run in parallel (default: 1)
-        - --device: Device to run the environment on (default: 'cpu')
-        - --headless: Whether to perform the simulation in headless mode (default: False)
-        - --enable_rt: Whether to use RTX rendering backend for the simulation (default: False)
-        - --gpu_id: The GPU ID to use for the simulation (default: 0)
-        - --filter_visual_rand: Whether to filter out visual randomization (default: False)
-        - --gym_config: Path to gym config file (default: '')
-        - --action_config: Path to action config file (default: None)
-        - --preview: Whether to preview the environment after launching (default: False)
+        --num_envs: Number of environments to run in parallel (default: 1)
+        --device: Device to run the environment on (default: 'cpu')
+        --headless: Whether to perform the simulation in headless mode (default: False)
+        --enable_rt: Whether to use RTX rendering backend for the simulation (default: False)
+        --gpu_id: The GPU ID to use for the simulation (default: 0)
+        --gym_config: Path to gym config file (default: '')
+        --action_config: Path to action config file (default: None)
+        --preview: Whether to preview the environment after launching (default: False)
+        --filter_visual_rand: Whether to filter out visual randomization (default: False)
+        --filter_dataset_saving: Whether to filter out dataset saving (default: False)
 
     Note:
         1. In preview mode, the environment will be launched and keep running in a loop for user interaction.
@@ -751,12 +752,6 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         type=int,
     )
     parser.add_argument(
-        "--filter_visual_rand",
-        help="Whether to filter out visual randomization.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
         "--gym_config",
         type=str,
         help="Path to gym config file.",
@@ -769,6 +764,18 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--preview",
         help="Whether to preview the environment after launching.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--filter_visual_rand",
+        help="Whether to filter out visual randomization.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--filter_dataset_saving",
+        help="Whether to filter out dataset saving.",
         default=False,
         action="store_true",
     )
@@ -795,6 +802,7 @@ def build_env_cfg_from_args(
         gym_config, manager_modules=DEFAULT_MANAGER_MODULES
     )
     cfg.filter_visual_rand = args.filter_visual_rand
+    cfg.filter_dataset_saving = args.filter_dataset_saving
 
     action_config = {}
     if args.action_config is not None:

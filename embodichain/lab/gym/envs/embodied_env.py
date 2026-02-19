@@ -125,6 +125,13 @@ class EmbodiedEnvCfg(EnvCfg):
     This is useful when we want to disable visual randomization for debug motion and physics issues.
     """
 
+    filter_dataset_saving: bool = False
+    """Whether to filter out dataset saving
+    
+    This is useful when we want to disable dataset saving for debug motion and physics issues.
+    If no dataset manager is configured, this flag will have no effect.
+    """
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -201,7 +208,7 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
 
-        if self.cfg.dataset:
+        if self.cfg.dataset and not self.cfg.filter_dataset_saving:
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
 
     def _apply_functor_filter(self) -> None:
@@ -376,7 +383,7 @@ class EmbodiedEnv(BaseEnv):
             env_ids_to_process = list(env_ids)
 
         # Save dataset before clearing buffers for environments that are being reset
-        if save_data and self.cfg.dataset:
+        if save_data and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
 
                 # Filter to only save successful episodes
