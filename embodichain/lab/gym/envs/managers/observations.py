@@ -61,6 +61,33 @@ def get_rigid_object_pose(
     return obj.get_local_pose(to_matrix=True)
 
 
+def get_rigid_object_velocity(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Get the world velocities of the rigid objects in the environment.
+
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the scene entity.
+
+    Returns:
+        A tensor of shape (num_envs, 6) representing the linear and angular velocities of the rigid objects.
+    """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return torch.zeros((env.num_envs, 6), dtype=torch.float32)
+
+    obj = env.sim.get_rigid_object(entity_cfg.uid)
+
+    return obj.body_data.vel
+
+
 def normalize_robot_joint_data(
     env: EmbodiedEnv,
     data: torch.Tensor,
