@@ -208,6 +208,7 @@ def randomize_robot_eef_pose(
 
         new_qpos[ret == False] = current_qpos[ret == False]
         robot.set_qpos(new_qpos, env_ids=env_ids, joint_ids=joint_ids, target=False)
+        robot.set_qpos(new_qpos, env_ids=env_ids, joint_ids=joint_ids)
 
     robot = env.sim.get_robot(entity_cfg.uid)
 
@@ -272,6 +273,7 @@ def randomize_robot_qpos(
     robot.set_qpos(
         qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids, target=False
     )
+    robot.set_qpos(qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids)
     env.sim.update(step=1)
 
 

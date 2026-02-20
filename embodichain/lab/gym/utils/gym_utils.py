@@ -805,7 +805,7 @@ def build_env_cfg_from_args(
     cfg.filter_dataset_saving = args.filter_dataset_saving
     if args.preview:
         # In preview mode, we typically don't want to save data
-        cfg.filter_dataset_saving = True  
+        cfg.filter_dataset_saving = True
 
     action_config = {}
     if args.action_config is not None:
