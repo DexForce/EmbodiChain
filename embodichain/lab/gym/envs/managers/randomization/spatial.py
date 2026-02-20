@@ -110,6 +110,7 @@ def randomize_rigid_object_pose(
     rotation_range: tuple[list[float], list[float]] | None = None,
     relative_position: bool = True,
     relative_rotation: bool = False,
+    physics_update_step: int = -1,
 ) -> None:
     """Randomize the pose of a rigid object in the environment.
 
@@ -122,6 +123,7 @@ def randomize_rigid_object_pose(
             The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
         relative_position (bool): Whether to randomize the position relative to the object's initial position. Default is True.
         relative_rotation (bool): Whether to randomize the rotation relative to the object's initial rotation. Default is False.
+        physics_update_step (int): The number of physics update steps to apply after randomization. Default is -1 (no update).
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
@@ -154,6 +156,9 @@ def randomize_rigid_object_pose(
 
     rigid_object.set_local_pose(pose, env_ids=env_ids)
     rigid_object.clear_dynamics()
+
+    if physics_update_step > 0:
+        env.sim.update(step=physics_update_step)
 
 
 def randomize_robot_eef_pose(
@@ -202,6 +207,7 @@ def randomize_robot_eef_pose(
         )
 
         new_qpos[ret == False] = current_qpos[ret == False]
+        robot.set_qpos(new_qpos, env_ids=env_ids, joint_ids=joint_ids, target=False)
         robot.set_qpos(new_qpos, env_ids=env_ids, joint_ids=joint_ids)
 
     robot = env.sim.get_robot(entity_cfg.uid)
@@ -215,8 +221,8 @@ def randomize_robot_eef_pose(
             joint_ids = robot.get_joint_ids(part)
             set_random_eef_pose(joint_ids, robot)
 
-    # simulate 10 steps to let the robot reach the target pose.
-    env.sim.update(step=10)
+    # simulate 1 steps to let the robot reach the target pose.
+    env.sim.update(step=1)
 
 
 def randomize_robot_qpos(
@@ -264,8 +270,11 @@ def randomize_robot_qpos(
     else:
         current_qpos = qpos
 
+    robot.set_qpos(
+        qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids, target=False
+    )
     robot.set_qpos(qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids)
-    env.sim.update(step=100)
+    env.sim.update(step=1)
 
 
 def randomize_target_pose(
