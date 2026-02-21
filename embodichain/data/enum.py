@@ -24,12 +24,14 @@ class SemanticMask(IntEnum):
     Attributes:
         BACKGROUND (int): Represents the background region (value: 0).
         FOREGROUND (int): Represents the foreground objects (value: 1).
-        ROBOT (int): Represents the robot region (value: 2).
+        ROBOT_LEFT (int): Represents the left robot region (value: 2).
+        ROBOT_RIGHT (int): Represents the right robot region (value: 3).
     """
 
     BACKGROUND = 0
     FOREGROUND = 1
-    ROBOT = 2
+    ROBOT_LEFT = 2
+    ROBOT_RIGHT = 3
 
 
 class EndEffector(Enum):
