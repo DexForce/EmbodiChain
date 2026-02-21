@@ -38,6 +38,7 @@ def get_rigid_object_pose(
     env: EmbodiedEnv,
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
+    to_matrix: bool = True,
 ) -> torch.Tensor:
     """Get the world poses of the rigid objects in the environment.
 
@@ -48,6 +49,7 @@ def get_rigid_object_pose(
         env: The environment instance.
         obs: The observation dictionary.
         entity_cfg: The configuration of the scene entity.
+        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
 
     Returns:
         A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
@@ -58,7 +60,7 @@ def get_rigid_object_pose(
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
-    return obj.get_local_pose(to_matrix=True)
+    return obj.get_local_pose(to_matrix=to_matrix)
 
 
 def get_rigid_object_velocity(

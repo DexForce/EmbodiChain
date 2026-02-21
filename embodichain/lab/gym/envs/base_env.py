@@ -164,21 +164,15 @@ class BaseEnv(gym.Env):
 
     @cached_property
     def single_observation_space(self) -> gym.spaces.Space:
-        if self.num_envs == 1:
-            return gym_utils.convert_observation_to_space(self._init_raw_obs)
-        else:
-            return gym_utils.convert_observation_to_space(
-                self._init_raw_obs, unbatched=True
-            )
+        return gym_utils.convert_observation_to_space(
+            self._init_raw_obs, unbatched=True
+        )
 
     @cached_property
     def observation_space(self) -> gym.spaces.Space:
-        if self.num_envs == 1:
-            return self.single_observation_space
-        else:
-            return gym.vector.utils.batch_space(
-                self.single_observation_space, n=self.num_envs
-            )
+        return gym_utils.convert_observation_to_space(
+            self._init_raw_obs, unbatched=False
+        )
 
     @cached_property
     def flattened_observation_space(self) -> gym.spaces.Box:
@@ -576,10 +570,10 @@ class BaseEnv(gym.Env):
         self.sim.reset_objects_state(
             env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
         )
-        self._elapsed_steps[reset_ids] = 0
 
         # Reset hook for user to perform any custom reset logic.
         self._initialize_episode(reset_ids, **options)
+        self._elapsed_steps[reset_ids] = 0
 
         return self.get_obs(**options), self.get_info(**options)
 

@@ -178,6 +178,9 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
+        if self.cfg.dataset and not self.cfg.filter_dataset_saving:
+            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
+
         self.episode_obs_buffer: Dict[int, List[EnvObs]] = {
             i: [] for i in range(self.num_envs)
         }
@@ -207,9 +210,6 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
-
-        if self.cfg.dataset and not self.cfg.filter_dataset_saving:
-            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -397,6 +397,7 @@ class EmbodiedEnv(BaseEnv):
                 ]
 
                 if successful_env_ids:
+
                     # Convert back to tensor if needed
                     successful_env_ids_tensor = torch.tensor(
                         successful_env_ids, device=self.device
@@ -405,8 +406,6 @@ class EmbodiedEnv(BaseEnv):
                         mode="save",
                         env_ids=successful_env_ids_tensor,
                     )
-                else:
-                    logger.log_warning("No successful episodes to save.")
 
         # Clear episode buffers and reset success status for environments being reset
         for env_id in env_ids_to_process:
