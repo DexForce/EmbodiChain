@@ -91,6 +91,11 @@ class TestRLTraining:
             os.remove(self.temp_gym_config_path)
             self.temp_gym_config_path = None
 
+        from embodichain.lab.sim import SimulationManager
+
+        sim = SimulationManager.get_instance()
+        sim.destroy()
+
     def test_training_pipeline(self):
         """Test RL training pipeline with multiple parallel environments."""
         from embodichain.agents.rl.train import train_from_config
