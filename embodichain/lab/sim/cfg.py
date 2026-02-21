@@ -546,6 +546,14 @@ class RigidObjectCfg(ObjectBaseCfg):
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
+    use_usd_properties: bool = False
+    """Whether to use physical properties from USD file instead of config.
+    
+    When True: Keep all physical properties (drive, physics attrs, etc.) from USD file.
+    When False (default): Override USD properties with config values (URDF behavior).
+    Only effective for USD files, ignored for URDF files.
+    """
+
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""
         if self.body_type == "dynamic":
@@ -1016,6 +1024,14 @@ class ArticulationCfg(ObjectBaseCfg):
     """Whether to compute the UV mapping for the articulation link.
     
     Currently, the uv mapping is computed for each link with projection uv mapping method.
+    """
+
+    use_usd_properties: bool = False
+    """Whether to use physical properties from USD file instead of config.
+    
+    When True: Keep all physical properties (drive, physics attrs, etc.) from USD file.
+    When False (default): Override USD properties with config values (URDF behavior).
+    Only effective for USD files, ignored for URDF files.
     """
 
 

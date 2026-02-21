@@ -582,41 +582,45 @@ class Articulation(BatchEntity):
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
-        # Set articulation configuration in DexSim
-        set_dexsim_articulation_cfg(entities, self.cfg)
+        if not cfg.use_usd_properties:
+            # Set articulation configuration in DexSim
+            set_dexsim_articulation_cfg(entities, self.cfg)
 
-        # Init joint drive parameters.
-        num_entities = len(entities)
-        dof = self._data.dof
-        default_cfg = JointDrivePropertiesCfg()
-        self.default_joint_damping = torch.full(
-            (num_entities, dof), default_cfg.damping, dtype=torch.float32, device=device
-        )
-        self.default_joint_stiffness = torch.full(
-            (num_entities, dof),
-            default_cfg.stiffness,
-            dtype=torch.float32,
-            device=device,
-        )
-        self.default_joint_max_effort = torch.full(
-            (num_entities, dof),
-            default_cfg.max_effort,
-            dtype=torch.float32,
-            device=device,
-        )
-        self.default_joint_max_velocity = torch.full(
-            (num_entities, dof),
-            default_cfg.max_velocity,
-            dtype=torch.float32,
-            device=device,
-        )
-        self.default_joint_friction = torch.full(
-            (num_entities, dof),
-            default_cfg.friction,
-            dtype=torch.float32,
-            device=device,
-        )
-        self._set_default_joint_drive()
+            # Init joint drive parameters.
+            num_entities = len(entities)
+            dof = self._data.dof
+            default_cfg = JointDrivePropertiesCfg()
+            self.default_joint_damping = torch.full(
+                (num_entities, dof),
+                default_cfg.damping,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_stiffness = torch.full(
+                (num_entities, dof),
+                default_cfg.stiffness,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_max_effort = torch.full(
+                (num_entities, dof),
+                default_cfg.max_effort,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_max_velocity = torch.full(
+                (num_entities, dof),
+                default_cfg.max_velocity,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_friction = torch.full(
+                (num_entities, dof),
+                default_cfg.friction,
+                dtype=torch.float32,
+                device=device,
+            )
+            self._set_default_joint_drive()
 
         self.pk_chain = None
         if self.cfg.build_pk_chain:
