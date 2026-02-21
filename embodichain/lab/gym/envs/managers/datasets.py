@@ -199,7 +199,7 @@ class LeRobotRecorder(Functor):
         curr_extra_episode_info = {}
         if self.extra_episode_info:
             for key, attr_list in self.extra_episode_info.items():
-                if key == "rigid_object_physcis_attributes":
+                if key == "rigid_object_physics_attributes":
                     rigid_obj_list = self._env.sim.get_rigid_object_uid_list()
                     for obj_uid in rigid_obj_list:
                         curr_extra_episode_info[obj_uid] = {}
@@ -304,22 +304,23 @@ class LeRobotRecorder(Functor):
             self._joint_ids = self._env.robot.get_joint_ids(remove_mimic=True)
 
         state_dim = len(self._joint_ids)
-        # Create joint names as strings: joint_0, joint_1, ...
-        joint_indices = [f"{i}" for i in self._joint_ids]
+        # Create joint names.
+        joint_names = [self._env.robot.joint_names[i] for i in self._joint_ids]
+
         features["observation.qpos"] = {
             "dtype": "float32",
             "shape": (state_dim,),
-            "names": joint_indices,
+            "names": joint_names,
         }
         features["observation.qvel"] = {
             "dtype": "float32",
             "shape": (state_dim,),
-            "names": joint_indices,
+            "names": joint_names,
         }
         features["observation.qf"] = {
             "dtype": "float32",
             "shape": (state_dim,),
-            "names": joint_indices,
+            "names": joint_names,
         }
 
         # Use full qpos dimension for action (includes gripper)
@@ -327,41 +328,49 @@ class LeRobotRecorder(Functor):
         features["action"] = {
             "dtype": "float32",
             "shape": (action_dim,),
-            "names": joint_indices,
+            "names": joint_names,
         }
 
         # Setup sensor observation features based env.observation.sensor
-        sensor_obs_space: dict = self._env.single_observation_space["sensor"]
+        if self._env.has_sensors:
+            sensor_obs_space: dict = self._env.single_observation_space["sensor"]
 
-        for sensor_name, value in sensor_obs_space.items():
-            sensor = self._env.get_sensor(sensor_name)
-            is_stereo = is_stereocam(sensor)
+            for sensor_name, value in sensor_obs_space.items():
+                sensor = self._env.get_sensor(sensor_name)
+                is_stereo = is_stereocam(sensor)
 
-            for frame_name, space in value.items():
-                # TODO: Support depth (uint16) and mask (also uint16 or uint8)
-                if frame_name not in ["color", "color_right"]:
-                    logger.log_error(
-                        f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
-                    )
+                for frame_name, space in value.items():
+                    # TODO: Support depth (uint16) and mask (also uint16 or uint8)
+                    if frame_name not in ["color", "color_right"]:
+                        logger.log_error(
+                            f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
+                        )
 
-                features[f"{sensor_name}.{frame_name}"] = {
-                    "dtype": "video" if self.use_videos else "image",
-                    "shape": (sensor.cfg.height, sensor.cfg.width, 3),
-                    "names": ["height", "width", "channel"],
-                }
-
-                if is_stereo:
-                    features[f"{sensor_name}.{frame_name}_right"] = {
+                    features[f"{sensor_name}.{frame_name}"] = {
                         "dtype": "video" if self.use_videos else "image",
                         "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                         "names": ["height", "width", "channel"],
                     }
+
+                    if is_stereo:
+                        features[f"{sensor_name}.{frame_name}_right"] = {
+                            "dtype": "video" if self.use_videos else "image",
+                            "shape": (sensor.cfg.height, sensor.cfg.width, 3),
+                            "names": ["height", "width", "channel"],
+                        }
 
         # TODO: The extra observation features are supposed to be defined in a flattened way in the observation space.
         # Lerobot requires a flat feature dict, so we may need to support nested dicts to flatten dict conversion in the future.
         # Add any extra features specified in observation space excluding 'robot' and 'sensor'
         for key, space in self._env.single_observation_space.items():
             if key in ["robot", "sensor"]:
+                continue
+
+            if isinstance(space, gym.spaces.Dict):
+                logger.log_warning(
+                    f"Nested Dict observation space for key '{key}' is not directly supported. "
+                    f"Please flatten it or specify features manually. Skipping '{key}'."
+                )
                 continue
 
             names = key
@@ -392,21 +401,23 @@ class LeRobotRecorder(Functor):
             Frame dict in LeRobot format with numpy arrays
         """
         frame = {"task": task}
-        sensor_obs_space: dict = self._env.single_observation_space["sensor"]
 
-        # Add images
-        for sensor_name, value in sensor_obs_space.items():
-            sensor = self._env.get_sensor(sensor_name)
-            is_stereo = is_stereocam(sensor)
+        if self._env.has_sensors:
+            sensor_obs_space: dict = self._env.single_observation_space["sensor"]
 
-            color_data = obs["sensor"][sensor_name]["color"]
-            color_img = color_data[:, :, :3].cpu()
-            frame[f"{sensor_name}.color"] = color_img
+            # Add images
+            for sensor_name, value in sensor_obs_space.items():
+                sensor = self._env.get_sensor(sensor_name)
+                is_stereo = is_stereocam(sensor)
 
-            if is_stereo:
-                color_right_data = obs["sensor"][sensor_name]["color_right"]
-                color_right_img = color_right_data[:, :, :3].cpu()
-                frame[f"{sensor_name}.color_right"] = color_right_img
+                color_data = obs["sensor"][sensor_name]["color"]
+                color_img = color_data[:, :, :3].cpu()
+                frame[f"{sensor_name}.color"] = color_img
+
+                if is_stereo:
+                    color_right_data = obs["sensor"][sensor_name]["color_right"]
+                    color_right_img = color_right_data[:, :, :3].cpu()
+                    frame[f"{sensor_name}.color_right"] = color_right_img
 
         # Add state
         frame["observation.qpos"] = obs["robot"]["qpos"][self._joint_ids].cpu()

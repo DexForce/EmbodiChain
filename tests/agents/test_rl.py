@@ -48,8 +48,6 @@ class TestRLTraining:
                     "robot_meta": {
                         "robot_type": "UR10_DH_Gripper",
                         "control_freq": 25,
-                        "arm_dofs": 6,
-                        "observation": {"vision": {}, "states": ["qpos"]},
                     },
                     "instruction": {"lang": "push_cube_to_target"},
                     "extra": {

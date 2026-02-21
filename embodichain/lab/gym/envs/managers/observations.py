@@ -52,11 +52,18 @@ def get_rigid_object_pose(
         to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
 
     Returns:
-        A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
+        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the rigid objects.
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
-        return torch.zeros((env.num_envs, 4, 4), dtype=torch.float32)
+        if to_matrix:
+            return torch.zeros(
+                (env.num_envs, 4, 4), dtype=torch.float32, device=env.device
+            )
+        else:
+            return torch.zeros(
+                (env.num_envs, 7), dtype=torch.float32, device=env.device
+            )
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
@@ -83,7 +90,7 @@ def get_rigid_object_velocity(
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
-        return torch.zeros((env.num_envs, 6), dtype=torch.float32)
+        return torch.zeros((env.num_envs, 6), dtype=torch.float32, device=env.device)
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 

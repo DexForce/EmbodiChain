@@ -202,6 +202,11 @@ class BaseEnv(gym.Env):
     def elapsed_steps(self) -> Union[int, torch.Tensor]:
         return self._elapsed_steps
 
+    @property
+    def has_sensors(self) -> bool:
+        """Return whether the environment has sensors."""
+        return len(self.sensors) > 0
+
     def get_sensor(self, name: str, **kwargs) -> BaseSensor:
         """Get the sensor instance by name.
 
