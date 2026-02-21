@@ -251,14 +251,8 @@
                 "mode": "save",
                 "params": {
                     "robot_meta": {
-                        "arm_dofs": 12,
                         "control_freq": 25,
-                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
-                        "observation": {
-                            "vision": {},
-                            "states": ["qpos"]
-                        },
-                        "min_len_steps": 5
+                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
                     },
                     "instruction": {
                         "lang": "Pour water from the bottle into the mug."

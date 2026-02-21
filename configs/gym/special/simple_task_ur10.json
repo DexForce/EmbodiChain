@@ -33,16 +33,7 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10",
-                        "arm_dofs": 6,
-                        "control_freq": 3,
-                        "observation": {
-                            "vision": {
-                                "cam_high": []
-                            },
-                            "states": ["qpos"]
-                        },
-                        "action": "qpos",
-                        "min_len_steps": 5
+                        "control_freq": 3
                     },
                     "instruction": {
                         "lang": "Acting with Oscillatory motion"

@@ -236,14 +236,8 @@
                 "mode": "save",
                 "params": {
                     "robot_meta": {
-                        "arm_dofs": 12,
                         "control_freq": 25,
-                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
-                        "observation": {
-                            "vision": {},
-                            "states": ["qpos"]
-                        },
-                        "min_len_steps": 125
+                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
                     },
                     "instruction": {
                         "lang": "Place the spoon and fork neatly into the plate on the table."
