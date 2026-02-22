@@ -153,6 +153,9 @@ def train_from_config(config_path: str):
     gym_env_cfg.sim_cfg.enable_rt = enable_rt
     gym_env_cfg.sim_cfg.gpu_id = gpu_id
 
+    if num_envs is not None:
+        gym_env_cfg.num_envs = num_envs
+
     logger.log_info(
         f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, enable_rt={gym_env_cfg.sim_cfg.enable_rt}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
     )
@@ -173,13 +176,10 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
-    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic)
-    if policy_name.lower() == "actor_critic":
-        # Get observation dimension from flattened observation space
-        # flattened_observation_space returns Box space for RL training
-        obs_dim = env.flattened_observation_space.shape[-1]
-        action_dim = env.action_space.shape[-1]
+    obs_dim = env.flattened_observation_space.shape[-1]
+    action_dim = env.action_space.shape[-1]
 
+    if policy_name.lower() == "actor_critic":
         actor_cfg = policy_block.get("actor")
         critic_cfg = policy_block.get("critic")
         if actor_cfg is None or critic_cfg is None:
@@ -197,6 +197,22 @@ def train_from_config(config_path: str):
             device,
             actor=actor,
             critic=critic,
+        )
+    elif policy_name.lower() == "actor_only":
+        actor_cfg = policy_block.get("actor")
+        if actor_cfg is None:
+            raise ValueError(
+                "ActorOnly requires 'actor' definition in JSON (policy.actor)."
+            )
+
+        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+
+        policy = build_policy(
+            policy_block,
+            env.flattened_observation_space,
+            env.action_space,
+            device,
+            actor=actor,
         )
     else:
         policy = build_policy(
