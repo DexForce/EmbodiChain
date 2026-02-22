@@ -233,6 +233,39 @@ class RLEnv(EmbodiedEnv):
         """
         return self._elapsed_steps >= self.episode_length
 
+    def sync_group_states(self, group_size: int) -> None:
+        """Sync simulation state within each group for GRPO.
+
+        Within each group of size G, copies the state of the first env to the others,
+        so all G envs share the same state before action sampling. Subclasses with
+        rigid objects may override to sync those as well.
+
+        Args:
+            group_size: Number of envs per group (must divide num_envs).
+        """
+        N = self.num_envs
+        if N % group_size != 0:
+            return
+        num_groups = N // group_size
+        qpos = self.robot.get_qpos()
+        qvel = self.robot.get_qvel()
+        for g in range(num_groups):
+            base_idx = g * group_size
+            src_qpos = qpos[base_idx : base_idx + 1]
+            src_qvel = qvel[base_idx : base_idx + 1]
+            for i in range(1, group_size):
+                env_id = base_idx + i
+                self.robot.set_qpos(
+                    src_qpos.expand(1, -1).clone(),
+                    env_ids=[env_id],
+                    target=False,
+                )
+                self.robot.set_qvel(
+                    src_qvel.expand(1, -1).clone(),
+                    env_ids=[env_id],
+                    target=False,
+                )
+
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """Evaluate the environment state.
 
