@@ -21,6 +21,7 @@ import torch
 from gymnasium import spaces
 
 from .actor_critic import ActorCritic
+from .actor_only import ActorOnly
 from .policy import Policy
 from .mlp import MLP
 
@@ -64,6 +65,12 @@ def build_policy(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
         return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
+    elif name == "actor_only":
+        if actor is None:
+            raise ValueError(
+                "ActorOnly policy requires external 'actor' module."
+            )
+        return policy_cls(obs_space, action_space, device, actor=actor)
     else:
         return policy_cls(obs_space, action_space, device)
 
@@ -88,9 +95,11 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
 
 # default registrations
 register_policy("actor_critic", ActorCritic)
+register_policy("actor_only", ActorOnly)
 
 __all__ = [
     "ActorCritic",
+    "ActorOnly",
     "register_policy",
     "get_registered_policy_names",
     "build_policy",
