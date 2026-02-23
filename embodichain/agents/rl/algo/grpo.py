@@ -57,10 +57,14 @@ class GRPO(BaseAlgorithm):
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
         self.buffer: RolloutBuffer | None = None
-        # Frozen reference policy for KL regularization.
-        self.ref_policy = deepcopy(policy).to(self.device).eval()
-        for param in self.ref_policy.parameters():
-            param.requires_grad_(False)
+        # Only create ref_policy when kl_coef > 0 (e.g. VLA fine-tuning).
+        # For from-scratch training (CartPole etc.), kl_coef=0 avoids the "tight band" problem.
+        if self.cfg.kl_coef > 0.0:
+            self.ref_policy = deepcopy(policy).to(self.device).eval()
+            for param in self.ref_policy.parameters():
+                param.requires_grad_(False)
+        else:
+            self.ref_policy = None
 
     def initialize_buffer(
         self, num_steps: int, num_envs: int, obs_dim: int, action_dim: int
@@ -74,41 +78,72 @@ class GRPO(BaseAlgorithm):
             num_steps, num_envs, obs_dim, action_dim, self.device
         )
 
-    def _compute_sequence_returns_and_mask(
+    def _compute_step_returns_and_mask(
         self, rewards: torch.Tensor, dones: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute per-env sequence return and valid-step mask.
+        """Compute step-wise discounted returns R_t = r_t + gamma * R_{t+1} and mask.
 
+        Solves causal + discount bias: each step's return only depends on future rewards.
         Returns:
-            seq_returns: shape [N], one scalar sequence return per environment.
-            seq_mask: shape [T, N], 1 for valid sequence steps, 0 otherwise.
+            step_returns: shape [T, N], discounted return from step t onward.
+            seq_mask: shape [T, N], 1 for valid steps, 0 after first done (if truncate).
         """
         t_steps, n_envs = rewards.shape
         seq_mask = torch.ones(
             (t_steps, n_envs), dtype=torch.float32, device=self.device
         )
-        seq_returns = torch.zeros(n_envs, dtype=torch.float32, device=self.device)
+        step_returns = torch.zeros(
+            (t_steps, n_envs), dtype=torch.float32, device=self.device
+        )
 
         alive = torch.ones(n_envs, dtype=torch.float32, device=self.device)
-        discount = 1.0
         for t in range(t_steps):
             seq_mask[t] = alive
-            seq_returns += alive * rewards[t] * discount
             if self.cfg.truncate_at_first_done:
                 alive = alive * (~dones[t]).float()
-            discount *= self.cfg.gamma
-        return seq_returns, seq_mask
 
-    def _compute_group_advantages(self, seq_returns: torch.Tensor) -> torch.Tensor:
-        """Normalize sequence returns within each fixed group."""
-        n_envs = seq_returns.shape[0]
+        running_return = torch.zeros(n_envs, dtype=torch.float32, device=self.device)
+        for t in reversed(range(t_steps)):
+            running_return = (
+                rewards[t]
+                + self.cfg.gamma * running_return * (~dones[t]).float()
+            )
+            step_returns[t] = running_return
+
+        return step_returns, seq_mask
+
+    def _compute_step_group_advantages(
+        self, step_returns: torch.Tensor, seq_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Per-step group normalization with masked mean/std for variable-length sequences.
+
+        When group members have different survival lengths, only compare against
+        peers still alive at that step (avoids dead envs' zeros dragging down the mean).
+        """
+        t_steps, n_envs = step_returns.shape
         group_size = self.cfg.group_size
-        returns_grouped = seq_returns.view(n_envs // group_size, group_size)
-        group_mean = returns_grouped.mean(dim=1, keepdim=True)
-        # unbiased=False avoids NaN when group size is small.
-        group_std = returns_grouped.std(dim=1, keepdim=True, unbiased=False)
+
+        returns_grouped = step_returns.view(
+            t_steps, n_envs // group_size, group_size
+        )
+        mask_grouped = seq_mask.view(
+            t_steps, n_envs // group_size, group_size
+        )
+
+        valid_count = mask_grouped.sum(dim=2, keepdim=True)
+        valid_count_safe = torch.clamp(valid_count, min=1.0)
+
+        group_mean = (
+            (returns_grouped * mask_grouped).sum(dim=2, keepdim=True)
+            / valid_count_safe
+        )
+        diff_sq = ((returns_grouped - group_mean) ** 2) * mask_grouped
+        group_var = diff_sq.sum(dim=2, keepdim=True) / valid_count_safe
+        group_std = torch.sqrt(group_var)
+
         adv = (returns_grouped - group_mean) / (group_std + self.cfg.eps)
-        return adv.reshape(-1)
+        adv = adv.view(t_steps, n_envs) * seq_mask
+        return adv
 
     def collect_rollout(
         self,
@@ -153,19 +188,16 @@ class GRPO(BaseAlgorithm):
                 on_step_callback(current_obs, actions, reward, done, env_info, next_obs)
             current_obs = next_obs
 
-        seq_returns, seq_mask = self._compute_sequence_returns_and_mask(
+        step_returns, seq_mask = self._compute_step_returns_and_mask(
             self.buffer.rewards, self.buffer.dones
         )
-        group_adv = self._compute_group_advantages(seq_returns)
-        advantages = (
-            group_adv.unsqueeze(0).expand(num_steps, -1).contiguous() * seq_mask
-        )
+        advantages = self._compute_step_group_advantages(step_returns, seq_mask)
 
         self.buffer.set_extras(
             {
                 "advantages": advantages,
                 "seq_mask": seq_mask,
-                "seq_return": seq_returns.unsqueeze(0).expand(num_steps, -1),
+                "seq_return": step_returns,
             }
         )
         return {}
@@ -202,14 +234,16 @@ class GRPO(BaseAlgorithm):
 
                 entropy_loss = -(entropy * seq_mask).sum() / denom
 
-                with torch.no_grad():
-                    ref_logprobs, _, _ = self.ref_policy.evaluate_actions(obs, actions)
-                # Positive sample-based KL approximation:
-                # exp(log pi_ref - log pi) - (log pi_ref - log pi) - 1
-                # ~= D_KL(pi || pi_ref) for small shifts.
-                log_ref_over_pi = ref_logprobs - logprobs
-                kl_per = torch.exp(log_ref_over_pi) - log_ref_over_pi - 1.0
-                kl = (kl_per * seq_mask).sum() / denom
+                if self.ref_policy is not None:
+                    with torch.no_grad():
+                        ref_logprobs, _, _ = self.ref_policy.evaluate_actions(
+                            obs, actions
+                        )
+                    log_ref_over_pi = ref_logprobs - logprobs
+                    kl_per = torch.exp(log_ref_over_pi) - log_ref_over_pi - 1.0
+                    kl = (kl_per * seq_mask).sum() / denom
+                else:
+                    kl = torch.tensor(0.0, device=self.device)
 
                 loss = (
                     actor_loss
