@@ -91,7 +91,9 @@ def convert_observation_to_space(
             torch.float32: np.float32,
             torch.float64: np.float64,
             torch.int8: np.int8,
+            torch.uint8: np.uint8,
             torch.int16: np.int16,
+            torch.uint16: np.uint16,
             torch.int32: np.int32,
             torch.int64: np.int64,
             torch.bool: np.bool_,
@@ -803,6 +805,9 @@ def build_env_cfg_from_args(
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+    if args.preview:
+        # In preview mode, we typically don't want to save data
+        cfg.filter_dataset_saving = True
 
     action_config = {}
     if args.action_config is not None:
