@@ -105,8 +105,7 @@ class GRPO(BaseAlgorithm):
         running_return = torch.zeros(n_envs, dtype=torch.float32, device=self.device)
         for t in reversed(range(t_steps)):
             running_return = (
-                rewards[t]
-                + self.cfg.gamma * running_return * (~dones[t]).float()
+                rewards[t] + self.cfg.gamma * running_return * (~dones[t]).float()
             )
             step_returns[t] = running_return
 
@@ -123,20 +122,15 @@ class GRPO(BaseAlgorithm):
         t_steps, n_envs = step_returns.shape
         group_size = self.cfg.group_size
 
-        returns_grouped = step_returns.view(
-            t_steps, n_envs // group_size, group_size
-        )
-        mask_grouped = seq_mask.view(
-            t_steps, n_envs // group_size, group_size
-        )
+        returns_grouped = step_returns.view(t_steps, n_envs // group_size, group_size)
+        mask_grouped = seq_mask.view(t_steps, n_envs // group_size, group_size)
 
         valid_count = mask_grouped.sum(dim=2, keepdim=True)
         valid_count_safe = torch.clamp(valid_count, min=1.0)
 
-        group_mean = (
-            (returns_grouped * mask_grouped).sum(dim=2, keepdim=True)
-            / valid_count_safe
-        )
+        group_mean = (returns_grouped * mask_grouped).sum(
+            dim=2, keepdim=True
+        ) / valid_count_safe
         diff_sq = ((returns_grouped - group_mean) ** 2) * mask_grouped
         group_var = diff_sq.sum(dim=2, keepdim=True) / valid_count_safe
         group_std = torch.sqrt(group_var)

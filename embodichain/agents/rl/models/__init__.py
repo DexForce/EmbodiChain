@@ -67,9 +67,7 @@ def build_policy(
         return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
     elif name == "actor_only":
         if actor is None:
-            raise ValueError(
-                "ActorOnly policy requires external 'actor' module."
-            )
+            raise ValueError("ActorOnly policy requires external 'actor' module.")
         return policy_cls(obs_space, action_space, device, actor=actor)
     else:
         return policy_cls(obs_space, action_space, device)
