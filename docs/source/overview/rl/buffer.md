@@ -5,7 +5,7 @@ This module implements the data buffer for RL training, responsible for storing 
 ## Main Classes and Structure
 
 ### RolloutBuffer
-- Used for on-policy algorithms (such as PPO), efficiently stores observations, actions, rewards, dones, values, and logprobs for each step.
+- Used for on-policy algorithms (such as PPO, GRPO), efficiently stores observations, actions, rewards, dones, values, and logprobs for each step.
 - Supports multi-environment parallelism (shape: [T, N, ...]), all data allocated on GPU.
 - Structure fields:
   - `obs`: Observation tensor, float32, shape [T, N, obs_dim]
@@ -38,7 +38,7 @@ for batch in buffer.iterate_minibatches(batch_size):
 - All data is allocated on GPU to avoid frequent CPU-GPU copying.
 - The extras field can be flexibly extended to meet different algorithm needs (e.g., GAE, TD-lambda, distributional advantages).
 - The iterator automatically shuffles to improve training stability.
-- Compatible with various RL algorithms (PPO, A2C, SAC, etc.), custom fields and sampling logic supported.
+- Compatible with various RL algorithms (PPO, GRPO, A2C, SAC, etc.), custom fields and sampling logic supported.
 
 ## Code Example
 ```python
