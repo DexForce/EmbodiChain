@@ -356,3 +356,166 @@ def randomize_target_pose(
 
     target_poses = getattr(env, store_key)
     target_poses[env_ids] = pose
+
+
+class planner_grid_cell_sampler(Functor):
+    """Sample grid cells for object placement without replacement.
+
+    This functor divides a planar region into a regular 2D grid and samples cells
+    to place objects. Each sampled cell will be marked as occupied and will not be
+    resampled until the grid is reset.
+
+    The sampler places objects at the center of selected grid cells, with the z-position
+    set to a reference height.
+    """
+
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        """Initialize the GridCellSampler functor.
+
+        Args:
+            cfg: The configuration of the functor.
+            env: The environment instance.
+        """
+        super().__init__(cfg, env)
+
+        # Initialize the grid state (will be properly set in reset)
+        self._grid_state: dict[int, torch.Tensor] = {}
+        self._grid_cell_sizes: dict[int, tuple[float, float]] = {}
+
+    def reset(self, env_ids: Union[torch.Tensor, None] = None) -> None:
+        """Reset the grid sampling state.
+
+        Args:
+            env_ids: The environment IDs to reset. If None, resets all environments.
+        """
+        if env_ids is None:
+            env_ids = torch.arange(self._env.num_envs, device=self._env.device)
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.tensor(env_ids, device=self._env.device)
+
+        for env_id in env_ids:
+            env_id_int = (
+                int(env_id.item()) if isinstance(env_id, torch.Tensor) else int(env_id)
+            )
+            # Initialize grid as all zeros (all cells available)
+            if env_id_int in self._grid_state:
+                self._grid_state[env_id_int].fill_(0)
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: Union[torch.Tensor, None],
+        position_range: tuple[list[float], list[float]],
+        reference_height: float,
+        object_uid_list: list[str],
+        grid_size: tuple[int, int],
+        physics_update_step: int = -1,
+    ) -> None:
+        """Sample grid cells and place objects at those positions.
+
+        Args:
+            env: The environment instance.
+            env_ids: The environment IDs to apply sampling. If None, applies to all environments.
+            position_range: The planar range [(x_min, y_min), (x_max, y_max)] defining the region.
+            reference_height: The z-coordinate for placing objects [m].
+            object_uid_list: List of rigid object UIDs to place in the grid cells.
+            grid_size: A tuple (rows, cols) defining the grid dimensions.
+            physics_update_step: The number of physics update steps to apply after placement. Default is -1 (no update).
+
+        Returns:
+            None
+        """
+        if env_ids is None:
+            env_ids = torch.arange(env.num_envs, device=env.device)
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.tensor(env_ids, device=env.device)
+
+        self.reset(env_ids)
+        num_instance = len(env_ids)
+
+        # Parse position range
+        x_min, y_min = position_range[0]
+        x_max, y_max = position_range[1]
+        cols, rows = grid_size
+
+        obj_positions = []
+        obj_list = []
+        # Verify all objects exist
+        for obj_uid in object_uid_list:
+            if obj_uid not in env.sim.get_rigid_object_uid_list():
+                logger.log_warning(
+                    f"Object UID '{obj_uid}' not found in the simulation."
+                )
+                continue
+            obj_positions.append(
+                torch.zeros((num_instance, 3), dtype=torch.float32, device=env.device)
+            )
+            obj = env.sim.get_rigid_object(obj_uid)
+            obj.reset()
+            obj_list.append(obj)
+
+        # Calculate cell dimensions
+        cell_width = (x_max - x_min) / cols
+        cell_height = (y_max - y_min) / rows
+
+        # Initialize grid state for environments if not present
+        for env_id in env_ids:
+            env_id_int = (
+                int(env_id.item()) if isinstance(env_id, torch.Tensor) else int(env_id)
+            )
+            if env_id_int not in self._grid_state:
+                self._grid_state[env_id_int] = torch.zeros(
+                    rows, cols, device=env.device, dtype=torch.uint8
+                )
+            self._grid_cell_sizes[env_id_int] = (cell_width, cell_height)
+
+        # Batch operation: for each environment, place all objects
+        for env_id in env_ids:
+            env_id_int = (
+                int(env_id.item()) if isinstance(env_id, torch.Tensor) else int(env_id)
+            )
+            grid = self._grid_state[env_id_int]
+
+            # Sample and place each object in this environment
+            for obj_id, rigid_object in enumerate(obj_list):
+                # Find available cells
+                available_cells = torch.where(grid == 0)
+
+                if len(available_cells[0]) == 0:
+                    logger.log_warning(
+                        f"No available cells in grid for environment {env_id_int}. All cells occupied."
+                    )
+                    break
+
+                # Randomly sample an available cell
+                num_available = len(available_cells[0])
+                random_idx = torch.randint(
+                    0, num_available, (1,), device=env.device
+                ).item()
+
+                row = available_cells[0][random_idx].item()
+                col = available_cells[1][random_idx].item()
+
+                # Mark cell as occupied
+                grid[row, col] = 1
+
+                # Calculate position at cell center
+                x = x_min + (col + 0.5) * cell_width
+                y = y_min + (row + 0.5) * cell_height
+                z = reference_height
+
+                obj_positions[obj_id][env_id] = torch.tensor(
+                    [x, y, z], dtype=torch.float32, device=env.device
+                )
+
+        for obj_id, rigid_object in enumerate(obj_list):
+            rigid_object: RigidObject
+            pose = rigid_object.get_local_pose()[env_ids]
+            pose[:, 0:3] = obj_positions[obj_id]
+
+            # Set object pose
+            rigid_object.set_local_pose(pose, env_ids=env_ids)
+            rigid_object.clear_dynamics()
+
+        if physics_update_step > 0:
+            env.sim.update(step=physics_update_step)
