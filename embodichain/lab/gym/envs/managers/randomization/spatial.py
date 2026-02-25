@@ -358,7 +358,7 @@ def randomize_target_pose(
     target_poses[env_ids] = pose
 
 
-class grid_cell_sampler(Functor):
+class planner_grid_cell_sampler(Functor):
     """Sample grid cells for object placement without replacement.
 
     This functor divides a planar region into a regular 2D grid and samples cells
