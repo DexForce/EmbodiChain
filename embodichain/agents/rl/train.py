@@ -137,6 +137,9 @@ def train_from_config(config_path: str):
         gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
     )
 
+    if num_envs is not None:
+        gym_env_cfg.num_envs = num_envs
+        
     # Ensure sim configuration mirrors runtime overrides
     if gym_env_cfg.sim_cfg is None:
         gym_env_cfg.sim_cfg = SimulationManagerCfg()
