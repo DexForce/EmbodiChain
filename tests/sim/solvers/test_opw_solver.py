@@ -78,7 +78,7 @@ class BaseSolverTest:
         test_qpos = torch.tensor(
             [[0.0, np.pi / 4, -np.pi / 4, 0.0, np.pi / 4, 0.0]],
             dtype=torch.float32,
-            device=self.robot.device
+            device=self.robot.device,
         )
 
         fk_xpos = self.robot.compute_fk(qpos=test_qpos, name=arm_name, to_matrix=True)
