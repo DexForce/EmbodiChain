@@ -713,13 +713,15 @@ class Robot(Articulation):
 
         if pose.shape[-1] == 7 and pose.dim() == 3:
             # Convert pose from (n_envs, n_batch, 7) to (n_envs * n_batch, 4, 4)
-            pose_batch = torch.reshape(-1, 7)
+            pose_batch = pose.reshape(-1, 7)
             pos = pose_batch[:, :3]
             quat = pose_batch[:, 3:]
             # Convert quaternion to rotation matrix
             rot = matrix_from_quat(quat)
             # Build homogeneous transformation matrix efficiently
-            pose_batch = torch.eye(4, device=pose.device).repeat(pose.shape[0], 1, 1)
+            pose_batch = torch.eye(4, device=pose.device).repeat(
+                pose_batch.shape[0], 1, 1
+            )
             pose_batch[:, :3, :3] = rot
             pose_batch[:, :3, 3] = pos
         else:
