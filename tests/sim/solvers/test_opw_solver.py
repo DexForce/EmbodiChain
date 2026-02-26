@@ -80,10 +80,21 @@ class BaseSolverTest:
         )
 
         fk_xpos = self.robot.compute_fk(qpos=qpos_fk, name=arm_name, to_matrix=True)
+        fk_xpos_xyzquat = self.robot.compute_fk(
+            qpos=qpos_fk, name=arm_name, to_matrix=False
+        )
 
         res, ik_qpos = self.robot.compute_ik(
             pose=fk_xpos, joint_seed=qpos_fk, name=arm_name
         )
+
+        res, ik_qpos_xyzquat = self.robot.compute_ik(
+            pose=fk_xpos_xyzquat, joint_seed=qpos_fk, name=arm_name
+        )
+
+        assert torch.allclose(
+            ik_qpos, ik_qpos_xyzquat, atol=1e-4, rtol=1e-4
+        ), "IK results do not match for different pose formats"
 
         res, ik_qpos = self.robot.compute_ik(pose=fk_xpos, name=arm_name)
 
