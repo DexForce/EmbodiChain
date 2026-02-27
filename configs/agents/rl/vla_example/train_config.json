@@ -10,7 +10,6 @@
         "num_envs": 32,
         "iterations": 500,
         "buffer_size": 2048,
-        "buffer_type": "vla",
         "enable_eval": true,
         "num_eval_envs": 8,
         "num_eval_episodes": 3,
