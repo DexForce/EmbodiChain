@@ -245,7 +245,7 @@ def get_trajectory_object_offset_qpos(
     return is_success, key_qpos_offset
 
 
-def interpolate_with_distance_warp(
+def interpolate_with_distance(
     trajectory: torch.Tensor,  # expected shape [B, N, M], float or convertible to float
     interp_num: int,  # T
     device=torch.device("cuda"),

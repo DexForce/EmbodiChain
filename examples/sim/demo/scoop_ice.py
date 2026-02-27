@@ -40,7 +40,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.utility.action_utils import (
-    interpolate_with_distance_warp,
+    interpolate_with_distance,
     interpolate_with_nums,
 )
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
@@ -518,15 +518,9 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
     )
 
     all_trajectory = torch.hstack([arm_trajectory, hand_trajectory])
-    interp_trajectory = interpolate_with_distance_warp(
+    interp_trajectory = interpolate_with_distance(
         trajectory=all_trajectory[None, :, :], interp_num=200, device=sim.device
     )
-
-    # interp_nums = torch.tensor([21, 20, 21, 20, 21], dtype=torch.int32, device=sim.device)
-    # interp_trajectory = interpolate_with_nums(
-    #     trajectory=all_trajectory[None, :, :], interp_nums=interp_nums, device=sim.device
-    # )
-
     interp_trajectory = interp_trajectory[0]
     # run trajectory
     arm_ids = robot.get_joint_ids("arm")
