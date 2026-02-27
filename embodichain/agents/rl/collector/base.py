@@ -55,8 +55,12 @@ class BaseCollector(ABC):
         self.obs_tensordict = dict_to_tensordict(obs_dict, self.device)
 
     @abstractmethod
-    def collect(self, **kwargs) -> TensorDict:
+    def collect(self, num_steps: int | None = None, **kwargs) -> TensorDict:
         """Collect data from environment.
+
+        Args:
+            num_steps: Number of steps to collect (required by SyncCollector,
+                ignored by AsyncCollector which collects continuously).
 
         Returns:
             TensorDict with collected data

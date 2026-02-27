@@ -35,15 +35,17 @@ class SyncCollector(BaseCollector):
         buffer.add(rollout)
     """
 
-    def collect(self, num_steps: int) -> TensorDict:
+    def collect(self, num_steps: int | None = None, **kwargs) -> TensorDict:
         """Collect a synchronous rollout.
 
         Args:
-            num_steps: Number of steps to collect
+            num_steps: Number of steps to collect (required)
 
         Returns:
             TensorDict with batch_size=[T, N] containing full rollout
         """
+        if num_steps is None:
+            raise TypeError("SyncCollector.collect() requires num_steps")
         self.policy.train()
         current_td = self.obs_tensordict
         rollout_list = []
