@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple, Callable
+import threading
 import time
+from typing import Dict, Any, Tuple, Callable
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -101,6 +102,7 @@ class Trainer:
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
+        self._stats_lock = threading.Lock()  # Protects curr_ret, curr_len, ret_window, len_window (async mode)
 
         # Initialize observation - will be used by collectors
         obs, _ = self.env.reset()
@@ -142,17 +144,18 @@ class Trainer:
             if done.dim() > 1:
                 done = done.squeeze(-1)
 
-            # Episode stats (stay on device; convert only when episode ends)
-            self.curr_ret += reward
-            self.curr_len += 1
-            done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
-            if done_idx.numel() > 0:
-                finished_ret = self.curr_ret[done_idx].detach().cpu().tolist()
-                finished_len = self.curr_len[done_idx].detach().cpu().tolist()
-                self.ret_window.extend(finished_ret)
-                self.len_window.extend(finished_len)
-                self.curr_ret[done_idx] = 0
-                self.curr_len[done_idx] = 0
+            # Episode stats (thread-safe for async mode: collector writes, main reads)
+            with self._stats_lock:
+                self.curr_ret += reward
+                self.curr_len += 1
+                done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
+                if done_idx.numel() > 0:
+                    finished_ret = self.curr_ret[done_idx].detach().cpu().tolist()
+                    finished_len = self.curr_len[done_idx].detach().cpu().tolist()
+                    self.ret_window.extend(finished_ret)
+                    self.len_window.extend(finished_len)
+                    self.curr_ret[done_idx] = 0
+                    self.curr_len[done_idx] = 0
 
             # Log environment metrics
             if isinstance(env_info, dict):
@@ -264,28 +267,30 @@ class Trainer:
             print("[Trainer] Async collector stopped")
 
     def _log_train(self, losses: Dict[str, float]):
+        # Snapshot episode stats under lock (async mode: main reads, collector writes)
+        with self._stats_lock:
+            ret_list = list(self.ret_window)
+            len_list = list(self.len_window)
+
+        avgR = float(np.mean(ret_list)) if ret_list else float("nan")
+        avgL = float(np.mean(len_list)) if len_list else float("nan")
+
         if self.writer:
             for k, v in losses.items():
                 self.writer.add_scalar(f"train/{k}", v, self.global_step)
             elapsed = max(1e-6, time.time() - self.start_time)
             sps = self.global_step / elapsed
             self.writer.add_scalar("charts/SPS", sps, self.global_step)
-            if len(self.ret_window) > 0:
+            if ret_list:
                 self.writer.add_scalar(
-                    "charts/episode_reward_avg_100",
-                    float(np.mean(self.ret_window)),
-                    self.global_step,
+                    "charts/episode_reward_avg_100", avgR, self.global_step
                 )
-            if len(self.len_window) > 0:
+            if len_list:
                 self.writer.add_scalar(
-                    "charts/episode_length_avg_100",
-                    float(np.mean(self.len_window)),
-                    self.global_step,
+                    "charts/episode_length_avg_100", avgL, self.global_step
                 )
         # console
         sps = self.global_step / max(1e-6, time.time() - self.start_time)
-        avgR = np.mean(self.ret_window) if len(self.ret_window) > 0 else float("nan")
-        avgL = np.mean(self.len_window) if len(self.len_window) > 0 else float("nan")
         print(
             f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
         )
