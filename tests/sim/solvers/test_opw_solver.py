@@ -27,8 +27,8 @@ from embodichain.lab.sim.robots import CobotMagicCfg
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self):
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+    def setup_simulation(self, sim_device):
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
         self.sim = SimulationManager(config)
         self.sim.set_manual_update(False)
 
@@ -75,21 +75,23 @@ class BaseSolverTest:
     def test_ik(self, arm_name: str):
         # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
 
-        qpos_fk = torch.tensor(
-            [[0.0, np.pi / 4, -np.pi / 4, 0.0, np.pi / 4, 0.0]], dtype=torch.float32
+        test_qpos = torch.tensor(
+            [[0.0, np.pi / 4, -np.pi / 4, 0.0, np.pi / 4, 0.0]],
+            dtype=torch.float32,
+            device=self.robot.device,
         )
 
-        fk_xpos = self.robot.compute_fk(qpos=qpos_fk, name=arm_name, to_matrix=True)
+        fk_xpos = self.robot.compute_fk(qpos=test_qpos, name=arm_name, to_matrix=True)
         fk_xpos_xyzquat = self.robot.compute_fk(
-            qpos=qpos_fk, name=arm_name, to_matrix=False
+            qpos=test_qpos, name=arm_name, to_matrix=False
         )
 
         res, ik_qpos = self.robot.compute_ik(
-            pose=fk_xpos, joint_seed=qpos_fk, name=arm_name
+            pose=fk_xpos, joint_seed=test_qpos, name=arm_name
         )
 
         res, ik_qpos_xyzquat = self.robot.compute_ik(
-            pose=fk_xpos_xyzquat, joint_seed=qpos_fk, name=arm_name
+            pose=fk_xpos_xyzquat, joint_seed=test_qpos, name=arm_name
         )
 
         assert torch.allclose(
@@ -98,16 +100,22 @@ class BaseSolverTest:
 
         res, ik_qpos = self.robot.compute_ik(pose=fk_xpos, name=arm_name)
 
-        if ik_qpos.dim() == 3:
+        if ik_qpos_xyzquat.dim() == 3:
             ik_xpos = self.robot.compute_fk(
-                qpos=ik_qpos[0][0], name=arm_name, to_matrix=True
+                qpos=ik_qpos_xyzquat[0][0], name=arm_name, to_matrix=True
             )
         else:
-            ik_xpos = self.robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
+            ik_xpos = self.robot.compute_fk(
+                qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
+            )
+
+        assert torch.allclose(
+            test_qpos, ik_qpos, atol=5e-3, rtol=5e-3
+        ), f"FK and IK qpos do not match for {arm_name}"
 
         assert torch.allclose(
             fk_xpos, ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"FK and IK results do not match for {arm_name}"
+        ), f"FK and IK xpos do not match for {arm_name}"
         # test for failed xpos
         invalid_pose = torch.tensor(
             [
@@ -135,7 +143,13 @@ class BaseSolverTest:
 
 class TestOPWSolver(BaseSolverTest):
     def setup_method(self):
-        self.setup_simulation()
+        self.setup_simulation("cpu")
+
+
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+class TestOPWSolverCUDA(BaseSolverTest):
+    def setup_method(self):
+        self.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
