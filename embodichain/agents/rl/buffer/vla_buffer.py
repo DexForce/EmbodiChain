@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import threading
 import torch
 from tensordict import TensorDict
 from typing import Optional
@@ -51,6 +52,7 @@ class VLABuffer:
         self.size = 0  # Current valid data count
         self._total_added = 0
         self._initialized = False
+        self._lock = threading.Lock()  # Thread-safe: main thread reads, collector writes
 
     def _initialize_buffer(self, template: TensorDict) -> None:
         """Initialize buffer structure from first transition template.
@@ -72,22 +74,23 @@ class VLABuffer:
         Args:
             transition: Single transition TensorDict (no batch dimension)
         """
-        # Lazy initialization on first add
-        if not self._initialized:
-            self._initialize_buffer(transition.to(self.device))
+        with self._lock:
+            # Lazy initialization on first add
+            if not self._initialized:
+                self._initialize_buffer(transition.to(self.device))
 
-        # Ensure transition is on correct device
-        transition = transition.to(self.device)
+            # Ensure transition is on correct device
+            transition = transition.to(self.device)
 
-        # Direct index assignment (zero-copy write)
-        self.buffer[self.write_pos] = transition
+            # Direct index assignment (zero-copy write)
+            self.buffer[self.write_pos] = transition
 
-        # Update circular index
-        self.write_pos = (self.write_pos + 1) % self.buffer_size
+            # Update circular index
+            self.write_pos = (self.write_pos + 1) % self.buffer_size
 
-        # Update size (saturates at buffer_size)
-        self.size = min(self.size + 1, self.buffer_size)
-        self._total_added += 1
+            # Update size (saturates at buffer_size)
+            self.size = min(self.size + 1, self.buffer_size)
+            self._total_added += 1
 
     def add_batch(self, transitions: TensorDict) -> None:
         """Add multiple transitions at once (batch write).
@@ -95,23 +98,24 @@ class VLABuffer:
         Args:
             transitions: Batch of transitions with shape [batch_size, ...]
         """
-        batch_size = transitions.batch_size[0]
+        with self._lock:
+            batch_size = transitions.batch_size[0]
 
-        # Lazy initialization
-        if not self._initialized:
-            self._initialize_buffer(transitions[0].to(self.device))
+            # Lazy initialization
+            if not self._initialized:
+                self._initialize_buffer(transitions[0].to(self.device))
 
-        transitions = transitions.to(self.device)
+            transitions = transitions.to(self.device)
 
-        # Handle circular write
-        for i in range(batch_size):
-            self.buffer[self.write_pos] = transitions[i]
-            self.write_pos = (self.write_pos + 1) % self.buffer_size
-            self.size = min(self.size + 1, self.buffer_size)
-            self._total_added += 1
+            # Handle circular write
+            for i in range(batch_size):
+                self.buffer[self.write_pos] = transitions[i]
+                self.write_pos = (self.write_pos + 1) % self.buffer_size
+                self.size = min(self.size + 1, self.buffer_size)
+                self._total_added += 1
 
     def get(self, flatten: bool = True) -> TensorDict:
-        """Get valid data from buffer.
+        """Get valid data from buffer (thread-safe).
 
         Args:
             flatten: If True, return flattened [size, ...]. Currently only supports True.
@@ -119,57 +123,65 @@ class VLABuffer:
         Returns:
             TensorDict with batch_size=[size, ...] containing valid data
         """
-        if not self._initialized or self.size == 0:
-            raise ValueError("Buffer is empty")
+        with self._lock:
+            if not self._initialized or self.size == 0:
+                raise ValueError("Buffer is empty")
 
-        if not flatten:
-            raise NotImplementedError("Only flatten=True is supported for VLABuffer")
-
-        # Return first 'size' elements (valid data)
-        # Note: Data is in insertion order up to write_pos, then wraps
-        if self.size < self.buffer_size:
-            # Buffer not yet full, data is [0:size]
-            return self.buffer[: self.size]
-        else:
-            # Buffer full, need to rearrange to maintain temporal order
-            # Oldest data is at write_pos, newest at write_pos-1
-            indices = (
-                torch.arange(
-                    self.write_pos,
-                    self.write_pos + self.buffer_size,
-                    device=self.device,
+            if not flatten:
+                raise NotImplementedError(
+                    "Only flatten=True is supported for VLABuffer"
                 )
-                % self.buffer_size
-            )
-            return self.buffer[indices]
+
+            # Return first 'size' elements (valid data)
+            # Note: Data is in insertion order up to write_pos, then wraps
+            if self.size < self.buffer_size:
+                # Buffer not yet full, data is [0:size]
+                return self.buffer[: self.size].clone()
+            else:
+                # Buffer full, need to rearrange to maintain temporal order
+                # Oldest data is at write_pos, newest at write_pos-1
+                indices = (
+                    torch.arange(
+                        self.write_pos,
+                        self.write_pos + self.buffer_size,
+                        device=self.device,
+                    )
+                    % self.buffer_size
+                )
+                return self.buffer[indices].clone()
 
     def clear(self) -> None:
         """Clear buffer (reset pointers, keep pre-allocated memory)."""
-        self.write_pos = 0
-        self.size = 0
-        # Keep buffer allocated for reuse
+        with self._lock:
+            self.write_pos = 0
+            self.size = 0
+            # Keep buffer allocated for reuse
 
     def __len__(self) -> int:
         """Return current number of valid transitions."""
-        return self.size
+        with self._lock:
+            return self.size
 
     def is_full(self) -> bool:
         """Check if buffer is at full buffer_size."""
-        return self.size >= self.buffer_size
+        with self._lock:
+            return self.size >= self.buffer_size
 
     def get_num_rollouts(self) -> int:
         """Return 1 (buffer stores transitions, not rollouts)."""
-        return 1 if self.size > 0 else 0
+        with self._lock:
+            return 1 if self.size > 0 else 0
 
     def get_stats(self) -> dict:
         """Get buffer statistics for logging."""
-        return {
-            "buffer_size": self.size,
-            "buffer_capacity": self.buffer_size,
-            "total_transitions": self.size,
-            "total_added": self._total_added,
-            "buffer_usage": (
-                self.size / self.buffer_size if self.buffer_size > 0 else 0.0
-            ),
-            "write_pos": self.write_pos,
-        }
+        with self._lock:
+            return {
+                "buffer_size": self.size,
+                "buffer_capacity": self.buffer_size,
+                "total_transitions": self.size,
+                "total_added": self._total_added,
+                "buffer_usage": (
+                    self.size / self.buffer_size if self.buffer_size > 0 else 0.0
+                ),
+                "write_pos": self.write_pos,
+            }
