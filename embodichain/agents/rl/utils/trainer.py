@@ -236,6 +236,7 @@ class Trainer:
 
                 # Get data and train
                 data = self.buffer.get(flatten=True)
+                self.buffer.clear()  # Must clear to avoid retraining on same data
 
                 # Update global step based on collected data (main thread only)
                 batch_size = data.batch_size[0] if len(data.batch_size) > 0 else 0
