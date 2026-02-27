@@ -125,10 +125,10 @@ class PPO(BaseAlgorithm):
             shuffled_data = flat_data[indices]
 
             # Iterate over minibatches
-            num_minibatches = total_samples // self.cfg.batch_size
+            num_minibatches = (total_samples + self.cfg.batch_size - 1) // self.cfg.batch_size
             for i in range(num_minibatches):
                 start_idx = i * self.cfg.batch_size
-                end_idx = start_idx + self.cfg.batch_size
+                end_idx = min(start_idx + self.cfg.batch_size, total_samples)
                 batch_td = shuffled_data[start_idx:end_idx]
 
                 # Extract data from TensorDict batch
