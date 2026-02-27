@@ -39,10 +39,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
-from embodichain.lab.sim.utility.action_utils import (
-    interpolate_with_distance,
-    interpolate_with_nums,
-)
+from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path

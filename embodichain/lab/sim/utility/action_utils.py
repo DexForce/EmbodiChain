@@ -258,7 +258,7 @@ def interpolate_with_distance(
     Args:
         trajectory: Torch.Tensor of shape [B, N, M].
         interp_num: Target number of samples T.
-        device: Warp device string ('cpu', 'cuda', 'cuda:0', ...).
+        device: Torch device string ('cpu', 'cuda', 'cuda:0', ...).
         dtype: Working dtype (wp.float32 or wp.float64). Defaults to wp.float32.
 
     Returns:
@@ -343,16 +343,25 @@ def interpolate_with_nums(
     device=torch.device("cuda"),
 ) -> torch.Tensor:
     """
-    Resample a batch of trajectories of shape [B, N, M] by
-    piecewise-linear interpolation with specified number of samples per segment.
+    Each entry ``interp_nums[i] = k`` controls segment ``i`` between
+    ``trajectory[:, i, :]`` and ``trajectory[:, i + 1, :]``. For that segment,
+    ``k`` samples are generated with interpolation factors
+    ``alpha = 0, 1/k, 2/k, ..., (k-1)/k`` (i.e., including the segment start
+    and excluding the segment end). The final endpoint
+    ``trajectory[:, -1, :]`` is appended once at the end of the result, so
+    intermediate segment endpoints are not duplicated.
 
     Args:
         trajectory: Torch.Tensor of shape [B, N, M].
-        interp_nums: Torch.Tensor of shape [N - 1] specifying number of samples in each segment.
-        device: Warp device string ('cpu', 'cuda', 'cuda:0', ...).
+        interp_nums: Torch.Tensor of shape [N - 1] specifying the number of
+            samples per segment, including each segment start and excluding
+            its end. Values must be non-negative; a value of 0 means that
+            no samples are drawn from that segment (other than the final
+            overall endpoint that is always appended once).
+        device: Torch device string ('cpu', 'cuda', 'cuda:0', ...).
 
     Returns:
-        Torch.tensor interpolated trajectories.
+        Torch.Tensor of interpolated trajectories.
     """
     trajectory = trajectory.to(device)
     if not torch.is_floating_point(trajectory):
@@ -371,20 +380,30 @@ def interpolate_with_nums(
 
     interp_nums_list = interp_nums_tensor.to(torch.int64).tolist()
 
-    segments = []
+    # Always seed the output with the first waypoint so it is never dropped,
+    # even when leading segments have zero samples.
+    segments = [trajectory[:, :1, :]]
     for i, count in enumerate(interp_nums_list):
         if count < 0:
             raise ValueError("`interp_nums` values must be non-negative.")
-        if count == 0:
-            continue
-
-        alpha = torch.arange(count, device=device, dtype=trajectory.dtype)
-        alpha = alpha / float(count)
-        alpha = alpha.view(1, count, 1)
-
         p0 = trajectory[:, i : i + 1, :]
         p1 = trajectory[:, i + 1 : i + 2, :]
-        segments.append(p0 + (p1 - p0) * alpha)
-
-    segments.append(trajectory[:, -1:, :])
+        if count == 0:
+            # No interpolated samples for this segment, but ensure the endpoint
+            # waypoint is still present so zero-sample segments don't remove it.
+            segments.append(p1)
+            continue
+        # Generate linearly spaced interpolation parameters from 0 to 1
+        # (inclusive), then drop the first value (t = 0) because p0 is
+        # already the last point in `segments`. This appends exactly
+        # `count` new points per segment and preserves all endpoints.
+        alpha = torch.linspace(
+            0.0,
+            1.0,
+            steps=count + 1,
+            device=device,
+            dtype=trajectory.dtype,
+        ).view(1, count + 1, 1)
+        seg = p0 + (p1 - p0) * alpha
+        segments.append(seg[:, 1:, :])
     return torch.cat(segments, dim=1)
