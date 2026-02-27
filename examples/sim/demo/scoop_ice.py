@@ -39,7 +39,10 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance_warp
+from embodichain.lab.sim.utility.action_utils import (
+    interpolate_with_distance_warp,
+    interpolate_with_nums,
+)
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
@@ -518,6 +521,12 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
     interp_trajectory = interpolate_with_distance_warp(
         trajectory=all_trajectory[None, :, :], interp_num=200, device=sim.device
     )
+
+    # interp_nums = torch.tensor([21, 20, 21, 20, 21], dtype=torch.int32, device=sim.device)
+    # interp_trajectory = interpolate_with_nums(
+    #     trajectory=all_trajectory[None, :, :], interp_nums=interp_nums, device=sim.device
+    # )
+
     interp_trajectory = interp_trajectory[0]
     # run trajectory
     arm_ids = robot.get_joint_ids("arm")

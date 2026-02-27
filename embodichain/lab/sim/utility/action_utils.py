@@ -335,3 +335,56 @@ def interpolate_with_distance_warp(
     # wp.synchronize_device(device)
     interp_trajectory = wp.to_torch(out).view(B, T, M)
     return interp_trajectory
+
+
+def interpolate_with_nums(
+    trajectory: torch.Tensor,  # expected shape [B, N, M], float or convertible to float
+    interp_nums: torch.Tensor,  # expected shape [N - 1], interp_num in each segment
+    device=torch.device("cuda"),
+) -> torch.Tensor:
+    """
+    Resample a batch of trajectories of shape [B, N, M] by
+    piecewise-linear interpolation with specified number of samples per segment.
+
+    Args:
+        trajectory: Torch.Tensor of shape [B, N, M].
+        interp_nums: Torch.Tensor of shape [N - 1] specifying number of samples in each segment.
+        device: Warp device string ('cpu', 'cuda', 'cuda:0', ...).
+
+    Returns:
+        Torch.tensor interpolated trajectories.
+    """
+    trajectory = trajectory.to(device)
+    if not torch.is_floating_point(trajectory):
+        trajectory = trajectory.float()
+
+    B, N, M = trajectory.shape
+    if N == 0:
+        return trajectory.new_empty((B, 0, M))
+
+    interp_nums_tensor = torch.as_tensor(interp_nums, device="cpu").reshape(-1)
+    if interp_nums_tensor.numel() != max(N - 1, 0):
+        raise ValueError("`interp_nums` must have shape (N - 1,).")
+
+    if N == 1:
+        return trajectory[:, :1, :]
+
+    interp_nums_list = interp_nums_tensor.to(torch.int64).tolist()
+
+    segments = []
+    for i, count in enumerate(interp_nums_list):
+        if count < 0:
+            raise ValueError("`interp_nums` values must be non-negative.")
+        if count == 0:
+            continue
+
+        alpha = torch.arange(count, device=device, dtype=trajectory.dtype)
+        alpha = alpha / float(count)
+        alpha = alpha.view(1, count, 1)
+
+        p0 = trajectory[:, i : i + 1, :]
+        p1 = trajectory[:, i + 1 : i + 2, :]
+        segments.append(p0 + (p1 - p0) * alpha)
+
+    segments.append(trajectory[:, -1:, :])
+    return torch.cat(segments, dim=1)
