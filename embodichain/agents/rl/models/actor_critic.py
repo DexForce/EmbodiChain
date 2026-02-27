@@ -133,7 +133,6 @@ class ActorCritic(Policy):
         if deterministic:
             action = mean
         else:
-            dist = Normal(mean, std)
             action = dist.sample()
 
         # Compute log probability
