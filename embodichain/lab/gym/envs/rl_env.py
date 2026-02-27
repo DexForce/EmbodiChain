@@ -37,7 +37,6 @@ class RLEnv(EmbodiedEnv):
 
     Optional attributes (can be set by subclasses):
     - action_scale: Scaling factor for actions (default: 1.0)
-    - episode_length: Maximum episode length (default: 1000)
     """
 
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
@@ -48,8 +47,6 @@ class RLEnv(EmbodiedEnv):
         # Set default values for common RL parameters
         if not hasattr(self, "action_scale"):
             self.action_scale = 1.0
-        if not hasattr(self, "episode_length"):
-            self.episode_length = 1000
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action for RL tasks with flexible transformation.
@@ -220,18 +217,6 @@ class RLEnv(EmbodiedEnv):
         }
 
         return info
-
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        """Check if episode should be truncated (timeout).
-
-        Args:
-            obs: Current observation
-            info: Info dictionary
-
-        Returns:
-            Boolean tensor of shape (num_envs,)
-        """
-        return self._elapsed_steps >= self.episode_length
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """Evaluate the environment state.

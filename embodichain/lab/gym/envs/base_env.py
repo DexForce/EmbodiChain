@@ -66,6 +66,11 @@ class EnvCfg:
     stops only due to the timelimit.
     """
 
+    max_episode_steps: int = -1
+    """The maximum number of steps per episode. If set to -1, there is no limit on the episode length, and the episode will 
+    only end when the task is successfully completed or failed.
+    """
+
 
 class BaseEnv(gym.Env):
     """Base environment for robot learning.
@@ -131,6 +136,11 @@ class BaseEnv(gym.Env):
 
         self._elapsed_steps = torch.zeros(
             self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
+        )
+
+        # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
+        self.max_episode_steps = (
+            self.cfg.max_episode_steps if self.cfg.max_episode_steps > 0 else 2**31 - 1
         )
 
         self._task_success = torch.zeros(
@@ -593,8 +603,6 @@ class BaseEnv(gym.Env):
         Returns:
             A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
         """
-        self._elapsed_steps += 1
-
         action = self._preprocess_action(action=action)
         action = self._step_action(action=action)
         self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
@@ -617,6 +625,8 @@ class BaseEnv(gym.Env):
             ),
         )
         truncateds = self.check_truncated(obs=obs, info=info)
+        truncateds = truncateds | (self._elapsed_steps >= self.max_episode_steps)
+
         if self.cfg.ignore_terminations:
             terminateds[:] = False
 
@@ -630,6 +640,8 @@ class BaseEnv(gym.Env):
             info=info,
             **kwargs,
         )
+
+        self._elapsed_steps += 1
 
         reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:

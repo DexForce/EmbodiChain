@@ -23,6 +23,7 @@ import gymnasium
 from typing import Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
+from tensordict import TensorDict
 
 from embodichain.lab.sim.types import Device, Array
 from embodichain.lab.sim.objects import Robot
@@ -402,10 +403,12 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
     env_cfg = EmbodiedEnvCfg()
 
     # check all necessary keys
-    required_keys = ["id", "max_episodes", "env", "robot"]
+    required_keys = ["id", "env", "robot"]
     for key in required_keys:
         if key not in config:
             log_error(f"Missing required config key: {key}")
+
+    env_cfg.max_episode_steps = config.get("max_episode_steps", -1)
 
     # parser robot config
     # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
@@ -823,3 +826,75 @@ def build_env_cfg_from_args(
     )
 
     return cfg, gym_config, action_config
+
+
+def init_rollout_buffer_from_obs_action_space(
+    obs_space: spaces.Space,
+    action_space: spaces.Space,
+    max_episode_steps: int,
+    num_envs: int,
+    device: Union[str, torch.device] = "cpu",
+) -> TensorDict:
+    """Initialize a rollout buffer based on the observation and action spaces.
+
+    Args:
+        obs_space (spaces.Space): The observation space of the environment.
+        action_space (spaces.Space): The action space of the environment.
+        max_episode_steps (int): The number of steps in an episode.
+        num_envs (int): The number of parallel environments.
+
+    Returns:
+        TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+    """
+
+    def _convert_space_dtype_to_torch_dtype(space: spaces.Space) -> torch.dtype:
+        if isinstance(space, spaces.Dict):
+            return {k: _convert_space_dtype_to_torch_dtype(v) for k, v in space.items()}
+        elif isinstance(space, spaces.Box):
+            if np.issubdtype(space.dtype, np.floating):
+                return torch.float32
+            elif np.issubdtype(space.dtype, np.int64):
+                return torch.int64
+            elif np.issubdtype(space.dtype, np.int32):
+                return torch.int32
+            elif np.issubdtype(space.dtype, np.uint16):
+                return torch.uint16
+            elif np.issubdtype(space.dtype, np.uint8):
+                return torch.uint8
+            elif np.issubdtype(space.dtype, np.bool_):
+                return torch.bool
+            else:
+                log_error(f"Unsupported space dtype: {space.dtype}")
+        else:
+            log_error(f"Space type {type(space)} is not supported yet.")
+
+    def _init_buffer_from_space(
+        space: spaces.Space, num_envs: int
+    ) -> Union[torch.Tensor, TensorDict]:
+        if isinstance(space, spaces.Dict):
+            return TensorDict(
+                {k: _init_buffer_from_space(v, num_envs) for k, v in space.items()},
+                batch_size=[num_envs],
+                device=device,
+            )
+        elif isinstance(space, spaces.Box):
+            return torch.zeros(
+                (num_envs, max_episode_steps, *space.shape[1:]),
+                dtype=_convert_space_dtype_to_torch_dtype(space),
+                device=device,
+            )
+        else:
+            log_error(f"Space type {type(space)} is not supported yet.")
+
+    rollout_buffer = TensorDict(
+        {
+            "obs": _init_buffer_from_space(obs_space, num_envs),
+            "actions": _init_buffer_from_space(action_space, num_envs),
+            "rewards": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.float32, device=device
+            ),
+        },
+        batch_size=[num_envs],
+        device=device,
+    )
+    return rollout_buffer

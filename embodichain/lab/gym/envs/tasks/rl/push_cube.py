@@ -60,8 +60,7 @@ class PushCubeEnv(RLEnv):
         return is_success, is_fail, metrics
 
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        is_timeout = self._elapsed_steps >= self.episode_length
         cube = self.sim.get_rigid_object("cube")
         cube_pos = cube.get_local_pose(to_matrix=True)[:, :3, 3]
         is_fallen = cube_pos[:, 2] < -0.1
-        return is_timeout | is_fallen
+        return is_fallen

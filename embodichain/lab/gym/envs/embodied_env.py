@@ -22,6 +22,7 @@ import gymnasium as gym
 
 from dataclasses import MISSING
 from typing import Dict, Union, Sequence, Tuple, Any, List, Optional
+from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -47,6 +48,9 @@ from embodichain.lab.gym.envs.managers import (
     DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.lab.gym.utils.gym_utils import (
+    init_rollout_buffer_from_obs_action_space,
+)
 from embodichain.utils import configclass, logger
 
 
@@ -111,7 +115,6 @@ class EmbodiedEnvCfg(EnvCfg):
     
     This field can be used to pass additional parameters that are specific to certain environments
     or tasks without modifying the base configuration class. For example:
-    - episode_length: Maximum episode length
     - action_scale: Action scaling factor
     - action_type: Action type (e.g., "delta_qpos", "qpos", "qvel")
     - vr_joint_mapping: VR joint mapping for teleoperation
@@ -130,6 +133,12 @@ class EmbodiedEnvCfg(EnvCfg):
     
     This is useful when we want to disable dataset saving for debug motion and physics issues.
     If no dataset manager is configured, this flag will have no effect.
+    """
+
+    init_rollout_buffer: bool = False
+    """Whether to initialize the rollout buffer in the environment.
+
+    If filter_dataset_saving is False and a dataset manager is configured, the rollout buffer will be initialized by default
     """
 
 
@@ -180,16 +189,31 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.dataset and not self.cfg.filter_dataset_saving:
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
+            self.cfg.init_rollout_buffer = True
 
-        self.episode_obs_buffer: Dict[int, List[EnvObs]] = {
-            i: [] for i in range(self.num_envs)
-        }
-        self.episode_action_buffer: Dict[int, List[EnvAction]] = {
-            i: [] for i in range(self.num_envs)
-        }
-        self.episode_success_status: Dict[int, bool] = {
-            i: False for i in range(self.num_envs)
-        }
+        # Rollout buffer for episode data collection.
+        # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
+        # The default key in the buffer are:
+        # - obs: the observation returned by the environment.
+        # - action: the action applied to the environment.
+        # - reward: the reward returned by the environment.
+        # TODO: we may add more keys and make the buffer extensible in the future.
+        # This buffer should also be support initialized from outside of the environment.
+        # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
+        self.rollout_buffer: TensorDict | None = None
+        if self.cfg.init_rollout_buffer:
+            self.rollout_buffer = init_rollout_buffer_from_obs_action_space(
+                obs_space=self.observation_space,
+                action_space=self.action_space,
+                max_episode_steps=self.max_episode_steps,
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+        self._current_rollout_step = 0
+
+        self.episode_success_status: torch.Tensor = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -321,18 +345,25 @@ class EmbodiedEnv(BaseEnv):
         info: Dict,
         **kwargs,
     ):
-        # Extract and append data for each environment
-        for env_id in range(self.num_envs):
-            single_obs = self._extract_single_env_data(obs, env_id)
-            single_action = self._extract_single_env_data(action, env_id)
-            self.episode_obs_buffer[env_id].append(single_obs)
-            self.episode_action_buffer[env_id].append(single_action)
+        if self._current_rollout_step >= self.max_episode_steps:
+            logger.log_warning(
+                f"Current rollout step {self._current_rollout_step} exceeds max episode steps {self.max_episode_steps}. \
+                    The rollout buffer will not be updated with new data to avoid overflow."
+            )
+        else:
+            # Extract data into episode buffer.
+            self.rollout_buffer["obs"][:, self._current_rollout_step, ...].copy_(
+                obs, non_blocking=True
+            )
+            self.rollout_buffer["action"][:, self._current_rollout_step, ...].copy_(
+                action, non_blocking=True
+            )
+            self._current_rollout_step += 1
 
-            # Update success status if episode is done
-            if dones[env_id].item():
-                if "success" in info:
-                    success_value = info["success"]
-                    self.episode_success_status[env_id] = success_value[env_id].item()
+        # Update success status for all environments where episode is done
+        if "success" in info:
+            # info["success"] should be a tensor or array of shape (num_envs,)
+            self.episode_success_status[dones] = info["success"][dones]
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:

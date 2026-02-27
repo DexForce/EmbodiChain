@@ -1,6 +1,7 @@
 { 
     "id": "CartPoleRL",
     "max_episodes": 5,
+    "max_episode_steps": 500,
     "env": {
         "events": {},
         "observations": {
@@ -26,7 +27,6 @@
         },
         "extensions": {
             "action_type": "delta_qpos",
-            "episode_length": 500,
             "action_scale": 0.1,
             "success_threshold": 0.1
         }

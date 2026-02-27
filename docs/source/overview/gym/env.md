@@ -44,6 +44,9 @@ Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it incl
 * **ignore_terminations** (bool): 
   Whether to ignore terminations when deciding when to auto reset. Terminations can be caused by the task reaching a success or fail state as defined in a task's evaluation function. If set to ``False``, episodes will stop early when termination conditions are met. If set to ``True``, episodes will only stop due to the timelimit, which is useful for modeling tasks as infinite horizon. Defaults to ``False``.
 
+* **max_episode_steps** (int | None): 
+  Maximum number of steps per episode. If set to ``-1``, episodes will not have a step limit and will only end due to success/failure conditions. Defaults to ``-1``.
+
 ### EmbodiedEnvCfg Parameters
 
 The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional parameters:
@@ -82,7 +85,7 @@ The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional paramet
   Dataset collection settings. Defaults to None, in which case no dataset collection is performed. Please refer to the {class}`~envs.managers.DatasetManager` class for more details.
 
 * **extensions** (Union[Dict[str, Any], None]): 
-  Task-specific extension parameters that are automatically bound to the environment instance. This allows passing custom parameters (e.g., ``episode_length``, ``action_type``, ``action_scale``) without modifying the base configuration class. These parameters are accessible as instance attributes after environment initialization. For example, if ``extensions = {"episode_length": 500}``, you can access it via ``self.episode_length``. Defaults to None.
+  Task-specific extension parameters that are automatically bound to the environment instance. This allows passing custom parameters (e.g., ``action_type``, ``action_scale``) without modifying the base configuration class. These parameters are accessible as instance attributes after environment initialization. Defaults to None.
 
 * **filter_visual_rand** (bool): 
   Whether to filter out visual randomization functors. Useful for debugging motion and physics issues when visual randomization interferes with the debugging process. Defaults to ``False``.
@@ -112,7 +115,6 @@ class MyTaskEnvCfg(EmbodiedEnvCfg):
 
     # 4. Task Extensions
     extensions = {       # Task-specific parameters
-        "episode_length": 500,
         "action_type": "delta_qpos",
         "action_scale": 0.1,
     }
@@ -187,7 +189,6 @@ RL environments use the ``extensions`` field to pass task-specific parameters:
 extensions = {
     "action_type": "delta_qpos",      # Action type: delta_qpos, qpos, qvel, qf, eef_pose
     "action_scale": 0.1,              # Scaling factor applied to all actions
-    "episode_length": 100,            # Maximum episode length
     "success_threshold": 0.1,         # Task-specific success threshold (optional)
 }
 ```
@@ -219,13 +220,6 @@ class MyRLTaskEnv(RLEnv):
         metrics = {"distance": ..., "angle_error": ...}
         
         return is_success, is_fail, metrics
-
-    def check_truncated(self, obs, info):
-        # Optional: Override to add custom truncation conditions
-        # Default: episode_length timeout
-        is_timeout = super().check_truncated(obs, info)
-        is_fallen = ...  # Custom condition (e.g., robot fell)
-        return is_timeout | is_fallen
 ```
 
 Configure rewards through the {class}`~envs.managers.RewardManager` in your environment config rather than overriding ``get_reward``.

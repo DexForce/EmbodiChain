@@ -72,7 +72,6 @@ class CartPoleEnv(RLEnv):
         return is_success, is_fail, metrics
 
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        is_timeout = self._elapsed_steps >= self.episode_length
         pole_qpos = self.robot.get_qpos(name="hand").reshape(-1)
         is_fallen = torch.abs(pole_qpos) > torch.pi * 0.5
-        return is_timeout | is_fallen
+        return is_fallen
