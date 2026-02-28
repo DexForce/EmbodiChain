@@ -242,9 +242,9 @@ class Robot(Articulation):
         """
 
         return TensorDict(
-            qpos=self.body_data.qpos[:, self.active_joint_ids],
-            qvel=self.body_data.qvel[:, self.active_joint_ids],
-            qf=self.body_data.qf[:, self.active_joint_ids],
+            qpos=self.body_data.qpos,
+            qvel=self.body_data.qvel,
+            qf=self.body_data.qf,
             batch_size=[self.num_instances],
             device=self.device,
         )

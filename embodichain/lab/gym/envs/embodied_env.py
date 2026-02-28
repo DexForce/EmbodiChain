@@ -72,6 +72,11 @@ class EmbodiedEnvCfg(EnvCfg):
 
     robot: RobotCfg = MISSING
 
+    control_parts: list[str] | None = None
+    """List of robot parts to control. If None, all controllable joints will be used. 
+    This is useful when we want to control only a subset of the robot joints for certain tasks or demonstrations.
+    """
+
     sensor: List[SensorCfg] = []
 
     light: EnvLightCfg = EnvLightCfg()
@@ -476,10 +481,26 @@ class EmbodiedEnv(BaseEnv):
         # Initialize the robot based on the configuration.
         robot: Robot = self.sim.add_robot(self.cfg.robot)
 
+        # Setup active joints for robot to control.
+        if self.cfg.control_parts:
+            # Check env control parts are valid
+            for part_name in self.cfg.control_parts:
+                if part_name not in robot.control_parts:
+                    logger.log_error(
+                        f"Invalid control part: {part_name}. The supported control parts are: {robot.control_parts}"
+                    )
+
+            for part_name in self.cfg.control_parts:
+                self.active_joint_ids.extend(
+                    robot.get_joint_ids(name=part_name, remove_mimic=True)
+                )
+        else:
+            self.active_joint_ids = self.robot.active_joint_ids
+
         robot.build_pk_serial_chain()
 
         qpos_limits = (
-            robot.body_data.qpos_limits[0, robot.active_joint_ids].cpu().numpy()
+            robot.body_data.qpos_limits[0, self.active_joint_ids].cpu().numpy()
         )
         self.single_action_space = gym.spaces.Box(
             low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32

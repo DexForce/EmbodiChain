@@ -87,9 +87,10 @@ class BaseEnv(gym.Env):
     # The simulator manager instance.
     sim: SimulationManager = None
 
-    # TODO: May be support multiple robots in the future.
     # The robot agent instance.
     robot: Robot = None
+
+    active_joint_ids: List[int] = []
 
     # The sensors used in the environment.
     sensors: Dict[str, BaseSensor] = {}
@@ -254,6 +255,9 @@ class BaseEnv(gym.Env):
         )
 
         self.robot = self._setup_robot(**kwargs)
+        if len(self.active_joint_ids) == 0:
+            self.active_joint_ids = self.robot.active_joint_ids
+
         if self.robot is None:
             logger.log_error(
                 f"The robot instance must be initialized in :meth:`_setup_robot` function."
@@ -403,7 +407,7 @@ class BaseEnv(gym.Env):
         """
 
         obs = TensorDict(
-            dict(robot=self.robot.get_proprioception()),
+            dict(robot=self.robot.get_proprioception()[:, self.active_joint_ids]),
             batch_size=[self.num_envs],
             device=self.device,
         )

@@ -475,6 +475,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
             cfg = ArticulationCfg.from_dict(obj_dict)
             env_cfg.articulation.append(cfg)
 
+    env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
