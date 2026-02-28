@@ -245,7 +245,7 @@ class Robot(Articulation):
             qpos=self.body_data.qpos[:, self.active_joint_ids],
             qvel=self.body_data.qvel[:, self.active_joint_ids],
             qf=self.body_data.qf[:, self.active_joint_ids],
-            batch_size=[self.num_envs],
+            batch_size=[self.num_instances],
             device=self.device,
         )
 

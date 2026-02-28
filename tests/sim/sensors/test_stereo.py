@@ -52,9 +52,6 @@ class StereoCameraTest:
         # Get data from the camera
         data = self.camera.get_data()
 
-        # Check if data is a dictionary
-        assert isinstance(data, dict), "Camera data should be a dictionary"
-
         # Check if all expected keys are present
         for key in self.camera.SUPPORTED_DATA_TYPES:
             assert key in data, f"Missing key in camera data: {key}"

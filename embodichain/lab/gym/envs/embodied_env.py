@@ -211,7 +211,8 @@ class EmbodiedEnv(BaseEnv):
                 device=self.device,
             )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
-        self._current_rollout_step = 0
+
+        self.current_rollout_step = 0
 
         self.episode_success_status: torch.Tensor = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -323,25 +324,25 @@ class EmbodiedEnv(BaseEnv):
         info: Dict,
         **kwargs,
     ):
-        if self.rollout_buffer:
-            if self._current_rollout_step < self._max_rollout_steps:
+        if self.rollout_buffer is not None:
+            if self.current_rollout_step < self._max_rollout_steps:
                 # Extract data into episode buffer.
-                self.rollout_buffer["obs"][:, self._current_rollout_step, ...].copy_(
-                    TensorDict(obs), non_blocking=True
+                self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
+                    obs, non_blocking=True
                 )
                 action_set = (
                     action if isinstance(action, torch.Tensor) else TensorDict(action)
                 )
-                self.rollout_buffer["action"][:, self._current_rollout_step, ...].copy_(
+                self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
                     action_set, non_blocking=True
                 )
-                self.rollout_buffer["reward"][:, self._current_rollout_step].copy_(
+                self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
                     rewards, non_blocking=True
                 )
-                self._current_rollout_step += 1
+                self.current_rollout_step += 1
             else:
                 logger.log_warning(
-                    f"Current rollout step {self._current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
+                    f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
                         Data will not be recorded in the rollout buffer."
                 )
 
@@ -408,7 +409,10 @@ class EmbodiedEnv(BaseEnv):
                     )
 
         # Clear episode buffers and reset success status for environments being reset
-        self.rollout_buffer[env_ids_to_process].zero_()
+        if self.rollout_buffer is not None:
+            self.rollout_buffer[env_ids_to_process].zero_()
+            self.current_rollout_step = 0
+
         self.episode_success_status[env_ids_to_process] = False
 
         # apply events such as randomization for environments that need a reset
@@ -436,16 +440,22 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             The action return.
         """
-        if isinstance(action, dict):
+        if isinstance(action, TensorDict):
             # Support multiple control modes simultaneously
             if "qpos" in action:
-                self.robot.set_qpos(qpos=action["qpos"])
+                self.robot.set_qpos(
+                    qpos=action["qpos"], joint_ids=self.robot.active_joint_ids
+                )
             if "qvel" in action:
-                self.robot.set_qvel(qvel=action["qvel"])
+                self.robot.set_qvel(
+                    qvel=action["qvel"], joint_ids=self.robot.active_joint_ids
+                )
             if "qf" in action:
-                self.robot.set_qf(qf=action["qf"])
+                self.robot.set_qf(
+                    qf=action["qf"], joint_ids=self.robot.active_joint_ids
+                )
         elif isinstance(action, torch.Tensor):
-            self.robot.set_qpos(qpos=action)
+            self.robot.set_qpos(qpos=action, joint_ids=self.robot.active_joint_ids)
         else:
             logger.log_error(f"Unsupported action type: {type(action)}")
 

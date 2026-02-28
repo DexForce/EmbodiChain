@@ -152,8 +152,12 @@ class LeRobotRecorder(Functor):
         # Process each environment
         for env_id in env_ids.cpu().tolist():
             # Get buffer for this environment (already contains single-env data)
-            obs_list = self._env.episode_obs_buffer[env_id]
-            action_list = self._env.episode_action_buffer[env_id]
+            obs_list = self._env.rollout_buffer["obs"][
+                env_id, self._env.current_rollout_step
+            ]
+            action_list = self._env.rollout_buffer["actions"][
+                env_id, self._env.current_rollout_step
+            ]
 
             if len(obs_list) == 0:
                 logger.log_warning(f"No episode data to save for env {env_id}")

@@ -202,12 +202,7 @@ class BaseEnv(gym.Env):
 
     @cached_property
     def action_space(self) -> gym.spaces.Space:
-        if self.num_envs == 1:
-            return self.single_action_space
-        else:
-            return gym.vector.utils.batch_space(
-                self.single_action_space, n=self.num_envs
-            )
+        return gym.vector.utils.batch_space(self.single_action_space, n=self.num_envs)
 
     @property
     def elapsed_steps(self) -> Union[int, torch.Tensor]:
@@ -414,7 +409,7 @@ class BaseEnv(gym.Env):
         )
 
         sensor_obs = self._get_sensor_obs(**kwargs)
-        if sensor_obs:
+        if len(sensor_obs.keys()) > 0:
             obs["sensor"] = sensor_obs
 
         obs = self._extend_obs(obs=obs, **kwargs)

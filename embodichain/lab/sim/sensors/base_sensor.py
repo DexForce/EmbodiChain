@@ -163,7 +163,7 @@ class BaseSensor(BatchEntity):
         """
         logger.log_error("Not implemented yet.")
 
-    def get_data(self, copy: bool = True) -> TensorDict[str, torch.Tensor]:
+    def get_data(self) -> TensorDict:
         """Retrieve data from the sensor.
 
         Args:

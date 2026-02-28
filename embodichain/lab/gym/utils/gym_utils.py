@@ -62,7 +62,7 @@ def convert_observation_to_space(
     """Convert observation to OpenAI gym observation space (recursively).
     Modified from `gym.envs.mujoco_env`
     """
-    if isinstance(observation, (dict)):
+    if isinstance(observation, (dict, TensorDict)):
         # CATUION: Explicitly create a list of key-value tuples
         # Otherwise, spaces.Dict will sort keys if a dict is provided
         space = spaces.Dict(
@@ -894,7 +894,7 @@ def init_rollout_buffer_from_obs_action_space(
                 (num_envs, max_episode_steps), dtype=torch.float32, device=device
             ),
         },
-        batch_size=[num_envs],
+        batch_size=[num_envs, max_episode_steps],
         device=device,
     )
     return rollout_buffer
