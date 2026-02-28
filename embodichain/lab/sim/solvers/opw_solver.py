@@ -121,10 +121,9 @@ class OPWSolver(BaseSolver):
 
         """
         super().__init__(cfg=cfg, device=device, **kwargs)
-        if self.device.type == "cpu":
-            self._init_py_opw_kinematics_solver(cfg, **kwargs)
-        else:
-            self._init_warp_solver(cfg, **kwargs)
+        # if self.device.type == "cpu":
+        #     self._init_py_opw_kinematics_solver(cfg, **kwargs)
+        self._init_warp_solver(cfg, **kwargs)
         self.set_tcp(np.eye(4))
 
     def _init_py_opw_kinematics_solver(self, cfg: OPWSolverCfg, **kwargs) -> None:
@@ -154,12 +153,11 @@ class OPWSolver(BaseSolver):
 
     def set_tcp(self, xpos: np.ndarray):
         super().set_tcp(xpos)
-        if self.device.type != "cpu":
-            self._tcp_warp = wp.mat44f(self.tcp_xpos)
-            tcp_inv = np.eye(4, dtype=float)
-            tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
-            tcp_inv[:3, 3] = -tcp_inv[:3, :3].T @ self.tcp_xpos[:3, 3]
-            self._tcp_inv_warp = wp.mat44f(tcp_inv)
+        self._tcp_warp = wp.mat44f(self.tcp_xpos)
+        tcp_inv = np.eye(4, dtype=float)
+        tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
+        tcp_inv[:3, 3] = -tcp_inv[:3, :3].T @ self.tcp_xpos[:3, 3]
+        self._tcp_inv_warp = wp.mat44f(tcp_inv)
 
     def _init_warp_solver(self, cfg: OPWSolverCfg, **kwargs):
         self.params = OPWparam()
@@ -254,15 +252,13 @@ class OPWSolver(BaseSolver):
             Tuple[torch.Tensor, torch.Tensor]:
                 - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, num_joints).
                 - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).
-        """
-        if self.device.type == "cpu":
-            return self.get_ik_py_opw(
-                target_xpos, qpos_seed, return_all_solutions, **kwargs
-            )
-        else:
-            return self.get_ik_warp(
-                target_xpos, qpos_seed, return_all_solutions, **kwargs
-            )
+        #"""
+        # if self.device.type == "cpu":
+        #     return self.get_ik_py_opw(
+        #         target_xpos, qpos_seed, return_all_solutions, **kwargs
+        #     )
+        # else:
+        return self.get_ik_warp(target_xpos, qpos_seed, return_all_solutions, **kwargs)
 
     def get_ik_warp(
         self,
@@ -318,6 +314,9 @@ class OPWSolver(BaseSolver):
             device=standardize_device_string(self.device),
         )
 
+        all_qpos = wp.to_torch(all_qpos_wp).reshape(n_sample, N_SOL, DOF)
+        all_ik_valid = wp.to_torch(all_ik_valid_wp).reshape(n_sample, N_SOL)
+
         if return_all_solutions:
             all_qpos = wp.to_torch(all_qpos_wp).reshape(n_sample, N_SOL, DOF)
             all_ik_valid = wp.to_torch(all_ik_valid_wp).reshape(n_sample, N_SOL)
@@ -331,7 +330,7 @@ class OPWSolver(BaseSolver):
                 dtype=float,
                 device=standardize_device_string(self.device),
             )
-        joint_weight = kwargs.get("joint_weight", torch.zeros(size=(DOF,), dtype=float))
+        joint_weight = kwargs.get("joint_weight", torch.ones(size=(DOF,), dtype=float))
         joint_weight_wp = wp_vec6f(
             joint_weight[0],
             joint_weight[1],
@@ -346,6 +345,7 @@ class OPWSolver(BaseSolver):
         best_ik_valid_wp = wp.zeros(
             n_sample, dtype=int, device=standardize_device_string(self.device)
         )
+        qpos_seed = wp.to_torch(qpos_seed_wp)
         wp.launch(
             kernel=opw_best_ik_kernel,
             dim=(n_sample),

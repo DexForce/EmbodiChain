@@ -25,8 +25,9 @@ wp_vec6f = wp.types.vector(length=6, dtype=float)
 
 @wp.func
 def normalize_to_pi(angle: float) -> float:
-    angle = (angle + wp.pi) % (2.0 * wp.pi) - wp.pi
-    return angle
+    # TODO: Cannot work in warp.
+    # return (angle + wp.pi) % (2.0 * wp.pi) - wp.pi
+    return wp.atan2(wp.sin(angle), wp.cos(angle))
 
 
 @wp.func
@@ -435,6 +436,8 @@ def opw_ik_kernel(
             qpos[qpos_start + k] = normalize_to_pi(
                 (theta[idx] + offsets[k]) * sign_corrections[k]
             )
+            # qpos[qpos_start + k] = (theta[idx] + offsets[k]) * sign_corrections[k]
+            # qpos[qpos_start + k] = 0.0
 
         # filter invalid solutions
         check_ee_pose = opw_single_fk(
