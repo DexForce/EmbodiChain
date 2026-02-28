@@ -436,8 +436,6 @@ def opw_ik_kernel(
             qpos[qpos_start + k] = normalize_to_pi(
                 (theta[idx] + offsets[k]) * sign_corrections[k]
             )
-            # qpos[qpos_start + k] = (theta[idx] + offsets[k]) * sign_corrections[k]
-            # qpos[qpos_start + k] = 0.0
 
         # filter invalid solutions
         check_ee_pose = opw_single_fk(
