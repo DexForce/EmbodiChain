@@ -34,7 +34,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
     ArticulationCfg,
 )
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance_warp
+from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
@@ -374,7 +374,7 @@ def create_trajectory(
     )
     all_trajectory = torch.cat([arm_trajectory, hand_trajectory], dim=-1)
     # trajetory with shape [n_envs, n_waypoint, dof]
-    interp_trajectory = interpolate_with_distance_warp(
+    interp_trajectory = interpolate_with_distance(
         trajectory=all_trajectory, interp_num=150, device=sim.device
     )
     return interp_trajectory

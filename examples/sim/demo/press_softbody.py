@@ -28,7 +28,7 @@ from dexsim.utility.path import get_resources_data_path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, SoftObject
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance_warp
+from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
@@ -181,7 +181,7 @@ def press_cow(sim: SimulationManager, robot: Robot):
     )
 
     arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos])
-    interp_trajectory = interpolate_with_distance_warp(
+    interp_trajectory = interpolate_with_distance(
         trajectory=arm_trajectory[None, :, :], interp_num=50, device=sim.device
     )
     interp_trajectory = interp_trajectory[0]
