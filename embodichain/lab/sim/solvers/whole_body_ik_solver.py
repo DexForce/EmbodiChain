@@ -13,32 +13,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""WholeBodyIKSolver — 全身IK求解器（纯 Pinocchio，无 CasADi 依赖）。
+"""WholeBodyIKSolver — 全身IK求解器。
 
-算法：带零空间次级任务的阻尼最小二乘（DLS）迭代 IK。
+继承自 :class:`~embodichain.lab.sim.solvers.PinocchioSolver`，完全重写
+``__init__``、``get_ik``、``get_fk``，在与项目其他 solver 保持相同配置接口
+（``end_link_name`` + ``tcp`` + ``root_link_name``）的基础上，额外支持：
 
-- **主任务**：末端执行器位置 + 姿态跟踪（6D 误差，加权）
-- **次级任务**（零空间投影）：关节正则化 + 平滑 + 腿部稳定性约束
-- **关节限位**：每步积分后直接 clip（硬约束）
+- **全身冗余模型**：``pin.buildReducedRobot`` 保留所有活动关节（单侧手臂 + 躯干）
+- **零空间次级任务**：正则化、平滑、腿部稳定性约束，防止冗余自由度随机漂移
 
-仅依赖 ``pinocchio``（pip install pin 即可），无需 pinocchio-casadi / CasADi / IPOPT。
+配置接口与 :class:`PinocchioSolver` 完全一致::
 
-用法示例::
-
-    cfg = WholeBodyIKSolverCfg(
-        urdf_path="/path/to/robot.urdf",
-        urdf_dir="/path/to/meshes",
-        joint_names=["LEFT_J1", ..., "RIGHT_J7", "WAIST", ...],
-        end_effectors={
-            "left":  EndEffectorCfg(parent_joint="LEFT_J7",  ...),
-            "right": EndEffectorCfg(parent_joint="RIGHT_J7", ...),
-            "head":  EndEffectorCfg(parent_joint="NECK2",    ...),
-        },
-        active_ee="left",
+    WholeBodyIKSolverCfg(
+        end_link_name="left_ee",        # URDF 已有的末端 link，与其他 solver 相同
+        root_link_name="base_link",     # 根坐标系，用于 robot.compute_ik 中的坐标变换
+        tcp=left_arm_tcp,               # 4×4 工具中心点矩阵，与其他 solver 相同
+        joint_names=None,               # 由 robot.init_solver 从 control_parts 自动填充
+        ...
     )
-    solver = cfg.init_solver()
 
-    success, q = solver.get_ik(target_pose_4x4, qpos_seed=current_q, active_ee="right")
+推荐通过 :meth:`DexforceW1Cfg._build_default_whole_body_solver_cfg` 使用::
+
+    robot.compute_ik(pose, name="left_arm_body")   # 左臂全身IK
+    robot.compute_ik(pose, name="right_arm_body")  # 右臂全身IK
+
+算法（每次迭代）：
+
+1. ``pin.framesForwardKinematics(q)`` → 当前末端位姿
+2. 应用 TCP 逆变换将目标转换到 end_link 坐标：``target_ee = target @ inv(tcp)``
+3. ``pin.log6(oMf.actInv(target_ee))`` → 6D 误差（LOCAL 帧，数值稳定）
+4. ``pin.computeFrameJacobian(q, fid, LOCAL)`` → 6×nq 雅可比
+5. DLS 伪逆 ``J^T (JJ^T + λI)^{-1}`` → 主任务增量
+6. 零空间 ``(I - J^† J) * (−∇E_sec)`` → 次级任务增量
+7. ``pin.integrate`` + clip 关节限位
 """
 
 import os
@@ -49,36 +56,12 @@ import numpy as np
 import torch
 
 from embodichain.utils import configclass, logger
-from embodichain.lab.sim.solvers.base_solver import BaseSolver, SolverCfg
+from embodichain.lab.sim.solvers.base_solver import BaseSolver
+from embodichain.lab.sim.solvers.pinocchio_solver import (
+    PinocchioSolver,
+    PinocchioSolverCfg,
+)
 from embodichain.lab.sim.utility.import_utils import lazy_import_pinocchio
-
-
-# ---------------------------------------------------------------------------
-# 末端执行器帧配置
-# ---------------------------------------------------------------------------
-
-
-@configclass
-class EndEffectorCfg:
-    """单个末端执行器帧的配置。
-
-    Attributes:
-        frame_name:   注册到 Pinocchio 模型中的帧名称，调用时也用此名称索引。
-        parent_joint: 该帧挂载的父关节名（必须存在于 reduced model 中）。
-        rotation:     父关节坐标系到末端帧的旋转矩阵（3×3，行主序嵌套列表）。
-        translation:  父关节坐标系到末端帧的平移向量 [x, y, z]（米）。
-        w_pos:        位置误差权重（越大位置跟踪越精确）。
-        w_rot:        姿态误差权重。
-    """
-
-    frame_name: str = ""
-    parent_joint: str = ""
-    rotation: List[List[float]] = field(
-        default_factory=lambda: [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-    )
-    translation: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    w_pos: float = 1.0
-    w_rot: float = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -111,41 +94,48 @@ class LegCostCfg:
 
 
 @configclass
-class WholeBodyIKSolverCfg(SolverCfg):
-    """全身IK求解器配置（纯 Pinocchio，DLS + 零空间投影）。
+class WholeBodyIKSolverCfg(PinocchioSolverCfg):
+    """全身IK求解器配置（继承自 :class:`PinocchioSolverCfg`）。
+
+    配置接口与 :class:`PinocchioSolverCfg` 完全对齐：
+    通过 ``end_link_name``（URDF 已有 link）、``tcp``（工具偏移矩阵）、
+    ``root_link_name`` 定义末端执行器，无需额外的 ``EndEffectorCfg``。
+
+    ``joint_names`` 的语义与 :class:`PinocchioSolverCfg` 不同：
+    这里表示"需要保持活动（未锁定）的关节集合"，而非串联运动链路径。
+    推荐将其设为 ``None`` 并通过 ``robot.init_solver`` 从 ``control_parts`` 自动填充。
 
     Attributes:
-        joint_names:        保留为活动关节的关节名列表（其余关节将被锁定为 0）。
-        urdf_dir:           URDF 网格文件搜索目录。None 时自动取 urdf_path 所在目录。
-        end_effectors:      末端执行器字典，键为自定义名称，值为 :class:`EndEffectorCfg`。
-        active_ee:          默认激活的末端执行器名称。
-        max_iterations:     每次 IK 调用的最大迭代步数。
-        dt:                 积分步长（越小越稳，越大收敛越快）。
-        damp:               DLS 阻尼系数（防止奇异）。
-        pos_eps:            位置收敛阈值（米）。
-        rot_eps:            姿态收敛阈值（弧度）。
-        w_regularization:   次级任务：关节正则化权重。
-        w_smooth:           次级任务：平滑（靠近 q_seed）权重。
-        joint_reg_extra:    对特定关节追加正则化系数，格式 {"joint_name": extra_weight}。
-        leg_costs_mode2:    leg_mode=2 时的稳定性次级代价列表。
-        leg_costs_mode3:    leg_mode=3 时的稳定性次级代价列表。
-        leg_mode:           腿部模式：2=标准站立，3=行走。
+        urdf_dir:          URDF 网格文件搜索目录；None 时依次尝试 mesh_path 或 urdf_path 所在目录。
+        w_pos:             末端位置误差权重（越大位置跟踪越精确）。
+        w_rot:             末端姿态误差权重。
+        max_iterations:    每次 IK 调用的最大迭代步数（默认 200，覆盖父类 1000）。
+        dt:                积分步长（默认 0.5，覆盖父类 0.1）。
+        damp:              DLS 阻尼系数（默认 1e-3，覆盖父类 1e-6）。
+        pos_eps:           位置收敛阈值，米（默认 1e-3，覆盖父类 5e-4）。
+        rot_eps:           姿态收敛阈值，弧度（默认 1e-3，覆盖父类 5e-4）。
+        w_regularization:  次级任务：关节正则化权重。
+        w_smooth:          次级任务：平滑（靠近 q_seed）权重。
+        joint_reg_extra:   对特定关节追加正则化系数，格式 {"joint_name": extra_weight}。
+        leg_costs_mode2:   leg_mode=2 时的稳定性次级代价列表。
+        leg_costs_mode3:   leg_mode=3 时的稳定性次级代价列表。
+        leg_mode:          腿部模式：2=标准站立，3=行走。
     """
 
     class_type: str = "WholeBodyIKSolver"
 
-    urdf_dir: Optional[str] = None
-
-    end_effectors: Optional[Dict[str, EndEffectorCfg]] = None
-
-    active_ee: Optional[str] = None
-
+    # ── 覆盖 PinocchioSolverCfg 的默认值以适配全身IK ────────────────────────
     max_iterations: int = 200
     dt: float = 0.5
     damp: float = 1e-3
-
     pos_eps: float = 1e-3
     rot_eps: float = 1e-3
+
+    # ── 全身IK独有字段 ────────────────────────────────────────────────────────
+    urdf_dir: Optional[str] = None
+
+    w_pos: float = 1.0
+    w_rot: float = 0.1
 
     w_regularization: float = 0.02
     w_smooth: float = 0.1
@@ -157,7 +147,9 @@ class WholeBodyIKSolverCfg(SolverCfg):
     leg_mode: int = 2
 
     def init_solver(self, **kwargs) -> "WholeBodyIKSolver":
-        return WholeBodyIKSolver(cfg=self, **kwargs)
+        solver = WholeBodyIKSolver(cfg=self, **kwargs)
+        solver.set_tcp(self._get_tcp_as_numpy())
+        return solver
 
 
 # ---------------------------------------------------------------------------
@@ -165,32 +157,38 @@ class WholeBodyIKSolverCfg(SolverCfg):
 # ---------------------------------------------------------------------------
 
 
-class WholeBodyIKSolver(BaseSolver):
+class WholeBodyIKSolver(PinocchioSolver):
     """全身IK求解器（DLS 迭代 IK + 零空间次级任务）。
+
+    继承自 :class:`PinocchioSolver`，完全重写 ``__init__``、``get_ik``、``get_fk``。
+    配置接口与 :class:`PinocchioSolver` 完全一致，通过继承的 ``end_link_name``
+    和 ``tcp_xpos`` 处理末端执行器，无额外自定义配置类。
 
     算法步骤（每次迭代）：
 
-    1. **正运动学**：`pin.framesForwardKinematics(q)` 得到当前末端位姿
-    2. **误差计算**：位置误差 + 姿态误差（`pin.log3`），加权成 6D 误差向量
-    3. **雅可比**：`pin.computeFrameJacobian(q, frame_id)` 得到 6×nq 雅可比
-    4. **主任务 dq**：DLS 伪逆 ``J^T (JJ^T + λI)^{-1} e``
-    5. **次级任务**：正则化 + 平滑 + 腿部稳定性的梯度，通过零空间
-       ``(I - J^† J)`` 投影后叠加到 dq
-    6. **积分 & 限位**：``q ← pin.integrate(q, dq * dt)``，然后 clip 到关节限位
+    1. **正运动学**：``pin.framesForwardKinematics(q)`` 得到当前末端位姿
+    2. **TCP 逆变换**：``target_ee = target @ inv(tcp)``，将工具目标换算到 end_link
+    3. **误差计算**：``pin.log6(oMf.actInv(target_ee))``，LOCAL 帧，数值稳定
+    4. **雅可比**：``pin.computeFrameJacobian(q, frame_id, LOCAL)``
+    5. **主任务 dq**：DLS 伪逆 ``J^T (JJ^T + λI)^{-1} e``
+    6. **次级任务**：正则化 + 平滑 + 腿部稳定性的梯度，零空间 ``(I - J^† J)`` 投影
+    7. **积分 & 限位**：``q ← pin.integrate(q, dq * dt)``，然后 clip 到关节限位
     """
 
     def __init__(self, cfg: WholeBodyIKSolverCfg, **kwargs):
-        # 注入哨兵跳过 BaseSolver 中的 pk_serial_chain 构建
+        # 跳过 PinocchioSolver.__init__（串联链专用初始化）。
+        # 直接调用 BaseSolver.__init__ 完成 cfg、device、joint_names 等基础属性设置。
         kwargs["pk_serial_chain"] = "_skip_"
-        super().__init__(cfg=cfg, **kwargs)
+        BaseSolver.__init__(self, cfg=cfg, **kwargs)
         self.pk_serial_chain = None
 
-        self._pin = lazy_import_pinocchio()
-        pin = self._pin
+        # 与 PinocchioSolver 保持一致的属性名
+        self.pin = lazy_import_pinocchio()
+        pin = self.pin
 
-        urdf_dir = cfg.urdf_dir or os.path.dirname(cfg.urdf_path)
+        urdf_dir = cfg.urdf_dir or cfg.mesh_path or os.path.dirname(cfg.urdf_path)
 
-        # ── 1. 加载完整机器人，锁定非活动关节 ────────────────────────────
+        # ── 1. 加载完整机器人，锁定非活动关节 ────────────────────────────────
         full_robot = pin.RobotWrapper.BuildFromURDF(cfg.urdf_path, urdf_dir)
 
         active_set = set(cfg.joint_names or [])
@@ -225,43 +223,41 @@ class WholeBodyIKSolver(BaseSolver):
         # 对外暴露的 joint_names 和限位均以 cfg 顺序为准
         self.joint_names = cfg_order
 
-        # ── 2. 注册末端执行器帧 ───────────────────────────────────────────
-        ee_cfgs: Dict[str, EndEffectorCfg] = cfg.end_effectors or {}
-        for ee_name, ee_cfg in ee_cfgs.items():
-            frame_name = ee_cfg.frame_name or ee_name
-            parent_id = self._reduced.model.getJointId(ee_cfg.parent_joint)
-            if parent_id >= self._reduced.model.njoints:
-                raise ValueError(
-                    f"[WholeBodyIKSolver] parent_joint='{ee_cfg.parent_joint}' "
-                    f"for EE '{ee_name}' not found in reduced model."
-                )
-            rot = np.array(ee_cfg.rotation, dtype=float)
-            trans = np.array(ee_cfg.translation, dtype=float)
-            self._reduced.model.addFrame(
-                pin.Frame(
-                    frame_name,
-                    parent_id,
-                    pin.SE3(rot.T, trans),
-                    pin.FrameType.OP_FRAME,
-                )
+        # ── 2. 查找末端帧 ID（使用 end_link_name，与其他 solver 一致）──────────
+        if cfg.end_link_name is None:
+            raise ValueError(
+                "[WholeBodyIKSolver] end_link_name must be specified in cfg."
             )
-        # 注册后需要重新创建 data
-        self._reduced.data = self._reduced.model.createData()
+        self._ee_frame_id: int = self._reduced.model.getFrameId(cfg.end_link_name)
+        if self._ee_frame_id >= self._reduced.model.nframes:
+            raise ValueError(
+                f"[WholeBodyIKSolver] end_link_name='{cfg.end_link_name}' "
+                "not found in reduced model. Check URDF or joint_names."
+            )
 
-        # ── 3. 缓存末端帧 ID ─────────────────────────────────────────────
-        self._ee_frame_ids: Dict[str, int] = {}
-        self._ee_cfgs: Dict[str, EndEffectorCfg] = {}
-        for ee_name, ee_cfg in ee_cfgs.items():
-            frame_name = ee_cfg.frame_name or ee_name
-            self._ee_frame_ids[ee_name] = self._reduced.model.getFrameId(frame_name)
-            self._ee_cfgs[ee_name] = ee_cfg
+        # ── 3. root_base_xpos：从 Pinocchio universe 到 root_link_name 的偏移 ──
+        # 与 PinocchioSolver 逻辑一致：get_ik 收到的目标在 root_link_name 坐标系下，
+        # 需要再乘以此矩阵才能得到 Pinocchio FK 使用的 universe 坐标系下的目标。
+        # 当 root_link_name 是机器人的根节点（如 "base_link"）时，该矩阵为单位阵。
+        self._root_base_xpos = np.eye(4)
+        if cfg.root_link_name is not None:
+            fid_root = self._reduced.model.getFrameId(cfg.root_link_name)
+            if fid_root < self._reduced.model.nframes:
+                placement = self._reduced.model.frames[fid_root].placement
+                self._root_base_xpos[:3, :3] = placement.rotation
+                self._root_base_xpos[:3, 3] = placement.translation
+            else:
+                logger.log_warning(
+                    f"[WholeBodyIKSolver] root_link_name='{cfg.root_link_name}' "
+                    "not found in reduced model; using identity for root_base_xpos."
+                )
 
-        # ── 4. 关节名 → pinocchio 内部 q 索引映射（内部计算始终用 pin 顺序）
+        # ── 4. 关节名 → pinocchio 内部 q 索引映射 ──────────────────────────
         self._joint_name_to_q_idx: Dict[str, int] = {}
         for i in range(1, self._reduced.model.njoints):
             self._joint_name_to_q_idx[self._reduced.model.names[i]] = i - 1
 
-        # ── 5. 正则化权重向量 ─────────────────────────────────────────────
+        # ── 5. 正则化权重向量 ─────────────────────────────────────────────────
         self._reg_weights = np.ones(self.dof)
         if cfg.joint_reg_extra:
             for jname, w in cfg.joint_reg_extra.items():
@@ -274,7 +270,7 @@ class WholeBodyIKSolver(BaseSolver):
                         "not found in reduced model, skipped."
                     )
 
-        # ── 6. 预编译腿部次级代价梯度函数 ────────────────────────────────
+        # ── 6. 预编译腿部次级代价梯度函数 ─────────────────────────────────────
         leg_cfgs = (
             cfg.leg_costs_mode3 if int(cfg.leg_mode) == 3 else cfg.leg_costs_mode2
         ) or []
@@ -305,7 +301,7 @@ class WholeBodyIKSolver(BaseSolver):
                     (np.array(indices, dtype=int), np.array(coeffs), float(lc.weight))
                 )
 
-        # 关节限位以 cfg 顺序对外暴露
+        # 关节限位以 cfg 顺序对外暴露（与 PinocchioSolver 的属性名一致）
         self.lower_position_limits = self._reduced.model.lowerPositionLimit[
             self._pin_to_cfg
         ]
@@ -313,15 +309,10 @@ class WholeBodyIKSolver(BaseSolver):
             self._pin_to_cfg
         ]
 
-        self._active_ee: Optional[str] = cfg.active_ee
         self._last_q = np.zeros(self.dof)
 
         #: 上一次 get_ik 调用后的诊断信息，可用于判断解的质量。
-        #: 字段说明：
-        #:   success     (bool)  — 迭代是否在阈值内收敛
-        #:   iterations  (int)   — 实际迭代步数
-        #:   pos_err     (float) — 收敛时的位置误差（米）
-        #:   rot_err     (float) — 收敛时的旋转误差（弧度）
+        #: 字段：success(bool), iterations(int), pos_err(float,m), rot_err(float,rad)
         self.last_solve_info: dict = {
             "success": False,
             "iterations": 0,
@@ -334,179 +325,103 @@ class WholeBodyIKSolver(BaseSolver):
     # -----------------------------------------------------------------------
 
     def _secondary_gradient(self, q: np.ndarray, q_seed: np.ndarray) -> np.ndarray:
-        """计算次级目标（正则化 + 平滑 + 腿部稳定性）的关节空间梯度。
-
-        次级代价：
-            E_sec = w_reg  * Σ reg_w[i] * q[i]²
-                  + w_smo  * ||q - q_seed||²
-                  + Σ_k  weight_k * (Σ_j coeff_j * q[idx_j])²
-
-        对 q 的梯度（乘以 2）：
-            g_reg[i]  = 2 * w_reg  * reg_w[i] * q[i]
-            g_smo[i]  = 2 * w_smo  * (q[i] - q_seed[i])
-            g_leg_k   = 2 * weight_k * val_k * coeff_j  （在各参与关节处）
-        """
+        """计算次级目标（正则化 + 平滑 + 腿部稳定性）的关节空间梯度。"""
         cfg: WholeBodyIKSolverCfg = self.cfg
         g = np.zeros(self.dof)
-
-        # 正则化
         g += 2.0 * cfg.w_regularization * self._reg_weights * q
-
-        # 平滑（靠近 q_seed）
         g += 2.0 * cfg.w_smooth * (q - q_seed)
-
-        # 腿部稳定性
         for indices, coeffs, weight in self._leg_cost_terms:
             val = float(np.dot(coeffs, q[indices]))
             g[indices] += 2.0 * weight * val * coeffs
-
         return g
 
     # -----------------------------------------------------------------------
     # 公开 API
     # -----------------------------------------------------------------------
 
-    def describe_chain(self, ee_name: str | None = None) -> str:
-        """返回从根节点到指定末端执行器的完整运动链描述字符串。
-
-        以树状格式打印每一层的关节名称，同时标注该关节是否属于活动关节
-        （参与 IK 求解）或已被锁定（零自由度）。
-
-        Args:
-            ee_name: 末端执行器名称；为 None 时打印所有已注册末端的链路。
+    def describe_chain(self) -> str:
+        """返回从根节点到末端执行器的运动链描述字符串。
 
         Returns:
             格式化后的链路描述字符串，可直接 print。
-
-        Example::
-
-            solver = cfg.init_solver()
-            print(solver.describe_chain("left"))
-            # universe
-            #   └─ ANKLE        [active]
-            #       └─ KNEE     [active]
-            #           └─ BUTTOCK [active]
-            #               └─ WAIST  [active]
-            #                   └─ LEFT_J1 [active]
-            #                       └─ ...
-            #                           └─ LEFT_J7 [active]
-            #                               └─ (EE frame: left)
         """
         model = self._reduced.model
         active_set = set(self.joint_names)
+        cfg: WholeBodyIKSolverCfg = self.cfg
 
-        def _joint_chain(frame_id: int) -> list[str]:
-            """从 frame 所在关节向根回溯，返回 [root→EE] 的关节名列表。"""
-            chain = []
-            jid = model.frames[frame_id].parentJoint
-            while jid > 0:
-                chain.append(model.names[jid])
-                jid = model.parents[jid]
-            chain.reverse()
-            return chain
+        fid = self._ee_frame_id
+        chain = []
+        jid = model.frames[fid].parentJoint
+        while jid > 0:
+            chain.append(model.names[jid])
+            jid = model.parents[jid]
+        chain.reverse()
 
-        targets = [ee_name] if ee_name is not None else list(self._ee_frame_ids.keys())
-        lines = []
-        for name in targets:
-            if name not in self._ee_frame_ids:
-                lines.append(f"[EE '{name}' not found]")
-                continue
-            chain = _joint_chain(self._ee_frame_ids[name])
-            lines.append(
-                f"EE '{name}'  (parent_joint={self._ee_cfgs[name].parent_joint})"
-            )
-            lines.append("  universe (base)")
-            for depth, jname in enumerate(chain):
-                tag = "[active]" if jname in active_set else "[locked]"
-                indent = "  " + "    " * depth + "└─ "
-                lines.append(f"{indent}{jname}  {tag}")
-            ee_cfg = self._ee_cfgs[name]
-            indent = "  " + "    " * len(chain) + "└─ "
-            lines.append(f"{indent}(EE frame offset  t={ee_cfg.translation})")
-            lines.append("")
+        lines = [f"EE '{cfg.end_link_name}'  (root='{cfg.root_link_name}')"]
+        lines.append("  universe (base)")
+        for depth, jname in enumerate(chain):
+            tag = "[active]" if jname in active_set else "[locked]"
+            indent = "  " + "    " * depth + "└─ "
+            lines.append(f"{indent}{jname}  {tag}")
+        indent = "  " + "    " * len(chain) + "└─ "
+        lines.append(f"{indent}(frame: {cfg.end_link_name})")
         return "\n".join(lines)
-
-    def set_active_ee(self, ee_name: str) -> None:
-        """切换默认激活的末端执行器。
-
-        Args:
-            ee_name: 末端执行器名称，必须已在 ``end_effectors`` 中配置。
-        """
-        if ee_name not in self._ee_frame_ids:
-            raise KeyError(
-                f"[WholeBodyIKSolver] EE '{ee_name}' not found. "
-                f"Available: {list(self._ee_frame_ids.keys())}"
-            )
-        self._active_ee = ee_name
 
     def get_ik(
         self,
         target_xpos: "torch.Tensor | np.ndarray",
         qpos_seed: "torch.Tensor | np.ndarray | None" = None,
-        active_ee: "str | None" = None,
+        qvel_seed: "np.ndarray | None" = None,
+        return_all_solutions: bool = False,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """求解全身逆运动学（单末端输入）。
+        """求解全身逆运动学。
 
-        算法：带零空间次级任务的阻尼最小二乘迭代 IK。
+        接口与 :class:`PinocchioSolver` 完全一致，通过继承的 ``end_link_name`` 和
+        ``tcp_xpos`` 定义目标末端，无需额外参数。
 
         Args:
-            target_xpos:  目标末端位姿，``(4, 4)`` 齐次变换矩阵。
-                          也接受 ``(1, 4, 4)`` 批量张量（取第 0 个）。
-            qpos_seed:    当前关节角，作为迭代初始值和平滑基准。
-                          若为 None，使用上次求解结果（或全零）。
-            active_ee:    指定本次求解的末端执行器名称。
-                          若为 None，使用 :attr:`_active_ee` 默认值。
+            target_xpos:          目标工具末端位姿，``(4, 4)`` 齐次变换矩阵（世界/根坐标系）。
+                                  也接受 ``(1, 4, 4)`` 批量张量（取第 0 个）。
+            qpos_seed:            当前关节角，作为迭代初始值和平滑基准（cfg 顺序）。
+                                  若为 None，使用上次求解结果（或全零）。
+            qvel_seed:            预留参数（暂未使用），与 :class:`PinocchioSolver` 签名对齐。
+            return_all_solutions: 预留参数（暂未使用），与 :class:`PinocchioSolver` 签名对齐。
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
                 - ``success`` — shape ``(1,)`` bool 张量，True 表示收敛。
-                - ``joints``  — shape ``(nq,)`` float32 张量，求解后关节角。
+                - ``joints``  — shape ``(nq,)`` float32 张量，求解后关节角（cfg 顺序）。
         """
-        pin = self._pin
+        pin = self.pin
 
-        # ── 确定激活末端 ─────────────────────────────────────────────────
-        ee = active_ee or self._active_ee
-        if ee is None:
-            raise ValueError(
-                "[WholeBodyIKSolver] active_ee not specified and no default set. "
-                "Pass active_ee= or set cfg.active_ee."
-            )
-        if ee not in self._ee_frame_ids:
-            raise KeyError(
-                f"[WholeBodyIKSolver] EE '{ee}' not found. "
-                f"Available: {list(self._ee_frame_ids.keys())}"
-            )
-
-        # ── 处理输入 ─────────────────────────────────────────────────────
+        # ── 处理输入 ──────────────────────────────────────────────────────────
         if isinstance(target_xpos, torch.Tensor):
             target_xpos = target_xpos.detach().cpu().numpy()
         target_xpos = np.asarray(target_xpos, dtype=float)
         if target_xpos.ndim == 3:
             target_xpos = target_xpos[0]
 
+        # root_base_xpos：root_link 坐标系 → Pinocchio universe 坐标系（与 PinocchioSolver 一致）
+        # TCP 逆变换：将工具目标换算到 end_link 坐标
+        compute_xpos = self._root_base_xpos @ target_xpos @ np.linalg.inv(self.tcp_xpos)
+        target_R = compute_xpos[:3, :3]
+        target_t = compute_xpos[:3, 3]
+        target_se3 = pin.SE3(target_R.copy(), target_t.copy())
+
         if qpos_seed is not None:
             if isinstance(qpos_seed, torch.Tensor):
                 qpos_seed = qpos_seed.detach().cpu().numpy()
-            # 输入为 cfg 顺序 → 转换为 pinocchio 内部顺序
             q_seed_cfg = np.asarray(qpos_seed, dtype=float).flatten()
             q_seed = q_seed_cfg[self._cfg_to_pin]
         else:
-            q_seed = self._last_q.copy()  # 内部始终存储 pin 顺序
+            q_seed = self._last_q.copy()
 
         cfg: WholeBodyIKSolverCfg = self.cfg
-        fid = self._ee_frame_ids[ee]
-        ee_cfg = self._ee_cfgs[ee]
+        fid = self._ee_frame_id
+        w_diag = np.array([cfg.w_pos] * 3 + [cfg.w_rot] * 3)
 
-        # 目标 SE3
-        target_R = target_xpos[:3, :3]
-        target_t = target_xpos[:3, 3]
-        target_se3 = pin.SE3(target_R.copy(), target_t.copy())
-
-        # 权重对角（位置 x3，姿态 x3）
-        w_diag = np.array([ee_cfg.w_pos] * 3 + [ee_cfg.w_rot] * 3)
-
-        # ── 迭代 DLS IK（内部全程使用 pinocchio 顺序）────────────────────
+        # ── 迭代 DLS IK（内部全程使用 pinocchio 顺序）───────────────────────
         q = q_seed.copy().astype(float)
         success = False
         _iter = 0
@@ -514,16 +429,12 @@ class WholeBodyIKSolver(BaseSolver):
         _rot_err = float("inf")
 
         for _iter in range(cfg.max_iterations):
-            # FK
             pin.framesForwardKinematics(self._reduced.model, self._reduced.data, q)
             oMf = self._reduced.data.oMf[fid]
 
-            # 6D 误差：log6(oMf^{-1} * target)，在 LOCAL 帧下计算。
-            # 相比 log3(R_cur @ R_tgt^T)，此方式严格与 LOCAL 帧雅可比自洽，
-            # 且对 180° 附近的大角度旋转在数值上更稳定（无 sin(θ)→0 奇点问题）。
-            err6 = pin.log6(oMf.actInv(target_se3)).vector  # shape (6,)
+            # 6D 误差（LOCAL 帧，与 log6 保持同一坐标系，对 180° 奇点数值稳定）
+            err6 = pin.log6(oMf.actInv(target_se3)).vector
 
-            # 收敛检查：位置误差用世界坐标（直觉上更清晰），旋转误差用 log6 角速度模长
             _pos_err = float(np.linalg.norm(oMf.translation - target_t))
             _rot_err = float(np.linalg.norm(err6[3:]))
 
@@ -533,7 +444,6 @@ class WholeBodyIKSolver(BaseSolver):
 
             err = err6 * w_diag
 
-            # 雅可比（LOCAL 帧，与 log6 保持同一坐标系）
             J_full = pin.computeFrameJacobian(
                 self._reduced.model,
                 self._reduced.data,
@@ -541,36 +451,28 @@ class WholeBodyIKSolver(BaseSolver):
                 fid,
                 pin.LOCAL,
             )
-            J = J_full * w_diag[:, None]  # 按误差权重缩放雅可比行
+            J = J_full * w_diag[:, None]
 
-            # DLS 伪逆：J^T (JJ^T + λI)^{-1}
             JJt = J @ J.T
             JJt[np.diag_indices_from(JJt)] += cfg.damp
-            J_pinv = J.T @ np.linalg.solve(JJt, np.eye(6))  # (nq, 6)
+            J_pinv = J.T @ np.linalg.solve(JJt, np.eye(6))
 
-            # 主任务增量
             dq_primary = J_pinv @ err
 
-            # 零空间投影矩阵：I - J^† J
             N = np.eye(self.dof) - J_pinv @ J
-
-            # 次级任务梯度（沿梯度下降方向取反）
             g_sec = self._secondary_gradient(q, q_seed)
             dq_secondary = -N @ g_sec
 
-            # 积分
-            dq = dq_primary + dq_secondary
-            q = pin.integrate(self._reduced.model, q, dq * cfg.dt)
-
-            # 硬关节限位（pin 顺序的限位数组）
+            q = pin.integrate(
+                self._reduced.model, q, (dq_primary + dq_secondary) * cfg.dt
+            )
             q = np.clip(
                 q,
                 self._reduced.model.lowerPositionLimit,
                 self._reduced.model.upperPositionLimit,
             )
 
-        self._last_q = q.copy()  # 内部以 pin 顺序存储
-
+        self._last_q = q.copy()
         self.last_solve_info = {
             "success": success,
             "iterations": _iter + 1,
@@ -578,7 +480,6 @@ class WholeBodyIKSolver(BaseSolver):
             "rot_err": _rot_err,
         }
 
-        # 输出转换为 cfg 顺序
         q_cfg = q[self._pin_to_cfg]
         return (
             torch.tensor([success], dtype=torch.bool),
@@ -588,40 +489,39 @@ class WholeBodyIKSolver(BaseSolver):
     def get_fk(
         self,
         qpos: "torch.Tensor | np.ndarray",
-        ee_name: "str | None" = None,
         **kwargs,
     ) -> torch.Tensor:
-        """计算指定末端执行器的正运动学。
+        """计算末端执行器的正运动学（含 TCP 偏移）。
+
+        接口与 :class:`PinocchioSolver` 完全一致。
 
         Args:
-            qpos:    关节角，shape ``(nq,)``。
-            ee_name: 末端执行器名称，若为 None 则使用 ``active_ee``。
+            qpos: 关节角，shape ``(nq,)`` 或 ``(batch, nq)``（cfg 顺序）。
 
         Returns:
-            torch.Tensor: 末端位姿，shape ``(4, 4)``。
+            torch.Tensor: 工具末端位姿（含 TCP）。
+                - 单配置输入 ``(nq,)``  → ``(4, 4)``
+                - 批次输入   ``(B, nq)`` → ``(B, 4, 4)``
         """
-        pin = self._pin
-        ee = ee_name or self._active_ee
-        if ee is None:
-            raise ValueError(
-                "[WholeBodyIKSolver] ee_name not specified and no active_ee set."
-            )
+        pin = self.pin
 
         if isinstance(qpos, torch.Tensor):
             qpos = qpos.detach().cpu().numpy()
-        qpos_cfg = np.asarray(qpos, dtype=float).flatten()
-        # 输入为 cfg 顺序 → 转换为 pinocchio 内部顺序
-        qpos = qpos_cfg[self._cfg_to_pin]
+        qpos = np.asarray(qpos, dtype=float)
 
-        pin.framesForwardKinematics(self._reduced.model, self._reduced.data, qpos)
-        fid = self._ee_frame_ids[ee]
-        oMf = self._reduced.data.oMf[fid]
+        batched = qpos.ndim == 2
+        if not batched:
+            qpos = qpos[np.newaxis]  # (1, nq)
 
-        mat = np.eye(4)
-        mat[:3, :3] = oMf.rotation
-        mat[:3, 3] = oMf.translation
-        return torch.from_numpy(mat).to(dtype=torch.float32)
+        results = np.empty((len(qpos), 4, 4))
+        for i, q_cfg in enumerate(qpos):
+            q_pin = q_cfg[self._cfg_to_pin]
+            pin.framesForwardKinematics(self._reduced.model, self._reduced.data, q_pin)
+            oMf = self._reduced.data.oMf[self._ee_frame_id]
+            mat = np.eye(4)
+            mat[:3, :3] = oMf.rotation
+            mat[:3, 3] = oMf.translation
+            results[i] = mat @ self.tcp_xpos
 
-    def get_all_ee_names(self) -> List[str]:
-        """返回所有已配置的末端执行器名称列表。"""
-        return list(self._ee_frame_ids.keys())
+        out = torch.from_numpy(results).to(dtype=torch.float32)
+        return out if batched else out[0]

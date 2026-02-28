@@ -24,6 +24,5 @@ from .srs_solver import SRSSolverCfg, SRSSolver
 from .whole_body_ik_solver import (
     WholeBodyIKSolverCfg,
     WholeBodyIKSolver,
-    EndEffectorCfg,
     LegCostCfg,
 )

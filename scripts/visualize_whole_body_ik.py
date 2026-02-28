@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
-from embodichain.lab.sim.solvers import WholeBodyIKSolverCfg, EndEffectorCfg
+from embodichain.lab.sim.solvers import WholeBodyIKSolverCfg
 
 # ── 路径 ──────────────────────────────────────────────────────────────────────
 URDF_PATH = (
@@ -28,55 +28,51 @@ URDF_PATH = (
 )
 URDF_DIR = "/home/dex/.cache/embodichain_data/extract/DexforceW1V021"
 
-# ── IK 求解器配置 ─────────────────────────────────────────────────────────────
-# 关键：躯干关节的正则化权重大幅降低（joint_reg_extra 为负值），
-# 否则 solver 会把躯干拉回零位，无法展示全身联动。
-ik_cfg = WholeBodyIKSolverCfg(
+# ── TCP（与 _build_default_solver_cfg 中 SRSSolver 使用的 TCP 保持同步）────────
+_LEFT_TCP = np.array(
+    [
+        [-1.0, 0.0, 0.0, 0.012],
+        [0.0, 0.0, 1.0, 0.0675],
+        [0.0, 1.0, 0.0, 0.127],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+)
+_RIGHT_TCP = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.012],
+        [0.0, 0.0, -1.0, -0.0675],
+        [0.0, 1.0, 0.0, 0.127],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+)
+
+# ── 躯干关节 ──────────────────────────────────────────────────────────────────
+TORSO_JOINTS = ["ANKLE", "KNEE", "BUTTOCK", "WAIST"]
+LEFT_ARM_JOINTS = [f"LEFT_J{i+1}" for i in range(7)]
+RIGHT_ARM_JOINTS = [f"RIGHT_J{i+1}" for i in range(7)]
+
+# 两个独立求解器，各管一侧手臂（torso 在前，与 control_parts 顺序对齐）
+_COMMON_CFG = dict(
     urdf_path=URDF_PATH,
     urdf_dir=URDF_DIR,
-    # 顺序与 sim "full_body" 控制部件完全对齐
-    joint_names=[
-        "ANKLE",
-        "KNEE",
-        "BUTTOCK",
-        "WAIST",  # [0:4]  torso
-        "LEFT_J1",
-        "LEFT_J2",
-        "LEFT_J3",
-        "LEFT_J4",
-        "LEFT_J5",
-        "LEFT_J6",
-        "LEFT_J7",  # [4:11]
-        "RIGHT_J1",
-        "RIGHT_J2",
-        "RIGHT_J3",
-        "RIGHT_J4",
-        "RIGHT_J5",
-        "RIGHT_J6",
-        "RIGHT_J7",  # [11:18]
-    ],
-    end_effectors={
-        "left": EndEffectorCfg(
-            parent_joint="LEFT_J7",
-            rotation=[[0, 1, 0], [0.707, 0, 0.707], [0.707, 0, -0.707]],
-            translation=[-0.15, 0, 0],
-            w_pos=1.0,
-            w_rot=0.1,
-        ),
-        "right": EndEffectorCfg(
-            parent_joint="RIGHT_J7",
-            rotation=[[0, 1, 0], [0.707, 0, 0.707], [0.707, 0, -0.707]],
-            translation=[-0.15, 0, 0],
-            w_pos=1.0,
-            w_rot=0.1,
-        ),
-    },
-    active_ee="left",
     max_iterations=500,
     dt=0.3,
     pos_eps=3e-3,
     rot_eps=0.05,
     leg_costs_mode2=[],
+)
+
+left_solver_cfg = WholeBodyIKSolverCfg(
+    **_COMMON_CFG,
+    joint_names=TORSO_JOINTS + LEFT_ARM_JOINTS,
+    end_link_name="left_ee",
+    tcp=_LEFT_TCP,
+)
+right_solver_cfg = WholeBodyIKSolverCfg(
+    **_COMMON_CFG,
+    joint_names=TORSO_JOINTS + RIGHT_ARM_JOINTS,
+    end_link_name="right_ee",
+    tcp=_RIGHT_TCP,
 )
 
 
@@ -93,7 +89,7 @@ def check_ik_quality(ik_solver) -> bool:
 
     pos_ok = pos_err_mm < 10.0
     rot_ok = rot_err_deg < 5.0
-    overall = pos_ok and rot_ok  # 以实际误差为准，不依赖 solver 内部收敛标志
+    overall = pos_ok and rot_ok
 
     status = "✓ 合格" if overall else "✗ 不合格"
     print(
@@ -101,8 +97,6 @@ def check_ik_quality(ik_solver) -> bool:
         f"  位置误差={pos_err_mm:.1f} mm  旋转误差={rot_err_deg:.1f}°"
     )
     if not converged:
-        # success=False 仅说明 solver 在 max_iterations 内未达到 pos_eps/rot_eps 阈值，
-        # 不代表解不可用——若实际误差已经满足使用要求则可正常使用。
         print(
             "    ↳ solver 提前停止（未达到 pos_eps/rot_eps），但实际误差可能已满足需求"
         )
@@ -129,7 +123,7 @@ def print_joint_changes(
         if diff[i] > threshold
     ]
 
-    body_joints = {"ANKLE", "KNEE", "BUTTOCK", "WAIST"}
+    body_joints = set(TORSO_JOINTS)
     body_moved = [x for x in moved if x[0] in body_joints]
     arm_moved = [x for x in moved if x[0] not in body_joints]
 
@@ -146,19 +140,19 @@ def print_joint_changes(
             print(f"     {name:10s}  {b:+.3f} → {a:+.3f}  (Δ={d:.3f} rad)")
 
 
-def set_robot_full_body(robot, q: np.ndarray, device: str) -> None:
-    """将 IK 输出（18 维，无 NECK）扩展为 full_body 的 20 维后写入仿真。
+def set_robot_full_body(
+    robot, q_torso: np.ndarray, q_left: np.ndarray, q_right: np.ndarray, device: str
+) -> None:
+    """将分散的关节角合并为 full_body 的 20 维后写入仿真。
 
     full_body 顺序：torso(0:4) + head(4:6) + left_arm(6:13) + right_arm(13:20)
-    IK 顺序：      torso(0:4)             + left_arm(4:11)  + right_arm(11:18)
-
-    同时设置 target=True 和 target=False，防止高刚度躯干关节被 PD 控制器拉回零位。
+    同时设置 target=True 和 target=False，防止 PD 控制器拉回零位。
     """
     q_full = np.zeros(20)
-    q_full[0:4] = q[0:4]  # ANKLE KNEE BUTTOCK WAIST
+    q_full[0:4] = q_torso
     q_full[4:6] = 0.0  # NECK1 NECK2 锁定为 0
-    q_full[6:13] = q[4:11]  # LEFT_J1..J7
-    q_full[13:20] = q[11:18]  # RIGHT_J1..J7
+    q_full[6:13] = q_left
+    q_full[13:20] = q_right
     qpos = torch.tensor(q_full, dtype=torch.float32, device=device).unsqueeze(0)
     robot.set_qpos(qpos, name="full_body", target=True)
     robot.set_qpos(qpos, name="full_body", target=False)
@@ -167,8 +161,12 @@ def set_robot_full_body(robot, q: np.ndarray, device: str) -> None:
 def smooth_move(
     robot,
     sim,
-    q_from: np.ndarray,
-    q_to: np.ndarray,
+    q_torso_from: np.ndarray,
+    q_torso_to: np.ndarray,
+    q_left_from: np.ndarray,
+    q_left_to: np.ndarray,
+    q_right_from: np.ndarray,
+    q_right_to: np.ndarray,
     n_frames: int = 80,
     fps: float = 30.0,
 ) -> None:
@@ -176,32 +174,41 @@ def smooth_move(
     for i in range(n_frames + 1):
         alpha = i / n_frames
         alpha = alpha * alpha * (3 - 2 * alpha)  # smoothstep
-        q = q_from + alpha * (q_to - q_from)
-        set_robot_full_body(robot, q, device)
+        t = q_torso_from + alpha * (q_torso_to - q_torso_from)
+        l = q_left_from + alpha * (q_left_to - q_left_from)
+        r = q_right_from + alpha * (q_right_to - q_right_from)
+        set_robot_full_body(robot, t, l, r, device)
         sim.update(step=1)
         time.sleep(1.0 / fps)
 
 
 def main():
     print("初始化 IK solver...")
-    ik_solver = ik_cfg.init_solver()
+    left_solver = left_solver_cfg.init_solver()
+    right_solver = right_solver_cfg.init_solver()
 
-    # 打印每个末端执行器的运动链，直观查看 IK 从哪条路径求解
-    print("\n── 运动链（URDF 拓扑结构）────────────────────────────────────────")
-    print(ik_solver.describe_chain())
+    print("\n── 左臂运动链（URDF 拓扑结构）────────────────────────────────────────")
+    print(left_solver.describe_chain())
+    print("\n── 右臂运动链 ──────────────────────────────────────────────────────────")
+    print(right_solver.describe_chain())
     print("────────────────────────────────────────────────────────────────\n")
 
-    # ── 用给定关节角配置计算 FK 目标（与 visualize_origin.py 相同的方式）────
-    # 关节顺序与 cfg.joint_names 对齐：
-    #   [0:4]  ANKLE KNEE BUTTOCK WAIST  (torso)
-    #   [4:6]  NECK1 NECK2               (head)
-    #   [6:13] LEFT_J1 ~ LEFT_J7         (left_arm)
-    #   [13:20] RIGHT_J1 ~ RIGHT_J7      (right_arm)
+    # ── FK 配置（q 以 full_body 20-DOF 顺序提供，提取对应子集喂给各 solver）──
+    # full_body 顺序：torso(0:4) + head(4:6) + left_arm(6:13) + right_arm(13:20)
+    # left_solver  顺序：torso(0:4) + left_arm(4:11)
+    # right_solver 顺序：torso(0:4) + right_arm(4:11)
+
+    def q20_to_left(q20: np.ndarray) -> np.ndarray:
+        return np.concatenate([q20[0:4], q20[6:13]])
+
+    def q20_to_right(q20: np.ndarray) -> np.ndarray:
+        return np.concatenate([q20[0:4], q20[13:20]])
+
     TEST_CASES = [
         {
             "title": "场景1 · 左手（手臂弯曲）",
-            "ee": "left",
-            "q": np.array(
+            "side": "left",
+            "q20": np.array(
                 [
                     0,
                     0,
@@ -223,14 +230,14 @@ def main():
                     0,
                     0,
                     0,
-                ],
+                ],  # right_arm
                 dtype=float,
-            ),  # right_arm
+            ),
         },
         {
             "title": "场景2 · 右手（手臂弯曲）",
-            "ee": "right",
-            "q": np.array(
+            "side": "right",
+            "q20": np.array(
                 [
                     0,
                     0,
@@ -252,24 +259,22 @@ def main():
                     -0.1,
                     0.0,
                     -0.3,
-                ],
+                ],  # right_arm
                 dtype=float,
-            ),  # right_arm
+            ),
         },
     ]
 
-    # FK 计算每个场景的目标位姿（目标由 q 决定，seed 在运行时取 q_current）
     SCENARIOS = []
     for tc in TEST_CASES:
-        target_pose = ik_solver.get_fk(
-            torch.from_numpy(tc["q"]).float(), ee_name=tc["ee"]
-        ).numpy()
+        if tc["side"] == "left":
+            q_sub = q20_to_left(tc["q20"])
+            target_pose = left_solver.get_fk(torch.from_numpy(q_sub).float()).numpy()
+        else:
+            q_sub = q20_to_right(tc["q20"])
+            target_pose = right_solver.get_fk(torch.from_numpy(q_sub).float()).numpy()
         SCENARIOS.append(
-            {
-                "title": tc["title"],
-                "ee": tc["ee"],
-                "target": target_pose,
-            }
+            {"title": tc["title"], "side": tc["side"], "target": target_pose}
         )
         print(f"  {tc['title']:20s}  EE 位置: {target_pose[:3, 3]}")
 
@@ -286,7 +291,10 @@ def main():
     for _ in range(20):
         sim.update(step=1)
 
-    q_current = np.zeros(ik_solver.dof)
+    # 全局关节状态（分量存储，便于各 solver 独立更新）
+    q_torso = np.zeros(4)
+    q_left = np.zeros(7)
+    q_right = np.zeros(7)
 
     # ── 逐场景运行 ───────────────────────────────────────────────────────────
     MARKER_NAME = "target_ee"
@@ -296,7 +304,6 @@ def main():
         print(f"  目标位置: {sc['target'][:3, 3]}")
         print(f"{'='*55}")
 
-        # 显示目标坐标系 marker（先清除上一个）
         sim.remove_marker(MARKER_NAME)
         sim.draw_marker(
             MarkerCfg(
@@ -309,38 +316,71 @@ def main():
         )
         sim.update(step=1)
 
-        # IK 求解（以当前机器人状态为 seed）
-        success, q_ik = ik_solver.get_ik(
-            sc["target"],
-            qpos_seed=torch.from_numpy(q_current).float(),
-            active_ee=sc["ee"],
-        )
-        q_ik_np = q_ik.numpy()
+        if sc["side"] == "left":
+            q_seed = np.concatenate([q_torso, q_left])
+            success, q_ik = left_solver.get_ik(
+                sc["target"],
+                qpos_seed=torch.from_numpy(q_seed).float(),
+            )
+            q_ik_np = q_ik.numpy()
+            check_ik_quality(left_solver)
+            print_joint_changes(q_seed, q_ik_np, left_solver.joint_names)
 
-        # IK 质量检查（直接读 solver 内部诊断信息）
-        check_ik_quality(ik_solver)
+            q_torso_new = q_ik_np[:4]
+            q_left_new = q_ik_np[4:]
+            q_right_new = q_right.copy()
+        else:
+            q_seed = np.concatenate([q_torso, q_right])
+            success, q_ik = right_solver.get_ik(
+                sc["target"],
+                qpos_seed=torch.from_numpy(q_seed).float(),
+            )
+            q_ik_np = q_ik.numpy()
+            check_ik_quality(right_solver)
+            print_joint_changes(q_seed, q_ik_np, right_solver.joint_names)
 
-        # 打印关节变化（全身联动核心展示）
-        print_joint_changes(q_current, q_ik_np, ik_solver.joint_names)
+            q_torso_new = q_ik_np[:4]
+            q_left_new = q_left.copy()
+            q_right_new = q_ik_np[4:]
 
-        # 仿真中平滑运动
         print("  → 运动中...", end="", flush=True)
-        smooth_move(robot, sim, q_from=q_current, q_to=q_ik_np)
+        smooth_move(
+            robot,
+            sim,
+            q_torso,
+            q_torso_new,
+            q_left,
+            q_left_new,
+            q_right,
+            q_right_new,
+        )
         print(" 完成")
 
-        q_current = q_ik_np.copy()
+        q_torso = q_torso_new
+        q_left = q_left_new
+        q_right = q_right_new
         input("  [按 Enter 继续下一场景]")
 
     # ── 回到零位 ─────────────────────────────────────────────────────────────
     sim.remove_marker(MARKER_NAME)
     print("\n回到零位...")
-    smooth_move(robot, sim, q_from=q_current, q_to=np.zeros(ik_solver.dof))
+    smooth_move(
+        robot,
+        sim,
+        q_torso,
+        np.zeros(4),
+        q_left,
+        np.zeros(7),
+        q_right,
+        np.zeros(7),
+    )
 
     print("\n所有场景完成。按 Ctrl+C 退出。")
-    q_zero = np.zeros(ik_solver.dof)
     try:
         while True:
-            set_robot_full_body(robot, q_zero, str(sim.device))
+            set_robot_full_body(
+                robot, np.zeros(4), np.zeros(7), np.zeros(7), str(sim.device)
+            )
             sim.update(step=1)
             time.sleep(1 / 30)
     except KeyboardInterrupt:
