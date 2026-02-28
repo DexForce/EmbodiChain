@@ -20,6 +20,7 @@ import gymnasium as gym
 
 from typing import Dict, List, Union, Tuple, Any, Sequence
 from functools import cached_property
+from tensordict import TensorDict
 
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
@@ -329,8 +330,8 @@ class BaseEnv(gym.Env):
         self,
         obs: EnvObs,
         action: EnvAction,
+        rewards: torch.Tensor,
         dones: torch.Tensor,
-        terminateds: torch.Tensor,
         info: Dict,
         **kwargs,
     ) -> None:
@@ -339,8 +340,8 @@ class BaseEnv(gym.Env):
         Args:
             obs: The observation dictionary.
             action: The action taken by the agent.
+            rewards: The reward tensor for the current step.
             dones: A tensor indicating which environments are done.
-            terminateds: A tensor indicating which environments are terminated.
             info: A dictionary containing additional information.
             **kwargs: Additional keyword arguments to be passed to the :meth:`_hook_after_sim_step` function.
         """
@@ -356,7 +357,7 @@ class BaseEnv(gym.Env):
         """
         pass
 
-    def _get_sensor_obs(self, **kwargs) -> Dict[str, any]:
+    def _get_sensor_obs(self, **kwargs) -> TensorDict[str, any]:
         """Get the sensor observation from the environment.
 
         Args:
@@ -365,7 +366,7 @@ class BaseEnv(gym.Env):
         Returns:
             The sensor observation dictionary.
         """
-        obs = {}
+        obs = TensorDict({}, batch_size=[self.num_envs], device=self.device)
 
         fetch_only = False
         if self.sim.is_rt_enabled:
@@ -399,19 +400,18 @@ class BaseEnv(gym.Env):
             - sensor (optional): the sensor readings.
             - extra (optional): any extra information.
 
-        Note:
-            If self.num_envs == 1, return the observation in single_observation_space format.
-            If self.num_envs > 1, return the observation in observation_space format.
-
         Args:
             **kwargs: Additional keyword arguments to be passed to the :meth:`_get_sensor_obs` functions.
 
         Returns:
             The observation dictionary.
         """
-        obs = None
 
-        obs = dict(robot=self.robot.get_proprioception())
+        obs = TensorDict(
+            dict(robot=self.robot.get_proprioception()),
+            batch_size=[self.num_envs],
+            device=self.device,
+        )
 
         sensor_obs = self._get_sensor_obs(**kwargs)
         if sensor_obs:
@@ -439,7 +439,7 @@ class BaseEnv(gym.Env):
         """
         return dict()
 
-    def get_info(self, **kwargs) -> Dict[str, Any]:
+    def get_info(self, **kwargs) -> TensorDict[str, Any]:
         """Get info about the current environment state, include elapsed steps, success, fail, etc.
 
         The returned info dictionary must contain at the success and fail status of the current step.
@@ -450,12 +450,18 @@ class BaseEnv(gym.Env):
         Returns:
             The info dictionary.
         """
-        info = dict(elapsed_steps=self._elapsed_steps)
+        info = TensorDict(
+            dict(elapsed_steps=self._elapsed_steps),
+            batch_size=[self.num_envs],
+            device=self.device,
+        )
 
-        info.update(self.evaluate(**kwargs))
+        evaluate = self.evaluate(**kwargs)
+        if evaluate:
+            info.update(evaluate)
         return info
 
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
+    def check_truncated(self, obs: EnvObs, info: TensorDict[str, Any]) -> torch.Tensor:
         """Check if the episode is truncated.
 
         Args:
@@ -630,13 +636,13 @@ class BaseEnv(gym.Env):
         if self.cfg.ignore_terminations:
             terminateds[:] = False
 
-        dones = torch.logical_or(terminateds, truncateds)
+        dones = terminateds | truncateds
 
         self._hook_after_sim_step(
             obs=obs,
             action=action,
+            rewards=rewards,
             dones=dones,
-            terminateds=terminateds,
             info=info,
             **kwargs,
         )

@@ -20,6 +20,8 @@ import torch
 
 from abc import abstractmethod
 from typing import Dict, List, Any, Sequence, Tuple, Union
+from tensordict import TensorDict
+
 from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils.math import matrix_from_quat
@@ -116,9 +118,12 @@ class BaseSensor(BatchEntity):
         self, config: SensorCfg, device: torch.device = torch.device("cpu")
     ) -> None:
 
-        self._data_buffer: Dict[str, torch.Tensor] = {}
+        num_envs = get_dexsim_arena_num()
+        self._data_buffer: TensorDict[str, torch.Tensor] = TensorDict(
+            {}, batch_size=[num_envs], device=device
+        )
 
-        self._entities = [None for _ in range(get_dexsim_arena_num())]
+        self._entities = [None for _ in range(num_envs)]
         self._build_sensor_from_config(config, device=device)
 
         super().__init__(config, self._entities, device)
@@ -158,7 +163,7 @@ class BaseSensor(BatchEntity):
         """
         logger.log_error("Not implemented yet.")
 
-    def get_data(self, copy: bool = True) -> Dict[str, torch.Tensor]:
+    def get_data(self, copy: bool = True) -> TensorDict[str, torch.Tensor]:
         """Retrieve data from the sensor.
 
         Args:
@@ -167,8 +172,6 @@ class BaseSensor(BatchEntity):
         Returns:
             The data collected by the sensor.
         """
-        if copy:
-            return {key: value.clone() for key, value in self._data_buffer.items()}
         return self._data_buffer
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:

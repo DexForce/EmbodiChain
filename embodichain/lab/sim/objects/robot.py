@@ -19,6 +19,7 @@ import numpy as np
 
 from typing import List, Dict, Tuple, Union, Sequence
 from dataclasses import dataclass, field
+from tensordict import TensorDict
 
 from dexsim.engine import Articulation as _Articulation
 from embodichain.lab.sim.cfg import RobotCfg
@@ -114,7 +115,7 @@ class Robot(Articulation):
             return (
                 torch.arange(self.dof, dtype=torch.int32).tolist()
                 if not remove_mimic
-                else [i for i in range(self.dof) if i not in self.mimic_ids]
+                else self.active_joint_ids
             )
 
         if name not in self.control_parts:
@@ -228,7 +229,7 @@ class Robot(Articulation):
             part_joint_ids = self.get_joint_ids(name=name)
             return qf_limits[local_env_ids][:, part_joint_ids]
 
-    def get_proprioception(self) -> Dict[str, torch.Tensor]:
+    def get_proprioception(self) -> TensorDict[str, torch.Tensor]:
         """Gets robot proprioception information, primarily for agent state representation in robot learning scenarios.
 
         The default proprioception information includes:
@@ -240,8 +241,12 @@ class Robot(Articulation):
             Dict[str, torch.Tensor]: A dictionary containing the robot's proprioception information
         """
 
-        return dict(
-            qpos=self.body_data.qpos, qvel=self.body_data.qvel, qf=self.body_data.qf
+        return TensorDict(
+            qpos=self.body_data.qpos[:, self.active_joint_ids],
+            qvel=self.body_data.qvel[:, self.active_joint_ids],
+            qf=self.body_data.qf[:, self.active_joint_ids],
+            batch_size=[self.num_envs],
+            device=self.device,
         )
 
     def set_qpos(

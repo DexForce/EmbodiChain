@@ -201,6 +201,7 @@ class EmbodiedEnv(BaseEnv):
         # This buffer should also be support initialized from outside of the environment.
         # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
         self.rollout_buffer: TensorDict | None = None
+        self._max_rollout_steps = 0
         if self.cfg.init_rollout_buffer:
             self.rollout_buffer = init_rollout_buffer_from_obs_action_space(
                 obs_space=self.observation_space,
@@ -209,6 +210,7 @@ class EmbodiedEnv(BaseEnv):
                 num_envs=self.num_envs,
                 device=self.device,
             )
+            self._max_rollout_steps = self.rollout_buffer.shape[1]
         self._current_rollout_step = 0
 
         self.episode_success_status: torch.Tensor = torch.zeros(
@@ -270,7 +272,6 @@ class EmbodiedEnv(BaseEnv):
             action_config: The configuration dict for the action bank.
         """
         self.action_bank = action_bank_cls(action_config)
-        misc_cfg = action_config.get("misc", {})
         try:
             this_class_name = self.action_bank.__class__.__name__
             node_func = {}
@@ -313,52 +314,36 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
-    def _extract_single_env_data(self, data: Any, env_id: int) -> Any:
-        """Extract single environment data from batched data.
-
-        Args:
-            data: Batched data (dict, tensor, list, or primitive)
-            env_id: Environment index
-
-        Returns:
-            Data for the specified environment
-        """
-        if isinstance(data, dict):
-            return {
-                k: self._extract_single_env_data(v, env_id) for k, v in data.items()
-            }
-        elif isinstance(data, torch.Tensor):
-            return data[env_id] if data.ndim > 0 else data
-        elif isinstance(data, (list, tuple)):
-            return type(data)(
-                self._extract_single_env_data(item, env_id) for item in data
-            )
-        else:
-            return data
-
     def _hook_after_sim_step(
         self,
         obs: EnvObs,
         action: EnvAction,
+        rewards: torch.Tensor,
         dones: torch.Tensor,
-        terminateds: torch.Tensor,
         info: Dict,
         **kwargs,
     ):
-        if self._current_rollout_step >= self.max_episode_steps:
-            logger.log_warning(
-                f"Current rollout step {self._current_rollout_step} exceeds max episode steps {self.max_episode_steps}. \
-                    The rollout buffer will not be updated with new data to avoid overflow."
-            )
-        else:
-            # Extract data into episode buffer.
-            self.rollout_buffer["obs"][:, self._current_rollout_step, ...].copy_(
-                obs, non_blocking=True
-            )
-            self.rollout_buffer["action"][:, self._current_rollout_step, ...].copy_(
-                action, non_blocking=True
-            )
-            self._current_rollout_step += 1
+        if self.rollout_buffer:
+            if self._current_rollout_step < self._max_rollout_steps:
+                # Extract data into episode buffer.
+                self.rollout_buffer["obs"][:, self._current_rollout_step, ...].copy_(
+                    TensorDict(obs), non_blocking=True
+                )
+                action_set = (
+                    action if isinstance(action, torch.Tensor) else TensorDict(action)
+                )
+                self.rollout_buffer["action"][:, self._current_rollout_step, ...].copy_(
+                    action_set, non_blocking=True
+                )
+                self.rollout_buffer["reward"][:, self._current_rollout_step].copy_(
+                    rewards, non_blocking=True
+                )
+                self._current_rollout_step += 1
+            else:
+                logger.log_warning(
+                    f"Current rollout step {self._current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
+                        Data will not be recorded in the rollout buffer."
+                )
 
         # Update success status for all environments where episode is done
         if "success" in info:
@@ -406,43 +391,25 @@ class EmbodiedEnv(BaseEnv):
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
-        if env_ids is None:
-            env_ids_to_process = list(range(self.num_envs))
-        elif isinstance(env_ids, torch.Tensor):
-            env_ids_to_process = env_ids.cpu().tolist()
-        else:
-            env_ids_to_process = list(env_ids)
+        env_ids_to_process = list(range(self.num_envs)) if env_ids is None else env_ids
 
         # Save dataset before clearing buffers for environments that are being reset
         if save_data and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
 
                 # Filter to only save successful episodes
-                successful_env_ids = [
-                    env_id
-                    for env_id in env_ids_to_process
-                    if (
-                        self.episode_success_status.get(env_id, False)
-                        or self._task_success[env_id].item()
-                    )
-                ]
+                successful_env_ids = self.episode_success_status | self._task_success
 
-                if successful_env_ids:
+                if successful_env_ids.any():
 
-                    # Convert back to tensor if needed
-                    successful_env_ids_tensor = torch.tensor(
-                        successful_env_ids, device=self.device
-                    )
                     self.dataset_manager.apply(
                         mode="save",
-                        env_ids=successful_env_ids_tensor,
+                        env_ids=successful_env_ids.nonzero(as_tuple=True)[0],
                     )
 
         # Clear episode buffers and reset success status for environments being reset
-        for env_id in env_ids_to_process:
-            self.episode_obs_buffer[env_id].clear()
-            self.episode_action_buffer[env_id].clear()
-            self.episode_success_status[env_id] = False
+        self.rollout_buffer[env_ids_to_process].zero_()
+        self.episode_success_status[env_ids_to_process] = False
 
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
@@ -501,10 +468,9 @@ class EmbodiedEnv(BaseEnv):
 
         robot.build_pk_serial_chain()
 
-        # TODO: we may need control parts to group actual controlled joints ids.
-        # In this way, the action pass to env should be a dict or struct to store the
-        # joint ids as well.
-        qpos_limits = robot.body_data.qpos_limits[0].cpu().numpy()
+        qpos_limits = (
+            robot.body_data.qpos_limits[0, robot.active_joint_ids].cpu().numpy()
+        )
         self.single_action_space = gym.spaces.Box(
             low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32
         )
