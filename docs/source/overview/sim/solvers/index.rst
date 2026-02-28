@@ -94,3 +94,4 @@ See also
     pinocchio_solver.md
     opw_solver.md
     srs_solver.md
+    whole_body_ik_solver.md
