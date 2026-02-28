@@ -55,10 +55,13 @@ def main():
     )
 
     # robot.compute_fk returns (1, 4, 4) homogeneous transform in world frame
+    t0 = time.perf_counter()
     target_left = robot.compute_fk(qpos_fk_left, name="left_arm_body", to_matrix=True)
     target_right = robot.compute_fk(
         qpos_fk_right, name="right_arm_body", to_matrix=True
     )
+    fk_time_ms = (time.perf_counter() - t0) * 1000
+    print(f"[Timing] FK (left+right targets): {fk_time_ms:.3f} ms")
 
     print(f"Left hand target position: {target_left[0, :3, 3].numpy()}")
     print(f"Right hand target position: {target_right[0, :3, 3].numpy()}")
@@ -66,9 +69,11 @@ def main():
     # ── Solve IK ──────────────────────────────────────────────────────────────
     # robot.compute_ik transforms target from world to solver.root_link_name frame
     qpos_seed_left = robot.get_qpos(name="left_arm_body")  # (1, 11)
+    t0 = time.perf_counter()
     res_left, ik_left = robot.compute_ik(
         pose=target_left, name="left_arm_body", joint_seed=qpos_seed_left
     )
+    ik_left_time_ms = (time.perf_counter() - t0) * 1000
     solver_left = robot._solvers["left_arm_body"]
     info = solver_left.last_solve_info
     print(
@@ -79,9 +84,11 @@ def main():
     )
 
     qpos_seed_right = robot.get_qpos(name="right_arm_body")  # (1, 11)
+    t0 = time.perf_counter()
     res_right, ik_right = robot.compute_ik(
         pose=target_right, name="right_arm_body", joint_seed=qpos_seed_right
     )
+    ik_right_time_ms = (time.perf_counter() - t0) * 1000
     solver_right = robot._solvers["right_arm_body"]
     info = solver_right.last_solve_info
     print(
@@ -92,8 +99,14 @@ def main():
     )
 
     # ── Verify: FK(IK result) matches target ───────────────────────────────────
+    t0 = time.perf_counter()
     fk_check_left = robot.compute_fk(ik_left, name="left_arm_body", to_matrix=True)
     fk_check_right = robot.compute_fk(ik_right, name="right_arm_body", to_matrix=True)
+    fk_check_time_ms = (time.perf_counter() - t0) * 1000
+    print(
+        f"[Timing] IK left: {ik_left_time_ms:.3f} ms  IK right: {ik_right_time_ms:.3f} ms"
+    )
+    print(f"[Timing] FK (verify left+right): {fk_check_time_ms:.3f} ms")
     print(f"Left hand FK(IK result): {fk_check_left[0, :3, 3].numpy()}")
     print(f"Right hand FK(IK result): {fk_check_right[0, :3, 3].numpy()}")
 

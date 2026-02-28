@@ -187,6 +187,7 @@ class DexforceW1Cfg(RobotCfg):
             # urdf_path is left as None; Robot.init_solver will fill it from robot.cfg.fpath
             "left_arm_body": WholeBodyIKSolverCfg(
                 end_link_name="left_ee",
+                backend="casadi",
                 tcp=left_arm_tcp,
                 root_link_name="base_link",
                 max_iterations=500,
@@ -196,6 +197,7 @@ class DexforceW1Cfg(RobotCfg):
             ),
             "right_arm_body": WholeBodyIKSolverCfg(
                 end_link_name="right_ee",
+                backend="casadi",
                 tcp=right_arm_tcp,
                 root_link_name="base_link",
                 max_iterations=500,
