@@ -54,7 +54,7 @@ def grid_sample_qpos_from_limits(
     ]
 
     # meshgrid and stack
-    mesh = torch.meshgrid(*grids)
+    mesh = torch.meshgrid(*grids, indexing="ij")
     stacked = torch.stack([m.reshape(-1) for m in mesh], dim=1)
 
     if stacked.shape[0] > max_samples:

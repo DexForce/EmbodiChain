@@ -252,7 +252,7 @@ class OPWSolver(BaseSolver):
             Tuple[torch.Tensor, torch.Tensor]:
                 - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, num_joints).
                 - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).
-        #"""
+        """
         # if self.device.type == "cpu":
         #     return self.get_ik_py_opw(
         #         target_xpos, qpos_seed, return_all_solutions, **kwargs
@@ -314,9 +314,6 @@ class OPWSolver(BaseSolver):
             device=standardize_device_string(self.device),
         )
 
-        all_qpos = wp.to_torch(all_qpos_wp).reshape(n_sample, N_SOL, DOF)
-        all_ik_valid = wp.to_torch(all_ik_valid_wp).reshape(n_sample, N_SOL)
-
         if return_all_solutions:
             all_qpos = wp.to_torch(all_qpos_wp).reshape(n_sample, N_SOL, DOF)
             all_ik_valid = wp.to_torch(all_ik_valid_wp).reshape(n_sample, N_SOL)
@@ -345,7 +342,6 @@ class OPWSolver(BaseSolver):
         best_ik_valid_wp = wp.zeros(
             n_sample, dtype=int, device=standardize_device_string(self.device)
         )
-        qpos_seed = wp.to_torch(qpos_seed_wp)
         wp.launch(
             kernel=opw_best_ik_kernel,
             dim=(n_sample),
