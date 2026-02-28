@@ -7,7 +7,7 @@
 * Analytical IK for OPW-parameterized 6-DOF manipulators
 * Supports both parallel and offset axes, with custom axis flipping
 * Fast batch computation for multiple target poses
-* Configurable for CPU (py_opw_kinematics) and GPU (warp) backends
+* Configurable for CPU and GPU backends
 * Flexible configuration via `OPWSolverCfg`
 * Strict enforcement of joint limits
 * Forward kinematics (FK) and multiple IK solution branches
@@ -107,5 +107,4 @@ solver = OPWSolver(cfg, device="cuda")
 ## References
 
 * [OPW Kinematics Paper](https://doi.org/10.1109/TRO.2017.2776312)
-* [py_opw_kinematics Documentation](https://github.com/UM-ARM-Lab/py_opw_kinematics)
 * [warp Documentation](https://github.com/NVIDIA/warp)
