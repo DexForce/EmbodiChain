@@ -727,8 +727,8 @@ def build_dexforce_w1_cfg(
             torso_joints + head_joints + left_arm_joints + right_arm_joints
         )
 
-    # 全身IK控制部件：躯干 + 单侧手臂（供 WholeBodyIKSolver 使用）
-    # joint_names 顺序：torso 在前，手臂在后，与 WholeBodyIKSolverCfg 约定一致
+    # Whole‑body IK control parts: torso + single arm (for WholeBodyIKSolver)
+    # joint_names order: torso first, arm second, consistent with WholeBodyIKSolverCfg
     if torso_joints and left_arm_joints:
         control_parts["left_arm_body"] = torso_joints + left_arm_joints
     if torso_joints and right_arm_joints:

@@ -94,14 +94,14 @@ class DexforceW1Cfg(RobotCfg):
 
     @staticmethod
     def _build_default_solver_cfg(is_industrial: bool) -> Dict[str, "SolverCfg"]:
-        """构建所有默认 solver 配置，包含单臂 SRS solver 和全身 IK solver。
+        """Build all default solver configurations, including single‑arm SRS solvers and whole‑body IK solvers.
 
-        返回的字典 key 与 ``control_parts`` 名称对应：
+        The returned dictionary keys are aligned with the ``control_parts`` names:
 
-        - ``"left_arm"`` / ``"right_arm"``   — :class:`SRSSolver`，单臂快速解析解
-        - ``"left_arm_body"`` / ``"right_arm_body"`` — :class:`WholeBodyIKSolver`，
-          躯干 + 单臂全身联动，``joint_names`` 由 :meth:`robot.init_solver` 从
-          对应 ``control_parts`` 自动填充
+        - ``"left_arm"`` / ``"right_arm"``: :class:`SRSSolver` (single‑arm analytic IK)
+        - ``"left_arm_body"`` / ``"right_arm_body"``: :class:`WholeBodyIKSolver`
+          (torso + single arm whole‑body IK, whose ``joint_names`` are populated
+          by :meth:`Robot.init_solver` from the corresponding ``control_parts``)
         """
         from embodichain.lab.sim.solvers import SRSSolverCfg, WholeBodyIKSolverCfg
         from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
@@ -184,7 +184,7 @@ class DexforceW1Cfg(RobotCfg):
                 rotation_directions=w1_left_arm_params.rotation_directions,
                 tcp=left_arm_tcp,
             ),
-            # urdf_path 不设置（None），由 robot.init_solver 自动填充 robot.cfg.fpath
+            # urdf_path is left as None; Robot.init_solver will fill it from robot.cfg.fpath
             "left_arm_body": WholeBodyIKSolverCfg(
                 end_link_name="left_ee",
                 tcp=left_arm_tcp,
