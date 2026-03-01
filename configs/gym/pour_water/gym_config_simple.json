@@ -1,6 +1,7 @@
 {   
     "id": "PourWater-v3",
     "max_episodes": 5,
+    "max_episode_steps": 300,
     "env": {
         "events": {
             "record_camera": {
@@ -202,7 +203,7 @@
                 "mode": "modify",
                 "name": "robot/qpos",
                 "params": {
-                    "joint_ids": [12, 13, 14, 15]
+                    "joint_ids": [6, 13]
                 }
             }
         },
@@ -213,8 +214,7 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "CobotMagic",
-                        "control_freq": 25,
-                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
+                        "control_freq": 25
                     },
                     "instruction": {
                         "lang": "Pour water from bottle to cup"
@@ -227,7 +227,8 @@
                     "use_videos": true
                 }
             }
-        }
+        },
+        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
     },
     "robot": {
         "uid": "CobotMagic",

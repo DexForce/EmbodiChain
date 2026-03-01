@@ -251,8 +251,7 @@
                 "mode": "save",
                 "params": {
                     "robot_meta": {
-                        "control_freq": 25,
-                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
+                        "control_freq": 25
                     },
                     "instruction": {
                         "lang": "Pour water from the bottle into the mug."
@@ -260,6 +259,7 @@
                 }
             }
         },
+        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
         "success_params": {
             "strict": false
         }

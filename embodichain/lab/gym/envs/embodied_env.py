@@ -176,9 +176,6 @@ class EmbodiedEnv(BaseEnv):
         self.affordance_datas = {}
         self.action_bank = None
 
-        # TODO: Change to array like data structure to handle different demo action list length for across different arena.
-        self.action_length: int = 0  # Set by create_demo_action_list
-
         extensions = getattr(cfg, "extensions", {}) or {}
 
         for name, value in extensions.items():
@@ -449,18 +446,16 @@ class EmbodiedEnv(BaseEnv):
             # Support multiple control modes simultaneously
             if "qpos" in action:
                 self.robot.set_qpos(
-                    qpos=action["qpos"], joint_ids=self.robot.active_joint_ids
+                    qpos=action["qpos"], joint_ids=self.active_joint_ids
                 )
             if "qvel" in action:
                 self.robot.set_qvel(
-                    qvel=action["qvel"], joint_ids=self.robot.active_joint_ids
+                    qvel=action["qvel"], joint_ids=self.active_joint_ids
                 )
             if "qf" in action:
-                self.robot.set_qf(
-                    qf=action["qf"], joint_ids=self.robot.active_joint_ids
-                )
+                self.robot.set_qf(qf=action["qf"], joint_ids=self.active_joint_ids)
         elif isinstance(action, torch.Tensor):
-            self.robot.set_qpos(qpos=action, joint_ids=self.robot.active_joint_ids)
+            self.robot.set_qpos(qpos=action, joint_ids=self.active_joint_ids)
         else:
             logger.log_error(f"Unsupported action type: {type(action)}")
 
@@ -625,14 +620,6 @@ class EmbodiedEnv(BaseEnv):
 
         This function should be implemented in subclasses to generate a sequence of actions
         that demonstrate a specific task or behavior within the environment.
-
-        Important:
-            Subclasses MUST set `self.action_length` to the length of the returned action list.
-            This is used by the environment to automatically detect episode truncation.
-            Example:
-                action_list = [...]  # Generate actions
-                self.action_length = len(action_list)
-                return action_list
 
         Returns:
             Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.

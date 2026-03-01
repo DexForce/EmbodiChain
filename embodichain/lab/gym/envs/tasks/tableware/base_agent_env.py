@@ -199,5 +199,4 @@ class BaseAgentEnv:
             regenerate=regenerate
         )
         action_list = self.code_agent.act(code_file_path, **kwargs)
-        self.action_length = len(action_list)
         return action_list
