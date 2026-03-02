@@ -213,9 +213,9 @@ class RigidObject(BatchEntity):
 
         # Determine if we should use USD properties or cfg properties.
         from embodichain.lab.sim.shapes import MeshCfg
-        is_usd_file = (
-            isinstance(cfg.shape, MeshCfg)
-            and cfg.shape.fpath.endswith((".usd", ".usda", ".usdc"))
+
+        is_usd_file = isinstance(cfg.shape, MeshCfg) and cfg.shape.fpath.endswith(
+            (".usd", ".usda", ".usdc")
         )
         use_cfg_properties = not (cfg.use_usd_properties and is_usd_file)
 

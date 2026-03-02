@@ -226,11 +226,11 @@ def load_mesh_objects_from_cfg(
                 logger.log_error(f"Currently not supporting multiple arenas for USD.")
             _env: dexsim.environment.Env = dexsim.default_world().get_env()
             results = _env.import_from_usd_file(fpath, return_object=True)
-            print(f"import usd result: {results}")
+            # print(f"import usd result: {results}")
 
             rigidbodys_found = []
             for key, value in results.items():
-                if isinstance(value, dexsim.cuda.pybind.models.MeshObject):
+                if isinstance(value, MeshObject):
                     rigidbodys_found.append(value)
             if len(rigidbodys_found) == 0:
                 logger.log_error(f"No rigid body found in USD file: {fpath}")

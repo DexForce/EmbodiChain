@@ -34,6 +34,7 @@ from embodichain.lab.sim.objects import (
 )
 from embodichain.data import get_data_path
 
+
 def main():
     """Main function to create and run the simulation scene."""
 
@@ -104,7 +105,7 @@ def main():
     )
 
     # Add objects to the scene
-    h1_path= get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
+    h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
     print(f"Loading USD file from: {h1_path}")
     h1: Articulation = sim.add_articulation(
         cfg=ArticulationCfg(

@@ -216,6 +216,7 @@ class ScannedBottle(EmbodiChainDataset):
 
         super().__init__(prefix, data_descriptor, path)
 
+
 class SugarBox(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(

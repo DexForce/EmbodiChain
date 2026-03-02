@@ -588,7 +588,7 @@ class Articulation(BatchEntity):
 
         # Set articulation configuration in DexSim
         set_dexsim_articulation_cfg(entities, self.cfg)
-        
+
         if use_cfg_properties:
             # Init joint drive parameters.
             num_entities = len(entities)

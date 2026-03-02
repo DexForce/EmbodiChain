@@ -122,6 +122,8 @@ class UnitreeH1(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
 class UnitreeH1Usd(EmbodiChainDataset):
     """Dataset class for the Unitree H1 robot USD version.
 
