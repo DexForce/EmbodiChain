@@ -550,8 +550,8 @@ class RigidObjectCfg(ObjectBaseCfg):
     """Whether to use physical properties from USD file instead of config.
     
     When True: Keep all physical properties (drive, physics attrs, etc.) from USD file.
-    When False (default): Override USD properties with config values (URDF behavior).
-    Only effective for USD files, ignored for URDF files.
+    When False (default): Override USD properties with config values.
+    Only effective for USD files.
     """
 
     def to_dexsim_body_type(self) -> ActorType:
