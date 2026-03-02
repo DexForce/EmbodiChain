@@ -67,9 +67,6 @@ def main():
 
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
-    # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
 
     cube: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
@@ -110,6 +107,10 @@ def main():
             use_usd_properties=False,
         )
     )
+
+    # Open window when the scene has been set up
+    if not args.headless:
+        sim.open_window()
 
     print("[INFO]: Scene setup complete!")
     print("[INFO]: Press Ctrl+C to stop the simulation")
