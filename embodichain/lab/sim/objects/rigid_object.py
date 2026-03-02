@@ -211,9 +211,10 @@ class RigidObject(BatchEntity):
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
         self.is_shared_visual_material = False
 
-        for entity in entities:
-            entity.set_body_scale(*cfg.body_scale)
-            entity.set_physical_attr(cfg.attrs.attr())
+        if not cfg.use_usd_properties:
+            for entity in entities:
+                entity.set_body_scale(*cfg.body_scale)
+                entity.set_physical_attr(cfg.attrs.attr())
 
         if device.type == "cuda":
             self._world.update(0.001)
