@@ -586,11 +586,10 @@ class Articulation(BatchEntity):
         is_usd_file = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         use_cfg_properties = not (cfg.use_usd_properties and is_usd_file)
 
-        # Set articulation configuration in DexSim
-        set_dexsim_articulation_cfg(entities, self.cfg)
-
         if use_cfg_properties:
-            # Init joint drive parameters.
+            # Set articulation configuration in DexSim
+            set_dexsim_articulation_cfg(entities, self.cfg)
+
             num_entities = len(entities)
             dof = self._data.dof
             default_cfg = JointDrivePropertiesCfg()
@@ -625,6 +624,13 @@ class Articulation(BatchEntity):
                 device=device,
             )
             self._set_default_joint_drive()
+        else:
+            # Read current properties from USD-loaded entities
+            self.default_joint_stiffness = self._data.joint_stiffness.clone()
+            self.default_joint_damping = self._data.joint_damping.clone()
+            self.default_joint_friction = self._data.joint_friction.clone()
+            self.default_joint_max_effort = self._data.qf_limits.clone()
+            self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
         self.pk_chain = None
         if self.cfg.build_pk_chain:
