@@ -33,7 +33,7 @@ class BaseUsdTest:
 
     def setup_simulation(self, sim_device):
         config = SimulationManagerCfg(
-            headless=False, sim_device=sim_device, num_envs=NUM_ARENAS, enable_rt=True
+            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS, enable_rt=False
         )
         self.sim = SimulationManager(config)
 
