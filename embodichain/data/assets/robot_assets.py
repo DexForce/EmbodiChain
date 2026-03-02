@@ -122,6 +122,32 @@ class UnitreeH1(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+class UnitreeH1Usd(EmbodiChainDataset):
+    """Dataset class for the Unitree H1 robot USD version.
+
+    Directory structure:
+        UnitreeH1Usd/H1_usd
+            h1.usd
+            h1.usda
+
+    Example usage:
+        >>> from embodichain.data.robot_dataset import UnitreeH1Usd
+        >>> dataset = UnitreeH1Usd()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("UnitreeH1Usd/H1_usd/h1.usd"))
+        >>> print(get_data_path("UnitreeH1Usd/H1_usd/h1.usda"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "H1_usd.zip"),
+            "9fc19f8c8b4a49398ec661e6ea9877ee",
+        )
+        prefix = "UnitreeH1Usd"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
 
 
 class ABB(EmbodiChainDataset):

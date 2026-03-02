@@ -15,8 +15,9 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates how to create a simulation scene using SimulationManager.
-It shows the basic setup of simulation context, adding objects, and sensors.
+This script demonstrates how to import USD files into the scene.
+Currently, it supports importing USD files as rigid objects or articulations.
+Multiple arenas are not supported when importing USD files.
 """
 
 import argparse
@@ -31,8 +32,7 @@ from embodichain.lab.sim.objects import (
     ArticulationCfg,
     Articulation,
 )
-from dexsim.utility.path import get_resources_data_path
-
+from embodichain.data import get_data_path
 
 def main():
     """Main function to create and run the simulation scene."""
@@ -91,11 +91,12 @@ def main():
         )
     )
 
-    usdpath = "/home/xiemh/model/004_sugar_box/004_sugar_box_xmh.usda"
+    sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
+    print(f"Loading USD file from: {sugar_box_path}")
     sugar_box: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="sugar_box",
-            shape=MeshCfg(fpath=usdpath),
+            shape=MeshCfg(fpath=sugar_box_path),
             body_type="dynamic",
             init_pos=[0.2, 0.2, 1.0],
             use_usd_properties=True,
@@ -103,11 +104,12 @@ def main():
     )
 
     # Add objects to the scene
+    h1_path= get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
+    print(f"Loading USD file from: {h1_path}")
     h1: Articulation = sim.add_articulation(
         cfg=ArticulationCfg(
             uid="h1",
-            # fpath="/home/xiemh/model/Collected_ur10/ur10.usd",
-            fpath="/home/xiemh/model/Collected_h1/h1.usda",
+            fpath=h1_path,
             build_pk_chain=False,
             init_pos=[-0.2, -0.2, 1.0],
             use_usd_properties=False,

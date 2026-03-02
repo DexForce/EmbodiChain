@@ -215,3 +215,14 @@ class ScannedBottle(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+class SugarBox(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "sugar_box_usd.zip"),
+            "a1bc5075512cedecd08af4f9c3e8f636",
+        )
+        prefix = "SugarBox"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
