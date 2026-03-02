@@ -21,10 +21,12 @@ import torch
 
 from .base import BaseAlgorithm
 from .ppo import PPOCfg, PPO
+from .grpo import GRPOCfg, GRPO
 
 # name -> (CfgClass, AlgoClass)
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
     "ppo": (PPOCfg, PPO),
+    "grpo": (GRPOCfg, GRPO),
 }
 
 
@@ -47,6 +49,8 @@ __all__ = [
     "BaseAlgorithm",
     "PPOCfg",
     "PPO",
+    "GRPOCfg",
+    "GRPO",
     "get_registered_algo_names",
     "build_algo",
 ]
