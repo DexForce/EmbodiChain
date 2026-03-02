@@ -221,7 +221,7 @@ def load_mesh_objects_from_cfg(
 
         is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: currently not supporting multiple arenas for USD
+            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
             if len(env_list) > 1:
                 logger.log_error(f"Currently not supporting multiple arenas for USD.")
             _env: dexsim.environment.Env = dexsim.default_world().get_env()

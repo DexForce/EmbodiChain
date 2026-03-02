@@ -51,12 +51,6 @@ def main():
     parser.add_argument(
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
     )
-    parser.add_argument(
-        "--enable_rt",
-        action="store_true",
-        default=True,
-        help="Enable ray tracing for better visuals",
-    )
     args = parser.parse_args()
 
     # Configure the simulation
@@ -66,7 +60,7 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        enable_rt=args.enable_rt,  # Enable ray tracing for better visuals
+        enable_rt=True,  # Enable ray tracing for better visuals
         num_envs=1,
         arena_space=3.0,
     )

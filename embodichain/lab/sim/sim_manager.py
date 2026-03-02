@@ -1043,12 +1043,12 @@ class SimulationManager:
 
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: currently not supporting multiple arenas for USD
+            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
             if len(env_list) > 1:
                 logger.log_error(f"Currently not supporting multiple arenas for USD.")
             env = self._env
             results = env.import_from_usd_file(cfg.fpath, return_object=True)
-            print("USD import results:", results)
+            # print("USD import results:", results)
 
             articulations_found = []
             for key, value in results.items():
@@ -1057,7 +1057,6 @@ class SimulationManager:
 
             if len(articulations_found) == 0:
                 logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-                return None
             elif len(articulations_found) > 1:
                 logger.log_error(
                     f"Multiple articulations found in USD file {cfg.fpath}. "
@@ -1135,10 +1134,12 @@ class SimulationManager:
 
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: currently not supporting multiple arenas for USD
+            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
+            if len(env_list) > 1:
+                logger.log_error(f"Currently not supporting multiple arenas for USD.")
             env = self._env
             results = env.import_from_usd_file(cfg.fpath, return_object=True)
-            print("USD import results:", results)
+            # print("USD import results:", results)
 
             articulations_found = []
             for key, value in results.items():
@@ -1147,7 +1148,6 @@ class SimulationManager:
 
             if len(articulations_found) == 0:
                 logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-                return None
             elif len(articulations_found) > 1:
                 logger.log_error(
                     f"Multiple articulations found in USD file {cfg.fpath}. "
