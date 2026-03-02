@@ -651,7 +651,7 @@ class Articulation(BatchEntity):
         parent_str = super().__str__()
         return parent_str + f" | dof: {self.dof} | num_links: {self.num_links}"
 
-    @property
+    @cached_property
     def dof(self) -> int:
         """Get the degree of freedom of the articulation.
 
@@ -660,7 +660,7 @@ class Articulation(BatchEntity):
         """
         return self._data.dof
 
-    @property
+    @cached_property
     def num_links(self) -> int:
         """Get the number of links in the articulation.
 
@@ -669,7 +669,7 @@ class Articulation(BatchEntity):
         """
         return self._data.num_links
 
-    @property
+    @cached_property
     def link_names(self) -> List[str]:
         """Get the names of the links in the articulation.
 
@@ -678,7 +678,7 @@ class Articulation(BatchEntity):
         """
         return self._data.link_names
 
-    @property
+    @cached_property
     def root_link_name(self) -> str:
         """Get the name of the root link of the articulation.
 
@@ -687,7 +687,7 @@ class Articulation(BatchEntity):
         """
         return self.entities[0].get_root_link_name()
 
-    @property
+    @cached_property
     def joint_names(self) -> List[str]:
         """Get the names of the actived joints in the articulation.
 
@@ -696,7 +696,7 @@ class Articulation(BatchEntity):
         """
         return self._entities[0].get_actived_joint_names()
 
-    @property
+    @cached_property
     def all_joint_names(self) -> List[str]:
         """Get the names of the joints in the articulation.
 

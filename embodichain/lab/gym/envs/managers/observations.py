@@ -38,6 +38,7 @@ def get_rigid_object_pose(
     env: EmbodiedEnv,
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
+    to_matrix: bool = True,
 ) -> torch.Tensor:
     """Get the world poses of the rigid objects in the environment.
 
@@ -48,17 +49,52 @@ def get_rigid_object_pose(
         env: The environment instance.
         obs: The observation dictionary.
         entity_cfg: The configuration of the scene entity.
+        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
 
     Returns:
-        A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
+        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the rigid objects.
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
-        return torch.zeros((env.num_envs, 4, 4), dtype=torch.float32)
+        if to_matrix:
+            return torch.zeros(
+                (env.num_envs, 4, 4), dtype=torch.float32, device=env.device
+            )
+        else:
+            return torch.zeros(
+                (env.num_envs, 7), dtype=torch.float32, device=env.device
+            )
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
-    return obj.get_local_pose(to_matrix=True)
+    return obj.get_local_pose(to_matrix=to_matrix)
+
+
+def get_rigid_object_velocity(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Get the world velocities of the rigid objects in the environment.
+
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the scene entity.
+
+    Returns:
+        A tensor of shape (num_envs, 6) representing the linear and angular velocities of the rigid objects.
+    """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return torch.zeros((env.num_envs, 6), dtype=torch.float32, device=env.device)
+
+    obj = env.sim.get_rigid_object(entity_cfg.uid)
+
+    return obj.body_data.vel
 
 
 def normalize_robot_joint_data(

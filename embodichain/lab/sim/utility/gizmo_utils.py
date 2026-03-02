@@ -51,7 +51,7 @@ def create_gizmo_callback() -> Callable:
 
 
 def run_gizmo_robot_control_loop(
-    robot: "Robot", control_part: str = "arm", end_link_name: str | None = None
+    robot: object | str, control_part: str = "arm", end_link_name: str | None = None
 ):
     """Run a control loop for testing gizmo controls on a robot.
 
@@ -59,7 +59,7 @@ def run_gizmo_robot_control_loop(
     using gizmo controls with keyboard input for additional commands.
 
     Args:
-        robot (Robot): The robot to control with the gizmo.
+        robot (Robot | str): The robot to control with the gizmo.
         control_part (str, optional): The part of the robot to control. Defaults to "arm".
         end_link_name (str | None, optional): The name of the end link for FK calculations. Defaults to None.
 
@@ -86,6 +86,9 @@ def run_gizmo_robot_control_loop(
     from embodichain.utils.logger import log_info, log_warning, log_error
 
     sim = SimulationManager.get_instance()
+
+    if isinstance(robot, str):
+        robot = sim.get_robot(uid=robot)
 
     # Enter auto-update mode.
     sim.set_manual_update(False)

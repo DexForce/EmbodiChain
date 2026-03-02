@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import numpy as np
+import gymnasium as gym
 import torch
+import tqdm
 
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
@@ -87,6 +89,10 @@ class LeRobotRecorder(Functor):
         # Optional parameters
         self.instruction = params.get("instruction", None)
         self.extra = params.get("extra", {})
+
+        # Experimental parameters for extra episode info saving.
+        self.extra_episode_info = self.extra.get("episode_info", {})
+        self.extra_episode_info_buffer = {}
         self.use_videos = params.get("use_videos", False)
 
         # LeRobot dataset instance
@@ -165,10 +171,14 @@ class LeRobotRecorder(Functor):
             episode_extra_info = extra_info.copy()
             self.total_time += current_episode_time
             episode_extra_info["total_time"] = self.total_time
-            self._update_dataset_info({"extra": episode_extra_info})
+            self._save_extra_episode_meta_info(env_id)
 
             try:
-                for obs, action in zip(obs_list, action_list):
+                for obs, action in tqdm.tqdm(
+                    zip(obs_list, action_list),
+                    total=len(obs_list),
+                    desc=f"Converting env {env_id} episode to LeRobot format",
+                ):
                     frame = self._convert_frame_to_lerobot(obs, action, task)
                     self.dataset.add_frame(frame)
 
@@ -182,6 +192,28 @@ class LeRobotRecorder(Functor):
                 self.curr_episode += 1
             except Exception as e:
                 logger.log_error(f"Failed to save episode {env_id}: {e}")
+
+    def _save_extra_episode_meta_info(self, env_id: int) -> None:
+        """Save extra episode meta info for a specific environment ID."""
+
+        curr_extra_episode_info = {}
+        if self.extra_episode_info:
+            for key, attr_list in self.extra_episode_info.items():
+                if key == "rigid_object_physics_attributes":
+                    rigid_obj_list = self._env.sim.get_rigid_object_uid_list()
+                    for obj_uid in rigid_obj_list:
+                        curr_extra_episode_info[obj_uid] = {}
+                        obj = self._env.sim.get_rigid_object(obj_uid)
+                        for attr in attr_list:
+                            if attr == "mass":
+                                curr_extra_episode_info[obj_uid]["mass"] = round(
+                                    obj.get_mass(env_ids=[env_id]).squeeze_().item(), 5
+                                )
+
+        self.extra_episode_info_buffer[self.curr_episode] = curr_extra_episode_info
+        self._update_dataset_info(
+            {"extra_episode_info": self.extra_episode_info_buffer}
+        )
 
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
@@ -260,43 +292,98 @@ class LeRobotRecorder(Functor):
     def _build_features(self) -> Dict:
         """Build LeRobot features dict."""
         features = {}
-        extra_vision_config = self.robot_meta.get("observation", {}).get("vision", {})
 
-        for camera_name in extra_vision_config.keys():
-            sensor = self._env.get_sensor(camera_name)
-            is_stereo = is_stereocam(sensor)
-            img_shape = (sensor.cfg.height, sensor.cfg.width, 3)
+        # Setup robot joint state features based on control_parts or all joints if not specified.
+        control_parts = self.robot_meta.get("control_parts", None)
+        if control_parts is not None:
+            self._joint_ids = []
+            for part in control_parts:
+                part_joint_ids = self._env.robot.get_joint_ids(part, remove_mimic=True)
+                self._joint_ids.extend(part_joint_ids)
+        else:
+            self._joint_ids = self._env.robot.get_joint_ids(remove_mimic=True)
 
-            features[camera_name] = {
-                "dtype": "video" if self.use_videos else "image",
-                "shape": img_shape,
-                "names": ["height", "width", "channel"],
-            }
+        state_dim = len(self._joint_ids)
+        # Create joint names.
+        joint_names = [self._env.robot.joint_names[i] for i in self._joint_ids]
 
-            if is_stereo:
-                features[get_right_name(camera_name)] = {
-                    "dtype": "video" if self.use_videos else "image",
-                    "shape": img_shape,
-                    "names": ["height", "width", "channel"],
-                }
-
-        qpos = self._env.robot.get_qpos()
-        state_dim = qpos.shape[1]
-
-        if state_dim > 0:
-            features["observation.state"] = {
-                "dtype": "float32",
-                "shape": (state_dim,),
-                "names": ["state"],
-            }
+        features["observation.qpos"] = {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": joint_names,
+        }
+        features["observation.qvel"] = {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": joint_names,
+        }
+        features["observation.qf"] = {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": joint_names,
+        }
 
         # Use full qpos dimension for action (includes gripper)
-        action_dim = state_dim
+        action_dim = len(self._joint_ids)
         features["action"] = {
             "dtype": "float32",
             "shape": (action_dim,),
-            "names": ["action"],
+            "names": joint_names,
         }
+
+        # Setup sensor observation features based env.observation.sensor
+        if self._env.has_sensors:
+            sensor_obs_space: dict = self._env.single_observation_space["sensor"]
+
+            for sensor_name, value in sensor_obs_space.items():
+                sensor = self._env.get_sensor(sensor_name)
+                is_stereo = is_stereocam(sensor)
+
+                for frame_name, space in value.items():
+                    # TODO: Support depth (uint16) and mask (also uint16 or uint8)
+                    if frame_name not in ["color", "color_right"]:
+                        logger.log_error(
+                            f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
+                        )
+
+                    features[f"{sensor_name}.{frame_name}"] = {
+                        "dtype": "video" if self.use_videos else "image",
+                        "shape": (sensor.cfg.height, sensor.cfg.width, 3),
+                        "names": ["height", "width", "channel"],
+                    }
+
+                    if is_stereo:
+                        features[f"{sensor_name}.{frame_name}_right"] = {
+                            "dtype": "video" if self.use_videos else "image",
+                            "shape": (sensor.cfg.height, sensor.cfg.width, 3),
+                            "names": ["height", "width", "channel"],
+                        }
+
+        # TODO: The extra observation features are supposed to be defined in a flattened way in the observation space.
+        # Lerobot requires a flat feature dict, so we may need to support nested dicts to flatten dict conversion in the future.
+        # Add any extra features specified in observation space excluding 'robot' and 'sensor'
+        for key, space in self._env.single_observation_space.items():
+            if key in ["robot", "sensor"]:
+                continue
+
+            if isinstance(space, gym.spaces.Dict):
+                logger.log_warning(
+                    f"Nested Dict observation space for key '{key}' is not directly supported. "
+                    f"Please flatten it or specify features manually. Skipping '{key}'."
+                )
+                continue
+
+            names = key
+            if "vel" in key:
+                names = ["lin_x", "lin_y", "lin_z", "ang_x", "ang_y", "ang_z"]
+            elif "pose" in key:
+                names = ["x", "y", "z", "qw", "qx", "qy", "qz"]
+
+            features[f"observation.{key}"] = {
+                "dtype": str(space.dtype),
+                "shape": space.shape,
+                "names": names,
+            }
 
         return features
 
@@ -314,51 +401,40 @@ class LeRobotRecorder(Functor):
             Frame dict in LeRobot format with numpy arrays
         """
         frame = {"task": task}
-        extra_vision_config = self.robot_meta.get("observation", {}).get("vision", {})
 
-        # Add images
-        for camera_name in extra_vision_config.keys():
-            if camera_name in obs.get("sensor", {}):
-                sensor = self._env.get_sensor(camera_name)
+        if self._env.has_sensors:
+            sensor_obs_space: dict = self._env.single_observation_space["sensor"]
+
+            # Add images
+            for sensor_name, value in sensor_obs_space.items():
+                sensor = self._env.get_sensor(sensor_name)
                 is_stereo = is_stereocam(sensor)
 
-                color_data = obs["sensor"][camera_name]["color"]
-                if isinstance(color_data, torch.Tensor):
-                    color_img = color_data[:, :, :3].cpu().numpy()
-                else:
-                    color_img = np.array(color_data)[:, :, :3]
-
-                if color_img.dtype in [np.float32, np.float64]:
-                    color_img = (color_img * 255).astype(np.uint8)
-
-                frame[camera_name] = color_img
+                color_data = obs["sensor"][sensor_name]["color"]
+                color_img = color_data[:, :, :3].cpu()
+                frame[f"{sensor_name}.color"] = color_img
 
                 if is_stereo:
-                    color_right_data = obs["sensor"][camera_name]["color_right"]
-                    if isinstance(color_right_data, torch.Tensor):
-                        color_right_img = color_right_data[:, :, :3].cpu().numpy()
-                    else:
-                        color_right_img = np.array(color_right_data)[:, :, :3]
-
-                    if color_right_img.dtype in [np.float32, np.float64]:
-                        color_right_img = (color_right_img * 255).astype(np.uint8)
-
-                    frame[get_right_name(camera_name)] = color_right_img
+                    color_right_data = obs["sensor"][sensor_name]["color_right"]
+                    color_right_img = color_right_data[:, :, :3].cpu()
+                    frame[f"{sensor_name}.color_right"] = color_right_img
 
         # Add state
-        qpos = obs["robot"][JointType.QPOS.value]
-        if isinstance(qpos, torch.Tensor):
-            state_data = qpos.cpu().numpy().astype(np.float32)
-        else:
-            state_data = np.array(qpos).astype(np.float32)
+        frame["observation.qpos"] = obs["robot"]["qpos"][self._joint_ids].cpu()
+        frame["observation.qvel"] = obs["robot"]["qvel"][self._joint_ids].cpu()
+        frame["observation.qf"] = obs["robot"]["qf"][self._joint_ids].cpu()
 
-        frame["observation.state"] = state_data
+        # Add extra observation features if they exist
+        for key in obs:
+            if key in ["robot", "sensor"]:
+                continue
 
-        # Add action (save complete qpos including gripper)
+            frame[f"observation.{key}"] = obs[key].cpu()
+
+        # Add action.
+        action = action[self._joint_ids]
         if isinstance(action, torch.Tensor):
-            action_data = action.cpu().numpy()
-        elif isinstance(action, np.ndarray):
-            action_data = action
+            action_data = action.cpu()
         elif isinstance(action, dict):
             # Extract qpos from action dict
             action_tensor = action.get(
@@ -372,13 +448,7 @@ class LeRobotRecorder(Functor):
                         break
 
             if isinstance(action_tensor, torch.Tensor):
-                action_data = action_tensor.cpu().numpy()
-            elif isinstance(action_tensor, np.ndarray):
-                action_data = action_tensor
-            else:
-                action_data = np.array(action_tensor)
-        else:
-            action_data = np.array(action)
+                action_data = action_tensor.cpu()
 
         frame["action"] = action_data
 
