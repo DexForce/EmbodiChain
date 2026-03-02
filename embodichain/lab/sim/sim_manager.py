@@ -1044,6 +1044,8 @@ class SimulationManager:
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
             # TODO: currently not supporting multiple arenas for USD
+            if len(env_list) > 1:
+                logger.log_error(f"Currently not supporting multiple arenas for USD.")
             env = self._env
             results = env.import_from_usd_file(cfg.fpath, return_object=True)
             print("USD import results:", results)

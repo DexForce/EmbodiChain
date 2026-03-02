@@ -582,10 +582,14 @@ class Articulation(BatchEntity):
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
-        if not cfg.use_usd_properties:
-            # Set articulation configuration in DexSim
-            set_dexsim_articulation_cfg(entities, self.cfg)
+        # Determine if we should use USD properties or cfg properties.
+        is_usd_file = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
+        use_cfg_properties = not (cfg.use_usd_properties and is_usd_file)
 
+        # Set articulation configuration in DexSim
+        set_dexsim_articulation_cfg(entities, self.cfg)
+        
+        if use_cfg_properties:
             # Init joint drive parameters.
             num_entities = len(entities)
             dof = self._data.dof

@@ -222,6 +222,8 @@ def load_mesh_objects_from_cfg(
         is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
             # TODO: currently not supporting multiple arenas for USD
+            if len(env_list) > 1:
+                logger.log_error(f"Currently not supporting multiple arenas for USD.")
             _env: dexsim.environment.Env = dexsim.default_world().get_env()
             results = _env.import_from_usd_file(fpath, return_object=True)
             print(f"import usd result: {results}")
