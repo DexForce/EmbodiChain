@@ -10,10 +10,11 @@ The {class}`~objects.Articulation` class represents the fundamental physics enti
 Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `fpath` | `str` | `None` | Path to the asset file (URDF/MJCF). |
+| `fpath` | `str` | `None` | Path to the asset file (URDF/MJCF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
 | `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
+| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
 | `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
@@ -61,6 +62,32 @@ articulation: Articulation = sim.add_articulation(cfg=art_cfg)
 # This performs a global reset of the simulation state
 sim.reset_objects_state()
 ```
+
+### USD Import
+
+You can import USD files (`.usd`, `.usda`, `.usdc`) as articulations:
+
+```python
+from embodichain.data import get_data_path
+
+# Import USD with properties from file
+usd_art_cfg = ArticulationCfg(
+    fpath=get_data_path("path/to/robot.usd"),
+    init_pos=(0, 0, 0.5),
+    use_usd_properties=True  # Keep USD drive/physics properties
+)
+usd_robot = sim.add_articulation(cfg=usd_art_cfg)
+
+# Or override USD properties with config (URDF behavior)
+usd_art_cfg_override = ArticulationCfg(
+    fpath=get_data_path("path/to/robot.usd"),
+    init_pos=(0, 0, 0.5),
+    use_usd_properties=False,  # Use config instead
+    drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500)
+)
+robot = sim.add_articulation(cfg=usd_art_cfg_override)
+```
+
 ## Articulation Class
 
 State data is accessed via getter methods that return batched tensors.
