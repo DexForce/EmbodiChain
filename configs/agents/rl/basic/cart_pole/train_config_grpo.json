@@ -3,7 +3,7 @@
         "exp_name": "cart_pole_grpo",
         "gym_config": "configs/agents/rl/basic/cart_pole/gym_config.json",
         "seed": 42,
-        "device": "cpu",
+        "device": "cuda:0",
         "headless": true,
         "enable_rt": false,
         "gpu_id": 0,
@@ -14,7 +14,25 @@
         "save_freq": 200,
         "use_wandb": true,
         "enable_eval": true,
-        "wandb_project_name": "embodychain-cart_pole"
+        "wandb_project_name": "embodychain-cart_pole",
+        "events": {
+            "eval": {
+                "record_camera": {
+                    "func": "record_camera_data_async",
+                    "mode": "interval",
+                    "interval_step": 1,
+                    "params": {
+                        "name": "main_cam",
+                        "resolution": [640, 480],
+                        "eye": [-1.4, 1.4, 2.5],
+                        "target": [0, 0, 0.7],
+                        "up": [0, 0, 1],
+                        "intrinsics": [600, 600, 320, 240],
+                        "save_path": "./outputs/videos/eval"
+                    }
+                }
+            }
+        }
     },
     "policy": {
         "name": "actor_only",
@@ -34,7 +52,7 @@
             "batch_size": 8192,
             "gamma": 0.99,
             "clip_coef": 0.2,
-            "ent_coef": 0.001,
+            "ent_coef": 0.01,
             "kl_coef": 0.0,
             "group_size": 4,
             "eps": 1e-8,
