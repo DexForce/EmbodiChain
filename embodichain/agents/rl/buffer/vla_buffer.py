@@ -23,165 +23,119 @@ from typing import Optional
 
 
 class VLABuffer:
-    """FIFO rollout buffer for VLA RL with pre-allocated TensorDict storage.
+    """Rollout buffer for VLA RL with (B, T) batch-first layout.
 
-    Uses a single pre-allocated TensorDict with circular indexing for efficient
-    high-frequency transition writes. Designed for async VLA scenarios where
-    model inference is slow but training is fast.
+    Stores complete rollouts to ensure correct GAE computation (GAE requires
+    sequential timesteps within the same trajectory). Async collector accumulates
+    T steps per env, then adds the full rollout.
 
     Key characteristics:
-    - Pre-allocated memory: Zero-copy writes via direct indexing
-    - FIFO eviction: Circular buffer automatically overwrites oldest data
-    - Transition-level storage: Each step is a separate entry
-    - High-frequency writes: Optimized for async collection (no TensorDict creation overhead)
+    - Rollout-level storage: Collect full rollout [T, N] before adding
+    - Batch-first layout: Stores and returns [N, T, ...] for VLA training
+    - Thread-safe: Async collector writes, main thread reads
+    - Single rollout: When full, one rollout ready for training
 
-    Storage layout: Single TensorDict with shape [buffer_size, ...]
+    Storage layout: [N, T, ...] - batch (env) first, time second.
     """
 
-    def __init__(self, buffer_size: int, device: torch.device):
-        """Initialize VLA buffer with lazy allocation.
+    def __init__(
+        self,
+        buffer_size: int,
+        device: torch.device,
+        num_envs: int,
+    ):
+        """Initialize VLA buffer.
 
         Args:
-            buffer_size: Maximum number of transitions to store
-            device: Device to store tensors on
+            buffer_size: Total transitions per rollout (T * N)
+            device: Device for tensors
+            num_envs: Number of parallel environments (N)
         """
         self.buffer_size = buffer_size
         self.device = device
-        self.buffer: Optional[TensorDict] = None  # Lazy init on first add
-        self.write_pos = 0  # Current write position (circular)
-        self.size = 0  # Current valid data count
-        self._total_added = 0
-        self._initialized = False
-        self._lock = threading.Lock()  # Thread-safe: main thread reads, collector writes
+        self.num_envs = num_envs
+        self.rollout_length = buffer_size // num_envs  # T
+        if self.rollout_length * num_envs != buffer_size:
+            raise ValueError(
+                f"buffer_size ({buffer_size}) must be divisible by num_envs ({num_envs})"
+            )
 
-    def _initialize_buffer(self, template: TensorDict) -> None:
-        """Initialize buffer structure from first transition template.
+        self._rollout: Optional[TensorDict] = None  # [N, T, ...]
+        self._lock = threading.Lock()
 
-        Args:
-            template: First transition TensorDict to infer structure from
-        """
-        if self._initialized:
-            return
+    def add_rollout(self, rollout: TensorDict) -> None:
+        """Add a complete rollout. Fixed layout: [N, T] (batch-first).
 
-        # Pre-allocate buffer with buffer_size
-        # Template should be a single transition [key: shape]
-        self.buffer = template.expand(self.buffer_size).clone()
-        self._initialized = True
-
-    def add(self, transition: TensorDict) -> None:
-        """Add a single transition to buffer (high-frequency async writes).
+        GAE requires same-trajectory timesteps; we only accept full rollouts.
 
         Args:
-            transition: Single transition TensorDict (no batch dimension)
+            rollout: TensorDict with batch_size=[N, T, ...]
         """
         with self._lock:
-            # Lazy initialization on first add
-            if not self._initialized:
-                self._initialize_buffer(transition.to(self.device))
-
-            # Ensure transition is on correct device
-            transition = transition.to(self.device)
-
-            # Direct index assignment (zero-copy write)
-            self.buffer[self.write_pos] = transition
-
-            # Update circular index
-            self.write_pos = (self.write_pos + 1) % self.buffer_size
-
-            # Update size (saturates at buffer_size)
-            self.size = min(self.size + 1, self.buffer_size)
-            self._total_added += 1
+            if rollout.batch_size[0] != self.num_envs or rollout.batch_size[1] != self.rollout_length:
+                raise ValueError(
+                    f"Rollout shape {rollout.batch_size} does not match "
+                    f"expected (N={self.num_envs}, T={self.rollout_length})"
+                )
+            self._rollout = rollout.to(self.device)
 
     def add_batch(self, transitions: TensorDict) -> None:
-        """Add multiple transitions at once (batch write).
-
-        Args:
-            transitions: Batch of transitions with shape [batch_size, ...]
-        """
-        with self._lock:
-            batch_size = transitions.batch_size[0]
-
-            # Lazy initialization
-            if not self._initialized:
-                self._initialize_buffer(transitions[0].to(self.device))
-
-            transitions = transitions.to(self.device)
-
-            # Handle circular write
-            for i in range(batch_size):
-                self.buffer[self.write_pos] = transitions[i]
-                self.write_pos = (self.write_pos + 1) % self.buffer_size
-                self.size = min(self.size + 1, self.buffer_size)
-                self._total_added += 1
+        """Deprecated: Use add_rollout. Batch must be a complete rollout [N, T]."""
+        if len(transitions.batch_size) >= 2:
+            self.add_rollout(transitions)
+        else:
+            raise NotImplementedError(
+                "VLABuffer requires full rollout. Use add_rollout(rollout) with [N, T]."
+            )
 
     def get(self, flatten: bool = True) -> TensorDict:
-        """Get valid data from buffer (thread-safe).
+        """Get rollout from buffer (thread-safe).
 
         Args:
-            flatten: If True, return flattened [size, ...]. Currently only supports True.
+            flatten: If True, flatten to [N*T, ...] for minibatch sampling.
 
         Returns:
-            TensorDict with batch_size=[size, ...] containing valid data
+            TensorDict with batch_size=[N, T] or [N*T] when flatten=True
         """
         with self._lock:
-            if not self._initialized or self.size == 0:
+            if self._rollout is None:
                 raise ValueError("Buffer is empty")
 
-            if not flatten:
-                raise NotImplementedError(
-                    "Only flatten=True is supported for VLABuffer"
-                )
+            rollout = self._rollout
+            self._rollout = None
 
-            # Return first 'size' elements (valid data)
-            # Note: Data is in insertion order up to write_pos, then wraps
-            if self.size < self.buffer_size:
-                # Buffer not yet full, data is [0:size]
-                return self.buffer[: self.size].clone()
-            else:
-                # Buffer full, need to rearrange to maintain temporal order
-                # Oldest data is at write_pos, newest at write_pos-1
-                indices = (
-                    torch.arange(
-                        self.write_pos,
-                        self.write_pos + self.buffer_size,
-                        device=self.device,
-                    )
-                    % self.buffer_size
-                )
-                return self.buffer[indices].clone()
+        if flatten:
+            return rollout.reshape(-1)
+        return rollout
 
     def clear(self) -> None:
-        """Clear buffer (reset pointers, keep pre-allocated memory)."""
+        """Clear buffer."""
         with self._lock:
-            self.write_pos = 0
-            self.size = 0
-            # Keep buffer allocated for reuse
+            self._rollout = None
 
     def __len__(self) -> int:
-        """Return current number of valid transitions."""
+        """Return 1 if has rollout, 0 otherwise."""
         with self._lock:
-            return self.size
+            return 1 if self._rollout is not None else 0
 
     def is_full(self) -> bool:
-        """Check if buffer is at full buffer_size."""
+        """True when one complete rollout is ready."""
         with self._lock:
-            return self.size >= self.buffer_size
+            return self._rollout is not None
 
     def get_num_rollouts(self) -> int:
-        """Return 1 (buffer stores transitions, not rollouts)."""
+        """Return 1 if has rollout, 0 otherwise."""
         with self._lock:
-            return 1 if self.size > 0 else 0
+            return 1 if self._rollout is not None else 0
 
     def get_stats(self) -> dict:
-        """Get buffer statistics for logging."""
+        """Get buffer statistics."""
         with self._lock:
-            return {
-                "buffer_size": self.size,
-                "buffer_capacity": self.buffer_size,
-                "total_transitions": self.size,
-                "total_added": self._total_added,
-                "buffer_usage": (
-                    self.size / self.buffer_size if self.buffer_size > 0 else 0.0
-                ),
-                "write_pos": self.write_pos,
-            }
+            has_data = self._rollout is not None
+        return {
+            "buffer_size": self.rollout_length * self.num_envs,
+            "rollout_length": self.rollout_length,
+            "num_envs": self.num_envs,
+            "layout": "batch_first",
+            "has_rollout": has_data,
+        }

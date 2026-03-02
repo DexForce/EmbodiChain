@@ -127,104 +127,94 @@ class AsyncCollector(BaseCollector):
             }
 
     def _collect_loop(self):
-        """Background thread main loop: continuously collect transitions.
+        """Background thread main loop: collect full rollout, then add to buffer.
 
-        This method runs in a separate thread and continuously:
-        1. Gets action from policy
-        2. Steps environment
-        3. Constructs transition TensorDict
-        4. Adds to buffer (thread-safe)
-        5. Updates statistics
+        GAE requires sequential timesteps within the same trajectory. We accumulate
+        T steps (one rollout) locally, then add the complete rollout to buffer.
+        This ensures correct per-env trajectory ordering for GAE computation.
         """
+        rollout_length = self.buffer.rollout_length
         current_td = self.obs_tensordict
 
         while self._running:
             try:
-                # Policy forward (no_grad for inference)
-                with torch.no_grad():
-                    self.policy.train()  # Use stochastic policy
-                    self.policy.forward(current_td)
+                rollout_list = []
 
-                # Extract action
-                action = current_td["action"]
-                action_type = getattr(self.env, "action_type", "delta_qpos")
-                action_dict = {action_type: action}
+                for t in range(rollout_length):
+                    # Policy forward (no_grad for inference)
+                    with torch.no_grad():
+                        self.policy.train()
+                        self.policy.forward(current_td)
 
-                # Environment step
-                next_obs_dict, reward, terminated, truncated, env_info = self.env.step(
-                    action_dict
-                )
+                    action = current_td["action"]
+                    action_type = getattr(self.env, "action_type", "delta_qpos")
+                    action_dict = {action_type: action}
 
-                # Convert observation to TensorDict
-                next_obs_td = dict_to_tensordict(next_obs_dict, self.device)
-                done = terminated | truncated
-                next_obs_for_td = next_obs_td["observation"]
-                batch_size = next_obs_td.batch_size[0]
+                    next_obs_dict, reward, terminated, truncated, env_info = self.env.step(
+                        action_dict
+                    )
 
-                # Build "next" TensorDict
-                next_td = TensorDict(
-                    {
-                        "observation": next_obs_for_td,
-                        "reward": (
-                            reward.float().unsqueeze(-1)
-                            if reward.dim() == 1
-                            else reward.float()
-                        ),
-                        "done": (
-                            done.bool().unsqueeze(-1)
-                            if done.dim() == 1
-                            else done.bool()
-                        ),
-                        "terminated": (
-                            terminated.bool().unsqueeze(-1)
-                            if terminated.dim() == 1
-                            else terminated.bool()
-                        ),
-                        "truncated": (
-                            truncated.bool().unsqueeze(-1)
-                            if truncated.dim() == 1
-                            else truncated.bool()
-                        ),
-                    },
-                    batch_size=torch.Size([batch_size]),
-                    device=self.device,
-                )
+                    next_obs_td = dict_to_tensordict(next_obs_dict, self.device)
+                    done = terminated | truncated
+                    next_obs_for_td = next_obs_td["observation"]
+                    batch_size = next_obs_td.batch_size[0]
 
-                # Compute next value for bootstrapping (GAE computation)
-                with torch.no_grad():
-                    next_value_td = TensorDict(
-                        {"observation": next_obs_for_td},
-                        batch_size=next_td.batch_size,
+                    next_td = TensorDict(
+                        {
+                            "observation": next_obs_for_td,
+                            "reward": (
+                                reward.float().unsqueeze(-1)
+                                if reward.dim() == 1
+                                else reward.float()
+                            ),
+                            "done": (
+                                done.bool().unsqueeze(-1)
+                                if done.dim() == 1
+                                else done.bool()
+                            ),
+                            "terminated": (
+                                terminated.bool().unsqueeze(-1)
+                                if terminated.dim() == 1
+                                else terminated.bool()
+                            ),
+                            "truncated": (
+                                truncated.bool().unsqueeze(-1)
+                                if truncated.dim() == 1
+                                else truncated.bool()
+                            ),
+                        },
+                        batch_size=torch.Size([batch_size]),
                         device=self.device,
                     )
-                    self.policy.get_value(next_value_td)
-                    next_td["value"] = next_value_td["value"]
 
-                # Add "next" to current transition
-                current_td["next"] = next_td
+                    with torch.no_grad():
+                        next_value_td = TensorDict(
+                            {"observation": next_obs_for_td},
+                            batch_size=next_td.batch_size,
+                            device=self.device,
+                        )
+                        self.policy.get_value(next_value_td)
+                        next_td["value"] = next_value_td["value"]
 
-                # Flatten transition for buffer (remove batch dimension for single-step storage)
-                # Current buffer expects transitions without batch dimension
-                # We need to add each parallel env's transition separately
-                for env_idx in range(batch_size):
-                    transition = current_td[env_idx]  # Extract single env's transition
+                    current_td["next"] = next_td
+                    rollout_list.append(current_td.clone())
 
-                    # Thread-safe buffer write
-                    with self._lock:
-                        self.buffer.add(transition)
-                        self._step_count += 1
+                    if self.on_step_callback is not None:
+                        self.on_step_callback(current_td, env_info)
 
-                # Callback for statistics
-                if self.on_step_callback is not None:
-                    self.on_step_callback(current_td, env_info)
+                    if done.any():
+                        with self._lock:
+                            self._episode_count += done.sum().item()
 
-                # Handle episode termination
-                if done.any():
-                    with self._lock:
-                        self._episode_count += done.sum().item()
+                    current_td = next_obs_td
 
-                # Prepare next observation
-                current_td = next_obs_td
+                # Stack along dim=1: list of [N,...] -> [N, T, ...] (batch-first)
+                rollout = torch.stack(rollout_list, dim=1)
+                self.obs_tensordict = current_td
+
+                with self._lock:
+                    self.buffer.add_rollout(rollout)
+                    self._step_count += rollout.batch_size[0] * rollout.batch_size[1]
 
             except Exception as e:
                 print(f"[AsyncCollector] Error in collection loop: {e}")

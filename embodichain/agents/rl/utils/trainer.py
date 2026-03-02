@@ -76,11 +76,18 @@ class Trainer:
             else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
 
+        # Initialize observation and get num_envs (needed for VLA buffer)
+        obs, _ = env.reset()
+        self.obs_tensordict = dict_to_tensordict(obs, device)
+        num_envs = self.obs_tensordict.batch_size[0]
+
         if model_type == "vla":
-            # VLA model: accumulate multiple rollouts with FIFO buffer
+            # VLA model: rollout-level buffer with (B,T) layout for correct GAE
             from embodichain.agents.rl.buffer import VLABuffer
 
-            self.buffer = VLABuffer(buffer_size=buffer_size, device=device)
+            self.buffer = VLABuffer(
+                buffer_size=buffer_size, device=device, num_envs=num_envs
+            )
         elif model_type == "standard":
             # Standard PPO model: single rollout, use and discard
             from embodichain.agents.rl.buffer import RolloutBuffer
@@ -103,11 +110,6 @@ class Trainer:
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
         self._stats_lock = threading.Lock()  # Protects curr_ret, curr_len, ret_window, len_window (async mode)
-
-        # Initialize observation - will be used by collectors
-        obs, _ = self.env.reset()
-        self.obs_tensordict = dict_to_tensordict(obs, self.device)
-        num_envs = self.obs_tensordict.batch_size[0]
 
         # Episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
@@ -199,16 +201,16 @@ class Trainer:
             # Collect rollout
             rollout = collector.collect(num_steps=self.buffer_size)
 
-            # Update global step (main thread only)
-            num_steps = rollout.batch_size[0]  # T dimension
-            num_envs = rollout.batch_size[1] if len(rollout.batch_size) > 1 else 1
-            self.global_step += num_steps * num_envs
+            # Update global step (rollout is [N, T])
+            num_envs = rollout.batch_size[0]
+            num_steps = rollout.batch_size[1] if len(rollout.batch_size) > 1 else 1
+            self.global_step += num_envs * num_steps
 
             self.buffer.add(rollout)
 
-            # Train when buffer is full
+            # Train when buffer is full (pass [N, T] for correct GAE)
             if self.buffer.is_full():
-                data = self.buffer.get(flatten=True)
+                data = self.buffer.get(flatten=False)
                 losses = self.algorithm.update(data)
                 self._log_train(losses)
 
@@ -237,13 +239,15 @@ class Trainer:
                     if not collector.is_running():
                         raise RuntimeError("Async collector stopped unexpectedly")
 
-                # Get data and train
-                data = self.buffer.get(flatten=True)
-                self.buffer.clear()  # Must clear to avoid retraining on same data
+                # Get data (flatten=False so PPO gets [N, T] for GAE)
+                data = self.buffer.get(flatten=False)
+                self.buffer.clear()  # get() already clears; clear() is redundant
 
-                # Update global step based on collected data (main thread only)
-                batch_size = data.batch_size[0] if len(data.batch_size) > 0 else 0
-                self.global_step += batch_size
+                # Update global step (data is [N, T])
+                if len(data.batch_size) >= 2:
+                    self.global_step += data.batch_size[0] * data.batch_size[1]
+                else:
+                    self.global_step += data.batch_size[0] if data.batch_size else 0
 
                 losses = self.algorithm.update(data)
                 self._log_train(losses)

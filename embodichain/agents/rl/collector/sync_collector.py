@@ -42,7 +42,7 @@ class SyncCollector(BaseCollector):
             num_steps: Number of steps to collect (required)
 
         Returns:
-            TensorDict with batch_size=[T, N] containing full rollout
+            TensorDict with batch_size=[N, T] (batch-first) containing full rollout
         """
         if num_steps is None:
             raise TypeError("SyncCollector.collect() requires num_steps")
@@ -126,7 +126,6 @@ class SyncCollector(BaseCollector):
         # Update observation for next collection
         self.obs_tensordict = current_td
 
-        # Stack into [T, N, ...] TensorDict
-        rollout = torch.stack(rollout_list, dim=0)
-
+        # Stack along dim=1: list of [N,...] -> [N, T, ...] (batch-first)
+        rollout = torch.stack(rollout_list, dim=1)
         return rollout

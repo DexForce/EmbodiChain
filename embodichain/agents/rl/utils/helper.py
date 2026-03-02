@@ -115,66 +115,68 @@ def compute_gae(
     rollout: TensorDict,
     gamma: float,
     gae_lambda: float,
+    time_first: bool = True,
 ) -> TensorDict:
     """Compute Generalized Advantage Estimation (GAE) on rollout TensorDict.
 
-    This follows the TorchRL convention where rollout has shape [T, N, ...].
-    Computes advantage and value_target in-place and returns the modified TensorDict.
+    Supports two layouts:
+    - time_first=True (default): [T, N, ...] - TorchRL convention
+    - time_first=False: [N, T, ...] - batch-first, matches VLA training convention
+
+    GAE requires sequential timesteps within the same trajectory. Both layouts
+    ensure correct per-env trajectory ordering.
 
     Args:
-        rollout: TensorDict with batch_size=[T, N] containing:
-            - "value": Tensor[T, N, 1] - state values
-            - "next": TensorDict with:
-                - "reward": Tensor[T, N, 1]
-                - "done": Tensor[T, N, 1]
-                - "value": Tensor[T, N, 1] - next state values (bootstrapped)
+        rollout: TensorDict with batch_size=[T, N] or [N, T] containing:
+            - "value": state values
+            - "next": TensorDict with "reward", "done", "value" (bootstrapped)
         gamma: Discount factor
         gae_lambda: GAE lambda parameter
+        time_first: If True, rollout is [T, N]; if False, rollout is [N, T]
 
     Returns:
-        TensorDict with added keys:
-            - "advantage": Tensor[T, N, 1]
-            - "value_target": Tensor[T, N, 1]
+        TensorDict with added keys: "advantage", "value_target"
     """
-    T, N = rollout.batch_size[:2]
     device = rollout.device
 
-    # Extract tensors - shape [T, N, 1]
-    values = rollout["value"]
-    rewards = rollout["next"]["reward"]
-    dones = rollout["next"]["done"].float()
+    if time_first:
+        # [T, N, ...]
+        T, N = rollout.batch_size[:2]
+        values = rollout["value"]
+        rewards = rollout["next"]["reward"]
+        dones = rollout["next"]["done"].float()
+        if "value" in rollout["next"]:
+            bootstrap_values = rollout["next"]["value"]
+        else:
+            bootstrap_values = torch.zeros_like(values)
 
-    # Bootstrap values: use next state value from rollout["next"]["value"]
-    # This is computed during collection by evaluating policy on next_obs
-    if "value" in rollout["next"]:
-        bootstrap_values = rollout["next"]["value"]
+        advantages = torch.zeros_like(values)
+        gae = torch.zeros(N, 1, device=device)
+
+        for t in reversed(range(T)):
+            delta = rewards[t] + gamma * bootstrap_values[t] * (1.0 - dones[t]) - values[t]
+            gae = delta + gamma * gae_lambda * (1.0 - dones[t]) * gae
+            advantages[t] = gae
     else:
-        # If not provided, assume 0 (terminal state)
-        bootstrap_values = torch.zeros_like(values)
+        # [N, T, ...] - batch-first
+        N, T = rollout.batch_size[:2]
+        values = rollout["value"]
+        rewards = rollout["next"]["reward"]
+        dones = rollout["next"]["done"].float()
+        if "value" in rollout["next"]:
+            bootstrap_values = rollout["next"]["value"]
+        else:
+            bootstrap_values = torch.zeros_like(values)
 
-    # Compute GAE advantages using backward iteration
-    # advantage[t] = delta[t] + (gamma * gae_lambda) * (1 - done[t]) * advantage[t+1]
-    # where delta[t] = reward[t] + gamma * (1 - done[t]) * V(s_{t+1}) - V(s_t)
-    # V(s_{t+1}) comes from bootstrap_values[t] which was computed on next_obs[t]
+        advantages = torch.zeros_like(values)
+        gae = torch.zeros(N, 1, device=device)
 
-    advantages = torch.zeros_like(values)
-    gae = torch.zeros(N, 1, device=device)
+        for t in reversed(range(T)):
+            delta = rewards[:, t] + gamma * bootstrap_values[:, t] * (1.0 - dones[:, t]) - values[:, t]
+            gae = delta + gamma * gae_lambda * (1.0 - dones[:, t]) * gae
+            advantages[:, t] = gae
 
-    # Iterate backwards through time
-    for t in reversed(range(T)):
-        # Compute TD error (delta)
-        # bootstrap_values[t] is V(s_{t+1}), the value of the next state after action at t
-        delta = rewards[t] + gamma * bootstrap_values[t] * (1.0 - dones[t]) - values[t]
-
-        # Compute GAE recursively
-        gae = delta + gamma * gae_lambda * (1.0 - dones[t]) * gae
-        advantages[t] = gae
-
-    # Compute value targets (for value function loss)
     value_targets = advantages + values
-
-    # Add to rollout TensorDict (in-place)
     rollout["advantage"] = advantages
     rollout["value_target"] = value_targets
-
     return rollout

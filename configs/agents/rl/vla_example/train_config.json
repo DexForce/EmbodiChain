@@ -60,6 +60,7 @@
             "batch_size": 2048,
             "gamma": 0.99,
             "gae_lambda": 0.95,
+            "rollout_time_first": false,
             "clip_coef": 0.2,
             "ent_coef": 0.001,
             "vf_coef": 0.5,

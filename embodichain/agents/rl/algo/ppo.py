@@ -69,6 +69,7 @@ class PPOCfg(AlgorithmCfg):
     clip_coef: float = 0.2
     ent_coef: float = 0.01
     vf_coef: float = 0.5
+    rollout_time_first: bool = False
 
 
 class PPO(BaseAlgorithm):
@@ -96,9 +97,14 @@ class PPO(BaseAlgorithm):
         if len(rollout.batch_size) == 1:
             rollout = rollout.unsqueeze(1)  # [size] -> [size, 1]
 
-        # Compute GAE advantages and returns
+        # GAE layout: use config (default False = [N, T] batch-first)
+        time_first = self.cfg.rollout_time_first
+
         rollout = compute_gae(
-            rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda
+            rollout,
+            gamma=self.cfg.gamma,
+            gae_lambda=self.cfg.gae_lambda,
+            time_first=time_first,
         )
 
         # Flatten to [T*N, ...] for training

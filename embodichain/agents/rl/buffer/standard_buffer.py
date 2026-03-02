@@ -57,8 +57,8 @@ class RolloutBuffer:
         """Get rollout from buffer and clear it (standard PPO behavior).
 
         Args:
-            flatten: If True, flatten to [batch_size, ...].
-                    If False, return as [T, N, ...].
+            flatten: If True, flatten to [N*T, ...].
+                    If False, return as [N, T, ...] (batch-first).
 
         Returns:
             TensorDict with rollout data
@@ -72,7 +72,7 @@ class RolloutBuffer:
         self._rollout = None
 
         if flatten:
-            # Flatten [T, N, ...] -> [T*N, ...]
+            # Flatten [N, T, ...] -> [N*T, ...]
             return rollout.reshape(-1)
         else:
             return rollout
