@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -485,14 +485,17 @@ class SimulationManager:
 
         self._is_initialized_gpu_physics = True
 
-    def render_camera_group(self) -> None:
+    def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
+
+        Args:
+            group_ids (list[int]): The list of camera group ids to render.
 
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
         if self.is_rt_enabled:
-            self._world.render_camera_group()
+            self._world.render_camera_group(group_ids)
         else:
             logger.log_warning(
                 "This interface is only valid when Ray Tracing rendering backend is enabled."
@@ -800,6 +803,14 @@ class SimulationManager:
             return None
         return self._lights[uid]
 
+    def get_light_uid_list(self) -> List[str]:
+        """Get current light uid list
+
+        Returns:
+            List[str]: list of light uid.
+        """
+        return list(self._lights.keys())
+
     def add_rigid_object(
         self,
         cfg: RigidObjectCfg,
@@ -1082,6 +1093,12 @@ class SimulationManager:
 
             cfg.fpath = cfg.urdf_cfg.assemble_urdf()
 
+            if cfg.solver_cfg is not None:
+                if isinstance(cfg.solver_cfg, dict):
+                    for key, value in cfg.solver_cfg.items():
+                        if hasattr(value, "urdf_path") and value.urdf_path is None:
+                            value.urdf_path = cfg.fpath
+
         if uid is None:
             uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
             cfg.uid = uid
@@ -1127,7 +1144,7 @@ class SimulationManager:
 
     def enable_gizmo(
         self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
-    ) -> None:
+    ) -> Gizmo:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
@@ -1186,6 +1203,8 @@ class SimulationManager:
             logger.log_error(
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
+
+        return gizmo
 
     def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
         """Disable and remove gizmo for a robot.
@@ -1603,24 +1622,36 @@ class SimulationManager:
         self._visual_materials = {}
         self._env.clean_materials()
 
-    def reset_objects_state(self, env_ids: Sequence[int] | None = None) -> None:
-        """Reset the state of all objects in the scene.
+    def reset_objects_state(
+        self,
+        env_ids: Sequence[int] | None = None,
+        excluded_uids: Sequence[str] | None = None,
+    ) -> None:
+        """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
+            excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
         """
-        for robot in self._robots.values():
-            robot.reset(env_ids)
-        for articulation in self._articulations.values():
-            articulation.reset(env_ids)
-        for rigid_obj in self._rigid_objects.values():
-            rigid_obj.reset(env_ids)
-        for rigid_obj_group in self._rigid_object_groups.values():
-            rigid_obj_group.reset(env_ids)
-        for light in self._lights.values():
-            light.reset(env_ids)
-        for sensor in self._sensors.values():
-            sensor.reset(env_ids)
+        excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
+        for uid, robot in self._robots.items():
+            if uid not in excluded_uids:
+                robot.reset(env_ids)
+        for uid, articulation in self._articulations.items():
+            if uid not in excluded_uids:
+                articulation.reset(env_ids)
+        for uid, rigid_obj in self._rigid_objects.items():
+            if uid not in excluded_uids:
+                rigid_obj.reset(env_ids)
+        for uid, rigid_obj_group in self._rigid_object_groups.items():
+            if uid not in excluded_uids:
+                rigid_obj_group.reset(env_ids)
+        for uid, light in self._lights.items():
+            if uid not in excluded_uids:
+                light.reset(env_ids)
+        for uid, sensor in self._sensors.items():
+            if uid not in excluded_uids:
+                sensor.reset(env_ids)
 
     def destroy(self) -> None:
         """Destroy all simulated assets and release resources."""

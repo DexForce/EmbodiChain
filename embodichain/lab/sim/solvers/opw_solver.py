@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 
 import torch
 import numpy as np
+import warp as wp
+import polars as pl
+
 from itertools import product
 from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
 from scipy.spatial.transform import Rotation
@@ -30,15 +33,6 @@ from embodichain.utils.warp.kinematics.opw_solver import (
     wp_vec6f,
 )
 from embodichain.utils.device_utils import standardize_device_string
-import warp as wp
-import polars as pl
-
-try:
-    from py_opw_kinematics import KinematicModel, Robot, EulerConvention
-except ImportError:
-    raise ImportError(
-        "py_opw_kinematics not installed. Install with `pip install py_opw_kinematics==0.1.6`"
-    )
 
 
 if TYPE_CHECKING:
@@ -121,45 +115,18 @@ class OPWSolver(BaseSolver):
 
         """
         super().__init__(cfg=cfg, device=device, **kwargs)
-        if self.device.type == "cpu":
-            self._init_py_opw_kinematics_solver(cfg, **kwargs)
-        else:
-            self._init_warp_solver(cfg, **kwargs)
+        # Note: the warp-based solver is currently the only active backend and
+        # is initialized regardless of the selected device.
+        self._init_warp_solver(cfg, **kwargs)
         self.set_tcp(np.eye(4))
-
-    def _init_py_opw_kinematics_solver(self, cfg: OPWSolverCfg, **kwargs) -> None:
-        self.kinematic_model = KinematicModel(
-            a1=cfg.a1,
-            a2=cfg.a2,
-            b=cfg.b,
-            c1=cfg.c1,
-            c2=cfg.c2,
-            c3=cfg.c3,
-            c4=cfg.c4,
-            offsets=cfg.offsets,
-            flip_axes=cfg.flip_axes,
-            has_parallelogram=cfg.has_parallelogram,
-        )
-        self.euler_convention = EulerConvention("ZYX", extrinsic=False, degrees=False)
-        self.opw_robot = Robot(
-            self.kinematic_model, self.euler_convention, ee_rotation=(0, 0, 0)
-        )
-        if self.pk_serial_chain != "":
-            fk_dict = self.pk_serial_chain.forward_kinematics(
-                th=np.zeros(6), end_only=False
-            )
-            root_tf = fk_dict[list(fk_dict.keys())[0]]
-
-            self.root_base_xpos = root_tf.get_matrix().cpu().numpy()
 
     def set_tcp(self, xpos: np.ndarray):
         super().set_tcp(xpos)
-        if self.device.type != "cpu":
-            self._tcp_warp = wp.mat44f(self.tcp_xpos)
-            tcp_inv = np.eye(4, dtype=float)
-            tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
-            tcp_inv[:3, 3] = -tcp_inv[:3, :3].T @ self.tcp_xpos[:3, 3]
-            self._tcp_inv_warp = wp.mat44f(tcp_inv)
+        self._tcp_warp = wp.mat44f(self.tcp_xpos)
+        tcp_inv = np.eye(4, dtype=float)
+        tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
+        tcp_inv[:3, 3] = -tcp_inv[:3, :3].T @ self.tcp_xpos[:3, 3]
+        self._tcp_inv_warp = wp.mat44f(tcp_inv)
 
     def _init_warp_solver(self, cfg: OPWSolverCfg, **kwargs):
         self.params = OPWparam()
@@ -255,14 +222,7 @@ class OPWSolver(BaseSolver):
                 - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, num_joints).
                 - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).
         """
-        if self.device.type == "cpu":
-            return self.get_ik_py_opw(
-                target_xpos, qpos_seed, return_all_solutions, **kwargs
-            )
-        else:
-            return self.get_ik_warp(
-                target_xpos, qpos_seed, return_all_solutions, **kwargs
-            )
+        return self.get_ik_warp(target_xpos, qpos_seed, return_all_solutions, **kwargs)
 
     def get_ik_warp(
         self,
@@ -331,7 +291,7 @@ class OPWSolver(BaseSolver):
                 dtype=float,
                 device=standardize_device_string(self.device),
             )
-        joint_weight = kwargs.get("joint_weight", torch.zeros(size=(DOF,), dtype=float))
+        joint_weight = kwargs.get("joint_weight", torch.ones(size=(DOF,), dtype=float))
         joint_weight_wp = wp_vec6f(
             joint_weight[0],
             joint_weight[1],
@@ -361,122 +321,6 @@ class OPWSolver(BaseSolver):
         best_ik_result = wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6)
         best_ik_valid = wp.to_torch(best_ik_valid_wp)
         return best_ik_valid, best_ik_result
-
-    def get_ik_py_opw(
-        self,
-        target_xpos: torch.Tensor,
-        qpos_seed: torch.Tensor,
-        return_all_solutions: bool = False,
-        **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute target joint positions using OPW inverse kinematics.
-
-        Args:
-            target_xpos (torch.Tensor): Current end-effector position, shape (n_sample, 3).
-            qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, num_joints).
-            return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.
-            **kwargs: Additional keyword arguments for future extensions.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]:
-                - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, num_joints).
-                - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).
-        """
-        # TODO: opw solver can only get one solution at a time
-        DOF = 6
-        if qpos_seed is not None:
-            if isinstance(qpos_seed, torch.Tensor):
-                qpos_seed_np = qpos_seed.detach().cpu().numpy()
-            else:
-                qpos_seed_np = np.array(qpos_seed)
-        else:
-            qpos_seed_np = np.zeros(DOF)
-
-        if isinstance(target_xpos, torch.Tensor):
-            target_xpos = target_xpos.detach().cpu().numpy()
-
-        if target_xpos.shape == (4, 4):
-            target_xpos_batch = target_xpos[None, :, :]
-        else:
-            target_xpos_batch = target_xpos
-
-        # TODO: support root base transform
-        # target_xpos = self.root_base_xpos @ target_xpos
-        # compute_xpos = target_xpos @ np.linalg.inv(self.tcp_xpos)
-
-        # TODO: single version
-        # if target_xpos.ndim == 3:
-        #     target_xpos = target_xpos[0]
-        # position = np.array(compute_xpos[:3, 3]) * 1000
-        # rotation = Rotation.from_matrix(compute_xpos[:3, :3])
-        # rotation = rotation.as_euler("ZYX")
-        # solutions = self.opw_robot.inverse((position, rotation))
-        # if len(solutions) == 0:
-        #     logger.log_warning("OPWSolver failed: No solutions found.")
-        #     if return_all_solutions:
-        #         return torch.tensor([False]), torch.zeros((1, 1, 6))
-        #     else:
-        #         return torch.tensor([False]), torch.zeros((1, 6))
-
-        # ret, qpos = self._select_optimal_solution(
-        #     qpos_seed_np, solutions, weights=None, return_all_valid=return_all_solutions
-        # )
-        # if not ret or len(qpos) == 0:
-        #     logger.log_warning("No valid solutions found within joint limits.")
-        #     if return_all_solutions:
-        #         return torch.tensor([False]), torch.zeros((1, 1, 6))
-        #     else:
-        #         return torch.tensor([False]), torch.zeros((1, 6))
-
-        # if return_all_solutions:
-        #     # qpos: (N, 6) -> (1, N, 6)
-        #     qpos_tensor = torch.from_numpy(qpos).float().unsqueeze(0)
-        # else:
-        #     # qpos: (6,) -> (1, 6)
-        #     qpos_tensor = torch.from_numpy(qpos).float().reshape(1, 6)
-
-        x_list = []
-        y_list = []
-        z_list = []
-        a_list = []
-        b_list = []
-        c_list = []
-        for xpos in target_xpos_batch:
-            compute_xpos = xpos @ np.linalg.inv(self.tcp_xpos)
-            position = np.array(compute_xpos[:3, 3]) * 1000
-            rotation = Rotation.from_matrix(compute_xpos[:3, :3])
-            rotation = rotation.as_euler("ZYX")
-            x_list.append(position[0])
-            y_list.append(position[1])
-            z_list.append(position[2])
-            a_list.append(rotation[0])
-            b_list.append(rotation[1])
-            c_list.append(rotation[2])
-        poses = pl.DataFrame(
-            {
-                "X": x_list,
-                "Y": y_list,
-                "Z": z_list,
-                "A": a_list,
-                "B": b_list,
-                "C": c_list,
-            }
-        )
-        qpos_seed_np = qpos_seed_np.reshape(-1)[:DOF]
-        res = self.opw_robot.batch_inverse(current_joints=qpos_seed_np, poses=poses)
-        solutions = res.to_numpy().copy()
-        is_success = np.any(np.logical_not(np.isnan(solutions)), axis=1)
-        for i in range(solutions.shape[0]):
-            for j in range(solutions.shape[1]):
-                solutions[i, j] = normalize_to_pi(solutions[i, j])
-
-        if return_all_solutions:
-            logger.log_warning(
-                "return_all_solutions=True is not supported in OPWSolverCPUMode. Returning the best solution only."
-            )
-        qpos_tensor = torch.tensor(solutions, dtype=torch.float32, device=self.device)
-        qpos_tensor = qpos_tensor.reshape(-1, 1, DOF)
-        return torch.tensor(is_success), qpos_tensor
 
     def _calculate_dynamic_weights(
         self, current_joints, joint_limits, base_weights=None

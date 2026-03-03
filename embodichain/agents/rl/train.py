@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ from embodichain.agents.rl.algo import build_algo, get_registered_algo_names
 from embodichain.agents.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
 from embodichain.utils.utility import load_json
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
@@ -134,9 +134,12 @@ def train_from_config(config_path: str):
     logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_json(str(gym_config_path))
-    gym_env_cfg = config_to_cfg(gym_config_data)
+    gym_env_cfg = config_to_cfg(
+        gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
+    )
+    if num_envs is not None:
+        gym_env_cfg.num_envs = int(num_envs)
 
-    # Override num_envs from train config if provided
     if num_envs is not None:
         gym_env_cfg.num_envs = num_envs
 
@@ -176,6 +179,15 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
+<<<<<<< HEAD
+=======
+    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic/actor_only)
+    if policy_name.lower() == "actor_critic":
+        # Get observation dimension from flattened observation space
+        # flattened_observation_space returns Box space for RL training
+        obs_dim = env.flattened_observation_space.shape[-1]
+        action_dim = env.action_space.shape[-1]
+>>>>>>> origin/main
 
     # Get action_dim from config (required)
     action_dim = policy_block.get("action_dim")
@@ -223,10 +235,28 @@ def train_from_config(config_path: str):
             actor=actor,
             critic=critic,
         )
-    elif policy_name.lower() == "vla":
-        # VLA policy loads pretrained model from checkpoint
-        logger.info(
-            f"Loading VLA model from config: {policy_block.get('vla_config', {})}"
+    elif policy_name.lower() == "actor_only":
+        obs_dim = env.flattened_observation_space.shape[-1]
+        action_dim = env.action_space.shape[-1]
+
+        actor_cfg = policy_block.get("actor")
+        if actor_cfg is None:
+            raise ValueError(
+                "ActorOnly requires 'actor' definition in JSON (policy.actor)."
+            )
+
+        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+
+        policy = build_policy(
+            policy_block,
+            env.flattened_observation_space,
+            env.action_space,
+            device,
+            actor=actor,
+        )
+    else:
+        policy = build_policy(
+            policy_block, env.flattened_observation_space, env.action_space, device
         )
         policy = build_policy(policy_block, action_dim=action_dim, device=device)
     else:

@@ -218,7 +218,7 @@ def main():
                 )
         time.sleep(0.005)
 
-    embed(header="Test PytorchSolver batch example. Press Ctrl-D to exit.")
+    embed(header="Test PytorchSolver batch example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":

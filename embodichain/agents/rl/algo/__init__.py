@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,10 +21,12 @@ import torch
 
 from .base import BaseAlgorithm
 from .ppo import PPOCfg, PPO
+from .grpo import GRPOCfg, GRPO
 
 # name -> (CfgClass, AlgoClass)
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
     "ppo": (PPOCfg, PPO),
+    "grpo": (GRPOCfg, GRPO),
 }
 
 
@@ -47,6 +49,8 @@ __all__ = [
     "BaseAlgorithm",
     "PPOCfg",
     "PPO",
+    "GRPOCfg",
+    "GRPO",
     "get_registered_algo_names",
     "build_algo",
 ]

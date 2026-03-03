@@ -8,3 +8,4 @@ sphinx-autosummary-accessors
 sphinxcontrib-bibtex
 sphinx-design
 sphinx_autodoc_typehints
+sphinx-multiversion

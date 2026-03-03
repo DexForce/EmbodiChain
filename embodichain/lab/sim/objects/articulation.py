@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -628,6 +628,7 @@ class Articulation(BatchEntity):
         self._visual_material: List[Dict[str, VisualMaterialInst]] = [
             {} for _ in range(len(entities))
         ]
+        self.is_shared_visual_material = False
 
         # Stores mimic information for joints.
         self._mimic_info = entities[0].get_mimic_info()
@@ -650,7 +651,7 @@ class Articulation(BatchEntity):
         parent_str = super().__str__()
         return parent_str + f" | dof: {self.dof} | num_links: {self.num_links}"
 
-    @property
+    @cached_property
     def dof(self) -> int:
         """Get the degree of freedom of the articulation.
 
@@ -659,7 +660,7 @@ class Articulation(BatchEntity):
         """
         return self._data.dof
 
-    @property
+    @cached_property
     def num_links(self) -> int:
         """Get the number of links in the articulation.
 
@@ -668,7 +669,7 @@ class Articulation(BatchEntity):
         """
         return self._data.num_links
 
-    @property
+    @cached_property
     def link_names(self) -> List[str]:
         """Get the names of the links in the articulation.
 
@@ -677,7 +678,7 @@ class Articulation(BatchEntity):
         """
         return self._data.link_names
 
-    @property
+    @cached_property
     def root_link_name(self) -> str:
         """Get the name of the root link of the articulation.
 
@@ -686,7 +687,7 @@ class Articulation(BatchEntity):
         """
         return self.entities[0].get_root_link_name()
 
-    @property
+    @cached_property
     def joint_names(self) -> List[str]:
         """Get the names of the actived joints in the articulation.
 
@@ -695,7 +696,7 @@ class Articulation(BatchEntity):
         """
         return self._entities[0].get_actived_joint_names()
 
-    @property
+    @cached_property
     def all_joint_names(self) -> List[str]:
         """Get the names of the joints in the articulation.
 
@@ -1582,6 +1583,7 @@ class Articulation(BatchEntity):
         mat: VisualMaterial,
         env_ids: Sequence[int] | None = None,
         link_names: List[str] | None = None,
+        shared: bool = False,
     ) -> None:
         """Set visual material for the rigid object.
 
@@ -1589,17 +1591,30 @@ class Articulation(BatchEntity):
             mat (VisualMaterial): The material to set.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
             link_names (List[str] | None, optional): List of link names to apply the material to. If None, applies to all links.
+            shared (bool, optional): Whether to share the material instance across links and environments. Defaults to False.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         link_names = self.link_names if link_names is None else link_names
 
-        for i, env_idx in enumerate(local_env_ids):
+        if shared:
+            if len(local_env_ids) != self.num_instances:
+                logger.log_error(f"Cannot share material instance for partial env_ids.")
+
             for link_name in link_names:
-                mat_inst = mat.create_instance(
-                    f"{mat.uid}_{self.uid}_{link_name}_{env_idx}"
-                )
-                self._entities[env_idx].set_material(link_name, mat_inst.mat)
-                self._visual_material[env_idx][link_name] = mat_inst
+                mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{link_name}")
+                for i, env_idx in enumerate(local_env_ids):
+                    self._entities[env_idx].set_material(link_name, mat_inst.mat)
+                    self._visual_material[env_idx][link_name] = mat_inst
+            self.is_shared_visual_material = True
+        else:
+            for i, env_idx in enumerate(local_env_ids):
+                for link_name in link_names:
+                    mat_inst = mat.create_instance(
+                        f"{mat.uid}_{self.uid}_{link_name}_{env_idx}"
+                    )
+                    self._entities[env_idx].set_material(link_name, mat_inst.mat)
+                    self._visual_material[env_idx][link_name] = mat_inst
+            self.is_shared_visual_material = False
 
     def get_visual_material_inst(
         self,

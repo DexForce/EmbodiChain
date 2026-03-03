@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -125,6 +125,13 @@ class EmbodiedEnvCfg(EnvCfg):
     This is useful when we want to disable visual randomization for debug motion and physics issues.
     """
 
+    filter_dataset_saving: bool = False
+    """Whether to filter out dataset saving
+    
+    This is useful when we want to disable dataset saving for debug motion and physics issues.
+    If no dataset manager is configured, this flag will have no effect.
+    """
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -171,6 +178,9 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
+        if self.cfg.dataset and not self.cfg.filter_dataset_saving:
+            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
+
         self.episode_obs_buffer: Dict[int, List[EnvObs]] = {
             i: [] for i in range(self.num_envs)
         }
@@ -200,9 +210,6 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
-
-        if self.cfg.dataset:
-            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -341,10 +348,12 @@ class EmbodiedEnv(BaseEnv):
         **kwargs,
     ) -> torch.Tensor:
         if self.reward_manager:
-            rewards, reward_info = self.reward_manager.compute(
+            extra_rewards, reward_info = self.reward_manager.compute(
                 obs=obs, action=action, info=info
             )
             info["rewards"] = reward_info
+            # Add manager terms to base reward from get_reward() so task reward is kept
+            rewards = rewards + extra_rewards
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
@@ -376,10 +385,8 @@ class EmbodiedEnv(BaseEnv):
             env_ids_to_process = list(env_ids)
 
         # Save dataset before clearing buffers for environments that are being reset
-        if save_data and self.cfg.dataset:
+        if save_data and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
-
-                current_task_success = self.is_task_success()
 
                 # Filter to only save successful episodes
                 successful_env_ids = [
@@ -387,11 +394,12 @@ class EmbodiedEnv(BaseEnv):
                     for env_id in env_ids_to_process
                     if (
                         self.episode_success_status.get(env_id, False)
-                        or current_task_success[env_id].item()
+                        or self._task_success[env_id].item()
                     )
                 ]
 
                 if successful_env_ids:
+
                     # Convert back to tensor if needed
                     successful_env_ids_tensor = torch.tensor(
                         successful_env_ids, device=self.device
@@ -400,8 +408,6 @@ class EmbodiedEnv(BaseEnv):
                         mode="save",
                         env_ids=successful_env_ids_tensor,
                     )
-                else:
-                    logger.log_warning("No successful episodes to save.")
 
         # Clear episode buffers and reset success status for environments being reset
         for env_id in env_ids_to_process:
@@ -445,7 +451,7 @@ class EmbodiedEnv(BaseEnv):
         elif isinstance(action, torch.Tensor):
             self.robot.set_qpos(qpos=action)
         else:
-            logger.error(f"Unsupported action type: {type(action)}")
+            logger.log_error(f"Unsupported action type: {type(action)}")
 
         return action
 
@@ -459,7 +465,7 @@ class EmbodiedEnv(BaseEnv):
             Robot: The robot instance added to the scene.
         """
         if self.cfg.robot is None:
-            logger.error("Robot configuration is not provided.")
+            logger.log_error("Robot configuration is not provided.")
 
         # Initialize the robot based on the configuration.
         robot: Robot = self.sim.add_robot(self.cfg.robot)
@@ -521,7 +527,12 @@ class EmbodiedEnv(BaseEnv):
             self.sim.add_rigid_object_group(cfg=cfg)
 
     def preview_sensor_data(
-        self, name: str, data_type: str = "color", env_ids: int = 0, method: str = "plt"
+        self,
+        name: str,
+        data_type: str = "color",
+        env_ids: int = 0,
+        method: str = "cv2",
+        save: bool = False,
     ) -> None:
         """Preview the sensor data by matplotlib
 
@@ -532,14 +543,15 @@ class EmbodiedEnv(BaseEnv):
             name (str): name of the sensor to preview.
             data_type (str): type of the sensor data to preview.
             env_ids (int): index of the arena to preview. Defaults to 0.
-            method (str): method to preview the sensor data. Currently support "plt" and "cv2". Defaults to "plt".
+            method (str): method to preview the sensor data. Currently support "plt" and "cv2". Defaults to "cv2".
+            save (bool): whether to save the preview image. Defaults to False.
         """
         # TODO: this function need to be improved to support more sensor types and data types.
 
         sensor = self.get_sensor(name=name)
 
         if data_type not in sensor.SUPPORTED_DATA_TYPES:
-            logger.error(
+            logger.log_error(
                 f"Data type '{data_type}' not supported by sensor '{name}'. Supported types: {sensor.SUPPORTED_DATA_TYPES}"
             )
 
@@ -558,15 +570,29 @@ class EmbodiedEnv(BaseEnv):
         if method == "cv2":
             import cv2
 
-            cv2.imshow(
-                f"sensor_data_{data_type}", cv2.cvtColor(view, cv2.COLOR_RGB2BGR)
-            )
-            cv2.waitKey(0)
+            if save:
+                cv2.imwrite(
+                    f"sensor_data_{data_type}.png",
+                    cv2.cvtColor(view, cv2.COLOR_RGB2BGR),
+                )
+            else:
+                window_name = f"sensor_data_{data_type}"
+                height, width = view.shape[:2]
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(window_name, width, height)
+                cv2.imshow(window_name, cv2.cvtColor(view, cv2.COLOR_RGB2BGR))
+                cv2.waitKey(0)
+                cv2.destroyWindow(window_name)
+
         elif method == "plt":
             from matplotlib import pyplot as plt
 
             plt.imshow(view)
-            plt.savefig(f"sensor_data_{data_type}.png")
+            if save:
+                plt.savefig(f"sensor_data_{data_type}.png")
+                plt.close()
+            else:
+                plt.show()
 
     def create_demo_action_list(self, *args, **kwargs) -> Sequence[EnvAction] | None:
         """Create a demonstration action list for the environment.
@@ -588,20 +614,6 @@ class EmbodiedEnv(BaseEnv):
         raise NotImplementedError(
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
-
-    def is_task_success(self, **kwargs) -> torch.Tensor:
-        """
-        Determine if the task is successfully completed. This is mainly used in the data generation process
-        of the imitation learning.
-
-        Args:
-            **kwargs: Additional arguments for task-specific success criteria.
-
-        Returns:
-            torch.Tensor: A boolean tensor indicating success for each environment in the batch.
-        """
-
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
 
     def close(self) -> None:
         """Close the environment and release resources."""

@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ from functools import cached_property
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor
+from embodichain.lab.sim.sensors import BaseSensor, Camera
 from embodichain.lab.gym.utils import gym_utils
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
@@ -133,6 +133,12 @@ class BaseEnv(gym.Env):
             self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
         )
 
+        self._task_success = torch.zeros(
+            self._num_envs, dtype=torch.bool, device=self.device
+        )
+        # The UIDs of objects that are detached from automatic reset.
+        self._detached_uids_for_reset: List[str] = []
+
         self._init_sim_state(**kwargs)
 
         self._init_raw_obs: Dict = self.get_obs(**kwargs)
@@ -158,21 +164,15 @@ class BaseEnv(gym.Env):
 
     @cached_property
     def single_observation_space(self) -> gym.spaces.Space:
-        if self.num_envs == 1:
-            return gym_utils.convert_observation_to_space(self._init_raw_obs)
-        else:
-            return gym_utils.convert_observation_to_space(
-                self._init_raw_obs, unbatched=True
-            )
+        return gym_utils.convert_observation_to_space(
+            self._init_raw_obs, unbatched=True
+        )
 
     @cached_property
     def observation_space(self) -> gym.spaces.Space:
-        if self.num_envs == 1:
-            return self.single_observation_space
-        else:
-            return gym.vector.utils.batch_space(
-                self.single_observation_space, n=self.num_envs
-            )
+        return gym_utils.convert_observation_to_space(
+            self._init_raw_obs, unbatched=False
+        )
 
     @cached_property
     def flattened_observation_space(self) -> gym.spaces.Box:
@@ -202,6 +202,11 @@ class BaseEnv(gym.Env):
     def elapsed_steps(self) -> Union[int, torch.Tensor]:
         return self._elapsed_steps
 
+    @property
+    def has_sensors(self) -> bool:
+        """Return whether the environment has sensors."""
+        return len(self.sensors) > 0
+
     def get_sensor(self, name: str, **kwargs) -> BaseSensor:
         """Get the sensor instance by name.
 
@@ -218,6 +223,17 @@ class BaseEnv(gym.Env):
             )
 
         return self.sensors[name]
+
+    def add_camera_group_id(self, group_id: int) -> None:
+        """Add a camera group ID for rendering.
+
+        Args:
+            group_id: The camera group ID to be added.
+        """
+        if not hasattr(self, "_camera_group_ids"):
+            self._camera_group_ids: List[int] = []
+        if self.sim.is_rt_enabled:
+            self._camera_group_ids.append(group_id)
 
     def _setup_scene(self, **kwargs):
         # Init sim manager.
@@ -244,6 +260,13 @@ class BaseEnv(gym.Env):
         self._prepare_scene(**kwargs)
 
         self.sensors = self._setup_sensors(**kwargs)
+
+        # Setup camera groups for rendering.
+        self._camera_group_ids: List[int] = []
+        if self.sim.is_rt_enabled:
+            for sensor in self.sensors.values():
+                if isinstance(sensor, Camera):
+                    self._camera_group_ids.append(sensor.group_id)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Load the robot agent, setup the controller and action space.
@@ -337,7 +360,7 @@ class BaseEnv(gym.Env):
         fetch_only = False
         if self.sim.is_rt_enabled:
             fetch_only = True
-            self.sim.render_camera_group()
+            self.sim.render_camera_group(self._camera_group_ids)
 
         for sensor_name, sensor in self.sensors.items():
             sensor.update(fetch_only=fetch_only)
@@ -482,6 +505,20 @@ class BaseEnv(gym.Env):
 
         return rewards
 
+    def is_task_success(self, **kwargs) -> torch.Tensor:
+        """
+        Determine if the task is successfully completed. This is mainly used in the data generation process
+        of the imitation learning.
+
+        Args:
+            **kwargs: Additional arguments for task-specific success criteria.
+
+        Returns:
+            torch.Tensor: A boolean tensor indicating success for each environment in the batch.
+        """
+
+        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action before sending to robot.
 
@@ -531,11 +568,17 @@ class BaseEnv(gym.Env):
             "reset_ids",
             torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
         )
-        self.sim.reset_objects_state(env_ids=reset_ids)
-        self._elapsed_steps[reset_ids] = 0
+
+        # Save task success status before resetting objects
+        self._task_success = self.is_task_success()
+
+        self.sim.reset_objects_state(
+            env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
+        )
 
         # Reset hook for user to perform any custom reset logic.
         self._initialize_episode(reset_ids, **options)
+        self._elapsed_steps[reset_ids] = 0
 
         return self.get_obs(**options), self.get_info(**options)
 
@@ -593,6 +636,14 @@ class BaseEnv(gym.Env):
             obs, _ = self.reset(options={"reset_ids": reset_env_ids})
 
         return obs, rewards, terminateds, truncateds, info
+
+    def add_detached_uids_for_reset(self, uids: List[str]) -> None:
+        """Add the UIDs of objects that are detached from automatic reset.
+
+        Args:
+            uids: The list of UIDs to be detached from automatic reset.
+        """
+        self._detached_uids_for_reset.extend(uids)
 
     def close(self) -> None:
         """Close the environment and release resources."""

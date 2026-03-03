@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ from dexsim.utility.path import get_resources_data_path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, SoftObject
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance_warp
+from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
@@ -179,12 +179,9 @@ def press_cow(sim: SimulationManager, robot: Robot):
     is_success, approach_qpos = robot.compute_ik(
         approach_xpos, joint_seed=arm_start_qpos, name="arm"
     )
-    is_success, press_qpos = robot.compute_ik(
-        approach_xpos, joint_seed=arm_start_qpos, name="arm"
-    )
 
-    arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos, press_qpos])
-    interp_trajectory = interpolate_with_distance_warp(
+    arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos])
+    interp_trajectory = interpolate_with_distance(
         trajectory=arm_trajectory[None, :, :], interp_num=50, device=sim.device
     )
     interp_trajectory = interp_trajectory[0]

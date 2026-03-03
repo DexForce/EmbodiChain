@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ from typing import Dict, Type
 import torch
 
 from .actor_critic import ActorCritic
+from .actor_only import ActorOnly
 from .policy import Policy
 from .mlp import MLP
 from .vla_policy import VLAPolicy, build_vla_policy, load_vla_model
@@ -76,11 +77,11 @@ def build_policy(
             raise ValueError(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
-        return policy_cls(
-            action_dim=action_dim, device=device, actor=actor, critic=critic
-        )
-    elif name == "vla":
-        return build_vla_policy(policy_block, action_dim, device)
+        return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
+    elif name == "actor_only":
+        if actor is None:
+            raise ValueError("ActorOnly policy requires external 'actor' module.")
+        return policy_cls(obs_space, action_space, device, actor=actor)
     else:
         # Other policies should also use action_dim signature
         return policy_cls(action_dim=action_dim, device=device)
@@ -106,11 +107,19 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
 
 # default registrations
 register_policy("actor_critic", ActorCritic)
+<<<<<<< HEAD
 register_policy("vla", VLAPolicy)
 
 __all__ = [
     "ActorCritic",
     "VLAPolicy",
+=======
+register_policy("actor_only", ActorOnly)
+
+__all__ = [
+    "ActorCritic",
+    "ActorOnly",
+>>>>>>> origin/main
     "register_policy",
     "get_registered_policy_names",
     "build_policy",

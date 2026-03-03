@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -100,7 +100,7 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
     elif drive_type == "acceleration":
         drive_type = DriveType.ACCELERATION
     elif drive_type == "none":
-        return DriveType.NONE
+        drive_type = DriveType.NONE
     else:
         logger.log_error(f"Unknow drive type {drive_type}")
 

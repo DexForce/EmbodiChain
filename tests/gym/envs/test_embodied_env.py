@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import gymnasium as gym
 
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.data import get_data_path
@@ -119,10 +119,14 @@ METADATA = {
 class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
-        cfg: EmbodiedEnvCfg = config_to_cfg(METADATA)
+    def setup_simulation(self, sim_device, enable_rt):
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            METADATA, manager_modules=DEFAULT_MANAGER_MODULES
+        )
         cfg.num_envs = NUM_ENVS
-        cfg.sim_cfg = SimulationManagerCfg(headless=True, sim_device=sim_device)
+        cfg.sim_cfg = SimulationManagerCfg(
+            headless=True, sim_device=sim_device, enable_rt=enable_rt
+        )
 
         self.env = gym.make(id=METADATA["id"], cfg=cfg)
 
@@ -160,10 +164,15 @@ class EmbodiedEnvTest:
 
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", enable_rt=False)
+
+
+class TestCPURT(EmbodiedEnvTest):
+    def setup_method(self):
+        self.setup_simulation("cpu", enable_rt=True)
 
 
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation("cuda")
+        self.setup_simulation("cuda", enable_rt=False)

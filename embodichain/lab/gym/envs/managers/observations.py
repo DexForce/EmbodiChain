@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ def get_rigid_object_pose(
     env: EmbodiedEnv,
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
+    to_matrix: bool = True,
 ) -> torch.Tensor:
     """Get the world poses of the rigid objects in the environment.
 
@@ -48,17 +49,52 @@ def get_rigid_object_pose(
         env: The environment instance.
         obs: The observation dictionary.
         entity_cfg: The configuration of the scene entity.
+        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
 
     Returns:
-        A tensor of shape (num_envs, 4, 4) representing the world poses of the rigid objects.
+        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the rigid objects.
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
-        return torch.zeros((env.num_envs, 4, 4), dtype=torch.float32)
+        if to_matrix:
+            return torch.zeros(
+                (env.num_envs, 4, 4), dtype=torch.float32, device=env.device
+            )
+        else:
+            return torch.zeros(
+                (env.num_envs, 7), dtype=torch.float32, device=env.device
+            )
 
     obj = env.sim.get_rigid_object(entity_cfg.uid)
 
-    return obj.get_local_pose(to_matrix=True)
+    return obj.get_local_pose(to_matrix=to_matrix)
+
+
+def get_rigid_object_velocity(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Get the world velocities of the rigid objects in the environment.
+
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the scene entity.
+
+    Returns:
+        A tensor of shape (num_envs, 6) representing the linear and angular velocities of the rigid objects.
+    """
+
+    if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+        return torch.zeros((env.num_envs, 6), dtype=torch.float32, device=env.device)
+
+    obj = env.sim.get_rigid_object(entity_cfg.uid)
+
+    return obj.body_data.vel
 
 
 def normalize_robot_joint_data(
@@ -96,6 +132,7 @@ def get_sensor_pose_in_robot_frame(
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
     robot_uid: str | None = None,
+    is_right: bool = False,
 ) -> torch.Tensor:
     """Get the pose of a sensor in the robot's base coordinate frame.
 
@@ -104,9 +141,11 @@ def get_sensor_pose_in_robot_frame(
         obs: The observation dictionary.
         entity_cfg: The configuration of the sensor entity.
         robot_uid: The uid of the robot. If None, uses the default robot from env.
+        is_right: Whether to return the right camera intrinsics for stereo cameras.
+            Defaults to False (left camera). Ignored for monocular cameras.
 
     Returns:
-        A tensor of shape (num_envs, 7) representing the sensor pose in robot coordinates as [x, y, z, qw, qx, qy, qz].
+        A tensor of shape (num_envs, 4, 4) representing the sensor pose in robot coordinates as a transformation matrix.
     """
     # Get robot base pose in world frame
     robot = env.sim.get_robot(robot_uid) if robot_uid else env.robot
@@ -120,17 +159,18 @@ def get_sensor_pose_in_robot_frame(
             f"Sensor with UID '{entity_cfg.uid}' not found in the simulation."
         )
 
-    cam_pose = sensor.get_arena_pose(to_matrix=True)
+    if isinstance(sensor, StereoCamera):
+        cam_left_pose, cam_right_pose = sensor.get_left_right_arena_pose()
+        if is_right:
+            cam_in_robot = torch.matmul(robot_pose_inv, cam_right_pose)
+        else:
+            cam_in_robot = torch.matmul(robot_pose_inv, cam_left_pose)
 
-    # Compute sensor pose in robot coordinate frame: T_robot_cam = inv(T_world_robot) @ T_world_cam
-    cam_in_robot = torch.matmul(robot_pose_inv, cam_pose)
-
-    # Convert (num_envs, 4, 4) to (num_envs, 7): [x, y, z, qw, qx, qy, qz]
-    xyz = cam_in_robot[:, :3, 3]
-    quat = quat_from_matrix(cam_in_robot[:, :3, :3])
-    pose = torch.cat([xyz, quat], dim=-1)
-
-    return pose
+    else:
+        cam_pose = sensor.get_arena_pose(to_matrix=True)
+        # Compute sensor pose in robot coordinate frame: T_robot_cam = inv(T_world_robot) @ T_world_cam
+        cam_in_robot = torch.matmul(robot_pose_inv, cam_pose)
+    return cam_in_robot
 
 
 def get_sensor_intrinsics(

@@ -13,7 +13,7 @@ This module defines configuration classes for RL algorithms, centralizing the ma
     - `gamma`: Discount factor.
     - `gae_lambda`: GAE advantage estimation parameter.
     - `max_grad_norm`: Gradient clipping threshold.
-- Supports inheritance and extension (e.g., PPOCfg adds clip_coef, ent_coef, vf_coef).
+- Supports inheritance and extension (e.g., PPOCfg adds clip_coef, ent_coef, vf_coef; GRPOCfg adds group_size, kl_coef, truncate_at_first_done).
 
 ### Automatic Loading
 - Supports automatic parsing of JSON config files; the main training script injects parameters automatically.
@@ -42,6 +42,33 @@ Or via config file:
     }
 }
 ```
+
+GRPO example (for Embodied AI / from-scratch training):
+
+```json
+{
+    "algorithm": {
+        "name": "grpo",
+        "cfg": {
+            "learning_rate": 0.0001,
+            "n_epochs": 10,
+            "batch_size": 8192,
+            "gamma": 0.99,
+            "clip_coef": 0.2,
+            "ent_coef": 0.001,
+            "kl_coef": 0,
+            "group_size": 4,
+            "eps": 1e-8,
+            "reset_every_rollout": true,
+            "max_grad_norm": 0.5,
+            "truncate_at_first_done": true
+        }
+    }
+}
+```
+
+- **kl_coef**: Set to `0` for from-scratch training (CartPole, dense reward); use `0.02` for VLA/LLM fine-tuning.
+- **group_size**: Number of envs per group for within-group return normalization (must divide `num_envs`).
 
 ## Extension and Customization
 - Custom algorithm parameter classes are supported for multi-algorithm and multi-task experiments.

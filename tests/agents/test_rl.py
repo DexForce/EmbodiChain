@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,8 +48,6 @@ class TestRLTraining:
                     "robot_meta": {
                         "robot_type": "UR10_DH_Gripper",
                         "control_freq": 25,
-                        "arm_dofs": 6,
-                        "observation": {"vision": {}, "states": ["qpos"]},
                     },
                     "instruction": {"lang": "push_cube_to_target"},
                     "extra": {
@@ -92,6 +90,11 @@ class TestRLTraining:
         if self.temp_gym_config_path and os.path.exists(self.temp_gym_config_path):
             os.remove(self.temp_gym_config_path)
             self.temp_gym_config_path = None
+
+        from embodichain.lab.sim import SimulationManager
+
+        sim = SimulationManager.get_instance()
+        sim.destroy()
 
     def test_training_pipeline(self):
         """Test RL training pipeline with multiple parallel environments."""

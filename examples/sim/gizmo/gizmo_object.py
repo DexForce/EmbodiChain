@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ def main():
         default=False,
         help="Enable ray tracing for better visuals",
     )
+
     args = parser.parse_args()
 
     # Configure the simulation
@@ -103,7 +104,7 @@ def main():
         sim.enable_gizmo(uid="cube2")
 
     logger.log_info("Scene setup complete!")
-    logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
+    logger.log_info(f"Running simulation with 1 environment(s)")
     if not args.headless:
         if sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")

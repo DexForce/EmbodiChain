@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -119,7 +119,7 @@ def main():
     else:
         robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
-    embed(header="Test PinocchioSolver example. Press Ctrl-D to exit.")
+    embed(header="Test PinocchioSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":

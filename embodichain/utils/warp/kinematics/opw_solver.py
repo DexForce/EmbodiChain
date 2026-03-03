@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,8 +25,9 @@ wp_vec6f = wp.types.vector(length=6, dtype=float)
 
 @wp.func
 def normalize_to_pi(angle: float) -> float:
-    angle = (angle + wp.pi) % (2.0 * wp.pi) - wp.pi
-    return angle
+    # TODO: Cannot work in warp.
+    # return (angle + wp.pi) % (2.0 * wp.pi) - wp.pi
+    return wp.atan2(wp.sin(angle), wp.cos(angle))
 
 
 @wp.func

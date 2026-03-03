@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -247,6 +247,30 @@ class Camera(BaseSensor):
             bool: True if Ray Tracing rendering is enabled, False otherwise.
         """
         return is_rt_enabled()
+
+    @cached_property
+    def group_id(self) -> int:
+        """Get the camera group ID in the dexsim world.
+
+        Returns:
+            int: The camera group ID.
+        """
+        if self.is_rt_enabled:
+            return self._frame_buffer.get_group_id()
+        else:
+            logger.log_warning(
+                "Camera group ID is only available for Ray Tracing renderer. Returning -1 for non-RT renderer."
+            )
+            return -1
+
+    @property
+    def is_attached(self) -> bool:
+        """Check if the camera is attached to a parent entity.
+
+        Returns:
+            bool: True if the camera is attached to a parent entity, False otherwise.
+        """
+        return self.cfg.extrinsics.parent is not None
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.

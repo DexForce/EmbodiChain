@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -66,7 +66,9 @@ class CartPoleEnv(RLEnv):
         qpos = self.robot.get_qpos(name="hand").reshape(-1)  # [num_envs, ]
         qvel = self.robot.get_qvel(name="hand").reshape(-1)  # [num_envs, ]
         upward_distance = torch.abs(qpos)
-        is_success = torch.logical_and(upward_distance < 0.02, torch.abs(qvel) < 0.05)
+        balance = torch.logical_and(upward_distance < 0.02, torch.abs(qvel) < 0.05)
+        at_final_step = self._elapsed_steps >= self.episode_length - 1
+        is_success = torch.logical_and(at_final_step, balance)
         is_fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         metrics = {"distance_to_goal": upward_distance}
         return is_success, is_fail, metrics

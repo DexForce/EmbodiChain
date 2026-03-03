@@ -1,6 +1,6 @@
 { 
     "trainer": {
-        "exp_name": "push_cube_ppo",
+        "exp_name": "cart_pole_ppo",
         "gym_config": "configs/agents/rl/basic/cart_pole/gym_config.json",
         "seed": 42,
         "device": "cuda:0",
@@ -9,8 +9,8 @@
         "gpu_id": 0,
         "num_envs": 64,
         "iterations": 1000,
-        "buffer_size": 1024,
-        "eval_freq": 2,
+        "rollout_steps": 1024,
+        "eval_freq": 200,
         "save_freq": 200,
         "use_wandb": false,
         "wandb_project_name": "embodychain-cart_pole",

@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -242,7 +242,7 @@ def main(visualize: bool = True):
                 )
         time.sleep(0.005)
 
-    embed(header="Test DifferentialSolver example. Press Ctrl-D to exit.")
+    embed(header="Test DifferentialSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":
