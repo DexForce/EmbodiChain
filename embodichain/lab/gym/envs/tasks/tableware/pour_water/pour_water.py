@@ -109,7 +109,7 @@ class PourWaterEnv(EmbodiedEnv):
                 # TODO: only 1 env supported now
                 actions[:, 0, joints] = torch.as_tensor(ret[key].T, dtype=torch.float32)
 
-        return actions[:, :, self.active_joint_ids]
+        return actions
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         """Determine if the task is successfully completed. This is mainly used in the data generation process

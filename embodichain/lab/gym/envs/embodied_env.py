@@ -59,8 +59,50 @@ __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
 @configclass
 class EmbodiedEnvCfg(EnvCfg):
-    """Configuration class for the Embodied Environment. Inherits from EnvCfg and can be extended
-    with additional parameters if needed.
+    """Configuration for Embodied AI environments.
+
+    `EmbodiedEnvCfg` extends `EnvCfg` with high-level scene, robot, sensor,
+    object and manager declarations used to build modular embodied environments.
+    The configuration is intended to be declarative: the environment and its
+    managers (events, observations, rewards, dataset) are assembled from the
+    provided config fields with minimal additional code.
+
+    Typical usage: declare robots, sensors, lights, rigid objects/articulations,
+    and manager configurations. Additional task-specific parameters can be
+    supplied via the `extensions` dict and will be bound to the environment
+    instance as attributes during initialization.
+
+    Key fields
+    - **robot**: `RobotCfg` (required) — the agent definition (URDF/MJCF, initial
+        state, control mode, etc.).
+    - **control_parts**: Optional[List[str]] — named robot parts to control. If
+        `None`, all controllable joints are used.
+    - **active_joint_ids**: List[int] — explicit joint indices to use for
+        control (alternative to `control_parts`).
+    - **sensor**: List[`SensorCfg`] — sensors attached to the robot or scene
+        (cameras, depth, segmentation, force sensors, ...).
+    - **light**: `EnvLightCfg` — lighting configuration (direct lights now,
+        indirect/IBL planned for future releases).
+    - **background**, **rigid_object**, **rigid_object_group**, **articulation**:
+        scene object lists for static/kinematic props, dynamic objects, grouped
+        object pools, and articulated mechanisms respectively.
+    - **events**: Optional manager config — event functors for startup/reset/
+        periodic randomization and scripted behaviors.
+    - **observations**, **rewards**, **dataset**: Optional manager configs to
+        compose observation transforms, reward functors, and dataset/recorder
+        settings (auto-saving on episode completion).
+    - **extensions**: Optional[Dict[str, Any]] — arbitrary task-specific key/value
+        pairs (e.g. `action_type`, `action_scale`, `control_frequency`) that are
+        automatically set on the config *and* bound to the environment instance.
+    - **filter_visual_rand** / **filter_dataset_saving**: booleans to disable
+        visual randomization or dataset saving for debugging purposes.
+    - **init_rollout_buffer**: bool — when true (or when a dataset manager is
+        present and dataset saving is enabled) the environment will initialize a
+        rollout buffer matching the observation/action spaces for episode
+        recording.
+
+    See `EmbodiedEnv` for usage patterns and the project documentation
+    for full examples showing how to declare environments from these configs.
     """
 
     @configclass
@@ -75,6 +117,11 @@ class EmbodiedEnvCfg(EnvCfg):
     control_parts: list[str] | None = None
     """List of robot parts to control. If None, all controllable joints will be used. 
     This is useful when we want to control only a subset of the robot joints for certain tasks or demonstrations.
+    """
+
+    active_joint_ids: List[int] = []
+    """List of active joint IDs for control. User also can directly specify the active joint IDs instead of control \
+    parts. This is useful when the control parts are not well defined or we want to have more fine-grained control.
     """
 
     sensor: List[SensorCfg] = []
@@ -219,6 +266,22 @@ class EmbodiedEnv(BaseEnv):
         self.episode_success_status: torch.Tensor = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+
+    def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
+        """Set the rollout buffer for episode data collection.
+
+        This function can be used to set the rollout buffer from outside of the environment,
+        such as a shared rollout buffer initialized in model training process and passed to the environment for data collection.
+
+        Args:
+            rollout_buffer (TensorDict): The rollout buffer to be set. The shape of the buffer should be (num_envs, max_episode_steps, *data_shape) for each key.
+        """
+        if len(rollout_buffer.shape) != 2:
+            logger.log_error(
+                f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
+            )
+        self.rollout_buffer = rollout_buffer
+        self._max_rollout_steps = self.rollout_buffer.shape[1]
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -489,8 +552,17 @@ class EmbodiedEnv(BaseEnv):
                 self.active_joint_ids.extend(
                     robot.get_joint_ids(name=part_name, remove_mimic=True)
                 )
+        elif self.cfg.active_joint_ids:
+            # Check env active joint ids are valid
+            for joint_id in self.cfg.active_joint_ids:
+                if joint_id not in robot.active_joint_ids:
+                    logger.log_error(
+                        f"Invalid active joint id: {joint_id}. The supported active joint ids are: {robot.active_joint_ids}"
+                    )
+            self.active_joint_ids = self.cfg.active_joint_ids
         else:
-            self.active_joint_ids = self.robot.active_joint_ids
+            # Use all joints of the robot.
+            self.active_joint_ids = list(range(robot.dof))
 
         robot.build_pk_serial_chain()
 

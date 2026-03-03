@@ -408,7 +408,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
-    env_cfg.max_episode_steps = config.get("max_episode_steps", -1)
+    env_cfg.max_episode_steps = config.get("max_episode_steps", 500)
 
     # parser robot config
     # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.

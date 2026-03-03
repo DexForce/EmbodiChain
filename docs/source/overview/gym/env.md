@@ -54,6 +54,12 @@ The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional paramet
 * **robot** ({class}`~embodichain.lab.sim.cfg.RobotCfg`): 
   Defines the agent in the scene. Supports loading robots from URDF/MJCF with specified initial state and control mode. This is a required field.
 
+* **control_parts** (List[str]): 
+  List of robot part names that are controlled by the environment's action space. This allows for flexible control schemes (e.g., controlling only the left arm or end-effector). Defaults to an empty list, in which case no robot parts are controlled.
+
+* **active_joint_ids** (List[int]): 
+  List of joint IDs that are active for control and observation. This is used to filter the robot's full joint state to only the relevant joints for the task. Defaults to an empty list, in which case all joints are considered active.
+
 * **sensor** (List[{class}`~embodichain.lab.sim.sensor.SensorCfg`]): 
   A list of sensors attached to the scene or robot. Common sensors include {class}`~embodichain.lab.sim.sensors.StereoCamera` for RGB-D and segmentation data. Defaults to an empty list.
 
@@ -89,6 +95,12 @@ The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional paramet
 
 * **filter_visual_rand** (bool): 
   Whether to filter out visual randomization functors. Useful for debugging motion and physics issues when visual randomization interferes with the debugging process. Defaults to ``False``.
+
+* **filter_dataset_saving** (bool): 
+  Whether to filter out dataset saving functors. Useful for debugging when dataset saving interferes with the debugging process. Defaults to ``False``.
+
+* **init_rollout_buffer** (bool): 
+  Whether to initialize the rollout buffer for data collection. If ``True``, the environment will create a rollout buffer matching the observation/action spaces for episode recording. Defaults to ``False``. If you plan to use the dataset manager for imitation learning, you should set this to ``True`` to enable episode recording.
 
 ### Example Configuration
 
