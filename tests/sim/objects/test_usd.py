@@ -15,13 +15,19 @@
 # ----------------------------------------------------------------------------
 
 import pytest
+import torch
 
 from embodichain.lab.sim import (
     SimulationManager,
     SimulationManagerCfg,
 )
 from embodichain.lab.sim.objects import Articulation, RigidObject
-from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    RigidObjectCfg,
+    JointDrivePropertiesCfg,
+    RigidBodyAttributesCfg,
+)
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 
@@ -41,18 +47,32 @@ class BaseUsdTest:
             self.sim.init_gpu_physics()
 
     def test_import_rigid(self):
+        default_attr = RigidBodyAttributesCfg()
         sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
         sugar_box: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="sugar_box",
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
-                use_usd_properties=True,
+                use_usd_properties=False,
                 init_pos=[0.0, 0.0, 0.1],
+                attrs=default_attr,
             )
+        )
+        body0 = sugar_box._entities[0].get_physical_body()
+        print(sugar_box._entities[0].get_physical_attr())
+        assert pytest.approx(body0.get_mass()) == default_attr.mass
+        assert pytest.approx(body0.get_linear_damping()) == default_attr.linear_damping
+        assert (
+            pytest.approx(body0.get_angular_damping()) == default_attr.angular_damping
+        )
+        assert body0.get_solver_iteration_counts() == (
+            default_attr.min_position_iters,
+            default_attr.min_velocity_iters,
         )
 
     def test_import_articulation(self):
+        default_drive = JointDrivePropertiesCfg()
         h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
         h1: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg(
@@ -61,8 +81,85 @@ class BaseUsdTest:
                 build_pk_chain=False,
                 use_usd_properties=False,
                 init_pos=[0.0, 0.0, 1.2],
+                drive_pros=default_drive,
             )
         )
+
+        stiffness = h1.body_data.joint_stiffness
+        damping = h1.body_data.joint_damping
+        max_force = h1.body_data.qf_limits
+        print(f"All joint stiffness: {stiffness}")
+        print(f"All joint damping: {damping}")
+        print(f"All joint max force: {max_force}")
+        expected_stiffness = default_drive.stiffness
+        assert torch.allclose(
+            stiffness, torch.tensor(expected_stiffness, dtype=torch.float32)
+        )
+        expectied_damping = default_drive.damping
+        assert torch.allclose(
+            damping, torch.tensor(expectied_damping, dtype=torch.float32)
+        )
+
+    def test_usd_properties(self):
+        """In this test, we set use_usd_properties=True to verify that the USD properties are correctly applied."""
+        h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
+        h1: Articulation = self.sim.add_articulation(
+            cfg=ArticulationCfg(
+                uid="h1_beta",
+                fpath=h1_path,
+                build_pk_chain=False,
+                use_usd_properties=True,
+                init_pos=[0.0, 0.0, 1.2],
+            )
+        )
+
+        stiffness = h1.body_data.joint_stiffness
+        damping = h1.body_data.joint_damping
+        max_force = h1.body_data.qf_limits
+        print(f"All joint stiffness: {stiffness}")
+        print(f"All joint damping: {damping}")
+        print(f"All joint max force: {max_force}")
+        expected_stiffness = 10000000.0
+        assert torch.allclose(
+            stiffness, torch.tensor(expected_stiffness, dtype=torch.float32)
+        )
+
+        joint_names = h1.joint_names
+        print(f"Joint names: {joint_names}")
+
+        target_joint_name = "left_hip_yaw_joint"
+        if target_joint_name in joint_names:
+            joint_idx = joint_names.index(target_joint_name)
+            # check for the first instance
+            assert torch.isclose(
+                stiffness[0, joint_idx], torch.tensor(10000000.0, dtype=torch.float32)
+            )
+            assert torch.isclose(
+                damping[0, joint_idx], torch.tensor(0.0, dtype=torch.float32)
+            )
+            assert torch.isclose(
+                max_force[0, joint_idx], torch.tensor(200.0, dtype=torch.float32)
+            )
+
+        default_attr = RigidBodyAttributesCfg()
+        sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
+        sugar_box: RigidObject = self.sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="sugar_box_beta",
+                shape=MeshCfg(fpath=sugar_box_path),
+                body_type="dynamic",
+                use_usd_properties=True,
+                init_pos=[0.0, 0.0, 0.1],
+                attrs=default_attr,
+            )
+        )
+        # body0=sugar_box._entities[0].get_physical_body()
+        # print(sugar_box._entities[0].get_physical_attr())
+        # assert(body0.get_mass()==0.514)
+        # assert(body0.get_linear_damping()==0)
+        # assert(body0.get_angular_damping()==0.05)
+        # assert(body0.get_solver_iteration_counts()==(4, 1))
+        # assert(body0.get_max_angular_velocity()==100)
 
     def teardown_method(self):
         """Clean up resources after each test method."""
@@ -85,7 +182,7 @@ if __name__ == "__main__":
     test.setup_method()
     test.test_import_rigid()
     test.test_import_articulation()
+    test.test_usd_properties()
 
-    from IPython import embed
-
-    embed()
+    # from IPython import embed
+    # embed()

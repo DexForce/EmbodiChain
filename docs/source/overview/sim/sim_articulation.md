@@ -10,7 +10,7 @@ The {class}`~objects.Articulation` class represents the fundamental physics enti
 Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `fpath` | `str` | `None` | Path to the asset file (URDF/MJCF/USD). |
+| `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
 | `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
