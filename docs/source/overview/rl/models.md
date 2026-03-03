@@ -13,7 +13,10 @@ This module contains RL policy networks and related model implementations, suppo
 - Supports GPU deployment and distributed training.
 
 ### ActorCritic
-- Typical actor-critic policy, includes actor (action distribution) and critic (value function).
+- Typical actor-critic policy, includes actor (action distribution) and critic (value function). Used with PPO.
+
+### ActorOnly
+- Actor-only policy without Critic. Used with GRPO (Group Relative Policy Optimization), which estimates advantages via group-level return comparison instead of a value function.
 - Supports Gaussian action distributions, learnable log_std, suitable for continuous action spaces.
 - Key methods:
     - `get_action`: Actor network outputs mean, samples action, returns log_prob and critic value.
