@@ -32,10 +32,10 @@ class OnlineDataEngine:
     This class is responsible for interacting with a shared buffer to store environment rollouts,
     managing buffer indices, and running simulation episodes in a gym environment. It supports
     continuous data generation and buffer management for reinforcement learning or similar tasks.
-    
+
     Args:
         shared_buffer (TensorDict): Shared memory buffer for storing environment rollouts.
-        index_list (mp.Array): Multiprocessing array for tracking buffer indices, which indicates 
+        index_list (mp.Array): Multiprocessing array for tracking buffer indices, which indicates
             the current rollout data range and will be locked by the main process for reading.
         env_config (tuple): Tuple containing environment configuration objects:
             - EmbodiedEnvCfg: Environment configuration.
@@ -53,7 +53,7 @@ class OnlineDataEngine:
         buffer_size (int): Size of the shared buffer.
         _tmp_buffer: Temporary buffer for current episode data.
         env (gym.Env): The instantiated gym environment.
-        
+
     Methods:
         _make_env() -> gym.Env:
             Instantiates and configures the gym environment, setting up the rollout buffer.
