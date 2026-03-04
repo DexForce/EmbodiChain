@@ -1,0 +1,145 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+import torch
+import time
+import gymnasium as gym
+import multiprocessing as mp
+
+from tensordict import TensorDict
+from tqdm import tqdm
+
+from embodichain.lab.gym.envs import EmbodiedEnvCfg
+from embodichain.utils.logger import log_info, log_error, log_warning
+
+
+class OnlineDataEngine:
+    """
+    Engine for managing online data streaming and environment rollouts in a multiprocessing setting.
+    This class is responsible for interacting with a shared buffer to store environment rollouts,
+    managing buffer indices, and running simulation episodes in a gym environment. It supports
+    continuous data generation and buffer management for reinforcement learning or similar tasks.
+    
+    Args:
+        shared_buffer (TensorDict): Shared memory buffer for storing environment rollouts.
+        index_list (mp.Array): Multiprocessing array for tracking buffer indices, which indicates 
+            the current rollout data range and will be locked by the main process for reading.
+        env_config (tuple): Tuple containing environment configuration objects:
+            - EmbodiedEnvCfg: Environment configuration.
+            - dict: Gym environment configuration.
+            - dict: Action configuration.
+
+    Attributes:
+        shared_buffer (TensorDict): The shared buffer for storing rollouts.
+        index_list (mp.Array): Buffer index tracker for multiprocessing.
+        _env_config (tuple): Tuple of environment, gym, and action configurations.
+        _env_cfg (EmbodiedEnvCfg): Environment configuration object.
+        _gym_config (dict): Gym environment configuration.
+        _action_config (dict): Action configuration.
+        device: Device on which the buffer is allocated.
+        buffer_size (int): Size of the shared buffer.
+        _tmp_buffer: Temporary buffer for current episode data.
+        env (gym.Env): The instantiated gym environment.
+        
+    Methods:
+        _make_env() -> gym.Env:
+            Instantiates and configures the gym environment, setting up the rollout buffer.
+        run():
+            Main loop for running environment rollouts, executing demo actions, and updating the shared buffer.
+        _update_shared_rollout_buffer() -> None:
+            Updates the shared buffer indices after each rollout, handling buffer wrapping and index management.
+    """
+
+    def __init__(
+        self, shared_buffer: TensorDict, index_list: mp.Array, env_config: tuple
+    ):
+        self.shared_buffer = shared_buffer
+        self.index_list = index_list
+        self._env_config = env_config
+
+        self._env_cfg: EmbodiedEnvCfg = self._env_config[0]
+        self._gym_config = self._env_config[1]
+        self._action_config = self._env_config[2]
+
+        self.device = shared_buffer.device
+        self.buffer_size = shared_buffer.batch_size[0]
+
+        # Init tmp buffer to save (num_envs, max_episode_length, ...) episode data.
+        self.index_list[0] = 0
+        self.index_list[1] = self._env_cfg.num_envs
+        self._tmp_buffer = self.shared_buffer[
+            self.index_list[0] : self.index_list[1], :
+        ]
+
+        self.env = self._make_env()
+
+    def _make_env(self) -> gym.Env:
+        env = gym.make(
+            id=self._gym_config["id"], cfg=self._env_cfg, **self._action_config
+        )
+
+        env.get_wrapper_attr("set_rollout_buffer")(self._tmp_buffer)
+        log_info(f"[Simulation Process] Environment created.")
+        return env
+
+    def run(self):
+        try:
+            while True:
+                _, _ = self.env.reset()
+                # Execute action
+                action_list = self.env.get_wrapper_attr("create_demo_action_list")()
+
+                if action_list is None or len(action_list) == 0:
+                    log_warning("Action is invalid. Skip to next generation.")
+                    continue
+
+                for action in tqdm(
+                    action_list, desc=f"Executing action list", unit="step"
+                ):
+                    # Step the environment with the current action
+                    # The environment will automatically detect truncation based on action_length
+                    obs, reward, terminated, truncated, info = self.env.step(action)
+
+                self._update_shared_rollout_buffer()
+
+        except KeyboardInterrupt:
+            log_info("[Simulation Process] Stopping...")
+        except Exception as e:
+            log_error(f"[Simulation Process] Error: {e}")
+        finally:
+            self.env.close()
+
+    def _update_shared_rollout_buffer(self) -> None:
+        produced_len = self._env_cfg.num_envs
+
+        self.index_list[0] += produced_len
+        self.index_list[1] += produced_len
+
+        if self.index_list[0] == self.buffer_size:
+            self.index_list[0] = 0
+            self.index_list[1] = produced_len
+        if self.index_list[1] > self.buffer_size:
+            self.index_list[1] = self.buffer_size
+            self.index_list[0] = self.buffer_size - self._env_cfg.num_envs
+
+        self._tmp_buffer = self.shared_buffer[
+            self.index_list[0] : self.index_list[1], :
+        ]
+
+        log_info(
+            f"[Simulation Process] Updated shared rollout buffer index: [{self.index_list[0]}, {self.index_list[1]}].",
+            color="green",
+        )
