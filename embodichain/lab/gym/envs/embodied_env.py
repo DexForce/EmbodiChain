@@ -396,11 +396,8 @@ class EmbodiedEnv(BaseEnv):
                 self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
                     obs, non_blocking=True
                 )
-                action_set = (
-                    action if isinstance(action, torch.Tensor) else TensorDict(action)
-                )
                 self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                    action_set, non_blocking=True
+                    action, non_blocking=True
                 )
                 self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
                     rewards, non_blocking=True
@@ -543,6 +540,11 @@ class EmbodiedEnv(BaseEnv):
 
         # Setup active joints for robot to control.
         if self.cfg.control_parts:
+            if len(self.cfg.active_joint_ids) > 0:
+                logger.log_error(
+                    f"Both control_parts and active_joint_ids are specified in the configuration. Please specify only one of them."
+                )
+
             # Check env control parts are valid
             for part_name in self.cfg.control_parts:
                 if part_name not in robot.control_parts:

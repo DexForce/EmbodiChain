@@ -110,7 +110,7 @@ class OnlineDataEngine:
                     action_list, desc=f"Executing action list", unit="step"
                 ):
                     # Step the environment with the current action
-                    # The environment will automatically detect truncation based on action_length
+                    # The environment automatically handles truncation via max_episode_steps and task-specific conditions
                     obs, reward, terminated, truncated, info = self.env.step(action)
 
                 self._update_shared_rollout_buffer()
