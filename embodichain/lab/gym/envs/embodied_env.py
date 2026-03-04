@@ -389,6 +389,7 @@ class EmbodiedEnv(BaseEnv):
         info: Dict,
         **kwargs,
     ):
+        # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
             if self.current_rollout_step < self._max_rollout_steps:
                 # Extract data into episode buffer.
@@ -477,7 +478,6 @@ class EmbodiedEnv(BaseEnv):
 
         # Clear episode buffers and reset success status for environments being reset
         if self.rollout_buffer is not None:
-            self.rollout_buffer[env_ids_to_process].zero_()
             self.current_rollout_step = 0
 
         self.episode_success_status[env_ids_to_process] = False
