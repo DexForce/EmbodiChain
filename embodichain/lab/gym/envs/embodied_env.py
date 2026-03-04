@@ -49,7 +49,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
-    init_rollout_buffer_from_obs_action_space,
+    init_rollout_buffer_from_gym_space,
 )
 from embodichain.utils import configclass, logger
 
@@ -252,7 +252,7 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer: TensorDict | None = None
         self._max_rollout_steps = 0
         if self.cfg.init_rollout_buffer:
-            self.rollout_buffer = init_rollout_buffer_from_obs_action_space(
+            self.rollout_buffer = init_rollout_buffer_from_gym_space(
                 obs_space=self.observation_space,
                 action_space=self.action_space,
                 max_episode_steps=self.max_episode_steps,
@@ -454,6 +454,7 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
+        logger.log_info(f"Initializing episode for env_ids: {env_ids}", color="cyan")
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process

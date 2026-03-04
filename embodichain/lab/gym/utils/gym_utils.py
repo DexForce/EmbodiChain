@@ -829,7 +829,7 @@ def build_env_cfg_from_args(
     return cfg, gym_config, action_config
 
 
-def init_rollout_buffer_from_obs_action_space(
+def init_rollout_buffer_from_gym_space(
     obs_space: spaces.Space,
     action_space: spaces.Space,
     max_episode_steps: int,
@@ -898,4 +898,146 @@ def init_rollout_buffer_from_obs_action_space(
         batch_size=[num_envs, max_episode_steps],
         device=device,
     )
+    return rollout_buffer
+
+
+def init_rollout_buffer_from_config(
+    config: dict,
+    max_episode_steps: int,
+    num_envs: int,
+    state_dim: int,
+    device: Union[str, torch.device] = "cpu",
+) -> TensorDict:
+    """Initialize a rollout buffer based on the environment configuration.
+
+    Args:
+        config (dict): The environment configuration dictionary.
+        max_episode_steps (int): The number of steps in an episode.
+        num_envs (int): The number of parallel environments.
+        state_dim (int): The dimension of the flattened state vector.
+
+    Returns:
+        TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+    """
+
+    # Parse sensor
+    sensor_desc = {}
+    for cfg in config.get("sensor", []):
+        desc = {}
+        width = cfg.get("width", 640)
+        height = cfg.get("height", 480)
+        desc["color"] = torch.zeros(
+            (
+                num_envs,
+                max_episode_steps,
+                height,
+                width,
+                4,
+            ),
+            dtype=torch.uint8,
+            device=device,
+        )
+        if cfg.get("enable_mask", False):
+            desc["mask"] = torch.zeros(
+                (
+                    num_envs,
+                    max_episode_steps,
+                    height,
+                    width,
+                ),
+                dtype=torch.int32,
+                device=device,
+            )
+        if cfg.get("enable_depth", False):
+            desc["depth"] = torch.zeros(
+                (
+                    num_envs,
+                    max_episode_steps,
+                    height,
+                    width,
+                ),
+                dtype=torch.float32,
+                device=device,
+            )
+
+        if cfg.get("sensor_type", "Camera") == "StereoCamera":
+            desc["color_right"] = torch.zeros(
+                (
+                    num_envs,
+                    max_episode_steps,
+                    height,
+                    width,
+                    4,
+                ),
+                dtype=torch.uint8,
+                device=device,
+            )
+            if "mask" in desc:
+                desc["mask_right"] = torch.zeros(
+                    (
+                        num_envs,
+                        max_episode_steps,
+                        height,
+                        width,
+                    ),
+                    dtype=torch.int32,
+                    device=device,
+                )
+            if "depth" in desc:
+                desc["depth_right"] = torch.zeros(
+                    (
+                        num_envs,
+                        max_episode_steps,
+                        height,
+                        width,
+                    ),
+                    dtype=torch.float32,
+                    device=device,
+                )
+
+        sensor_desc[cfg.get("uid", "camera")] = desc
+
+    # For simplicity, we initialize the observation buffer as a flat vector with dimension state_dim.
+    # In practice, you may want to initialize it according to the actual observation space structure.
+    rollout_buffer = TensorDict(
+        {
+            "obs": {
+                "robot": {
+                    "qpos": torch.zeros(
+                        (num_envs, max_episode_steps, state_dim),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                    "qvel": torch.zeros(
+                        (num_envs, max_episode_steps, state_dim),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                    "qf": torch.zeros(
+                        (num_envs, max_episode_steps, state_dim),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                },
+            },
+            # TODO: For action, we may support TensorDict structure in the future, which may include
+            # qpos, qvel and qf.
+            "actions": torch.zeros(
+                (num_envs, max_episode_steps, state_dim),
+                dtype=torch.float32,
+                device=device,
+            ),
+            "rewards": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.float32, device=device
+            ),
+        },
+        batch_size=[num_envs, max_episode_steps],
+        device=device,
+    )
+
+    if sensor_desc:
+        rollout_buffer["obs"]["sensor"] = TensorDict(
+            sensor_desc, batch_size=[num_envs, max_episode_steps], device=device
+        )
+
     return rollout_buffer
