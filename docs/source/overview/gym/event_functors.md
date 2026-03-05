@@ -31,6 +31,8 @@ This page lists all available event functors that can be used with the Event Man
   - Randomize textures, base colors, and material properties (metallic, roughness, IOR). Implemented as a Functor class. Supports both RigidObject and Articulation assets.
 * - ``randomize_light``
   - Vary light position, color, and intensity within specified ranges.
+* - ``randomize_emission_light``
+  - Randomize global emission light color and intensity. Applies the same emission light properties across all environments.
 * - ``randomize_camera_extrinsics``
   - Randomize camera poses for viewpoint diversity. Supports both attach mode (pos/euler perturbation) and look_at mode (eye/target/up perturbation).
 * - ``randomize_camera_intrinsics``
