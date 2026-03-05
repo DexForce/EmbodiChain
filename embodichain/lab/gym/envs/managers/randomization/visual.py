@@ -364,8 +364,8 @@ def randomize_emission_light(
     .. attention::
         This function applied the same emission light properties for all the environments.
 
-        color_range is the absolute r, g, b value set to the emission light.
-        intensity_range is the absolute value added into the emission light's intensity.
+        color_range is the absolute r, g, b value set on the emission light.
+        intensity_range is the absolute intensity value set on the emission light.
     """
 
     color = None
@@ -382,7 +382,11 @@ def randomize_emission_light(
     if intensity_range:
         intensity = np.random.uniform(intensity_range[0], intensity_range[1])
 
-    env.sim.set_emission_light(color=color.squeeze_(0).tolist(), intensity=intensity)
+    if isinstance(color, torch.Tensor):
+        color_arg = color.squeeze(0).tolist()
+    else:
+        color_arg = None
+    env.sim.set_emission_light(color=color_arg, intensity=intensity)
 
 
 def randomize_camera_intrinsics(
