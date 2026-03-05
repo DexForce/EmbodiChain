@@ -136,6 +136,8 @@ def train_from_config(config_path: str):
     gym_env_cfg = config_to_cfg(
         gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
     )
+    if num_envs is not None:
+        gym_env_cfg.num_envs = int(num_envs)
 
     if num_envs is not None:
         gym_env_cfg.num_envs = num_envs
@@ -176,7 +178,7 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
-    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic)
+    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic/actor_only)
     if policy_name.lower() == "actor_critic":
         # Get observation dimension from flattened observation space
         # flattened_observation_space returns Box space for RL training
@@ -200,6 +202,25 @@ def train_from_config(config_path: str):
             device,
             actor=actor,
             critic=critic,
+        )
+    elif policy_name.lower() == "actor_only":
+        obs_dim = env.flattened_observation_space.shape[-1]
+        action_dim = env.action_space.shape[-1]
+
+        actor_cfg = policy_block.get("actor")
+        if actor_cfg is None:
+            raise ValueError(
+                "ActorOnly requires 'actor' definition in JSON (policy.actor)."
+            )
+
+        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+
+        policy = build_policy(
+            policy_block,
+            env.flattened_observation_space,
+            env.action_space,
+            device,
+            actor=actor,
         )
     else:
         policy = build_policy(

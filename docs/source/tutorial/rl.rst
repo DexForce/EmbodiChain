@@ -136,10 +136,10 @@ Algorithm Configuration
 
 The ``algorithm`` section defines the RL algorithm:
 
-- **name**: Algorithm name (e.g., "ppo")
+- **name**: Algorithm name (e.g., "ppo", "grpo")
 - **cfg**: Algorithm-specific hyperparameters
 
-Example:
+PPO example:
 
 .. code-block:: json
 
@@ -157,6 +157,30 @@ Example:
        "max_grad_norm": 0.5
      }
    }
+
+GRPO example (for Embodied AI / from-scratch training, e.g. CartPole):
+
+.. code-block:: json
+
+   "algorithm": {
+     "name": "grpo",
+     "cfg": {
+       "learning_rate": 0.0001,
+       "n_epochs": 10,
+       "batch_size": 8192,
+       "gamma": 0.99,
+       "clip_coef": 0.2,
+       "ent_coef": 0.001,
+       "kl_coef": 0,
+       "group_size": 4,
+       "eps": 1e-8,
+       "reset_every_rollout": true,
+       "max_grad_norm": 0.5,
+       "truncate_at_first_done": true
+     }
+   }
+
+For GRPO: use ``actor_only`` policy. Set ``kl_coef=0`` for from-scratch training; ``kl_coef=0.02`` for VLA/LLM fine-tuning.
 
 Training Script
 ~~~~~~~~~~~~~~~
@@ -207,7 +231,7 @@ Training Process
 The training process follows this sequence:
 
 1. **Rollout Phase**: Algorithm collects trajectories by interacting with the environment (via ``collect_rollout``). During this phase, the trainer performs dense per-step logging of rewards and metrics from environment info.
-2. **GAE Computation**: Algorithm computes advantages and returns using Generalized Advantage Estimation (internal to algorithm, stored in buffer extras)
+2. **Advantage/Return Computation**: Algorithm computes advantages and returns (e.g. GAE for PPO, step-wise group normalization for GRPO; stored in buffer extras)
 3. **Update Phase**: Algorithm updates the policy using collected data (e.g., PPO)
 4. **Logging**: Trainer logs training losses and aggregated metrics to TensorBoard and Weights & Biases
 5. **Evaluation** (periodic): Trainer evaluates the current policy
@@ -248,7 +272,8 @@ All policies must inherit from the ``Policy`` abstract base class:
 Available Policies
 ------------------
 
-- **ActorCritic**: MLP-based Gaussian policy with learnable log_std. Requires external ``actor`` and ``critic`` modules to be provided (defined in JSON config).
+- **ActorCritic**: MLP-based Gaussian policy with learnable log_std. Requires external ``actor`` and ``critic`` modules to be provided (defined in JSON config). Used with PPO.
+- **ActorOnly**: Actor-only policy without Critic. Used with GRPO (group-relative advantage estimation).
 - **VLAPlaceholderPolicy**: Placeholder for Vision-Language-Action policies
 
 Algorithms
@@ -258,6 +283,7 @@ Available Algorithms
 --------------------
 
 - **PPO**: Proximal Policy Optimization with GAE
+- **GRPO**: Group Relative Policy Optimization (no Critic, step-wise returns, masked group normalization). Use ``actor_only`` policy. Set ``kl_coef=0`` for from-scratch training (CartPole, dense reward); ``kl_coef=0.02`` for VLA/LLM fine-tuning.
 
 Adding a New Algorithm
 ---------------------

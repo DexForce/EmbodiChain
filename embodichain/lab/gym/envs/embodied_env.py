@@ -348,10 +348,12 @@ class EmbodiedEnv(BaseEnv):
         **kwargs,
     ) -> torch.Tensor:
         if self.reward_manager:
-            rewards, reward_info = self.reward_manager.compute(
+            extra_rewards, reward_info = self.reward_manager.compute(
                 obs=obs, action=action, info=info
             )
             info["rewards"] = reward_info
+            # Add manager terms to base reward from get_reward() so task reward is kept
+            rewards = rewards + extra_rewards
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
