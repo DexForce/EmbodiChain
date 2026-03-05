@@ -433,6 +433,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         env_cfg.light.direct = [
             LightCfg.from_dict(l) for l in config["light"].get("direct", [])
         ]
+        env_cfg.light.indirect = config["light"].get("indirect", None)
 
     # parser background objects config
     if "background" in config:
