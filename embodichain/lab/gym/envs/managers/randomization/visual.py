@@ -20,6 +20,8 @@ import torch
 import os
 import random
 import copy
+import numpy as np
+
 from typing import TYPE_CHECKING, Literal, Union, Dict
 
 from embodichain.lab.sim.objects import (
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
 __all__ = [
     "randomize_camera_extrinsics",
     "randomize_light",
+    "randomize_emission_light",
     "randomize_camera_intrinsics",
     "set_rigid_object_visual_material",
     "set_rigid_object_group_visual_material",
@@ -342,11 +345,44 @@ def randomize_light(
         light.set_intensity(new_intensity, env_ids=env_ids)
 
 
-# def randomize_emission_light(
-#     env: EmbodiedEnv,
-#     env_ids: Union[torch.Tensor, None],
-#     color_range: tuple[list[float], list[float]] | None = None,
-#     intensity_range: tuple[float, float] | None = None,
+def randomize_emission_light(
+    env: EmbodiedEnv,
+    env_ids: Union[torch.Tensor, None],
+    color_range: tuple[list[float], list[float]] | None = None,
+    intensity_range: tuple[float, float] | None = None,
+) -> None:
+    """Randomize emission light properties by adding, scaling, or setting random values.
+
+    This function allows randomizing emission light properties in the scene. The function samples random values from the
+    given distribution parameters and adds, scales, or sets the values into the physics simulation based on the
+    operation.
+
+    The distribution parameters are lists of two elements each, representing the lower and upper bounds of the
+    distribution for the r, g, b components of the light color and intensity. The function samples random values for each
+    component independently.
+
+    .. attention::
+        This function applied the same emission light properties for all the environments.
+
+        color_range is the absolute r, g, b value set to the emission light.
+        intensity_range is the absolute value added into the emission light's intensity.
+    """
+
+    color = None
+    if color_range:
+        color = torch.zeros((1, 3), dtype=torch.float32)
+        random_value = sample_uniform(
+            lower=torch.tensor(color_range[0]),
+            upper=torch.tensor(color_range[1]),
+            size=color.shape,
+        )
+        color += random_value
+
+    intensity = None
+    if intensity_range:
+        intensity = np.random.uniform(intensity_range[0], intensity_range[1])
+
+    env.sim.set_emission_light(color=color.squeeze_(0).tolist(), intensity=intensity)
 
 
 def randomize_camera_intrinsics(
