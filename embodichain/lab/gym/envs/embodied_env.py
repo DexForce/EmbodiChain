@@ -64,7 +64,7 @@ class EmbodiedEnvCfg(EnvCfg):
         direct: List[LightCfg] = []
 
         # TODO: support more types of indirect light in the future.
-        # indirect: Dict[str, Any] | None = None
+        indirect: dict[str, Any] | None = None
 
     robot: RobotCfg = MISSING
 
@@ -496,8 +496,14 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_lights(self) -> None:
         """Setup the lights in the environment."""
+        # Set direct lights.
         for cfg in self.cfg.light.direct:
             self.sim.add_light(cfg=cfg)
+
+        # Set indirect lights.
+        if self.cfg.light.indirect is not None:
+            if "emission_light" in self.cfg.light.indirect:
+                self.sim.set_emission_light(**self.cfg.light.indirect["emission_light"])
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""

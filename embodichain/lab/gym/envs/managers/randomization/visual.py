@@ -342,6 +342,13 @@ def randomize_light(
         light.set_intensity(new_intensity, env_ids=env_ids)
 
 
+# def randomize_emission_light(
+#     env: EmbodiedEnv,
+#     env_ids: Union[torch.Tensor, None],
+#     color_range: tuple[list[float], list[float]] | None = None,
+#     intensity_range: tuple[float, float] | None = None,
+
+
 def randomize_camera_intrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
