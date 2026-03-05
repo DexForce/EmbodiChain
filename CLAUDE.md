@@ -212,3 +212,111 @@ Refer to `embodichain/lab/sim/robots/` for existing examples (`dexforce_w1`, `co
 ### Adding a New Task Environment
 
 Refer to `embodichain/lab/gym/envs/tasks/` for existing examples. Tasks subclass `EmbodiedEnv` or `BaseAgentEnv` and implement `_setup_scene`, `_reset_idx`, and evaluation logic.
+
+---
+
+## Unit Tests
+
+### Structure
+
+Tests live in `tests/` and mirror the source tree:
+
+```text
+tests/
+├── toolkits/
+│   └── test_pg_grasp.py
+├── gym/
+│   └── action_bank/
+│       └── test_configurable_action.py
+└── sim/
+    ├── objects/
+    │   ├── test_light.py
+    │   └── test_rigid_object_group.py
+    ├── sensors/
+    │   ├── test_camera.py
+    │   └── test_stereo.py
+    └── planners/
+        └── test_motion_generator.py
+```
+
+Place new test files at `tests/<subpackage>/test_<module>.py`, matching the layout of `embodichain/`.
+
+### Two accepted styles
+
+**pytest style** — for pure-Python logic with no test ordering dependency:
+
+```python
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# ...
+# ----------------------------------------------------------------------------
+
+from embodichain.my_module import my_function
+
+
+def test_expected_output():
+    result = my_function(input_value)
+    assert result == expected_value
+
+
+def test_edge_case():
+    result = my_function(edge_input)
+    assert result is not None
+```
+
+**`unittest.TestCase` style** — when tests must run in a specific order or share `setUp`/`tearDown` state:
+
+```python
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# ...
+# ----------------------------------------------------------------------------
+
+import unittest
+from embodichain.my_module import MyClass
+
+
+class TestMyClass(unittest.TestCase):
+    def setUp(self):
+        self.obj = MyClass(param=1.0)
+
+    def tearDown(self):
+        pass
+
+    def test_basic_behavior(self):
+        result = self.obj.run()
+        self.assertEqual(result, expected)
+
+    def test_raises_on_bad_input(self):
+        self.assertRaises(ValueError, self.obj.run, bad_input)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### Conventions
+
+- **File header**: include the standard Apache 2.0 copyright block (same as all source files).
+- **Naming**: test files are `test_<module>.py`; test functions/methods are `test_<scenario>`.
+- **Simulation-dependent tests**: tests that require a running `SimulationManager` (GPU, sensors, robots) must initialize and teardown the sim inside `setUp`/`tearDown` or a pytest fixture. Keep them isolated from pure-logic tests.
+- **No magic numbers**: define expected values as named constants or comments explaining their origin.
+- **`if __name__ == "__main__"`**: include this block for tests that support optional visual/interactive output (pass `is_visual=True` manually when debugging).
+
+### Running tests
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run a specific file
+pytest tests/toolkits/test_pg_grasp.py
+
+# Run a specific test function
+pytest tests/toolkits/test_pg_grasp.py::test_antipodal_score_selector
+
+# Run with verbose output
+pytest -v tests/
+```

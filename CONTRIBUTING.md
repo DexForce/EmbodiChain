@@ -36,6 +36,67 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
     *   Include a summary of the changes and link to any relevant issues (e.g., `Fixes #123`).
     *   Ensure all checks pass.
 
+## Using Claude Code for Contributions
+
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) is an AI-powered CLI that can assist you throughout the contribution workflow — from understanding the codebase to writing, reviewing, and debugging code.
+
+### Setup
+
+Install Claude Code and authenticate:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude
+```
+
+A `CLAUDE.md` file is present at the root of this repository. Claude Code reads it automatically at startup to load project conventions, structure, and style rules, so it is context-aware from the first prompt.
+
+### Suggested workflows
+
+**Explore the codebase before making changes**
+
+```
+> Explain how the Functor/Manager pattern works in embodichain/lab/gym/envs/managers/
+> What is the difference between EmbodiedEnv and RLEnv?
+> Show me an example of how a randomization functor is registered in a task config.
+```
+
+**Implement a new feature**
+
+```
+> I want to add a new observation functor that returns the end-effector velocity.
+  Which existing functor should I model it after?
+> Generate the functor following the project style, with a proper docstring and type hints.
+```
+
+**Validate style and formatting before submitting**
+
+```
+> Review my changes in embodichain/lab/gym/envs/managers/randomization/visual.py
+  for style issues, missing type hints, and docstring completeness.
+```
+
+**Write or update tests**
+
+```
+> Write a pytest test for the randomize_emission_light function in
+  embodichain/lab/gym/envs/managers/randomization/visual.py.
+```
+
+**Understand a bug**
+
+```
+> I'm getting a KeyError in observation_manager.py at line 42 when env_ids is None.
+  What could cause this and how should it be fixed?
+```
+
+### Tips
+
+*   Always run `black .` after Claude Code generates or edits Python files — Claude Code can do this for you if you ask.
+*   Claude Code respects the `CLAUDE.md` conventions. If you notice it deviating (wrong docstring style, missing `__all__`, etc.), point it out and it will correct the output.
+*   For large features, break the work into small, focused tasks and handle them one at a time.
+*   Claude Code can help draft your PR description and populate the PR checklist once your changes are ready.
+
 ## Contribute specific robots
 
 TODO: Add instructions for contributing new robot models and its configurations.
