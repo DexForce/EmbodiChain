@@ -91,7 +91,10 @@ def _sim_worker_fn(
             Remains set permanently thereafter.
     """
     import gymnasium as gym
-    from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
+    from embodichain.lab.gym.utils.gym_utils import (
+        config_to_cfg,
+        DEFAULT_MANAGER_MODULES,
+    )
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.utils.logger import log_info, log_warning, log_error
 
@@ -166,12 +169,13 @@ def _sim_worker_fn(
                     leave=False,
                 ):
                     env.step(action)
-                    
+
                 rollout_idx += 1
 
                 log_info(
                     f"[Simulation Process] Rollout {rollout_idx}/{num_rollouts_per_fill} done. "
-                    f"lock_index=[{lock_index[0]}, {lock_index[1]}], ", color="green"
+                    f"lock_index=[{lock_index[0]}, {lock_index[1]}], ",
+                    color="green",
                 )
 
                 # Advance lock_index to the next write slice.
@@ -307,7 +311,8 @@ class OnlineDataEngine:
         )
         self._sim_process.start()
         log_info(
-            f"[OnlineDataEngine] Simulation subprocess started (PID={self._sim_process.pid}).", color="green"
+            f"[OnlineDataEngine] Simulation subprocess started (PID={self._sim_process.pid}).",
+            color="green",
         )
 
         # Trigger the initial fill so data is ready before the first sample.
