@@ -15,9 +15,12 @@
 # ----------------------------------------------------------------------------
 
 from .config import AlgorithmCfg
-from .helper import flatten_dict_observation
+from .helper import dict_to_tensordict, mean_scalar, pack_log_dict, compute_gae
 
 __all__ = [
     "AlgorithmCfg",
-    "flatten_dict_observation",
+    "dict_to_tensordict",
+    "mean_scalar",
+    "pack_log_dict",
+    "compute_gae",
 ]

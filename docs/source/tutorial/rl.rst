@@ -64,7 +64,7 @@ The ``runtime`` section controls experiment setup:
 - **cuda**: Whether to use GPU (default: true)
 - **headless**: Whether to run simulation in headless mode
 - **iterations**: Number of training iterations
-- **rollout_steps**: Steps per rollout (e.g., 1024)
+- **buffer_size**: Steps per rollout (e.g., 1024)
 - **eval_freq**: Frequency of evaluation (in steps)
 - **save_freq**: Frequency of checkpoint saving (in steps)
 - **use_wandb**: Whether to enable Weights & Biases logging (set in JSON config)
