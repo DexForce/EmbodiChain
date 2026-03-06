@@ -18,15 +18,15 @@ import torch
 from tensordict import TensorDict
 
 
-def flatten_dict_observation(input_dict: dict) -> torch.Tensor:
+def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
     """
-    Flatten hierarchical dict observations from ObservationManager.
+    Flatten hierarchical TensorDict observations from ObservationManager.
 
-    Recursively traverse nested dicts, collect all tensor values,
+    Recursively traverse nested TensorDicts, collect all tensor values,
     flatten each to (num_envs, -1), and concatenate in sorted key order.
 
     Args:
-        input_dict: Nested dict structure, e.g. {"robot": {"qpos": tensor, "ee_pos": tensor}, "object": {...}}
+        obs: Nested TensorDict structure, e.g. TensorDict(robot=TensorDict(qpos=..., qvel=...), ...)
 
     Returns:
         Concatenated flat tensor of shape (num_envs, total_dim)
@@ -34,20 +34,20 @@ def flatten_dict_observation(input_dict: dict) -> torch.Tensor:
     obs_list = []
 
     def _collect_tensors(d, prefix=""):
-        """Recursively collect tensors from nested dicts in sorted order."""
+        """Recursively collect tensors from nested TensorDicts in sorted order."""
         for key in sorted(d.keys()):
             full_key = f"{prefix}/{key}" if prefix else key
             value = d[key]
-            if isinstance(value, (dict, TensorDict)):
+            if isinstance(value, TensorDict):
                 _collect_tensors(value, full_key)
             elif isinstance(value, torch.Tensor):
                 # Flatten tensor to (num_envs, -1) shape
                 obs_list.append(value.flatten(start_dim=1))
 
-    _collect_tensors(input_dict)
+    _collect_tensors(obs)
 
     if not obs_list:
-        raise ValueError("No tensors found in observation dict")
+        raise ValueError("No tensors found in observation TensorDict")
 
     result = torch.cat(obs_list, dim=-1)
     return result

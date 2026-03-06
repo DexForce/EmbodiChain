@@ -17,6 +17,8 @@
 import torch
 from typing import Dict, Any, Tuple, Callable
 
+from tensordict import TensorDict
+
 from embodichain.agents.rl.utils import AlgorithmCfg, flatten_dict_observation
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.utils import configclass
@@ -106,8 +108,8 @@ class PPO(BaseAlgorithm):
             reward = reward.float()
             done = done.bool()
 
-            # Flatten dict observation from ObservationManager if needed
-            if isinstance(next_obs, dict):
+            # Flatten TensorDict observation from ObservationManager if needed
+            if isinstance(next_obs, TensorDict):
                 next_obs = flatten_dict_observation(next_obs)
 
             # Add to buffer

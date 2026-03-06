@@ -396,11 +396,12 @@ class EmbodiedEnv(BaseEnv):
                 self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
                     obs, non_blocking=True
                 )
-                action_set = (
-                    action if isinstance(action, torch.Tensor) else TensorDict(action)
-                )
+                if isinstance(action, TensorDict):
+                    action_tensor = action["qpos"]
+                else:
+                    action_tensor = action
                 self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                    action_set, non_blocking=True
+                    action_tensor, non_blocking=True
                 )
                 self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
                     rewards, non_blocking=True
