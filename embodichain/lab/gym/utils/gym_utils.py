@@ -789,6 +789,27 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
+    """Merge command-line arguments with gym configuration.
+
+    Command-line arguments will override the corresponding values in the gym configuration.
+
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments.
+        gym_config (dict): The original gym configuration dictionary.
+
+    Returns:
+        dict: The merged gym configuration dictionary.
+    """
+    merged_config = deepcopy(gym_config)
+    merged_config["num_envs"] = args.num_envs
+    merged_config["device"] = args.device
+    merged_config["headless"] = args.headless
+    merged_config["enable_rt"] = args.enable_rt
+    merged_config["gpu_id"] = args.gpu_id
+    return merged_config
+
+
 def build_env_cfg_from_args(
     args: argparse.Namespace,
 ) -> tuple["EmbodiedEnvCfg", dict, dict]:
@@ -806,11 +827,7 @@ def build_env_cfg_from_args(
     from embodichain.lab.sim import SimulationManagerCfg
 
     gym_config = load_json(args.gym_config)
-    gym_config["num_envs"] = args.num_envs
-    gym_config["device"] = args.device
-    gym_config["headless"] = args.headless
-    gym_config["enable_rt"] = args.enable_rt
-    gym_config["gpu_id"] = args.gpu_id
+    gym_config = merge_args_with_gym_config(args, gym_config)
 
     cfg: EmbodiedEnvCfg = config_to_cfg(
         gym_config, manager_modules=DEFAULT_MANAGER_MODULES

@@ -455,7 +455,7 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
-        logger.log_info(f"Initializing episode for env_ids: {env_ids}", color="cyan")
+        logger.log_debug(f"Initializing episode for env_ids: {env_ids}", color="blue")
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process

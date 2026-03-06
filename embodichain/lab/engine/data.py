@@ -45,12 +45,12 @@ class OnlineDataEngineCfg:
     """Device on which the shared buffer is allocated."""
 
     # TODO: We may support multiple envs in the future.
-    gym_config: dict | None = None
+    gym_config: dict = dict()
     """Gym environment configuration dictionary (already loaded, not a file path).
     The contents depend on the specific environment being used. Default is None."""
 
-    action_config: dict | None = None
-    """Action configuration dictionary.  The contents depend on the specific environment and robot being used. Default is None."""
+    action_config: dict = dict()
+    """Action configuration dictionary.  The contents depend on the specific environment and robot being used. Default is {}."""
 
     refill_threshold: int = 1000
     """Total number of samples drawn from the shared buffer before a refill is triggered.
@@ -91,7 +91,7 @@ def _sim_worker_fn(
             Remains set permanently thereafter.
     """
     import gymnasium as gym
-    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.utils.logger import log_info, log_warning, log_error
 
@@ -99,7 +99,7 @@ def _sim_worker_fn(
     action_config: dict = cfg.action_config
 
     # Build env config from the gym configuration dictionary.
-    env_cfg = config_to_cfg(gym_config)
+    env_cfg = config_to_cfg(gym_config, manager_modules=DEFAULT_MANAGER_MODULES)
     env_cfg.filter_dataset_saving = True
     env_cfg.init_rollout_buffer = False
     env_cfg.sim_cfg = SimulationManagerCfg(
@@ -114,8 +114,8 @@ def _sim_worker_fn(
 
     if buffer_size % num_envs != 0:
         log_warning(
-            "[Simulation Process] buffer_size ({buffer_size}) is not evenly divisible by "
-            "num_envs ({num_envs}). This may lead to inefficient buffer usage and should ideally be fixed by adjusting "
+            f"[Simulation Process] buffer_size ({buffer_size}) is not evenly divisible by "
+            f"num_envs ({num_envs}). This may lead to inefficient buffer usage and should ideally be fixed by adjusting "
             "the OnlineDataEngineCfg.",
         )
 
@@ -157,15 +157,22 @@ def _sim_worker_fn(
                         f"[Simulation Process] Rollout {rollout_idx + 1}/{num_rollouts_per_fill}: "
                         "action list is empty, skipping episode."
                     )
-                else:
-                    for action in tqdm(
-                        action_list,
-                        desc=f"[Sim] rollout {rollout_idx + 1}/{num_rollouts_per_fill}",
-                        unit="step",
-                        leave=False,
-                    ):
-                        env.step(action)
-                    rollout_idx += 1
+                    continue
+
+                for action in tqdm(
+                    action_list,
+                    desc=f"[Sim] rollout {rollout_idx + 1}/{num_rollouts_per_fill}",
+                    unit="step",
+                    leave=False,
+                ):
+                    env.step(action)
+                    
+                rollout_idx += 1
+
+                log_info(
+                    f"[Simulation Process] Rollout {rollout_idx}/{num_rollouts_per_fill} done. "
+                    f"lock_index=[{lock_index[0]}, {lock_index[1]}], ", color="green"
+                )
 
                 # Advance lock_index to the next write slice.
                 next_start = lock_index[0] + num_envs
@@ -180,11 +187,6 @@ def _sim_worker_fn(
 
                 lock_index[0] = next_start
                 lock_index[1] = next_end
-
-                log_info(
-                    f"[Simulation Process] Rollout {rollout_idx}/{num_rollouts_per_fill} done. "
-                    f"lock_index=[{lock_index[0]}, {lock_index[1]}], "
-                )
 
             # Signal that the buffer contains valid data for the first time.
             # is_set() is checked so subsequent refills do not redundantly set it.
@@ -218,7 +220,7 @@ class OnlineDataEngine:
 
     **Subprocess lifecycle**
 
-    The simulation subprocess is started in :meth:`__init__` and immediately
+    The simulation subprocess is started in :meth:`start` and immediately
     receives a fill signal so the buffer is populated before the first call to
     :meth:`sample_batch`.  The subprocess loops indefinitely: it waits for
     *fill_signal*, runs ``buffer_size // num_envs`` rollouts to overwrite every
@@ -291,10 +293,6 @@ class OnlineDataEngine:
         # Accumulated sample count used by the refill criterion.
         self._sample_count: Synchronized = mp.Value("i", 0)
 
-        # -------------------------------------------------------------------
-        # Simulation subprocess
-        # -------------------------------------------------------------------
-
     def start(self) -> None:
         self._sim_process: mp.Process = mp.Process(
             target=_sim_worker_fn,
@@ -309,8 +307,7 @@ class OnlineDataEngine:
         )
         self._sim_process.start()
         log_info(
-            "[OnlineDataEngine] Simulation subprocess started (PID=%d)."
-            % self._sim_process.pid
+            f"[OnlineDataEngine] Simulation subprocess started (PID={self._sim_process.pid}).", color="green"
         )
 
         # Trigger the initial fill so data is ready before the first sample.
