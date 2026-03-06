@@ -67,7 +67,7 @@ class EnvCfg:
     stops only due to the timelimit.
     """
 
-    max_episode_steps: int = 500
+    max_episode_steps: int = 300
     """The maximum number of steps per episode. If set to -1, there is no limit on the episode length, and the episode will 
     only end when the task is successfully completed or failed.
     """

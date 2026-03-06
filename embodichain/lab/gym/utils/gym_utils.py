@@ -408,7 +408,8 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
-    env_cfg.max_episode_steps = config.get("max_episode_steps", 500)
+    env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
+    env_cfg.num_envs = config.get("num_envs", 1)
 
     # parser robot config
     # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
@@ -805,11 +806,18 @@ def build_env_cfg_from_args(
     from embodichain.lab.sim import SimulationManagerCfg
 
     gym_config = load_json(args.gym_config)
+    gym_config["num_envs"] = args.num_envs
+    gym_config["device"] = args.device
+    gym_config["headless"] = args.headless
+    gym_config["enable_rt"] = args.enable_rt
+    gym_config["gpu_id"] = args.gpu_id
+
     cfg: EmbodiedEnvCfg = config_to_cfg(
         gym_config, manager_modules=DEFAULT_MANAGER_MODULES
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+
     if args.preview:
         # In preview mode, we typically don't want to save data
         cfg.filter_dataset_saving = True
@@ -819,12 +827,11 @@ def build_env_cfg_from_args(
         action_config = load_json(args.action_config)
         action_config["action_config"] = action_config
 
-    cfg.num_envs = args.num_envs
     cfg.sim_cfg = SimulationManagerCfg(
-        headless=args.headless,
-        sim_device=args.device,
-        enable_rt=args.enable_rt,
-        gpu_id=args.gpu_id,
+        headless=gym_config["headless"],
+        sim_device=gym_config["device"],
+        enable_rt=gym_config["enable_rt"],
+        gpu_id=gym_config["gpu_id"],
     )
 
     return cfg, gym_config, action_config
@@ -905,7 +912,7 @@ def init_rollout_buffer_from_gym_space(
 def init_rollout_buffer_from_config(
     config: dict,
     max_episode_steps: int,
-    num_envs: int,
+    batch_size: int,
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
 ) -> TensorDict:
@@ -914,7 +921,7 @@ def init_rollout_buffer_from_config(
     Args:
         config (dict): The environment configuration dictionary.
         max_episode_steps (int): The number of steps in an episode.
-        num_envs (int): The number of parallel environments.
+        batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
 
     Returns:
@@ -929,7 +936,7 @@ def init_rollout_buffer_from_config(
         height = cfg.get("height", 480)
         desc["color"] = torch.zeros(
             (
-                num_envs,
+                batch_size,
                 max_episode_steps,
                 height,
                 width,
@@ -941,7 +948,7 @@ def init_rollout_buffer_from_config(
         if cfg.get("enable_mask", False):
             desc["mask"] = torch.zeros(
                 (
-                    num_envs,
+                    batch_size,
                     max_episode_steps,
                     height,
                     width,
@@ -952,7 +959,7 @@ def init_rollout_buffer_from_config(
         if cfg.get("enable_depth", False):
             desc["depth"] = torch.zeros(
                 (
-                    num_envs,
+                    batch_size,
                     max_episode_steps,
                     height,
                     width,
@@ -964,7 +971,7 @@ def init_rollout_buffer_from_config(
         if cfg.get("sensor_type", "Camera") == "StereoCamera":
             desc["color_right"] = torch.zeros(
                 (
-                    num_envs,
+                    batch_size,
                     max_episode_steps,
                     height,
                     width,
@@ -976,7 +983,7 @@ def init_rollout_buffer_from_config(
             if "mask" in desc:
                 desc["mask_right"] = torch.zeros(
                     (
-                        num_envs,
+                        batch_size,
                         max_episode_steps,
                         height,
                         width,
@@ -987,7 +994,7 @@ def init_rollout_buffer_from_config(
             if "depth" in desc:
                 desc["depth_right"] = torch.zeros(
                     (
-                        num_envs,
+                        batch_size,
                         max_episode_steps,
                         height,
                         width,
@@ -1005,17 +1012,17 @@ def init_rollout_buffer_from_config(
             "obs": {
                 "robot": {
                     "qpos": torch.zeros(
-                        (num_envs, max_episode_steps, state_dim),
+                        (batch_size, max_episode_steps, state_dim),
                         dtype=torch.float32,
                         device=device,
                     ),
                     "qvel": torch.zeros(
-                        (num_envs, max_episode_steps, state_dim),
+                        (batch_size, max_episode_steps, state_dim),
                         dtype=torch.float32,
                         device=device,
                     ),
                     "qf": torch.zeros(
-                        (num_envs, max_episode_steps, state_dim),
+                        (batch_size, max_episode_steps, state_dim),
                         dtype=torch.float32,
                         device=device,
                     ),
@@ -1024,21 +1031,21 @@ def init_rollout_buffer_from_config(
             # TODO: For action, we may support TensorDict structure in the future, which may include
             # qpos, qvel and qf.
             "actions": torch.zeros(
-                (num_envs, max_episode_steps, state_dim),
+                (batch_size, max_episode_steps, state_dim),
                 dtype=torch.float32,
                 device=device,
             ),
             "rewards": torch.zeros(
-                (num_envs, max_episode_steps), dtype=torch.float32, device=device
+                (batch_size, max_episode_steps), dtype=torch.float32, device=device
             ),
         },
-        batch_size=[num_envs, max_episode_steps],
+        batch_size=[batch_size, max_episode_steps],
         device=device,
     )
 
     if sensor_desc:
         rollout_buffer["obs"]["sensor"] = TensorDict(
-            sensor_desc, batch_size=[num_envs, max_episode_steps], device=device
+            sensor_desc, batch_size=[batch_size, max_episode_steps], device=device
         )
 
     return rollout_buffer

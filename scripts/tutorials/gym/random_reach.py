@@ -31,7 +31,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.gym.utils.registration import register_env
 
 
-@register_env("RandomReach-v1", max_episode_steps=100, override=True)
+@register_env("RandomReach-v1", override=True)
 class RandomReachEnv(BaseEnv):
 
     robot_init_qpos = np.array(
@@ -142,22 +142,31 @@ if __name__ == "__main__":
 
         for i in range(100):
             action = env.action_space.sample()
-            action = torch.as_tensor(action, dtype=torch.float32, device=env.device)
+            action = torch.as_tensor(
+                action, dtype=torch.float32, device=env.get_wrapper_attr("device")
+            )
 
             init_pose = env.unwrapped.robot_init_qpos
             init_pose = (
-                torch.as_tensor(init_pose, dtype=torch.float32, device=env.device)
+                torch.as_tensor(
+                    init_pose,
+                    dtype=torch.float32,
+                    device=env.get_wrapper_attr("device"),
+                )
                 .unsqueeze_(0)
-                .repeat(env.num_envs, 1)
+                .repeat(env.get_wrapper_attr("num_envs"), 1)
             )
             action = (
                 init_pose
-                + torch.rand_like(action, dtype=torch.float32, device=env.device) * 0.2
+                + torch.rand_like(
+                    action, dtype=torch.float32, device=env.get_wrapper_attr("device")
+                )
+                * 0.2
                 - 0.1
             )
 
             obs, reward, done, truncated, info = env.step(action)
-            total_steps += env.num_envs
+            total_steps += env.get_wrapper_attr("num_envs")
 
         end_time = time.time()
         elapsed_time = end_time - start_time

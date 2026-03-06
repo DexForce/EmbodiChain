@@ -14,4 +14,4 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .data import OnlineDataEngine
+from .data import OnlineDataEngine, OnlineDataEngineCfg

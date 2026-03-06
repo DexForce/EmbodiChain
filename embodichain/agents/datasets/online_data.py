@@ -14,134 +14,104 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from __future__ import annotations
+from typing import Callable, Optional
 
-import time
-from typing import Any, Callable, Iterator, Optional, Tuple
-
-try:  # Python >=3.8 ships sharedctypes everywhere
-    from multiprocessing.sharedctypes import SynchronizedArray
-except ImportError:  # pragma: no cover - fallback for static type checking only
-    SynchronizedArray = Any
-
-from torch.utils.data import IterableDataset
 from tensordict import TensorDict
+from torch.utils.data import Dataset
 
-from embodichain.utils.logger import log_warning
+from embodichain.lab.engine.data import OnlineDataEngine
 
 
-class OnlineRolloutDataset(IterableDataset):
-    """Dataset that streams rollouts emitted by :class:`OnlineDataEngine`.
+class OnlineDataset(Dataset):
+    """PyTorch Dataset backed by a live :class:`OnlineDataEngine` shared buffer.
 
-    The dataset expects access to the same shared :class:`TensorDict` buffer and
-    the multiprocessing ``index_list`` used by the producer. Every time the
-    engine finishes a rollout it advances the indices; this dataset blocks until
-    that happens, clones the finished slice to detach it from shared memory, and
-    yields individual environment rollouts from the slice. As long as the
-    producer keeps running, the iterator produces an infinite stream of samples.
+    Wraps an :class:`OnlineDataEngine` to expose a standard
+    :class:`torch.utils.data.Dataset` interface that draws trajectory chunks
+    on-the-fly from the shared rollout buffer populated by the simulation
+    subprocess.
+
+    Because the underlying data is generated continuously, the dataset has a
+    *virtual* length (``dataset_size``) that controls how many samples are
+    considered per epoch by a :class:`~torch.utils.data.DataLoader`.  Each
+    call to :meth:`__getitem__` independently samples a fresh chunk from the
+    engine regardless of the ``idx`` argument, so every iteration sees
+    freshly sampled (potentially new) data.
+
+    Layout of a single sample returned by :meth:`__getitem__`:
+        TensorDict with batch size ``[chunk_size]`` containing all keys
+        present in the shared buffer (``obs``, ``actions``, ``rewards``, …)
+        after the optional ``transform`` has been applied.
 
     Args:
-        shared_buffer: Shared rollout buffer managed by the engine.
-        index_list: Two-element multiprocessing array storing the current
-            ``[start, end)`` slice inside ``shared_buffer`` where the producer
-            is writing next. The dataset watches changes to detect when new data
-            is ready.
-        poll_interval_s: Sleep interval (in seconds) when waiting for fresh
-            data. Choose a smaller value for lower latency at the cost of more
-            CPU usage.
-        timeout_s: Optional timeout (in seconds). If provided, the iterator
-            raises :class:`TimeoutError` when no new data arrives before the
-            deadline. ``None`` waits indefinitely.
-        transform: Optional callable applied to every rollout before yielding
-            (e.g. to flatten the time dimension or convert to numpy).
-        copy_tensors: When ``True`` (default) the data slice is cloned before
-            yielding so that the producer can safely overwrite the shared memory
-            afterwards. Disable only if the consumer finishes using the data
-            before the producer can wrap around.
+        engine: An :class:`OnlineDataEngine` instance whose shared buffer is
+            used for data sampling.  The engine must have been set up with a
+            ``shared_buffer`` of shape ``(buffer_size, max_episode_steps, …)``.
+        chunk_size: Number of consecutive timesteps in each sample.  Must not
+            exceed ``max_episode_steps`` configured in the engine's environment.
+        dataset_size: Virtual dataset length — the value returned by
+            :meth:`__len__` and used by DataLoader to determine epoch size.
+            Defaults to ``10_000``.
+        transform: Optional callable ``(TensorDict) -> TensorDict`` applied to
+            each sampled chunk before it is returned.  Use this for per-sample
+            post-processing such as type casting, normalisation, or key
+            selection.  The callable receives a TensorDict with batch size
+            ``[chunk_size]`` and must return one of the same batch size.
+
+    Example::
+
+        engine = OnlineDataEngine(shared_buffer, index_list, env_config)
+
+        def normalize(sample: TensorDict) -> TensorDict:
+            sample["actions"] = sample["actions"].float() / action_scale
+            return sample
+
+        dataset = OnlineDataset(engine, chunk_size=64, transform=normalize)
+        loader  = DataLoader(dataset, batch_size=32, num_workers=4)
+
+        for batch in loader:
+            # batch["obs"], batch["actions"], batch["rewards"]
+            # each has shape (32, 64, ...)
+            train_step(batch)
     """
 
     def __init__(
         self,
-        shared_buffer: TensorDict,
-        index_list: SynchronizedArray,
-        *,
-        poll_interval_s: float = 0.01,
-        timeout_s: Optional[float] = None,
+        engine: OnlineDataEngine,
+        chunk_size: int,
         transform: Optional[Callable[[TensorDict], TensorDict]] = None,
-        copy_tensors: bool = True,
     ) -> None:
-        super().__init__()
-        if shared_buffer.batch_size is None or not shared_buffer.batch_size:
-            raise ValueError("shared_buffer must have a leading batch dimension")
-        self.shared_buffer = shared_buffer
-        self.index_list = index_list
-        self.poll_interval_s = max(poll_interval_s, 1e-4)
-        self.timeout_s = timeout_s
-        self.transform = transform
-        self.copy_tensors = copy_tensors
-        self._buffer_size = int(shared_buffer.batch_size[0])
-        self._lock = getattr(index_list, "get_lock", lambda: None)()
-
-    def __iter__(self) -> Iterator[TensorDict]:
-        start, end = self._read_indices()
-
-        while True:
-            next_start, next_end = self._wait_for_new_range((start, end))
-            chunk = self._materialize_chunk(start, end)
-            start, end = next_start, next_end
-
-            if chunk is None:
-                continue
-
-            for rollout_idx in range(chunk.batch_size[0]):
-                rollout_td = chunk[rollout_idx]
-                if self.transform is not None:
-                    rollout_td = self.transform(rollout_td)
-                yield rollout_td
+        self._engine = engine
+        self._chunk_size = chunk_size
+        self._transform = transform
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Dataset interface
     # ------------------------------------------------------------------
-    def _read_indices(self) -> Tuple[int, int]:
-        if self._lock is None:
-            return int(self.index_list[0]), int(self.index_list[1])
-        with self._lock:  # type: ignore[attr-defined]
-            return int(self.index_list[0]), int(self.index_list[1])
 
-    def _wait_for_new_range(self, current_range: Tuple[int, int]) -> Tuple[int, int]:
-        start_time = time.monotonic()
-        while True:
-            candidate = self._read_indices()
-            if candidate != current_range:
-                return candidate
+    def __len__(self) -> int:
+        """Return the buffer size as the virtual length of the dataset."""
+        return self._engine.buffer_size
 
-            if (
-                self.timeout_s is not None
-                and (time.monotonic() - start_time) > self.timeout_s
-            ):
-                raise TimeoutError(
-                    "Timed out while waiting for OnlineDataEngine to publish new rollouts."
-                )
+    def __getitem__(self, idx: int) -> TensorDict:
+        """Sample a single trajectory chunk from the shared buffer.
 
-            time.sleep(self.poll_interval_s)
+        The ``idx`` argument is intentionally ignored — each call draws an
+        independent random chunk from the engine so that the DataLoader
+        receives diverse, freshly sampled data on every access.
 
-    def _materialize_chunk(self, start: int, end: int) -> Optional[TensorDict]:
-        if end <= start:
-            log_warning(
-                "Received an empty index range from OnlineDataEngine; waiting for the next chunk."
-            )
-            return None
+        Args:
+            idx: Ignored sample index (required by the Dataset protocol).
 
-        if end > self._buffer_size or start < 0:
-            raise ValueError(
-                f"Invalid buffer slice [{start}, {end}) for buffer size {self._buffer_size}."
-            )
+        Returns:
+            TensorDict with batch size ``[chunk_size]`` containing the sampled
+            trajectory data, post-processed by ``transform`` if provided.
+        """
+        # Draw one chunk (batch_size=1) and remove the outer batch dimension
+        # so the returned TensorDict has shape [chunk_size, ...].
+        batch = self._engine.sample_batch(batch_size=1, chunk_size=self._chunk_size)
+        sample: TensorDict = batch[0]
 
-        chunk_view = self.shared_buffer[start:end]
-        return chunk_view.clone() if self.copy_tensors else chunk_view
+        if self._transform is not None:
+            sample = self._transform(sample)
 
-    # IterableDataset does not define __len__ for infinite streams.
-    def __len__(self) -> int:  # pragma: no cover - make intent explicit
-        raise TypeError(
-            "OnlineRolloutDataset is an infinite stream; length is undefined."
-        )
+        return sample

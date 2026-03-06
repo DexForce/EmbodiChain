@@ -391,16 +391,17 @@ class EmbodiedEnv(BaseEnv):
     ):
         # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
+            buffer_device = self.rollout_buffer.device
             if self.current_rollout_step < self._max_rollout_steps:
                 # Extract data into episode buffer.
                 self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
-                    obs, non_blocking=True
+                    obs.to(buffer_device), non_blocking=True
                 )
                 self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                    action, non_blocking=True
+                    action.to(buffer_device), non_blocking=True
                 )
                 self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
-                    rewards, non_blocking=True
+                    rewards.to(buffer_device), non_blocking=True
                 )
                 self.current_rollout_step += 1
             else:

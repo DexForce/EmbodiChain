@@ -183,7 +183,6 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
             log_warning(f"Env {uid} is already registered. Skip registration.")
             return cls
 
-    # Register for ManiSkil2
     register(
         uid,
         cls,
