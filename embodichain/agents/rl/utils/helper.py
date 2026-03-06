@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
+from tensordict import TensorDict
 
 
 def flatten_dict_observation(input_dict: dict) -> torch.Tensor:
@@ -37,7 +38,7 @@ def flatten_dict_observation(input_dict: dict) -> torch.Tensor:
         for key in sorted(d.keys()):
             full_key = f"{prefix}/{key}" if prefix else key
             value = d[key]
-            if isinstance(value, dict):
+            if isinstance(value, (dict, TensorDict)):
                 _collect_tensors(value, full_key)
             elif isinstance(value, torch.Tensor):
                 # Flatten tensor to (num_envs, -1) shape
