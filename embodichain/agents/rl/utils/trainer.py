@@ -23,6 +23,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 import wandb
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from .helper import flatten_dict_observation
@@ -79,8 +80,8 @@ class Trainer:
         obs, _ = self.env.reset()
 
         # Initialize algorithm's buffer
-        # Flatten dict observations from ObservationManager to tensor for RL algorithms
-        if isinstance(obs, dict):
+        # Flatten TensorDict observations from ObservationManager to tensor for RL algorithms
+        if isinstance(obs, TensorDict):
             obs_tensor = flatten_dict_observation(obs)
             obs_dim = obs_tensor.shape[-1]
             num_envs = obs_tensor.shape[0]
@@ -265,7 +266,11 @@ class Trainer:
                 obs, reward, terminated, truncated, info = self.eval_env.step(
                     action_dict
                 )
-                obs = flatten_dict_observation(obs) if isinstance(obs, dict) else obs
+                obs = (
+                    flatten_dict_observation(obs)
+                    if isinstance(obs, TensorDict)
+                    else obs
+                )
 
                 # Update statistics only for still-running environments
                 done = terminated | truncated

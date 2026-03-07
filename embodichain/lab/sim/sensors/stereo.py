@@ -24,6 +24,7 @@ import warp as wp
 import dexsim.render as dr
 
 from typing import Dict, Tuple, List, Sequence
+from tensordict import TensorDict
 
 from dexsim.utility import inv_transform
 from embodichain.lab.sim.sensors import Camera, CameraCfg

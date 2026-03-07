@@ -26,6 +26,8 @@ import gymnasium as gym
 import torch
 import tqdm
 
+from tensordict import TensorDict
+
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.lab.gym.utils.misc import is_stereocam
@@ -152,8 +154,12 @@ class LeRobotRecorder(Functor):
         # Process each environment
         for env_id in env_ids.cpu().tolist():
             # Get buffer for this environment (already contains single-env data)
-            obs_list = self._env.episode_obs_buffer[env_id]
-            action_list = self._env.episode_action_buffer[env_id]
+            obs_list = self._env.rollout_buffer["obs"][
+                env_id, : self._env.current_rollout_step
+            ]
+            action_list = self._env.rollout_buffer["actions"][
+                env_id, : self._env.current_rollout_step
+            ]
 
             if len(obs_list) == 0:
                 logger.log_warning(f"No episode data to save for env {env_id}")
@@ -218,13 +224,8 @@ class LeRobotRecorder(Functor):
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
         # Save any remaining episodes
-        env_ids_with_data = []
-        for env_id in range(self.num_envs):
-            if len(self._env.episode_obs_buffer[env_id]) > 0:
-                env_ids_with_data.append(env_id)
-
-        if env_ids_with_data:
-            active_env_ids = torch.tensor(env_ids_with_data, device=self.device)
+        if self._env.current_rollout_step > 0:
+            active_env_ids = torch.arange(self._env.num_envs, device=self._env.device)
             self._save_episodes(active_env_ids)
 
         try:
@@ -293,19 +294,11 @@ class LeRobotRecorder(Functor):
         """Build LeRobot features dict."""
         features = {}
 
-        # Setup robot joint state features based on control_parts or all joints if not specified.
-        control_parts = self.robot_meta.get("control_parts", None)
-        if control_parts is not None:
-            self._joint_ids = []
-            for part in control_parts:
-                part_joint_ids = self._env.robot.get_joint_ids(part, remove_mimic=True)
-                self._joint_ids.extend(part_joint_ids)
-        else:
-            self._joint_ids = self._env.robot.get_joint_ids(remove_mimic=True)
-
-        state_dim = len(self._joint_ids)
+        state_dim = len(self._env.active_joint_ids)
         # Create joint names.
-        joint_names = [self._env.robot.joint_names[i] for i in self._joint_ids]
+        joint_names = [
+            self._env.robot.joint_names[i] for i in self._env.active_joint_ids
+        ]
 
         features["observation.qpos"] = {
             "dtype": "float32",
@@ -324,7 +317,7 @@ class LeRobotRecorder(Functor):
         }
 
         # Use full qpos dimension for action (includes gripper)
-        action_dim = len(self._joint_ids)
+        action_dim = state_dim
         features["action"] = {
             "dtype": "float32",
             "shape": (action_dim,),
@@ -388,7 +381,7 @@ class LeRobotRecorder(Functor):
         return features
 
     def _convert_frame_to_lerobot(
-        self, obs: Dict[str, Any], action: Any, task: str
+        self, obs: TensorDict, action: TensorDict | torch.Tensor, task: str
     ) -> Dict:
         """Convert a single frame to LeRobot format.
 
@@ -420,26 +413,23 @@ class LeRobotRecorder(Functor):
                     frame[f"{sensor_name}.color_right"] = color_right_img
 
         # Add state
-        frame["observation.qpos"] = obs["robot"]["qpos"][self._joint_ids].cpu()
-        frame["observation.qvel"] = obs["robot"]["qvel"][self._joint_ids].cpu()
-        frame["observation.qf"] = obs["robot"]["qf"][self._joint_ids].cpu()
+        frame["observation.qpos"] = obs["robot"]["qpos"].cpu()
+        frame["observation.qvel"] = obs["robot"]["qvel"].cpu()
+        frame["observation.qf"] = obs["robot"]["qf"].cpu()
 
         # Add extra observation features if they exist
-        for key in obs:
+        for key in obs.keys():
             if key in ["robot", "sensor"]:
                 continue
 
             frame[f"observation.{key}"] = obs[key].cpu()
 
         # Add action.
-        action = action[self._joint_ids]
         if isinstance(action, torch.Tensor):
             action_data = action.cpu()
-        elif isinstance(action, dict):
+        elif isinstance(action, TensorDict):
             # Extract qpos from action dict
-            action_tensor = action.get(
-                "qpos", action.get("delta_qpos", action.get("action", None))
-            )
+            action_tensor = action.get("qpos", action.get("delta_qpos", None))
             if action_tensor is None:
                 # Fallback to first tensor value
                 for v in action.values():

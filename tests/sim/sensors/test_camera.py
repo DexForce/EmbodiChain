@@ -18,6 +18,8 @@ import pytest
 import torch
 import os
 
+from tensordict import TensorDict
+
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, SensorCfg, CameraCfg
 from embodichain.lab.sim.objects import Articulation
@@ -57,7 +59,7 @@ class CameraTest:
         data = self.camera.get_data()
 
         # Check if data is a dictionary
-        assert isinstance(data, dict), "Camera data should be a dictionary"
+        assert isinstance(data, TensorDict), "Camera data should be a TensorDict"
 
         # Check if all expected keys are present
         for key in self.camera.SUPPORTED_DATA_TYPES:

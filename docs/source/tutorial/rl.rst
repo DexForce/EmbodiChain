@@ -82,7 +82,6 @@ For RL environments (inheriting from ``RLEnv``), use the ``extensions`` field fo
 
 - **action_type**: Action type - "delta_qpos" (default), "qpos", "qvel", "qf", "eef_pose"
 - **action_scale**: Scaling factor applied to all actions (default: 1.0)
-- **episode_length**: Maximum episode length (default: 1000)
 - **success_threshold**: Task-specific success threshold (optional)
 
 Example:
@@ -96,7 +95,6 @@ Example:
        "extensions": {
          "action_type": "delta_qpos",
          "action_scale": 0.1,
-         "episode_length": 100,
          "success_threshold": 0.1
        }
      }
@@ -364,7 +362,7 @@ To add a new RL environment:
    from embodichain.lab.gym.utils.registration import register_env
    import torch
    
-   @register_env("MyTaskRL", max_episode_steps=100, override=True)
+   @register_env("MyTaskRL", override=True)
    class MyTaskEnv(RLEnv):
        def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
            super().__init__(cfg, **kwargs)
@@ -375,14 +373,9 @@ To add a new RL environment:
            is_fail = torch.zeros_like(is_success)
            metrics = {"distance": ..., "error": ...}
            return is_success, is_fail, metrics
-       
-       def check_truncated(self, obs, info):
-           """Optional: Add custom truncation conditions."""
-           is_timeout = super().check_truncated(obs, info)
-           # Add custom conditions if needed
-           return is_timeout
 
-2. Configure the environment in your JSON config with RL-specific extensions:
+
+1. Configure the environment in your JSON config with RL-specific extensions:
 
 .. code-block:: json
 
@@ -393,7 +386,6 @@ To add a new RL environment:
        "extensions": {
          "action_type": "delta_qpos",
          "action_scale": 0.1,
-         "episode_length": 100,
          "success_threshold": 0.05
        }
      }
