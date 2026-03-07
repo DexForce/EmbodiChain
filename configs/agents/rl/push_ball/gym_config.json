@@ -1,0 +1,199 @@
+{
+    "id": "PushBallRL",
+    "max_episodes": 5,
+    "env": {
+        "events": {
+            "randomize_ball": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {
+                        "uid": "soccer_ball"
+                    },
+                    "position_range": [
+                        [-0.05, -0.1, 0.0],
+                        [0.05, 0.1, 0.0]
+                    ],
+                    "relative_position": true
+                }
+            },
+            "randomize_goal": {
+                "func": "randomize_target_pose",
+                "mode": "reset",
+                "params": {
+                "position_range": [
+                    [0.65, -0.15, 0.05],
+                    [0.85, 0.15, 0.05]
+                ],
+                    "relative_position": false,
+                    "store_key": "goal_pose"
+                }
+            }
+        },
+        "observations": {
+            "robot_qpos": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [0, 1, 2, 3, 4, 5]
+                }
+            },
+            "robot_ee_pos": {
+                "func": "get_robot_eef_pose",
+                "mode": "add",
+                "name": "robot/ee_pos",
+                "params": {
+                    "part_name": "arm"
+                }
+            },
+            "ball_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "object/ball_pose",
+                "params": {
+                    "entity_cfg": {"uid": "soccer_ball"}
+                }
+            },
+            "goal_pos": {
+                "func": "target_position",
+                "mode": "add",
+                "name": "object/goal_pos",
+                "params": {
+                    "target_pose_key": "goal_pose"
+                }
+            }
+        },
+        "rewards": {
+            "reaching_reward": {
+                "func": "reaching_behind_object",
+                "mode": "add",
+                "weight": 0.1,
+                "params": {
+                    "object_cfg": {
+                        "uid": "soccer_ball"
+                    },
+                    "target_pose_key": "goal_pose",
+                    "behind_offset": 0.02,
+                    "height_offset": 0.02,
+                    "distance_scale": 5.0,
+                    "part_name": "arm"
+                }
+            },
+            "push_reward": {
+                "func": "incremental_distance_to_target",
+                "mode": "add",
+                "weight": 1.0,
+                "params": {
+                    "source_entity_cfg": {
+                        "uid": "soccer_ball"
+                    },
+                    "target_pose_key": "goal_pose",
+                    "tanh_scale": 10.0,
+                    "positive_weight": 2.0,
+                    "negative_weight": 0.5,
+                    "use_xy_only": true
+                }
+            },
+            "action_penalty": {
+                "func": "action_smoothness_penalty",
+                "mode": "add",
+                "weight": 0.01,
+                "params": {}
+            },
+            "success_bonus": {
+                "func": "success_reward",
+                "mode": "add",
+                "weight": 10.0,
+                "params": {}
+            }
+        },
+        "extensions": {
+            "action_type": "delta_qpos",
+            "episode_length": 100,
+            "action_scale": 0.1,
+            "success_threshold": 0.1
+        }
+    },
+    "robot": {
+        "uid": "ur10",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
+                }
+            ]
+        },
+        "init_pos": [0.0, 0.0, 0.0],
+        "init_rot": [0.0, 0.0, 0.0],
+        "init_qpos": [0.0, -1.57079, 1.57079, -1.57079, -1.57079, 0.0],
+        "drive_pros": {
+            "drive_type": "force",
+            "stiffness": 100000.0,
+            "damping": 1000.0,
+            "max_velocity": 2.0,
+            "max_effort": 500.0
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "control_parts": {
+            "arm": ["Joint[1-6]"]
+        }
+    },
+    "rigid_object": [
+        {
+            "uid": "soccer_ball",
+            "shape": {
+                "shape_type": "Sphere",
+                "radius": 0.05
+            },
+            "body_type": "dynamic",
+            "init_pos": [0.5, 0.0, 0.05],
+            "attrs": {
+                "mass": 1.0,
+                "static_friction": 3.0,
+                "dynamic_friction": 2.5,
+                "linear_damping": 1.0,
+                "angular_damping": 1.0,
+                "restitution": 0.3,
+                "max_linear_velocity": 2.0,
+                "max_angular_velocity": 2.0
+            }
+        }
+    ],
+    "sensor": [],
+    "light": {},
+    "background": [
+        {
+            "uid": "goal_circle",
+            "shape": {
+                "shape_type": "Sphere",
+                "radius": 0.1
+            },
+            "body_scale": [1.0, 1.0, 0.02],
+            "body_type": "kinematic",
+            "init_pos": [0.75, 0.0, 0.001],
+            "attrs": {
+                "enable_collision": false,
+                "mass": 1.0,
+                "static_friction": 0.0,
+                "dynamic_friction": 0.0,
+                "restitution": 0.0
+            }
+        }
+    ],
+    "rigid_object_group": [],
+    "articulation": []
+}
