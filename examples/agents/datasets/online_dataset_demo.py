@@ -54,24 +54,6 @@ def _parse_args() -> argparse.Namespace:
         default="cpu",
         help="Simulation device, e.g. 'cpu' or 'cuda:0' (default: cpu).",
     )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="configs/gym/special/simple_task_ur10.json",
-        help="Path to the gym JSON config (default: configs/gym/special/simple_task_ur10.json).",
-    )
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=32,
-        help="Number of timesteps per trajectory chunk (default: 32).",
-    )
-    parser.add_argument(
-        "--num-batches",
-        type=int,
-        default=5,
-        help="Number of batches to draw in each mode demo (default: 5).",
-    )
     return parser.parse_args()
 
 
@@ -241,14 +223,10 @@ def main() -> None:
     engine = _build_engine(args)
 
     try:
-        _demo_item_mode(
-            engine, chunk_size=args.chunk_size, num_batches=args.num_batches
-        )
-        _demo_batch_mode(
-            engine, chunk_size=args.chunk_size, num_batches=args.num_batches
-        )
-        _demo_uniform_dynamic(engine, num_batches=args.num_batches)
-        _demo_gmm_dynamic(engine, num_batches=args.num_batches)
+        _demo_item_mode(engine, chunk_size=32, num_batches=5)
+        _demo_batch_mode(engine, chunk_size=32, num_batches=5)
+        _demo_uniform_dynamic(engine, num_batches=5)
+        _demo_gmm_dynamic(engine, num_batches=5)
     finally:
         # engine.stop()
         log_info("[Demo] Engine stopped.", color="green")
