@@ -82,7 +82,9 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     gym_config["enable_rt"] = True
     gym_config["gpu_id"] = 0
     gym_config["device"] = args.device
-    cfg = OnlineDataEngineCfg(buffer_size=2, state_dim=6, gym_config=gym_config)
+    cfg = OnlineDataEngineCfg(
+        buffer_size=2, state_dim=6, gym_config=gym_config, buffer_device=args.device
+    )
     engine = OnlineDataEngine(cfg)
     engine.start()
 
