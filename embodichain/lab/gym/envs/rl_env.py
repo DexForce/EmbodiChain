@@ -19,6 +19,8 @@
 import torch
 from typing import Dict, Any, Sequence, Optional, Tuple
 
+from tensordict import TensorDict
+
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
@@ -37,7 +39,6 @@ class RLEnv(EmbodiedEnv):
 
     Optional attributes (can be set by subclasses):
     - action_scale: Scaling factor for actions (default: 1.0)
-    - episode_length: Maximum episode length (default: 1000)
     """
 
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
@@ -48,8 +49,6 @@ class RLEnv(EmbodiedEnv):
         # Set default values for common RL parameters
         if not hasattr(self, "action_scale"):
             self.action_scale = 1.0
-        if not hasattr(self, "episode_length"):
-            self.episode_length = 1000
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Preprocess action for RL tasks with flexible transformation.
@@ -70,16 +69,17 @@ class RLEnv(EmbodiedEnv):
             action: Raw action from policy (tensor or dict)
 
         Returns:
-            Dict action ready for robot control
+            TensorDict action ready for robot control
         """
         # Convert tensor input to dict based on action_type
-        if not isinstance(action, dict):
+        if not isinstance(action, (dict, TensorDict)):
             action_type = getattr(self, "action_type", "delta_qpos")
             action = {action_type: action}
 
         # Step 1: Scale all action values by action_scale
         scaled_action = {}
-        for key, value in action.items():
+        for key in action.keys():
+            value = action[key]
             if isinstance(value, torch.Tensor):
                 scaled_action[key] = value * self.action_scale
             else:
@@ -104,7 +104,13 @@ class RLEnv(EmbodiedEnv):
         if "qf" in scaled_action:
             result["qf"] = scaled_action["qf"]
 
-        return result
+        if not result:
+            raise ValueError(
+                "No valid action keys found. Expected one of: "
+                "qpos, delta_qpos, qpos_normalized, eef_pose, qvel, qf"
+            )
+        batch_size = next(iter(result.values())).shape[0]
+        return TensorDict(result, batch_size=[batch_size], device=self.device)
 
     def _denormalize_action(self, action: torch.Tensor) -> torch.Tensor:
         """Denormalize action from [-1, 1] to actual range.
@@ -220,18 +226,6 @@ class RLEnv(EmbodiedEnv):
         }
 
         return info
-
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        """Check if episode should be truncated (timeout).
-
-        Args:
-            obs: Current observation
-            info: Info dictionary
-
-        Returns:
-            Boolean tensor of shape (num_envs,)
-        """
-        return self._elapsed_steps >= self.episode_length
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """Evaluate the environment state.

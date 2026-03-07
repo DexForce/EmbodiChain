@@ -647,6 +647,8 @@ class Articulation(BatchEntity):
         # Stores mimic information for joints.
         self._mimic_info = entities[0].get_mimic_info()
 
+        self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
+
         # TODO: very weird that we must call update here to make sure the GPU indices are valid.
         if device.type == "cuda":
             self._world.update(0.001)
@@ -673,6 +675,15 @@ class Articulation(BatchEntity):
             int: The degree of freedom of the articulation.
         """
         return self._data.dof
+
+    @cached_property
+    def active_dof(self) -> int:
+        """Get the number of active degrees of freedom of the articulation.
+
+        Returns:
+            int: The number of active degrees of freedom of the articulation.
+        """
+        return len(self.active_joint_ids)
 
     @cached_property
     def num_links(self) -> int:
@@ -703,12 +714,21 @@ class Articulation(BatchEntity):
 
     @cached_property
     def joint_names(self) -> List[str]:
-        """Get the names of the actived joints in the articulation.
+        """Get the names of the joints in the articulation.
 
         Returns:
             List[str]: The names of the actived joints in the articulation.
         """
         return self._entities[0].get_actived_joint_names()
+
+    @cached_property
+    def active_joint_names(self) -> List[str]:
+        """Get the names of the active joints in the articulation.
+
+        Returns:
+            List[str]: The names of the active joints in the articulation.
+        """
+        return [self.joint_names[i] for i in self.active_joint_ids]
 
     @cached_property
     def all_joint_names(self) -> List[str]:

@@ -59,7 +59,6 @@ class PourWaterEnv(EmbodiedEnv):
         logger.log_info(
             f"Demo action list created with {len(action_list)} steps.", color="green"
         )
-        self.action_length = len(action_list)
         return action_list
 
     def create_expert_demo_action_list(self, **kwargs):
@@ -92,8 +91,8 @@ class PourWaterEnv(EmbodiedEnv):
         # TODO: to be removed, need a unified interface in robot class
         left_arm_joints = self.robot.get_joint_ids(name="left_arm")
         right_arm_joints = self.robot.get_joint_ids(name="right_arm")
-        left_eef_joints = self.robot.get_joint_ids(name="left_eef")
-        right_eef_joints = self.robot.get_joint_ids(name="right_eef")
+        left_eef_joints = self.robot.get_joint_ids(name="left_eef", remove_mimic=True)
+        right_eef_joints = self.robot.get_joint_ids(name="right_eef", remove_mimic=True)
 
         total_traj_num = ret[list(ret.keys())[0]].shape[-1]
         actions = torch.zeros(
@@ -102,8 +101,8 @@ class PourWaterEnv(EmbodiedEnv):
 
         for key, joints in [
             ("left_arm", left_arm_joints),
-            ("right_arm", right_arm_joints),
             ("left_eef", left_eef_joints),
+            ("right_arm", right_arm_joints),
             ("right_eef", right_eef_joints),
         ]:
             if key in ret:

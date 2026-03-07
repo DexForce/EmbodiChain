@@ -20,6 +20,7 @@ from copy import deepcopy
 from typing import Any, Callable, Dict
 
 import torch
+from tensordict import TensorDict
 
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.agents.rl.utils import AlgorithmCfg, flatten_dict_observation
@@ -158,7 +159,7 @@ class GRPO(BaseAlgorithm):
 
         if self.cfg.reset_every_rollout:
             current_obs, _ = env.reset()
-            if isinstance(current_obs, dict):
+            if isinstance(current_obs, TensorDict):
                 current_obs = flatten_dict_observation(current_obs)
 
         for _ in range(num_steps):
@@ -169,7 +170,7 @@ class GRPO(BaseAlgorithm):
             done = (terminated | truncated).bool()
             reward = reward.float()
 
-            if isinstance(next_obs, dict):
+            if isinstance(next_obs, TensorDict):
                 next_obs = flatten_dict_observation(next_obs)
 
             # GRPO does not use value function targets; store zeros in value slot.

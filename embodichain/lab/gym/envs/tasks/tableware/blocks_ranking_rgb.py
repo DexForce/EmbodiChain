@@ -255,7 +255,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         )
 
         logger.log_info(f"Generated {len(action_list)} demo actions for RGB ranking")
-        self.action_length = len(action_list)
         return action_list
 
     def is_task_success(self, **kwargs) -> torch.Tensor:

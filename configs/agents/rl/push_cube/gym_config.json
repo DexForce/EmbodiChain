@@ -1,6 +1,7 @@
 { 
     "id": "PushCubeRL",
     "max_episodes": 5,
+    "max_episode_steps": 100,
     "env": {
         "events": {
             "randomize_cube": {
@@ -112,7 +113,6 @@
         },
         "extensions": {
             "action_type": "delta_qpos",
-            "episode_length": 100,
             "action_scale": 0.1,
             "success_threshold": 0.1
         }

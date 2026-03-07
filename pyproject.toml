@@ -50,6 +50,7 @@ dependencies = [
   "black==24.3.0",
   "fvcore",
   "h5py",
+  "tensordict"
 ]
 
 [project.optional-dependencies]

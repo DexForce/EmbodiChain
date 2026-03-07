@@ -80,7 +80,7 @@ Every source file begins with the Apache 2.0 copyright header:
 - Use full type hints on all public APIs.
 - Use `from __future__ import annotations` at the top of every file.
 - Use `TYPE_CHECKING` guards for circular-import-safe imports.
-- Prefer `Union[A, B]` or `A | B` (Python 3.10+ union syntax is acceptable).
+- Prefer `A | B` over `Union[A, B]`.
 
 ### Configuration Pattern (`@configclass`)
 
@@ -265,7 +265,7 @@ def test_edge_case():
     assert result is not None
 ```
 
-**`unittest.TestCase` style** — when tests must run in a specific order or share `setUp`/`tearDown` state:
+**`Class` style** — when tests must run in a specific order or share `setup_method`/`teardown_method` state:
 
 ```python
 # ----------------------------------------------------------------------------
@@ -274,28 +274,23 @@ def test_edge_case():
 # ...
 # ----------------------------------------------------------------------------
 
-import unittest
 from embodichain.my_module import MyClass
 
 
-class TestMyClass(unittest.TestCase):
-    def setUp(self):
+class TestMyClass():
+    def setup_method(self):
         self.obj = MyClass(param=1.0)
 
-    def tearDown(self):
+    def teardown_method(self):
         pass
 
     def test_basic_behavior(self):
         result = self.obj.run()
-        self.assertEqual(result, expected)
+        assert result == expected_result
 
     def test_raises_on_bad_input(self):
-        self.assertRaises(ValueError, self.obj.run, bad_input)
-
-
-if __name__ == "__main__":
-    unittest.main()
-```
+        with pytest.raises(ValueError):
+            self.obj.run(bad_input)
 
 ### Conventions
 
