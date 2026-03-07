@@ -33,6 +33,7 @@ from dexsim.utility import log_debug, log_error
 
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
+    "embodichain.lab.gym.envs.managers.action_manager",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.randomization",
     "embodichain.lab.gym.envs.managers.record",
@@ -386,6 +387,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         EventCfg,
         ObservationCfg,
         RewardCfg,
+        ActionTermCfg,
         DatasetFunctorCfg,
     )
     from embodichain.utils import configclass
@@ -612,6 +614,24 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
             )
 
             setattr(env_cfg.rewards, reward_name, reward)
+
+    # parser actions config (ActionManager)
+    env_cfg.actions = None
+    env_config = config.get("env", {})
+    if "actions" in env_config:
+        env_cfg.actions = ComponentCfg()
+        for term_name, term_params in env_config["actions"].items():
+            term_params_modified = deepcopy(term_params)
+            term_func = find_function_from_modules(
+                term_params["func"],
+                manager_modules,
+                raise_if_not_found=True,
+            )
+            action_term = ActionTermCfg(
+                func=term_func,
+                params=term_params_modified.get("params", {}),
+            )
+            setattr(env_cfg.actions, term_name, action_term)
 
     return env_cfg
 
