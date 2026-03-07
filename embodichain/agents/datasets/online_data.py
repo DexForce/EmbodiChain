@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from tensordict import TensorDict
 from torch.utils.data import Dataset
 
-from embodichain.lab.engine.data import OnlineDataEngine
+from embodichain.agents.engine.data import OnlineDataEngine
 
 
 class OnlineDataset(Dataset):

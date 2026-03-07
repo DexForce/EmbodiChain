@@ -50,13 +50,14 @@ class OnlineDataEngineCfg:
     The contents depend on the specific environment being used. Default is None."""
 
     action_config: dict = dict()
-    """Action configuration dictionary.  The contents depend on the specific environment and robot being used. Default is {}."""
+    """Action configuration dictionary.  The contents depend on the specific environment and robot being used."""
 
-    refill_threshold: int = 1000
-    """Total number of samples drawn from the shared buffer before a refill is triggered.
+    refill_threshold: int = 50
+    """Total number of samples (refill_threshold * buffer_size) drawn from the shared buffer before a refill is triggered.
     Accumulates across all calls to :meth:`OnlineDataEngine.sample_batch`. When this threshold
     is exceeded the engine signals the simulation subprocess to regenerate the entire buffer,
-    amortising the cost of environment simulation over many training steps."""
+    amortising the cost of environment simulation over many training steps.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +131,7 @@ def _sim_worker_fn(
 
     # --- Build the environment and attach the initial tmp_buffer slice ------
     env = gym.make(id=gym_config["id"], cfg=env_cfg, **action_config)
-    log_info("[Simulation Process] Environment created.", color="green")
+    log_info("[Simulation Process] Environment created.", color="cyan")
 
     # --- Main loop: wait for fill signal, then fill the entire buffer -------
     try:
@@ -140,7 +141,7 @@ def _sim_worker_fn(
 
             log_info(
                 "[Simulation Process] Fill signal received. Starting full buffer fill.",
-                color="green",
+                color="cyan",
             )
 
             # Reset write cursor to the beginning of the buffer.
@@ -175,7 +176,7 @@ def _sim_worker_fn(
                 log_info(
                     f"[Simulation Process] Rollout {rollout_idx}/{num_rollouts_per_fill} done. "
                     f"lock_index=[{lock_index[0]}, {lock_index[1]}], ",
-                    color="green",
+                    color="cyan",
                 )
 
                 # Advance lock_index to the next write slice.
@@ -198,8 +199,13 @@ def _sim_worker_fn(
                 init_signal.set()
                 log_info(
                     "[Simulation Process] Initial buffer fill complete. Engine is ready.",
-                    color="green",
+                    color="cyan",
                 )
+
+            # At this point the entire buffer has been filled with fresh data, and
+            # all the data in the buffer is valid and safe to sample from.
+            lock_index[0] = -1
+            lock_index[1] = -1
 
     except KeyboardInterrupt:
         log_warning("[Simulation Process] Stopping (KeyboardInterrupt).")
@@ -462,7 +468,7 @@ class OnlineDataEngine:
         with self._sample_count.get_lock():
             self._sample_count.value += count
             should_refill = (
-                self._sample_count.value >= self.cfg.refill_threshold
+                self._sample_count.value >= self.cfg.refill_threshold * self.buffer_size
                 and not self._fill_signal.is_set()
             )
             if should_refill:
@@ -471,8 +477,8 @@ class OnlineDataEngine:
         if should_refill:
             self._fill_signal.set()
             log_info(
-                f"[OnlineDataEngine] Sample count reached refill threshold "
-                f"({self.cfg.refill_threshold}). Signalling subprocess to refill the buffer.",
+                f"[OnlineDataEngine] Sample count reached refill threshold (refill_threshold * buffer_size) "
+                f"({self.cfg.refill_threshold * self.buffer_size}). Signalling subprocess to refill the buffer.",
                 color="cyan",
             )
 
@@ -489,7 +495,9 @@ class OnlineDataEngine:
         if self._sim_process.is_alive():
             self._sim_process.terminate()
             self._sim_process.join(timeout=3.0)
-            log_info("[OnlineDataEngine] Simulation subprocess terminated.")
+            log_info(
+                "[OnlineDataEngine] Simulation subprocess terminated.", color="green"
+            )
 
     def __del__(self) -> None:
         self.stop()
