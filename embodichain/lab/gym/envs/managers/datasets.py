@@ -224,12 +224,7 @@ class LeRobotRecorder(Functor):
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
         # Save any remaining episodes
-        env_ids_with_data = []
-        for env_id in range(self.num_envs):
-            if len(self._env.episode_obs_buffer[env_id]) > 0:
-                env_ids_with_data.append(env_id)
-
-        if env_ids_with_data:
+        if self._env.current_rollout_step > 0:
             active_env_ids = torch.tensor(env_ids_with_data, device=self.device)
             self._save_episodes(active_env_ids)
 

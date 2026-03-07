@@ -397,8 +397,13 @@ class EmbodiedEnv(BaseEnv):
                 self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
                     obs.to(buffer_device), non_blocking=True
                 )
+                # TODO: Use a action manager to handle the action space consistency with RL.
+                if isinstance(action, TensorDict):
+                    action_to_store = action["qpos"]
+                elif isinstance(action, torch.Tensor):
+                    action_to_store = action
                 self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                    action.to(buffer_device), non_blocking=True
+                    action_to_store.to(buffer_device), non_blocking=True
                 )
                 self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
                     rewards.to(buffer_device), non_blocking=True

@@ -72,6 +72,7 @@ def _sim_worker_fn(
     lock_index: SynchronizedArray,
     fill_signal: MpEvent,
     init_signal: MpEvent,
+    close_signal: MpEvent,
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -91,6 +92,7 @@ def _sim_worker_fn(
         fill_signal: Event set by the main process to request a refill.
         init_signal: Event set by this worker after the first fill completes.
             Remains set permanently thereafter.
+        close_signal: Event set by the main process to request a graceful shutdown.
     """
     import gymnasium as gym
     from embodichain.lab.gym.utils.gym_utils import (
@@ -140,6 +142,13 @@ def _sim_worker_fn(
             fill_signal.wait()
             fill_signal.clear()
 
+            if close_signal.is_set():
+                log_info(
+                    "[Simulation Process] Close signal received. Shutting down.",
+                    color="cyan",
+                )
+                break
+
             log_info(
                 "[Simulation Process] Fill signal received. Starting full buffer fill.",
                 color="cyan",
@@ -151,6 +160,9 @@ def _sim_worker_fn(
 
             rollout_idx = 0
             while rollout_idx < num_rollouts_per_fill:
+                if close_signal.is_set():
+                    return
+
                 tmp_buffer = shared_buffer[lock_index[0] : lock_index[1], :]
                 env.get_wrapper_attr("set_rollout_buffer")(tmp_buffer)
 
@@ -170,6 +182,8 @@ def _sim_worker_fn(
                     unit="step",
                     leave=False,
                 ):
+                    if close_signal.is_set():
+                        return
                     env.step(action)
 
                 rollout_idx += 1
@@ -194,8 +208,8 @@ def _sim_worker_fn(
                 lock_index[0] = next_start
                 lock_index[1] = next_end
 
-            # Signal that the buffer contains valid data for the first time.
-            # is_set() is checked so subsequent refills do not redundantly set it.
+            # # Signal that the buffer contains valid data for the first time.
+            # # is_set() is checked so subsequent refills do not redundantly set it.
             if not init_signal.is_set():
                 init_signal.set()
                 log_info(
@@ -203,8 +217,8 @@ def _sim_worker_fn(
                     color="cyan",
                 )
 
-            # At this point the entire buffer has been filled with fresh data, and
-            # all the data in the buffer is valid and safe to sample from.
+            # # At this point the entire buffer has been filled with fresh data, and
+            # # all the data in the buffer is valid and safe to sample from.
             lock_index[0] = -1
             lock_index[1] = -1
 
@@ -290,25 +304,31 @@ class OnlineDataEngine:
         # Shared interprocess state
         # -------------------------------------------------------------------
 
+        # Use a spawn context to avoid forking unsafe runtime state.
+        self._mp_ctx = mp.get_context("forkserver")
+
         # Current write window: subprocess updates these after each rollout.
         # Shape: [write_start, write_end)  (exclusive upper bound).
-        self._lock_index: SynchronizedArray = mp.Array("i", [0, num_envs])
+        self._lock_index: SynchronizedArray = self._mp_ctx.Array("i", [0, num_envs])
 
         # Raised by the main process to request a full buffer refill.
-        self._fill_signal: MpEvent = mp.Event()
+        self._fill_signal: MpEvent = self._mp_ctx.Event()
 
         # Set by the subprocess once the first complete buffer fill finishes.
         # Used by the :attr:`is_init` property to let callers wait for readiness.
-        self._init_signal: MpEvent = mp.Event()
+        self._init_signal: MpEvent = self._mp_ctx.Event()
+
+        # Set by the main process to request the simulation subprocess to stop.
+        self._close_signal: MpEvent = self._mp_ctx.Event()
 
         # Accumulated sample count used by the refill criterion.
-        self._sample_count: Synchronized = mp.Value("i", 0)
+        self._sample_count: Synchronized = self._mp_ctx.Value("i", 0)
 
-        #
+        # Handle to the simulation subprocess, set in start() and used in stop().
         self._sim_process: mp.Process | None = None
 
     def start(self) -> None:
-        self._sim_process: mp.Process = mp.Process(
+        self._sim_process: mp.Process = self._mp_ctx.Process(
             target=_sim_worker_fn,
             args=(
                 self.cfg,
@@ -316,6 +336,7 @@ class OnlineDataEngine:
                 self._lock_index,
                 self._fill_signal,
                 self._init_signal,
+                self._close_signal,
             ),
             daemon=True,
         )
@@ -496,15 +517,28 @@ class OnlineDataEngine:
     def stop(self) -> None:
         """Terminate the simulation subprocess and release resources.
 
+        Sets the close signal and waits briefly for the subprocess to exit
+        gracefully (it checks the signal between rollout steps).  If the
+        subprocess is still alive after the grace period it is force-terminated.
+
         Safe to call multiple times — subsequent calls are no-ops if the
         subprocess has already been terminated.
         """
+        if self._sim_process is None or not self._sim_process.is_alive():
+            return
+
+        # Ask the subprocess to stop and unblock it if it is waiting on fill_signal.
+        self._close_signal.set()
+        self._fill_signal.set()
+
+        # Allow time for a graceful exit (close_signal is checked between steps).
+        self._sim_process.join(timeout=5.0)
+
         if self._sim_process.is_alive():
             self._sim_process.terminate()
             self._sim_process.join(timeout=3.0)
-            log_info(
-                "[OnlineDataEngine] Simulation subprocess terminated.", color="green"
-            )
+
+        log_info("[OnlineDataEngine] Simulation subprocess terminated.", color="green")
 
     def __del__(self) -> None:
         self.stop()

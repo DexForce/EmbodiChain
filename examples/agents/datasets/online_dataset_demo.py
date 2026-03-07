@@ -81,10 +81,11 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
+    import torch.multiprocessing as mp
+
+    mp.set_start_method("spawn", force=True)
     """Construct and start an OnlineDataEngine from the given CLI args."""
-    config_path = Path(
-        "/root/sources/EmbodiChain/configs/gym/special/simple_task_ur10.json"
-    )
+    config_path = Path("configs/gym/special/simple_task_ur10.json")
     if not config_path.exists():
         raise FileNotFoundError(
             f"Gym config not found: {config_path}. "
@@ -99,12 +100,10 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     gym_config["enable_rt"] = True
     gym_config["gpu_id"] = 0
     gym_config["device"] = args.device
-    cfg = OnlineDataEngineCfg(buffer_size=4, state_dim=6, gym_config=gym_config)
+    cfg = OnlineDataEngineCfg(buffer_size=2, state_dim=6, gym_config=gym_config)
     engine = OnlineDataEngine(cfg)
     engine.start()
-    from IPython import embed
 
-    embed()  # Debug breakpoint: inspect engine state after startup
     return engine
 
 
@@ -127,7 +126,7 @@ def _demo_item_mode(
     )
 
     dataset = OnlineDataset(engine, chunk_size=chunk_size)
-    loader = DataLoader(dataset, batch_size=batch_size)
+    loader = DataLoader(dataset, batch_size=batch_size, collate_fn=dataset.collate_fn)
 
     for i, batch in enumerate(loader):
         if i >= num_batches:
@@ -157,7 +156,9 @@ def _demo_batch_mode(
     )
 
     dataset = OnlineDataset(engine, chunk_size=chunk_size, batch_size=batch_size)
-    loader = DataLoader(dataset, batch_size=None)
+    loader = DataLoader(
+        dataset, batch_size=None, collate_fn=dataset.passthrough_collate_fn
+    )
 
     for i, batch in enumerate(loader):
         if i >= num_batches:
@@ -184,7 +185,7 @@ def _demo_uniform_dynamic(engine: OnlineDataEngine, num_batches: int) -> None:
 
     sampler = UniformChunkSampler(low=low, high=high)
     dataset = OnlineDataset(engine, chunk_size=sampler)
-    loader = DataLoader(dataset, batch_size=4)
+    loader = DataLoader(dataset, batch_size=4, collate_fn=dataset.collate_fn)
 
     for i, batch in enumerate(loader):
         if i >= num_batches:
@@ -213,7 +214,9 @@ def _demo_gmm_dynamic(engine: OnlineDataEngine, num_batches: int) -> None:
 
     sampler = GMMChunkSampler(means=means, stds=stds, weights=weights, low=8, high=96)
     dataset = OnlineDataset(engine, chunk_size=sampler, batch_size=4)
-    loader = DataLoader(dataset, batch_size=None)
+    loader = DataLoader(
+        dataset, batch_size=None, collate_fn=dataset.passthrough_collate_fn
+    )
 
     for i, batch in enumerate(loader):
         if i >= num_batches:
@@ -247,7 +250,7 @@ def main() -> None:
         _demo_uniform_dynamic(engine, num_batches=args.num_batches)
         _demo_gmm_dynamic(engine, num_batches=args.num_batches)
     finally:
-        engine.stop()
+        # engine.stop()
         log_info("[Demo] Engine stopped.", color="green")
 
 

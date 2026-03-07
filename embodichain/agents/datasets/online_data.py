@@ -171,18 +171,28 @@ class OnlineDataset(IterableDataset):
             TensorDict sampled from the engine's shared buffer, optionally
             post-processed by ``transform``.
         """
-        while True:
+        if self._batch_size is None:
+            # In item mode, keep chunk_size fixed per iterator to preserve
+            # consistent shapes for DataLoader collation.
             chunk_size = self._next_chunk_size()
 
-            if self._batch_size is None:
+            while True:
                 # Item mode: draw one trajectory and remove the outer batch dim.
                 raw = self._engine.sample_batch(batch_size=1, chunk_size=chunk_size)
                 sample: TensorDict = raw[0]
-            else:
-                # Batch mode: draw a full pre-batched TensorDict.
-                sample = self._engine.sample_batch(
-                    batch_size=self._batch_size, chunk_size=chunk_size
-                )
+
+                if self._transform is not None:
+                    sample = self._transform(sample)
+
+                yield sample
+
+        while True:
+            chunk_size = self._next_chunk_size()
+
+            # Batch mode: draw a full pre-batched TensorDict.
+            sample = self._engine.sample_batch(
+                batch_size=self._batch_size, chunk_size=chunk_size
+            )
 
             if self._transform is not None:
                 sample = self._transform(sample)
