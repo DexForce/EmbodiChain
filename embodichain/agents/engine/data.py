@@ -16,11 +16,12 @@
 
 from __future__ import annotations
 
+import time
 import torch
 import multiprocessing as mp
+
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from multiprocessing.synchronize import Event as MpEvent
-
 from tensordict import TensorDict
 from tqdm import tqdm
 
@@ -276,7 +277,7 @@ class OnlineDataEngine:
         self.buffer_size: int = self.shared_buffer.batch_size[0]
         self.device = self.shared_buffer.device
 
-        num_envs: int = cfg.gym_config["num_envs"]
+        num_envs: int = cfg.gym_config.get("num_envs", 1)
 
         if num_envs > self.buffer_size:
             log_error(
@@ -303,6 +304,9 @@ class OnlineDataEngine:
         # Accumulated sample count used by the refill criterion.
         self._sample_count: Synchronized = mp.Value("i", 0)
 
+        #
+        self._sim_process: mp.Process | None = None
+
     def start(self) -> None:
         self._sim_process: mp.Process = mp.Process(
             target=_sim_worker_fn,
@@ -323,6 +327,9 @@ class OnlineDataEngine:
 
         # Trigger the initial fill so data is ready before the first sample.
         self._fill_signal.set()
+
+        while not self.is_init:
+            time.sleep(0.5)
 
     # -----------------------------------------------------------------------
     # Buffer initialisation

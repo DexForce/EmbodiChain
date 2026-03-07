@@ -14,104 +14,219 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import Callable, Optional
+from __future__ import annotations
+
+from typing import Callable, Iterator, List, Optional
 
 from tensordict import TensorDict
-from torch.utils.data import Dataset
+from torch.utils.data import IterableDataset
 
 from embodichain.agents.engine.data import OnlineDataEngine
+from embodichain.agents.datasets.sampler import ChunkSizeSampler
 
 
-class OnlineDataset(Dataset):
-    """PyTorch Dataset backed by a live :class:`OnlineDataEngine` shared buffer.
+__all__ = [
+    "OnlineDataset",
+]
 
-    Wraps an :class:`OnlineDataEngine` to expose a standard
-    :class:`torch.utils.data.Dataset` interface that draws trajectory chunks
-    on-the-fly from the shared rollout buffer populated by the simulation
-    subprocess.
 
-    Because the underlying data is generated continuously, the dataset has a
-    *virtual* length (``dataset_size``) that controls how many samples are
-    considered per epoch by a :class:`~torch.utils.data.DataLoader`.  Each
-    call to :meth:`__getitem__` independently samples a fresh chunk from the
-    engine regardless of the ``idx`` argument, so every iteration sees
-    freshly sampled (potentially new) data.
+class OnlineDataset(IterableDataset):
+    """Infinite IterableDataset backed by a live OnlineDataEngine shared buffer.
 
-    Layout of a single sample returned by :meth:`__getitem__`:
-        TensorDict with batch size ``[chunk_size]`` containing all keys
-        present in the shared buffer (``obs``, ``actions``, ``rewards``, …)
-        after the optional ``transform`` has been applied.
+    Two sampling modes are supported depending on the ``batch_size`` argument:
+
+    **Item mode** (``batch_size=None``, default)
+        ``__iter__`` yields one ``TensorDict`` of shape ``[chunk_size]`` per step.
+        Use with a standard ``DataLoader(dataset, batch_size=B)`` so the
+        DataLoader handles collation and worker sharding.
+
+    **Batch mode** (``batch_size=N``)
+        ``__iter__`` yields one pre-batched ``TensorDict`` of shape
+        ``[N, chunk_size]`` per step by calling
+        ``engine.sample_batch(N, chunk_size)`` directly.
+        Use with ``DataLoader(dataset, batch_size=None)`` to skip DataLoader
+        collation and leverage the engine's bulk-sampling efficiency.
+
+    **Dynamic chunk sizes**
+        Pass a :class:`ChunkSizeSampler` as ``chunk_size`` to draw a fresh
+        chunk length on every iteration step.  In batch mode the size is
+        sampled once per step and applied uniformly to all trajectories in
+        the batch, ensuring a consistent ``[batch_size, chunk_size]`` shape.
+        Two built-in samplers are provided:
+
+        - :class:`UniformChunkSampler` — uniform discrete distribution over
+          ``[low, high]``.
+        - :class:`GMMChunkSampler` — Gaussian Mixture Model, useful for
+          multi-modal chunk-length curricula.
+
+    .. note::
+        ``__len__`` is intentionally absent — ``IterableDataset`` does not
+        require it and the stream is infinite.
+
+    .. note::
+        Multi-worker DataLoader: each worker gets its own iterator; since
+        sampling is independent random draws from shared memory, this is safe.
 
     Args:
-        engine: An :class:`OnlineDataEngine` instance whose shared buffer is
-            used for data sampling.  The engine must have been set up with a
-            ``shared_buffer`` of shape ``(buffer_size, max_episode_steps, …)``.
-        chunk_size: Number of consecutive timesteps in each sample.  Must not
-            exceed ``max_episode_steps`` configured in the engine's environment.
-        dataset_size: Virtual dataset length — the value returned by
-            :meth:`__len__` and used by DataLoader to determine epoch size.
-            Defaults to ``10_000``.
-        transform: Optional callable ``(TensorDict) -> TensorDict`` applied to
-            each sampled chunk before it is returned.  Use this for per-sample
-            post-processing such as type casting, normalisation, or key
-            selection.  The callable receives a TensorDict with batch size
-            ``[chunk_size]`` and must return one of the same batch size.
+        engine: A started OnlineDataEngine whose shared buffer is used for
+            sampling.
+        chunk_size: Fixed number of consecutive timesteps per chunk (``int``),
+            or a :class:`ChunkSizeSampler` that returns a fresh size on every
+            iteration step.
+        batch_size: If ``None``, yield single chunks of shape ``[chunk_size]``
+            (item mode). If an int, yield pre-batched TensorDicts of shape
+            ``[batch_size, chunk_size]`` (batch mode).
+        transform: Optional ``(TensorDict) -> TensorDict`` applied to each
+            yielded item/batch before returning.
 
-    Example::
+    Example — fixed chunk size, item mode::
 
-        engine = OnlineDataEngine(shared_buffer, index_list, env_config)
-
-        def normalize(sample: TensorDict) -> TensorDict:
-            sample["actions"] = sample["actions"].float() / action_scale
-            return sample
-
-        dataset = OnlineDataset(engine, chunk_size=64, transform=normalize)
-        loader  = DataLoader(dataset, batch_size=32, num_workers=4)
-
+        dataset = OnlineDataset(engine, chunk_size=64)
+        loader  = DataLoader(dataset, batch_size=32, num_workers=4,
+                             collate_fn=OnlineDataset.collate_fn)
         for batch in loader:
-            # batch["obs"], batch["actions"], batch["rewards"]
-            # each has shape (32, 64, ...)
+            # batch has shape [32, 64, ...]
+            train_step(batch)
+
+    Example — fixed chunk size, batch mode::
+
+        dataset = OnlineDataset(engine, chunk_size=64, batch_size=32)
+        loader  = DataLoader(dataset, batch_size=None,
+                             collate_fn=OnlineDataset.passthrough_collate_fn)
+        for batch in loader:
+            # batch has shape [32, 64, ...]
+            train_step(batch)
+
+    Example — dynamic chunk size with uniform sampler::
+
+        sampler = UniformChunkSampler(low=16, high=64)
+        dataset = OnlineDataset(engine, chunk_size=sampler)
+        loader  = DataLoader(dataset, batch_size=32)
+        for batch in loader:
+            # chunk dimension varies each batch
+            train_step(batch)
+
+    Example — dynamic chunk size with GMM sampler::
+
+        sampler = GMMChunkSampler(
+            means=[16.0, 64.0], stds=[4.0, 8.0], weights=[0.6, 0.4],
+            low=8, high=96,
+        )
+        dataset = OnlineDataset(engine, chunk_size=sampler, batch_size=32)
+        loader  = DataLoader(dataset, batch_size=None)
+        for batch in loader:
             train_step(batch)
     """
 
     def __init__(
         self,
         engine: OnlineDataEngine,
-        chunk_size: int,
+        chunk_size: int | ChunkSizeSampler,
+        batch_size: Optional[int] = None,
         transform: Optional[Callable[[TensorDict], TensorDict]] = None,
     ) -> None:
+        if isinstance(chunk_size, int):
+            if chunk_size < 1:
+                raise ValueError(f"chunk_size must be ≥ 1, got {chunk_size}.")
+        elif not isinstance(chunk_size, ChunkSizeSampler):
+            raise TypeError(
+                f"chunk_size must be an int or a ChunkSizeSampler, got {type(chunk_size).__name__}."
+            )
         self._engine = engine
         self._chunk_size = chunk_size
+        self._batch_size = batch_size
         self._transform = transform
 
     # ------------------------------------------------------------------
-    # Dataset interface
+    # Internal helpers
     # ------------------------------------------------------------------
 
-    def __len__(self) -> int:
-        """Return the buffer size as the virtual length of the dataset."""
-        return self._engine.buffer_size
+    def _next_chunk_size(self) -> int:
+        """Return the chunk size for the current iteration step.
 
-    def __getitem__(self, idx: int) -> TensorDict:
-        """Sample a single trajectory chunk from the shared buffer.
-
-        The ``idx`` argument is intentionally ignored — each call draws an
-        independent random chunk from the engine so that the DataLoader
-        receives diverse, freshly sampled data on every access.
-
-        Args:
-            idx: Ignored sample index (required by the Dataset protocol).
+        For fixed ``int`` chunk sizes this is a no-op attribute read.
+        For :class:`ChunkSizeSampler` instances the sampler is called to draw
+        a fresh value.
 
         Returns:
-            TensorDict with batch size ``[chunk_size]`` containing the sampled
-            trajectory data, post-processed by ``transform`` if provided.
+            Positive integer chunk size.
         """
-        # Draw one chunk (batch_size=1) and remove the outer batch dimension
-        # so the returned TensorDict has shape [chunk_size, ...].
-        batch = self._engine.sample_batch(batch_size=1, chunk_size=self._chunk_size)
-        sample: TensorDict = batch[0]
+        if isinstance(self._chunk_size, int):
+            return self._chunk_size
+        return self._chunk_size()
 
-        if self._transform is not None:
-            sample = self._transform(sample)
+    # ------------------------------------------------------------------
+    # IterableDataset interface
+    # ------------------------------------------------------------------
 
-        return sample
+    def __iter__(self) -> Iterator[TensorDict]:
+        """Yield trajectory chunks indefinitely from the shared buffer.
+
+        In item mode each call to ``next()`` draws one chunk of shape
+        ``[chunk_size]``.  In batch mode each call draws a full batch of
+        shape ``[batch_size, chunk_size]``.  When a :class:`ChunkSizeSampler`
+        is used, ``chunk_size`` is re-sampled once per yielded item/batch.
+
+        Yields:
+            TensorDict sampled from the engine's shared buffer, optionally
+            post-processed by ``transform``.
+        """
+        while True:
+            chunk_size = self._next_chunk_size()
+
+            if self._batch_size is None:
+                # Item mode: draw one trajectory and remove the outer batch dim.
+                raw = self._engine.sample_batch(batch_size=1, chunk_size=chunk_size)
+                sample: TensorDict = raw[0]
+            else:
+                # Batch mode: draw a full pre-batched TensorDict.
+                sample = self._engine.sample_batch(
+                    batch_size=self._batch_size, chunk_size=chunk_size
+                )
+
+            if self._transform is not None:
+                sample = self._transform(sample)
+
+            yield sample
+
+    @staticmethod
+    def collate_fn(batch: List[TensorDict]) -> TensorDict:
+        """Collate a list of TensorDicts into a single batched TensorDict.
+
+        Pass this as ``collate_fn`` to ``DataLoader`` when using item mode
+        (``batch_size`` not None on the DataLoader side) to avoid the default
+        collation failure with TensorDict objects.
+
+        Args:
+            batch: List of TensorDicts, each of shape ``[chunk_size, ...]``.
+
+        Returns:
+            Stacked TensorDict of shape ``[len(batch), chunk_size, ...]``.
+        """
+        import torch
+
+        return torch.stack(batch)
+
+    @staticmethod
+    def passthrough_collate_fn(batch: TensorDict) -> TensorDict:
+        """Collate function for batch-mode DataLoaders.
+
+        When the dataset is in batch mode it already yields pre-batched
+        TensorDicts.  With ``batch_size=None``, PyTorch's DataLoader skips
+        auto-batching and passes each item directly to ``collate_fn`` as-is
+        (not wrapped in a list).  This function returns the TensorDict
+        unchanged.
+
+        Pass this as ``collate_fn`` to ``DataLoader`` when using batch mode
+        (``batch_size=None`` on the DataLoader side) to avoid the default
+        collation failure with TensorDict objects.
+
+        Args:
+            batch: A pre-batched TensorDict of shape
+                ``[batch_size, chunk_size, ...]`` passed directly by the
+                DataLoader.
+
+        Returns:
+            The pre-batched TensorDict unchanged.
+        """
+        return batch
