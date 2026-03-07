@@ -33,13 +33,12 @@ First, we register the environment with the Gymnasium registry using the :func:`
 
 .. literalinclude:: ../../../scripts/tutorials/gym/random_reach.py
    :language: python
-   :start-at: @register_env("RandomReach-v1", max_episode_steps=100, override=True)
+   :start-at: @register_env("RandomReach-v1" override=True)
    :end-at: class RandomReachEnv(BaseEnv):
 
 The decorator parameters define:
 
 - **Environment ID**: ``"RandomReach-v1"`` - unique identifier for the environment
-- **max_episode_steps**: Maximum steps per episode (100 in this case)
 - **override**: Whether to override existing environment with same ID
 
 Environment Initialization

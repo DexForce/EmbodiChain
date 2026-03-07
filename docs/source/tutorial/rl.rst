@@ -362,7 +362,7 @@ To add a new RL environment:
    from embodichain.lab.gym.utils.registration import register_env
    import torch
    
-   @register_env("MyTaskRL", max_episode_steps=100, override=True)
+   @register_env("MyTaskRL", override=True)
    class MyTaskEnv(RLEnv):
        def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
            super().__init__(cfg, **kwargs)

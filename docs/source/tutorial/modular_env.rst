@@ -173,7 +173,7 @@ The actual environment class is remarkably simple due to the configuration-drive
 
 .. literalinclude:: ../../../scripts/tutorials/gym/modular_env.py
    :language: python
-   :start-at: @register_env("ModularEnv-v1", max_episode_steps=100, override=True)
+   :start-at: @register_env("ModularEnv-v1" override=True)
    :end-at: super().__init__(cfg, **kwargs)
 
 The :class:`envs.EmbodiedEnv` base class automatically:

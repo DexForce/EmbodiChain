@@ -215,7 +215,7 @@ Inherit from {class}`~envs.RLEnv` and implement the task-specific logic:
 from embodichain.lab.gym.envs import RLEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@register_env("MyRLTask-v0", max_episode_steps=100)
+@register_env("MyRLTask-v0")
 class MyRLTaskEnv(RLEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
@@ -244,7 +244,7 @@ Inherit from {class}`~envs.EmbodiedEnv` for IL tasks:
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@register_env("MyILTask-v0", max_episode_steps=500)
+@register_env("MyILTask-v0")
 class MyILTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
