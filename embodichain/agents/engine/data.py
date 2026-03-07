@@ -433,7 +433,6 @@ class OnlineDataEngine:
             TensorDict with batch size ``[batch_size, chunk_size]``.
 
         Raises:
-            RuntimeError: If the buffer contains no valid data yet.
             ValueError: If ``chunk_size`` exceeds ``max_episode_steps``.
         """
         max_steps: int = self.shared_buffer.batch_size[1]
@@ -453,11 +452,12 @@ class OnlineDataEngine:
         available = all_valid[~is_locked]
 
         if len(available) == 0:
-            # Edge case: the entire valid region is locked.  Fall back to
-            # sampling from all valid rows to avoid a hard failure.
+            # Edge case: the entire valid region is locked. Sampling a batch
+            # is not possible in this state and will result in a hard failure.
             log_error(
                 "[OnlineDataEngine] All valid buffer rows are currently locked. "
-                "Cannot sample a batch at this time.",
+                "Cannot sample a batch at this time; sampling fails because no "
+                "unlocked rows are available.",
                 error_type=RuntimeError,
             )
 

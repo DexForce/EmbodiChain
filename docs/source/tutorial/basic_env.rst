@@ -33,7 +33,7 @@ First, we register the environment with the Gymnasium registry using the :func:`
 
 .. literalinclude:: ../../../scripts/tutorials/gym/random_reach.py
    :language: python
-   :start-at: @register_env("RandomReach-v1" override=True)
+   :start-at: @register_env("RandomReach-v1", override=True)
    :end-at: class RandomReachEnv(BaseEnv):
 
 The decorator parameters define:
