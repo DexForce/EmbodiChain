@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import inspect
+from abc import abstractmethod
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -52,10 +53,12 @@ class ActionTerm(Functor):
         super().__init__(cfg, env)
 
     @property
+    @abstractmethod
     def action_dim(self) -> int:
         """Dimension of the action term (policy output dimension)."""
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def process_action(self, action: torch.Tensor) -> EnvAction:
         """Process raw action from policy into robot control format.
 
@@ -65,7 +68,7 @@ class ActionTerm(Functor):
         Returns:
             TensorDict with keys such as "qpos", "qvel", or "qf" ready for robot control.
         """
-        raise NotImplementedError
+        ...
 
     def __call__(self, *args, **kwargs) -> Any:
         """Not used for ActionTerm; use process_action instead."""
@@ -258,7 +261,12 @@ class QposNormalizedTerm(ActionTerm):
 
 
 class EefPoseTerm(ActionTerm):
-    """End-effector pose (6D or 7D) -> IK -> qpos."""
+    """End-effector pose (6D or 7D) -> IK -> qpos.
+
+    On IK failure, falls back to current_qpos for that env.
+    Returns ``ik_success`` in the TensorDict so reward/observation
+    can penalize or condition on IK failures.
+    """
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
@@ -296,7 +304,7 @@ class EefPoseTerm(ActionTerm):
             ret.unsqueeze(-1).expand_as(qpos_ik), qpos_ik, current_qpos
         )
         return TensorDict(
-            {"qpos": result_qpos},
+            {"qpos": result_qpos, "ik_success": ret},
             batch_size=[batch_size],
             device=self.device,
         )

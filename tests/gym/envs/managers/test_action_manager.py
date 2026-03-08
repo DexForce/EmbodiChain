@@ -145,7 +145,9 @@ def test_eef_pose_term_process_action_6d():
     result = term.process_action(action)
 
     assert "qpos" in result
+    assert "ik_success" in result
     assert result["qpos"].shape == (2, 6)
+    assert result["ik_success"].shape == (2,)
     # Mock returns joint_seed (zeros); verify output matches
     torch.testing.assert_close(result["qpos"], env.get_qpos())
     assert term.action_dim == 6
@@ -165,6 +167,7 @@ def test_eef_pose_term_process_action_7d():
     result = term.process_action(action)
 
     assert "qpos" in result
+    assert "ik_success" in result
     assert result["qpos"].shape == (2, 6)
     torch.testing.assert_close(result["qpos"], env.get_qpos())
     assert term.action_dim == 7
