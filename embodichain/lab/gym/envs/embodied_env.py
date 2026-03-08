@@ -45,6 +45,7 @@ from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
     RewardManager,
+    ActionManager,
     DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
@@ -162,6 +163,15 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.managers.DatasetManager` class for more details.
     """
 
+    actions: Union[object, None] = None
+    """Action manager settings. Defaults to None, in which case no action preprocessing is applied.
+
+    When configured, the ActionManager preprocesses raw policy actions (e.g., delta_qpos, eef_pose)
+    into robot control format.
+
+    Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
+    """
+
     extensions: Union[Dict[str, Any], None] = None
     """Extension parameters for task-specific configurations.
     
@@ -232,6 +242,7 @@ class EmbodiedEnv(BaseEnv):
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
+        self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
 
         super().__init__(cfg, **kwargs)
@@ -302,6 +313,16 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
+
+        if self.cfg.actions:
+            self.action_manager = ActionManager(self.cfg.actions, self)
+            # Override action space to match ActionManager output dim (e.g. EefPoseTerm uses 6/7D)
+            self.single_action_space = gym.spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(self.action_manager.total_action_dim,),
+                dtype=np.float32,
+            )
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -397,9 +418,12 @@ class EmbodiedEnv(BaseEnv):
                 self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
                     obs.to(buffer_device), non_blocking=True
                 )
-                # TODO: Use a action manager to handle the action space consistency with RL.
                 if isinstance(action, TensorDict):
-                    action_to_store = action["qpos"]
+                    action_to_store = (
+                        action["qpos"]
+                        if "qpos" in action
+                        else (action["qvel"] if "qvel" in action else action["qf"])
+                    )
                 elif isinstance(action, torch.Tensor):
                     action_to_store = action
                 self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
@@ -529,6 +553,63 @@ class EmbodiedEnv(BaseEnv):
             logger.log_error(f"Unsupported action type: {type(action)}")
 
         return action
+
+    def compute_task_state(
+        self, **kwargs
+    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Compute task-specific state: success, fail, and metrics.
+
+        Override this method in subclass to define task-specific logic for RL tasks.
+
+        Returns:
+            Tuple of (success, fail, metrics):
+                - success: Boolean tensor of shape (num_envs,)
+                - fail: Boolean tensor of shape (num_envs,)
+                - metrics: Dict of metric tensors
+        """
+        success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        metrics: Dict[str, Any] = {}
+        return success, fail, metrics
+
+    def get_info(self, **kwargs) -> Dict[str, Any]:
+        """Get environment info dictionary.
+
+        Calls compute_task_state() to get task-specific success/fail/metrics when
+        available. Subclasses should override compute_task_state() for RL tasks.
+
+        Returns:
+            Info dictionary with success, fail, elapsed_steps, metrics
+        """
+        success, fail, metrics = self.compute_task_state(**kwargs)
+        info: Dict[str, Any] = {
+            "success": success,
+            "fail": fail,
+            "elapsed_steps": self._elapsed_steps,
+            "metrics": metrics,
+        }
+        return info
+
+    def evaluate(self, **kwargs) -> Dict[str, Any]:
+        """Evaluate the environment state.
+
+        Returns:
+            Evaluation dictionary with success and metrics
+        """
+        info = self.get_info(**kwargs)
+        eval_dict: Dict[str, Any] = {
+            "success": info["success"][0].item(),
+        }
+        if "metrics" in info:
+            for key, value in info["metrics"].items():
+                eval_dict[key] = value
+        return eval_dict
+
+    def _preprocess_action(self, action: EnvAction) -> EnvAction:
+        """Delegate to ActionManager when configured."""
+        if self.action_manager is not None:
+            return self.action_manager.process_action(action)
+        return super()._preprocess_action(action)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Setup the robot in the environment.
