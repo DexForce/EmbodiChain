@@ -40,7 +40,9 @@ class MockEnv:
         self.device = torch.device("cpu")
 
     def get_qpos(self):
-        return torch.zeros(self.num_envs, len(self.active_joint_ids), device=self.device)
+        return torch.zeros(
+            self.num_envs, len(self.active_joint_ids), device=self.device
+        )
 
     @property
     def robot(self):

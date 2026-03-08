@@ -435,9 +435,9 @@ class EmbodiedEnv(BaseEnv):
                     )
                     action_to_store = None
                 if action_to_store is not None:
-                    self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                        action_to_store.to(buffer_device), non_blocking=True
-                    )
+                    self.rollout_buffer["actions"][
+                        :, self.current_rollout_step, ...
+                    ].copy_(action_to_store.to(buffer_device), non_blocking=True)
                 self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
                     rewards.to(buffer_device), non_blocking=True
                 )
