@@ -429,7 +429,7 @@ class EmbodiedEnv(BaseEnv):
                 elif isinstance(action, torch.Tensor):
                     action_to_store = action
                 else:
-                    logger.log_error(
+                    logger.log_warning(
                         f"Unexpected action type {type(action)} in _hook_after_sim_step; "
                         "skipping action storage in rollout buffer."
                     )
