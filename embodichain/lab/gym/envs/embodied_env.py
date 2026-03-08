@@ -93,8 +93,8 @@ class EmbodiedEnvCfg(EnvCfg):
         compose observation transforms, reward functors, and dataset/recorder
         settings (auto-saving on episode completion).
     - **extensions**: Optional[Dict[str, Any]] — arbitrary task-specific key/value
-        pairs (e.g. `action_type`, `action_scale`, `control_frequency`) that are
-        automatically set on the config *and* bound to the environment instance.
+        pairs (e.g. `success_threshold`, `control_frequency`) that are automatically
+        set on the config *and* bound to the environment instance.
     - **filter_visual_rand** / **filter_dataset_saving**: booleans to disable
         visual randomization or dataset saving for debugging purposes.
     - **init_rollout_buffer**: bool — when true (or when a dataset manager is
@@ -174,13 +174,15 @@ class EmbodiedEnvCfg(EnvCfg):
 
     extensions: Union[Dict[str, Any], None] = None
     """Extension parameters for task-specific configurations.
-    
-    This field can be used to pass additional parameters that are specific to certain environments
-    or tasks without modifying the base configuration class. For example:
-    - action_scale: Action scaling factor
-    - action_type: Action type (e.g., "delta_qpos", "qpos", "qvel")
+
+    This field can be used to pass additional parameters that are specific to certain
+    environments or tasks without modifying the base configuration class. For example:
+    - success_threshold: Task-specific success distance threshold
     - vr_joint_mapping: VR joint mapping for teleoperation
     - control_frequency: Control frequency for VR teleoperation
+
+    Note: Action configuration (e.g., delta_qpos, scale) should use the ``actions``
+    field and ActionManager, not extensions.
     """
 
     # Some helper attributes
@@ -426,9 +428,16 @@ class EmbodiedEnv(BaseEnv):
                     )
                 elif isinstance(action, torch.Tensor):
                     action_to_store = action
-                self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                    action_to_store.to(buffer_device), non_blocking=True
-                )
+                else:
+                    logger.log_error(
+                        f"Unexpected action type {type(action)} in _hook_after_sim_step; "
+                        "skipping action storage in rollout buffer."
+                    )
+                    action_to_store = None
+                if action_to_store is not None:
+                    self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
+                        action_to_store.to(buffer_device), non_blocking=True
+                    )
                 self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
                     rewards.to(buffer_device), non_blocking=True
                 )

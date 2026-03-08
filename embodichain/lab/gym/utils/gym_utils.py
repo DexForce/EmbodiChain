@@ -615,7 +615,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
             setattr(env_cfg.rewards, reward_name, reward)
 
-    # parser actions config (ActionManager)
+    # parse actions config (ActionManager)
     env_cfg.actions = None
     env_config = config.get("env", {})
     if "actions" in env_config:

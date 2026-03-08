@@ -201,6 +201,7 @@ Configure action preprocessing via the ``actions`` field:
 
 ```python
 from embodichain.lab.gym.envs.managers import ActionTermCfg, DeltaQposTerm
+from embodichain.utils import configclass
 
 @configclass
 class MyRLActionCfg:

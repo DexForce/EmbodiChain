@@ -9,11 +9,9 @@
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-# USE OR OTHER DEALINGS IN THE SOFTWARE.
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -230,7 +228,13 @@ class QposTerm(ActionTerm):
 
 
 class QposNormalizedTerm(ActionTerm):
-    """Normalized action in [-1, 1] -> denormalize to joint limits -> qpos."""
+    """Normalized action in [-1, 1] -> denormalize to joint limits -> qpos.
+
+    The policy output is scaled by ``params.scale`` before denormalization.
+    With scale=1.0 (default), action in [-1, 1] maps to [low, high].
+    With scale<1.0, the effective range shrinks toward the center (e.g. scale=0.5
+    maps to 25%-75% of joint range). Use scale=1.0 for standard normalized control.
+    """
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
