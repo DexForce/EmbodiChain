@@ -126,7 +126,7 @@ class ActionManager(ManagerBase):
 
         Supports:
         1. Tensor input: Passed to the active (first) term.
-        2. Dict/TensorDict input: Uses key matching term name, or first term if single.
+        2. Dict/TensorDict input: Uses key matching term name; raises an error if no match.
 
         Args:
             action: Raw action from policy (tensor or dict).
@@ -150,8 +150,9 @@ class ActionManager(ManagerBase):
     def _prepare_functors(self) -> None:
         """Parse config and create action terms.
 
-        ActionTerm uses process_action(env, action) rather than __call__(env, env_ids, ...),
-        so we skip the base class params signature check and resolve terms directly.
+        ActionTerm uses process_action(action) (a bound instance method) rather than
+        __call__(env, env_ids, ...), so we skip the base class params signature check
+        and resolve terms directly.
         """
         if isinstance(self.cfg, dict):
             cfg_items = self.cfg.items()

@@ -617,7 +617,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
     # parse actions config (ActionManager)
     env_cfg.actions = None
-    env_config = config.get("env", {})
+    env_config = config["env"]
     if "actions" in env_config:
         env_cfg.actions = ComponentCfg()
         for term_name, term_params in env_config["actions"].items():
