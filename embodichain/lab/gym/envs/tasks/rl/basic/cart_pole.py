@@ -18,13 +18,12 @@ import torch
 from typing import Dict, Any, Tuple
 
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.gym.envs.rl_env import RLEnv
-from embodichain.lab.gym.envs import EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.types import EnvObs
 
 
 @register_env("CartPoleRL", max_episode_steps=50, override=True)
-class CartPoleEnv(RLEnv):
+class CartPoleEnv(EmbodiedEnv):
     """
     CartPole balancing task for reinforcement learning.
 

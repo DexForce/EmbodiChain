@@ -19,7 +19,7 @@ EmbodiChain/
 │   ├── data/                     # Assets, datasets, constants, enums
 │   ├── lab/                      # Simulation lab
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
-│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv, RLEnv
+│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
 │   │   │   │   ├── tasks/        # Task implementations (tableware, RL, special)
