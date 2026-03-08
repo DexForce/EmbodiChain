@@ -21,8 +21,8 @@ import torch
 
 from embodichain.lab.gym.envs.managers import (
     ActionManager,
-    ActionTerm,
     DeltaQposTerm,
+    EefPoseTerm,
     QposTerm,
     QposNormalizedTerm,
     QvelTerm,
@@ -73,6 +73,19 @@ class MockEnvWithLimits(MockEnv):
         return BodyData(self._qpos_limits)
 
 
+class MockEnvForEef(MockEnv):
+    """Mock env with compute_ik for EefPoseTerm."""
+
+    def __init__(self, num_envs: int = 2, action_dim: int = 6):
+        super().__init__(num_envs, action_dim)
+
+    def compute_ik(self, pose, joint_seed):
+        """Return (all success, joint_seed) to simulate IK success."""
+        batch_size = joint_seed.shape[0]
+        ret = torch.ones(batch_size, dtype=torch.bool, device=self.device)
+        return ret, joint_seed.clone()
+
+
 def test_delta_qpos_term_process_action():
     """DeltaQposTerm: qpos = current_qpos + scale * action."""
     env = MockEnv(num_envs=4, action_dim=6)
@@ -113,10 +126,58 @@ def test_qpos_normalized_term_process_action():
     result = term.process_action(action)
 
     assert "qpos" in result
-    # low=-1, high=1: (-1+1)*0.5*(1-(-1)) = 0 for action=-1; (1+1)*0.5*2 = 2 for action=1
+    # low=-1, high=1: qpos = low + (action + 1.0) * 0.5 * (high - low)
     expected = torch.tensor([[-1.0, -1.0], [1.0, 1.0]])
     torch.testing.assert_close(result["qpos"], expected)
     assert term.action_dim == 2
+
+
+def test_eef_pose_term_process_action_6d():
+    """EefPoseTerm: 6D pose (x,y,z,euler) -> IK -> qpos."""
+    env = MockEnvForEef(num_envs=2, action_dim=6)
+    cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 6})
+    term = EefPoseTerm(cfg, env)
+
+    # 6D: position + euler angles
+    action = torch.zeros(2, 6)
+    action[:, :3] = 0.1  # position
+    action[:, 3:6] = 0.0  # euler (identity rotation)
+    result = term.process_action(action)
+
+    assert "qpos" in result
+    assert result["qpos"].shape == (2, 6)
+    # Mock returns joint_seed (zeros); verify output matches
+    torch.testing.assert_close(result["qpos"], env.get_qpos())
+    assert term.action_dim == 6
+
+
+def test_eef_pose_term_process_action_7d():
+    """EefPoseTerm: 7D pose (x,y,z,quat) -> IK -> qpos."""
+    env = MockEnvForEef(num_envs=2, action_dim=6)
+    cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 7})
+    term = EefPoseTerm(cfg, env)
+
+    # 7D: position + quaternion (w,x,y,z)
+    action = torch.zeros(2, 7)
+    action[:, :3] = 0.1
+    action[:, 3] = 1.0  # quat w
+    action[:, 4:7] = 0.0  # quat x,y,z (identity)
+    result = term.process_action(action)
+
+    assert "qpos" in result
+    assert result["qpos"].shape == (2, 6)
+    torch.testing.assert_close(result["qpos"], env.get_qpos())
+    assert term.action_dim == 7
+
+
+def test_eef_pose_term_invalid_dim_raises():
+    """EefPoseTerm raises ValueError for non-6D/7D action."""
+    env = MockEnvForEef(num_envs=2, action_dim=6)
+    cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 5})
+    term = EefPoseTerm(cfg, env)
+
+    with pytest.raises(ValueError, match="EEF pose action must be 6D or 7D"):
+        term.process_action(torch.zeros(2, 5))
 
 
 def test_qvel_term_process_action():
