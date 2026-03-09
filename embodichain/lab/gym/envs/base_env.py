@@ -620,6 +620,8 @@ class BaseEnv(gym.Env):
             rewards=rewards, obs=obs, action=action, info=info
         )
 
+        self._elapsed_steps += 1
+
         terminateds = torch.logical_or(
             info.get(
                 "success",
@@ -645,8 +647,6 @@ class BaseEnv(gym.Env):
             info=info,
             **kwargs,
         )
-
-        self._elapsed_steps += 1
 
         reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:

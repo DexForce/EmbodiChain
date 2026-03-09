@@ -17,10 +17,19 @@ embodichain.lab.gym.envs.managers
       SceneEntityCfg
       EventCfg
       ObservationCfg
+      ActionTermCfg
       Functor
       ManagerBase
       EventManager
       ObservationManager
+      ActionManager
+      ActionTerm
+      DeltaQposTerm
+      QposTerm
+      QposNormalizedTerm
+      EefPoseTerm
+      QvelTerm
+      QfTerm
 
    .. rubric:: Functions
 
@@ -61,6 +70,10 @@ Configuration Classes
     :members:
     :exclude-members: __init__, class_type
 
+.. autoclass:: ActionTermCfg
+    :members:
+    :exclude-members: __init__, class_type
+
 Base Classes
 ------------
 
@@ -83,6 +96,46 @@ Managers
     :show-inheritance:
 
 .. autoclass:: ObservationManager
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: ActionManager
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: ActionTerm
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: DeltaQposTerm
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: QposTerm
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: QposNormalizedTerm
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: EefPoseTerm
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: QvelTerm
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: QfTerm
     :members:
     :inherited-members:
     :show-inheritance:

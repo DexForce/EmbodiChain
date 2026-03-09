@@ -164,7 +164,10 @@ class GRPO(BaseAlgorithm):
 
         for _ in range(num_steps):
             actions, log_prob, _ = policy.get_action(current_obs, deterministic=False)
-            action_type = getattr(env, "action_type", "delta_qpos")
+            am = getattr(env, "action_manager", None)
+            action_type = (
+                am.action_type if am else getattr(env, "action_type", "delta_qpos")
+            )
             action_dict = {action_type: actions}
             next_obs, reward, terminated, truncated, env_info = env.step(action_dict)
             done = (terminated | truncated).bool()

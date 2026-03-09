@@ -111,9 +111,13 @@
                 "params": {}
             }
         },
+        "actions": {
+            "delta_qpos": {
+                "func": "DeltaQposTerm",
+                "params": { "scale": 0.1 }
+            }
+        },
         "extensions": {
-            "action_type": "delta_qpos",
-            "action_scale": 0.1,
             "success_threshold": 0.1
         }
     },
