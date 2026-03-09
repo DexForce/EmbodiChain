@@ -73,6 +73,8 @@ class SyncCollector(BaseCollector):
             # Build "next" TensorDict
             done = terminated | truncated
             next_obs_for_td = next_obs_td["observation"]
+            if hasattr(self.policy, "reset_envs"):
+                self.policy.reset_envs(done, next_obs_for_td)
 
             # Ensure batch_size consistency - use next_obs_td's batch_size
             batch_size = next_obs_td.batch_size[0]

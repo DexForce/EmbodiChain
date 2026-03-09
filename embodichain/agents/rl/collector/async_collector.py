@@ -160,6 +160,8 @@ class AsyncCollector(BaseCollector):
                     next_obs_td = dict_to_tensordict(next_obs_dict, self.device)
                     done = terminated | truncated
                     next_obs_for_td = next_obs_td["observation"]
+                    if hasattr(self.policy, "reset_envs"):
+                        self.policy.reset_envs(done, next_obs_for_td)
                     batch_size = next_obs_td.batch_size[0]
 
                     next_td = TensorDict(

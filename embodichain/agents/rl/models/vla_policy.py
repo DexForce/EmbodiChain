@@ -77,18 +77,14 @@ class VLAPolicy(Policy):
             JointType,
             Modality,
         )
-        from dexechain.data.global_mapping import (
-            GlobalMapping,
-        )  # pyright: ignore[reportMissingImports]
+        from dexechain.data.global_mapping import GlobalMapping  # pyright: ignore[reportMissingImports]
         from dexechain.lab.gym.utils.gym_utils import (  # pyright: ignore[reportMissingImports]
             get_pk_serial_chain_from_robot_type,
         )
         from dexechain.lab.gym.utils.misc import (  # pyright: ignore[reportMissingImports]
             _data_key_to_control_part,
         )
-        from dexechain.utils.utility import (
-            get_right_name,
-        )  # pyright: ignore[reportMissingImports]
+        from dexechain.utils.utility import get_right_name  # pyright: ignore[reportMissingImports]
 
         self.ActionMode = ActionMode
         self.ControlParts = ControlParts
@@ -138,6 +134,9 @@ class VLAPolicy(Policy):
         self._runtime_robot = None
         self._state_history: torch.Tensor | None = None
         self._image_history: torch.Tensor | None = None
+        self._cached_chunk: torch.Tensor | None = None
+        self._cached_chunk_context: TensorDict | None = None
+        self._cached_chunk_step: torch.Tensor | None = None
 
     def bind_env(self, env) -> None:
         self._runtime_env = env
@@ -148,6 +147,49 @@ class VLAPolicy(Policy):
             self._runtime_robot = env.get_wrapper_attr("robot")
         except Exception:
             self._runtime_robot = None
+
+    def _reset_chunk_cache(self, env_mask: torch.Tensor | None = None) -> None:
+        if env_mask is None:
+            self._cached_chunk = None
+            self._cached_chunk_context = None
+            self._cached_chunk_step = None
+            return
+        if self._cached_chunk_step is not None:
+            self._cached_chunk_step[env_mask] = self.inference_horizon
+
+    @torch.no_grad()
+    def reset_envs(
+        self, done_mask: torch.Tensor, next_observation: TensorDict | None = None
+    ) -> None:
+        if done_mask.dim() > 1:
+            done_mask = done_mask.squeeze(-1)
+        done_mask = done_mask.to(device=self.device, dtype=torch.bool)
+        if not done_mask.any():
+            return
+
+        self._reset_chunk_cache(done_mask)
+
+        if next_observation is None:
+            if self._state_history is not None:
+                self._state_history[done_mask] = 0
+            if self._image_history is not None:
+                self._image_history[done_mask] = 0
+            return
+
+        current_state, _ = self._build_state_vector(next_observation)
+        current_images = self._extract_current_images(next_observation)
+        reset_state_history = current_state.unsqueeze(1).repeat(1, self.state_history_len, 1)
+        reset_image_history = current_images.unsqueeze(1).repeat(1, self.img_history_size, 1, 1, 1, 1)
+
+        if self._state_history is None or self._state_history.shape[0] != current_state.shape[0]:
+            self._state_history = reset_state_history
+        else:
+            self._state_history[done_mask] = reset_state_history[done_mask]
+
+        if self._image_history is None or self._image_history.shape[0] != current_images.shape[0]:
+            self._image_history = reset_image_history
+        else:
+            self._image_history[done_mask] = reset_image_history[done_mask]
 
     def _resolve_action_key_order(
         self, action_key_order: Optional[list[str]]
@@ -261,14 +303,18 @@ class VLAPolicy(Policy):
         right_arm_end = left_eef_end + arm_dofs_per_side
 
         return {
-            self.ControlParts.LEFT_ARM.value
-            + self.JointType.QPOS.value: qpos[:, :left_arm_end],
-            self.ControlParts.LEFT_EEF.value
-            + self.EndEffector.GRIPPER.value: qpos[:, left_arm_end:left_eef_end],
-            self.ControlParts.RIGHT_ARM.value
-            + self.JointType.QPOS.value: qpos[:, left_eef_end:right_arm_end],
-            self.ControlParts.RIGHT_EEF.value
-            + self.EndEffector.GRIPPER.value: qpos[:, right_arm_end:],
+            self.ControlParts.LEFT_ARM.value + self.JointType.QPOS.value: qpos[
+                :, :left_arm_end
+            ],
+            self.ControlParts.LEFT_EEF.value + self.EndEffector.GRIPPER.value: qpos[
+                :, left_arm_end:left_eef_end
+            ],
+            self.ControlParts.RIGHT_ARM.value + self.JointType.QPOS.value: qpos[
+                :, left_eef_end:right_arm_end
+            ],
+            self.ControlParts.RIGHT_EEF.value + self.EndEffector.GRIPPER.value: qpos[
+                :, right_arm_end:
+            ],
         }
 
     def _build_state_vector(
@@ -307,9 +353,7 @@ class VLAPolicy(Policy):
                     normalized = self.EefNormalizer.normalize_eef(
                         qpos_data, part, robot=self._runtime_robot
                     )
-                    state_entries[key] = self._fit_state_value(
-                        key, normalized, qpos.dtype
-                    )
+                    state_entries[key] = self._fit_state_value(key, normalized, qpos.dtype)
         else:
             state_entries = {
                 self.ControlParts.LEFT_ARM.value
@@ -323,8 +367,7 @@ class VLAPolicy(Policy):
                 self.ControlParts.LEFT_EEF.value
                 + self.EndEffector.GRIPPER.value: self._normalize_gripper(
                     qpos_chunks[
-                        self.ControlParts.LEFT_EEF.value
-                        + self.EndEffector.GRIPPER.value
+                        self.ControlParts.LEFT_EEF.value + self.EndEffector.GRIPPER.value
                     ],
                     self.ControlParts.LEFT_EEF.value + self.EndEffector.GRIPPER.value,
                 ),
@@ -368,11 +411,9 @@ class VLAPolicy(Policy):
                 ],
             )
             eef_pose_dict = {
-                key: (
-                    value.to(self.device, dtype=qpos.dtype)
-                    if isinstance(value, torch.Tensor)
-                    else torch.as_tensor(value, device=self.device, dtype=qpos.dtype)
-                )
+                key: value.to(self.device, dtype=qpos.dtype)
+                if isinstance(value, torch.Tensor)
+                else torch.as_tensor(value, device=self.device, dtype=qpos.dtype)
                 for key, value in eef_pose_dict.items()
             }
             state_entries.update(eef_pose_dict)
@@ -460,6 +501,20 @@ class VLAPolicy(Policy):
         )
         return batch, critic_input, context
 
+    def _slice_batch(
+        self, batch: dict[str, torch.Tensor | list[str]], mask: torch.Tensor
+    ) -> dict[str, torch.Tensor | list[str]]:
+        mask_list = mask.tolist()
+        sliced: dict[str, torch.Tensor | list[str]] = {}
+        for key, value in batch.items():
+            if isinstance(value, torch.Tensor):
+                sliced[key] = value[mask]
+            elif isinstance(value, list):
+                sliced[key] = [item for item, keep in zip(value, mask_list) if keep]
+            else:
+                sliced[key] = value
+        return sliced
+
     def _predict_chunk_actions(
         self, batch: dict[str, torch.Tensor | list[str]]
     ) -> torch.Tensor:
@@ -485,17 +540,16 @@ class VLAPolicy(Policy):
         )
         return data[self.Modality.ACTIONS.value]
 
-    def _decode_first_action(
-        self, trajectory: torch.Tensor, observation: TensorDict
+    def _decode_action_step(
+        self, step_action: torch.Tensor, observation: TensorDict
     ) -> torch.Tensor:
-        first_step = trajectory[:, 0]
         current_qpos = observation["robot"][self.JointType.QPOS.value].to(self.device)
         qpos_chunks = self._split_qpos(current_qpos)
         decoded_parts: list[torch.Tensor] = []
 
         for key in self.action_key_order:
             indices = self.indices_generator.get([key])
-            value = first_step[:, indices]
+            value = step_action[:, indices]
             if (
                 self.ActionMode.RELATIVE.value in key
                 and self.JointType.QPOS.value in key
@@ -510,15 +564,14 @@ class VLAPolicy(Policy):
                 elif key.startswith(self.ControlParts.RIGHT_ARM.value):
                     value = (
                         qpos_chunks[
-                            self.ControlParts.RIGHT_ARM.value
-                            + self.JointType.QPOS.value
+                            self.ControlParts.RIGHT_ARM.value + self.JointType.QPOS.value
                         ]
                         + value
                     )
             elif self.EndEffector.GRIPPER.value in key:
-                value = self.gripper_closed_value + (1.0 - value) * (
-                    self.gripper_open_value - self.gripper_closed_value
-                )
+                value = self.gripper_closed_value + (
+                    1.0 - value
+                ) * (self.gripper_open_value - self.gripper_closed_value)
             decoded_parts.append(value)
 
         if not decoded_parts:
@@ -526,6 +579,11 @@ class VLAPolicy(Policy):
                 f"No action keys could be decoded from model outputs: {self.vla_model.output}"
             )
         return torch.cat(decoded_parts, dim=-1).to(self.device)
+
+    def _decode_first_action(
+        self, trajectory: torch.Tensor, observation: TensorDict
+    ) -> torch.Tensor:
+        return self._decode_action_step(trajectory[:, 0], observation)
 
     def _expand_env_action(
         self, action: torch.Tensor, observation: TensorDict
@@ -554,7 +612,9 @@ class VLAPolicy(Policy):
                     value = value.unsqueeze(0)
                 control_part = key.replace(self.EndEffector.GRIPPER.value, "")
                 target_dim = len(
-                    self._runtime_robot.get_joint_ids(control_part, remove_mimic=False)
+                    self._runtime_robot.get_joint_ids(
+                        control_part, remove_mimic=False
+                    )
                 )
                 if target_dim > value.shape[-1]:
                     value = value.repeat(1, target_dim)
@@ -590,20 +650,65 @@ class VLAPolicy(Policy):
         batch, critic_input, context = self._build_policy_context(
             observation, update_history=True
         )
-        trajectory = self._predict_chunk_actions(batch)
-        mean_action = self._decode_first_action(trajectory, observation)
+        batch_size = observation.batch_size[0]
+
+        if (
+            self._cached_chunk is None
+            or self._cached_chunk_context is None
+            or self._cached_chunk_step is None
+            or self._cached_chunk.shape[0] != batch_size
+        ):
+            self._cached_chunk = None
+            self._cached_chunk_context = None
+            self._cached_chunk_step = torch.full(
+                (batch_size,),
+                self.inference_horizon,
+                device=self.device,
+                dtype=torch.long,
+            )
+
+        refresh_mask = self._cached_chunk_step >= self.inference_horizon
+        if refresh_mask.any():
+            refresh_batch = self._slice_batch(batch, refresh_mask)
+            refresh_trajectory = self._predict_chunk_actions(refresh_batch)
+            refresh_context = context[refresh_mask]
+
+            if self._cached_chunk is None:
+                chunk_shape = (batch_size,) + tuple(refresh_trajectory.shape[1:])
+                self._cached_chunk = torch.zeros(
+                    chunk_shape,
+                    device=refresh_trajectory.device,
+                    dtype=refresh_trajectory.dtype,
+                )
+            if self._cached_chunk_context is None:
+                self._cached_chunk_context = context.clone()
+
+            self._cached_chunk[refresh_mask] = refresh_trajectory
+            self._cached_chunk_context["state_history"][refresh_mask] = refresh_context[
+                "state_history"
+            ]
+            self._cached_chunk_context["image_history"][refresh_mask] = refresh_context[
+                "image_history"
+            ]
+            self._cached_chunk_step[refresh_mask] = 0
+
+        step_indices = self._cached_chunk_step.clone()
+        raw_step_actions = self._cached_chunk[
+            torch.arange(batch_size, device=self.device), step_indices
+        ]
+        mean_action = self._decode_action_step(raw_step_actions, observation)
         action, log_prob, _ = self._action_stats(mean_action, deterministic)
         tensordict["action"] = action
         tensordict["env_action"] = self._expand_env_action(action, observation)
         tensordict["sample_log_prob"] = log_prob
         tensordict["value"] = self.value_head(critic_input)
-        tensordict["policy_context"] = context
+        tensordict["policy_context"] = self._cached_chunk_context.clone()
+        tensordict["chunk_step_idx"] = step_indices.unsqueeze(-1)
         tensordict["loc"] = mean_action
-        tensordict["scale"] = (
-            self.log_std.clamp(self.log_std_min, self.log_std_max)
-            .exp()
-            .expand_as(mean_action)
-        )
+        tensordict["scale"] = self.log_std.clamp(
+            self.log_std_min, self.log_std_max
+        ).exp().expand_as(mean_action)
+        self._cached_chunk_step = self._cached_chunk_step + 1
         return tensordict
 
     @torch.no_grad()
@@ -622,7 +727,14 @@ class VLAPolicy(Policy):
             observation, update_history=False, cached_context=context
         )
         trajectory = self._predict_chunk_actions(batch)
-        mean_action = self._decode_first_action(trajectory, observation)
+        if "chunk_step_idx" in tensordict.keys():
+            step_idx = tensordict["chunk_step_idx"].squeeze(-1).long()
+            step_action = trajectory[
+                torch.arange(trajectory.shape[0], device=trajectory.device), step_idx
+            ]
+            mean_action = self._decode_action_step(step_action, observation)
+        else:
+            mean_action = self._decode_first_action(trajectory, observation)
         _, log_prob, entropy = self._action_stats(
             mean_action, deterministic=False, provided_action=actions
         )

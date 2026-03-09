@@ -324,6 +324,8 @@ class Trainer:
         self.policy.eval()
         if hasattr(self.policy, "bind_env"):
             self.policy.bind_env(self.eval_env)
+        if hasattr(self.policy, "_reset_chunk_cache"):
+            self.policy._reset_chunk_cache()
         episode_returns = []
         episode_lengths = []
 
@@ -357,10 +359,12 @@ class Trainer:
                     env_action
                 )
                 next_obs = dict_to_tensordict(next_obs, self.device)
+                done = terminated | truncated
+                if hasattr(self.policy, "reset_envs"):
+                    self.policy.reset_envs(done, next_obs["observation"])
                 obs = next_obs
 
                 # Update statistics only for still-running environments
-                done = terminated | truncated
                 still_running = ~done_mask
                 cumulative_reward[still_running] += reward[still_running].float()
                 step_count[still_running] += 1
