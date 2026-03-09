@@ -878,7 +878,15 @@ class RigidObject(BatchEntity):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
-        # self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
+
+        from embodichain.lab.sim.shapes import MeshCfg
+
+        is_usd_file = isinstance(
+            self.cfg.shape, MeshCfg
+        ) and self.cfg.shape.fpath.endswith((".usd", ".usda", ".usdc"))
+        use_cfg_properties = not (self.cfg.use_usd_properties and is_usd_file)
+        if use_cfg_properties:
+            self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
