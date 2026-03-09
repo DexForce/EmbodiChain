@@ -212,7 +212,7 @@ class RigidObject(BatchEntity):
         self.is_shared_visual_material = False
 
         # Determine if we should use USD properties or cfg properties.
-        if not self.cfg.use_usd_properties:
+        if not cfg.use_usd_properties:
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
                 entity.set_physical_attr(cfg.attrs.attr())
