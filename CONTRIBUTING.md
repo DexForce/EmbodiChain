@@ -57,7 +57,7 @@ A `CLAUDE.md` file is present at the root of this repository. Claude Code reads 
 
 ```
 > Explain how the Functor/Manager pattern works in embodichain/lab/gym/envs/managers/
-> What is the difference between EmbodiedEnv and RLEnv?
+> How does the Action Manager work with EmbodiedEnv for RL tasks?
 > Show me an example of how a randomization functor is registered in a task config.
 ```
 

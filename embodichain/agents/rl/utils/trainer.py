@@ -259,7 +259,12 @@ class Trainer:
             while not done_mask.all():
                 # Get deterministic actions from policy
                 actions, _, _ = self.policy.get_action(obs, deterministic=True)
-                action_type = getattr(self.eval_env, "action_type", "delta_qpos")
+                am = getattr(self.eval_env, "action_manager", None)
+                action_type = (
+                    am.action_type
+                    if am
+                    else getattr(self.eval_env, "action_type", "delta_qpos")
+                )
                 action_dict = {action_type: actions}
 
                 # Environment step
