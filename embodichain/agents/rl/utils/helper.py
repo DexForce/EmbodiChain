@@ -14,33 +14,30 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Helper utilities for RL training.
+"""Helper utilities for RL training."""
 
-This module provides utility functions for RL algorithms.
-"""
+from __future__ import annotations
 
-import torch
 import numpy as np
+import torch
 from tensordict import TensorDict
 
 
 def dict_to_tensordict(obs_dict: dict, device: torch.device) -> TensorDict:
-    """Convert nested dict observation to TensorDict recursively.
+    """Convert a nested observation dict into a TensorDict.
 
     Args:
-        obs_dict: Nested observation dictionary
-        device: Device to place tensors on
+        obs_dict: Nested observation dictionary returned by the environment.
+        device: Device to place tensors on.
 
     Returns:
-        TensorDict with nested structure preserved and "observation" key
+        TensorDict with an outer ``"observation"`` key.
     """
 
-    def _recursive_convert(d):
-        """Recursively convert dict to TensorDict-compatible structure."""
+    def _recursive_convert(data: dict) -> dict:
         result = {}
-        for key, value in d.items():
+        for key, value in data.items():
             if isinstance(value, dict):
-                # Recursively convert nested dicts
                 result[key] = _recursive_convert(value)
             elif isinstance(value, torch.Tensor):
                 result[key] = value.to(device)
@@ -48,30 +45,52 @@ def dict_to_tensordict(obs_dict: dict, device: torch.device) -> TensorDict:
                 result[key] = torch.tensor(value, device=device)
         return result
 
-    # Convert the observation dict structure
-    converted = _recursive_convert(obs_dict)
-
-    # Infer batch_size from first tensor we find
-    def _get_first_tensor_batch_size(d):
-        """Find first tensor and get its batch dimension."""
-        for value in d.values():
+    def _get_first_tensor_batch_size(data: dict) -> int | None:
+        for value in data.values():
             if isinstance(value, torch.Tensor):
-                return value.shape[0]
-            elif isinstance(value, dict):
-                bs = _get_first_tensor_batch_size(value)
-                if bs is not None:
-                    return bs
+                return int(value.shape[0])
+            if isinstance(value, dict):
+                batch_size = _get_first_tensor_batch_size(value)
+                if batch_size is not None:
+                    return batch_size
         return None
 
+    converted = _recursive_convert(obs_dict)
     batch_size = _get_first_tensor_batch_size(converted)
     if batch_size is None:
-        batch_size = 1  # Default if no tensors found
+        batch_size = 1
 
-    # Wrap in TensorDict with explicit batch_size
     obs_td = TensorDict(converted, batch_size=[batch_size], device=device)
-
-    # Wrap observation in outer TensorDict with "observation" key
     return TensorDict({"observation": obs_td}, batch_size=[batch_size], device=device)
+
+
+def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
+    """Flatten a nested observation TensorDict into a dense tensor.
+
+    Args:
+        obs: Nested observation TensorDict.
+
+    Returns:
+        A tensor shaped ``[num_envs, obs_dim]``.
+    """
+
+    obs_list: list[torch.Tensor] = []
+
+    def _collect_tensors(data: TensorDict) -> None:
+        for key in sorted(data.keys()):
+            value = data[key]
+            if isinstance(value, TensorDict):
+                _collect_tensors(value)
+            elif isinstance(value, torch.Tensor):
+                obs_list.append(value.flatten(start_dim=1))
+
+    _collect_tensors(obs)
+
+    if not obs_list:
+        raise ValueError("No tensors found in observation TensorDict")
+    if len(obs_list) == 1:
+        return obs_list[0]
+    return torch.cat(obs_list, dim=-1)
 
 
 def mean_scalar(x) -> float:
@@ -154,7 +173,9 @@ def compute_gae(
         gae = torch.zeros(N, 1, device=device)
 
         for t in reversed(range(T)):
-            delta = rewards[t] + gamma * bootstrap_values[t] * (1.0 - dones[t]) - values[t]
+            delta = (
+                rewards[t] + gamma * bootstrap_values[t] * (1.0 - dones[t]) - values[t]
+            )
             gae = delta + gamma * gae_lambda * (1.0 - dones[t]) * gae
             advantages[t] = gae
     else:
@@ -172,7 +193,11 @@ def compute_gae(
         gae = torch.zeros(N, 1, device=device)
 
         for t in reversed(range(T)):
-            delta = rewards[:, t] + gamma * bootstrap_values[:, t] * (1.0 - dones[:, t]) - values[:, t]
+            delta = (
+                rewards[:, t]
+                + gamma * bootstrap_values[:, t] * (1.0 - dones[:, t])
+                - values[:, t]
+            )
             gae = delta + gamma * gae_lambda * (1.0 - dones[:, t]) * gae
             advantages[:, t] = gae
 

@@ -78,12 +78,10 @@ The ``env`` section defines the task environment:
 - **id**: Environment registry ID (e.g., "PushCubeRL")
 - **cfg**: Environment-specific configuration parameters
 
-For RL environments (inheriting from ``RLEnv``), use the ``extensions`` field for RL-specific parameters:
+For RL environments, use the ``actions`` field for action preprocessing and ``extensions`` for task-specific parameters:
 
-- **action_type**: Action type - "delta_qpos" (default), "qpos", "qvel", "qf", "eef_pose"
-- **action_scale**: Scaling factor applied to all actions (default: 1.0)
-- **episode_length**: Maximum episode length (default: 1000)
-- **success_threshold**: Task-specific success threshold (optional)
+- **actions**: Action Manager config (e.g., DeltaQposTerm with scale)
+- **extensions**: Task-specific parameters (e.g., success_threshold)
 
 Example:
 
@@ -93,10 +91,13 @@ Example:
      "id": "PushCubeRL",
      "cfg": {
        "num_envs": 4,
+       "actions": {
+         "delta_qpos": {
+           "func": "DeltaQposTerm",
+           "params": { "scale": 0.1 }
+         }
+       },
        "extensions": {
-         "action_type": "delta_qpos",
-         "action_scale": 0.1,
-         "episode_length": 100,
          "success_threshold": 0.1
        }
      }
@@ -356,16 +357,16 @@ Adding a New Environment
 
 To add a new RL environment:
 
-1. Create an environment class inheriting from ``RLEnv`` (which provides action preprocessing, goal management, and standardized info structure):
+1. Create an environment class inheriting from ``EmbodiedEnv`` (with Action Manager configured for action preprocessing and standardized info structure):
 
 .. code-block:: python
 
-   from embodichain.lab.gym.envs import RLEnv, EmbodiedEnvCfg
+   from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
    from embodichain.lab.gym.utils.registration import register_env
    import torch
    
-   @register_env("MyTaskRL", max_episode_steps=100, override=True)
-   class MyTaskEnv(RLEnv):
+   @register_env("MyTaskRL", override=True)
+   class MyTaskEnv(EmbodiedEnv):
        def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
            super().__init__(cfg, **kwargs)
        
@@ -375,14 +376,9 @@ To add a new RL environment:
            is_fail = torch.zeros_like(is_success)
            metrics = {"distance": ..., "error": ...}
            return is_success, is_fail, metrics
-       
-       def check_truncated(self, obs, info):
-           """Optional: Add custom truncation conditions."""
-           is_timeout = super().check_truncated(obs, info)
-           # Add custom conditions if needed
-           return is_timeout
 
-2. Configure the environment in your JSON config with RL-specific extensions:
+
+2. Configure the environment in your JSON config with ``actions`` and ``extensions``:
 
 .. code-block:: json
 
@@ -390,30 +386,29 @@ To add a new RL environment:
      "id": "MyTaskRL",
      "cfg": {
        "num_envs": 4,
+       "actions": {
+         "delta_qpos": {
+           "func": "DeltaQposTerm",
+           "params": { "scale": 0.1 }
+         }
+       },
        "extensions": {
-         "action_type": "delta_qpos",
-         "action_scale": 0.1,
-         "episode_length": 100,
          "success_threshold": 0.05
        }
      }
    }
 
-The ``RLEnv`` base class provides:
+The ``EmbodiedEnv`` with Action Manager provides:
 
-- **Action Preprocessing**: Automatically handles different action types (delta_qpos, qpos, qvel, qf, eef_pose)
-- **Action Scaling**: Applies ``action_scale`` to all actions
-- **Goal Management**: Built-in goal pose tracking and visualization
+- **Action Preprocessing**: Configurable via ``actions`` (DeltaQposTerm, QposTerm, EefPoseTerm, etc.)
 - **Standardized Info**: Implements ``get_info()`` using ``compute_task_state()`` template method
 
 Best Practices
 ~~~~~~~~~~~~~~
 
-- **Use RLEnv for RL Tasks**: Always inherit from ``RLEnv`` for reinforcement learning tasks. It provides action preprocessing, goal management, and standardized info structure out of the box.
+- **Use EmbodiedEnv with Action Manager for RL Tasks**: Inherit from ``EmbodiedEnv`` and configure ``actions`` in your config. The Action Manager handles action preprocessing (delta_qpos, qpos, qvel, qf, eef_pose) in a modular way.
 
-- **Action Type Configuration**: Configure ``action_type`` in the environment's ``extensions`` field. The default is "delta_qpos" (incremental joint positions). Other options: "qpos" (absolute), "qvel" (velocity), "qf" (force), "eef_pose" (end-effector pose with IK).
-
-- **Action Scaling**: Use ``action_scale`` in the environment's ``extensions`` field to scale actions. This is applied in ``RLEnv._preprocess_action()`` before robot control.
+- **Action Configuration**: Use the ``actions`` field in your JSON config. Example: ``"delta_qpos": {"func": "DeltaQposTerm", "params": {"scale": 0.1}}``.
 
 - **Device Management**: Device is single-sourced from ``runtime.cuda``. All components (trainer/algorithm/policy/env) share the same device.
 

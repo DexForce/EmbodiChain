@@ -84,5 +84,4 @@ class SimpleTaskEnv(EmbodiedEnv):
         logger.log_info(
             f"Generated {len(action_list)} demo actions with sinusoidal trajectory"
         )
-        self.action_length = len(action_list)
         return action_list

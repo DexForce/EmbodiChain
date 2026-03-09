@@ -335,6 +335,17 @@ class RewardCfg(FunctorCfg):
 
 
 @configclass
+class ActionTermCfg(FunctorCfg):
+    """Configuration for an action term.
+
+    The action term is used to preprocess raw actions from the policy into
+    the format expected by the robot (e.g., qpos, qvel, qf).
+    """
+
+    pass
+
+
+@configclass
 class DatasetFunctorCfg(FunctorCfg):
     """Configuration for dataset collection functors.
 

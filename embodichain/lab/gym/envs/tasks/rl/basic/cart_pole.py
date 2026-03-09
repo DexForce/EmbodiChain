@@ -18,13 +18,12 @@ import torch
 from typing import Dict, Any, Tuple
 
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.gym.envs.rl_env import RLEnv
-from embodichain.lab.gym.envs import EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.types import EnvObs
 
 
 @register_env("CartPoleRL", max_episode_steps=50, override=True)
-class CartPoleEnv(RLEnv):
+class CartPoleEnv(EmbodiedEnv):
     """
     CartPole balancing task for reinforcement learning.
 
@@ -67,14 +66,13 @@ class CartPoleEnv(RLEnv):
         qvel = self.robot.get_qvel(name="hand").reshape(-1)  # [num_envs, ]
         upward_distance = torch.abs(qpos)
         balance = torch.logical_and(upward_distance < 0.02, torch.abs(qvel) < 0.05)
-        at_final_step = self._elapsed_steps >= self.episode_length - 1
+        at_final_step = self._elapsed_steps >= self.max_episode_steps - 1
         is_success = torch.logical_and(at_final_step, balance)
         is_fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         metrics = {"distance_to_goal": upward_distance}
         return is_success, is_fail, metrics
 
     def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        is_timeout = self._elapsed_steps >= self.episode_length
         pole_qpos = self.robot.get_qpos(name="hand").reshape(-1)
         is_fallen = torch.abs(pole_qpos) > torch.pi * 0.5
-        return is_timeout | is_fallen
+        return is_fallen

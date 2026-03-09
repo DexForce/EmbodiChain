@@ -19,13 +19,14 @@ from __future__ import annotations
 import dexsim
 import math
 import torch
+import uuid
+import numpy as np
 
 from typing import Union, Tuple, Sequence, List, Optional, Dict
+from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils import logger, configclass
-import uuid
-import numpy as np
 
 
 @configclass
@@ -43,6 +44,9 @@ class ContactSensorCfg(SensorCfg):
 
     filter_need_both_actor: bool = True
     """Whether to filter contact only when both actors are in the filter list."""
+
+    max_contact_num: int = 65536
+    """Maximum number of contacts the sensor can handle."""
 
     sensor_type: str = "ContactSensor"
 
@@ -86,29 +90,13 @@ class ContactSensor(BaseSensor):
         self.item_user_env_ids_map: Optional[torch.Tensor] = None
         """Map from dexsim userid to environment id."""
 
-        self._data_buffer = {
-            "position": torch.empty((0, 3), device=device),
-            "normal": torch.empty((0, 3), device=device),
-            "friction": torch.empty((0, 3), device=device),
-            "impulse": torch.empty((0,), device=device),
-            "distance": torch.empty((0,), device=device),
-            "user_ids": torch.empty((0, 2), dtype=torch.int32, device=device),
-            "env_ids": torch.empty((0,), dtype=torch.int32, device=device),
-        }
-        """
-            position: [num_contacts, 3] tensor, contact position in arena frame
-            normal: [num_contacts, 3] tensor, contact normal
-            friction: [num_contacts, 3] tensor, contact friction. Currently this value is not accurate.
-            impulse: [num_contacts, ] tensor, contact impulse
-            distance: [num_contacts, ] tensor, contact distance
-            user_ids: [num_contacts, 2] of int, contact user ids
-                , use rigid_object.get_user_id() and find which object it belongs to.
-            env_ids: [num_contacts, ] of int, which arena the contact belongs to.
-        """
-
         self._visualizer: Optional[dexsim.models.PointCloud] = None
         """contact point visualizer. Default to None"""
         self.device = device
+        self.cfg = config
+
+        self._curr_contact_num = 0
+
         super().__init__(config, device)
 
     def _precompute_filter_ids(self, config: ContactSensorCfg):
@@ -176,15 +164,43 @@ class ContactSensor(BaseSensor):
         world_config = dexsim.get_world_config()
         self.is_use_gpu_physics = device.type == "cuda" and world_config.enable_gpu_sim
         if self.is_use_gpu_physics:
-            MAX_CONTACT = 65536
             self.contact_data_buffer = torch.zeros(
-                MAX_CONTACT, 11, dtype=torch.float32, device=device
+                self.cfg.max_contact_num, 11, dtype=torch.float32, device=device
             )
             self.contact_user_ids_buffer = torch.zeros(
-                MAX_CONTACT, 2, dtype=torch.int32, device=device
+                self.cfg.max_contact_num, 2, dtype=torch.int32, device=device
             )
         else:
             self._ps.enable_contact_data_update_on_cpu(True)
+
+        # TODO: We may pre-allocate the data buffer for contact data.
+        self._data_buffer = TensorDict(
+            {
+                "position": torch.empty((config.max_contact_num, 3), device=device),
+                "normal": torch.empty((config.max_contact_num, 3), device=device),
+                "friction": torch.empty((config.max_contact_num, 3), device=device),
+                "impulse": torch.empty((config.max_contact_num,), device=device),
+                "distance": torch.empty((config.max_contact_num,), device=device),
+                "user_ids": torch.empty(
+                    (config.max_contact_num, 2), dtype=torch.int32, device=device
+                ),
+                "env_ids": torch.empty(
+                    (config.max_contact_num,), dtype=torch.int32, device=device
+                ),
+            },
+            batch_size=[config.max_contact_num],
+            device=device,
+        )
+        """
+            position: [num_contacts, 3] tensor, contact position in arena frame
+            normal: [num_contacts, 3] tensor, contact normal
+            friction: [num_contacts, 3] tensor, contact friction. Currently this value is not accurate.
+            impulse: [num_contacts, ] tensor, contact impulse
+            distance: [num_contacts, ] tensor, contact distance
+            user_ids: [num_contacts, 2] of int, contact user ids
+                , use rigid_object.get_user_id() and find which object it belongs to.
+            env_ids: [num_contacts, ] of int, which arena the contact belongs to.
+        """
 
     def update(self, **kwargs) -> None:
         """Update the sensor state based on the current simulation state.
@@ -194,7 +210,6 @@ class ContactSensor(BaseSensor):
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
-
         if not self.is_use_gpu_physics:
             contact_data_np, body_user_indices_np = self._ps.get_cpu_contact_buffer()
             n_contact = contact_data_np.shape[0]
@@ -210,16 +225,8 @@ class ContactSensor(BaseSensor):
             )
             contact_data = self.contact_data_buffer[:n_contact]
             body_user_indices = self.contact_user_ids_buffer[:n_contact]
+
         if n_contact == 0:
-            self._data_buffer = {
-                "position": torch.empty((0, 3), device=self.device),
-                "normal": torch.empty((0, 3), device=self.device),
-                "friction": torch.empty((0, 3), device=self.device),
-                "impulse": torch.empty((0,), device=self.device),
-                "distance": torch.empty((0,), device=self.device),
-                "user_ids": torch.empty((0, 2), dtype=torch.int32, device=self.device),
-                "env_ids": torch.empty((0,), dtype=torch.int32, device=self.device),
-            }
             return
 
         filter0_mask = torch.isin(body_user_indices[:, 0], self.item_user_ids)
@@ -229,6 +236,8 @@ class ContactSensor(BaseSensor):
         else:
             filter_mask = torch.logical_or(filter0_mask, filter1_mask)
 
+        self._curr_contact_num = filter_mask.sum().item()
+
         filtered_contact_data = contact_data[filter_mask]
         filtered_user_ids = body_user_indices[filter_mask]
         filtered_env_ids = self.item_user_env_ids_map[filtered_user_ids[:, 0]]
@@ -237,13 +246,24 @@ class ContactSensor(BaseSensor):
         filtered_contact_data[:, 0:3] = (
             filtered_contact_data[:, 0:3] - contact_offsets
         )  # minus arean offsets
-        self._data_buffer["position"] = filtered_contact_data[:, 0:3]
-        self._data_buffer["normal"] = filtered_contact_data[:, 3:6]
-        self._data_buffer["friction"] = filtered_contact_data[:, 6:9]
-        self._data_buffer["impulse"] = filtered_contact_data[:, 9]
-        self._data_buffer["distance"] = filtered_contact_data[:, 10]
-        self._data_buffer["user_ids"] = filtered_user_ids
-        self._data_buffer["env_ids"] = filtered_env_ids
+
+        self._data_buffer["position"][: self._curr_contact_num] = filtered_contact_data[
+            :, 0:3
+        ]
+        self._data_buffer["normal"][: self._curr_contact_num] = filtered_contact_data[
+            :, 3:6
+        ]
+        self._data_buffer["friction"][: self._curr_contact_num] = filtered_contact_data[
+            :, 6:9
+        ]
+        self._data_buffer["impulse"][: self._curr_contact_num] = filtered_contact_data[
+            :, 9
+        ]
+        self._data_buffer["distance"][: self._curr_contact_num] = filtered_contact_data[
+            :, 10
+        ]
+        self._data_buffer["user_ids"][: self._curr_contact_num] = filtered_user_ids
+        self._data_buffer["env_ids"][: self._curr_contact_num] = filtered_env_ids
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor:
         """Not used.
@@ -283,11 +303,9 @@ class ContactSensor(BaseSensor):
         logger.log_error("`set_local_pose` for contact sensor is not implemented yet.")
         return None
 
-    def get_data(self, copy: bool = True) -> Dict[str, torch.Tensor]:
+    def get_data(self) -> TensorDict:
         """Retrieve data from the sensor.
 
-        Args:
-            copy: If True, return a copy of the data buffer. Defaults to True.
         Returns:
             Dict:{
                 "position": Tensor of float32 (num_contact, 3) representing the contact positions,
@@ -300,9 +318,24 @@ class ContactSensor(BaseSensor):
                 "env_ids": [num_contacts, ] of int, which arena the contact belongs to.
             }
         """
-        if copy:
-            return {key: value.clone() for key, value in self._data_buffer.items()}
-        return self._data_buffer
+
+        if self._curr_contact_num == 0:
+            return TensorDict(
+                {
+                    "position": torch.empty((0, 3), device=self.device),
+                    "normal": torch.empty((0, 3), device=self.device),
+                    "friction": torch.empty((0, 3), device=self.device),
+                    "impulse": torch.empty((0,), device=self.device),
+                    "distance": torch.empty((0,), device=self.device),
+                    "user_ids": torch.empty(
+                        (0, 2), dtype=torch.int32, device=self.device
+                    ),
+                    "env_ids": torch.empty((0,), dtype=torch.int32, device=self.device),
+                },
+                batch_size=[0],
+                device=self.device,
+            )
+        return self._data_buffer[: self._curr_contact_num]
 
     def filter_by_user_ids(self, item_user_ids: torch.Tensor):
         """Filter contact report by specific user IDs.
@@ -319,15 +352,7 @@ class ContactSensor(BaseSensor):
             filter_mask = torch.logical_and(filter0_mask, filter1_mask)
         else:
             filter_mask = torch.logical_or(filter0_mask, filter1_mask)
-        return {
-            "position": self._data_buffer["position"][filter_mask],
-            "normal": self._data_buffer["normal"][filter_mask],
-            "friction": self._data_buffer["friction"][filter_mask],
-            "impulse": self._data_buffer["impulse"][filter_mask],
-            "distance": self._data_buffer["distance"][filter_mask],
-            "user_ids": self._data_buffer["user_ids"][filter_mask],
-            "env_ids": self._data_buffer["env_ids"][filter_mask],
-        }
+        return self._data_buffer[filter_mask]
 
     def set_contact_point_visibility(
         self,

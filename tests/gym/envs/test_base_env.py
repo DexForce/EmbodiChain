@@ -123,6 +123,8 @@ class BaseEnvTest:
             headless=True,
             device=sim_device,
         )
+        self.device = self.env.get_wrapper_attr("device")
+        self.num_envs = self.env.get_wrapper_attr("num_envs")
 
     def test_env_rollout(self):
         """Test environment rollout."""
@@ -133,22 +135,18 @@ class BaseEnvTest:
             for i in range(2):
                 action = self.env.action_space.sample()
                 action = torch.as_tensor(
-                    action, dtype=torch.float32, device=self.env.device
+                    action, dtype=torch.float32, device=self.device
                 )
 
                 init_pose = self.env.get_wrapper_attr("robot_init_qpos")
                 init_pose = (
-                    torch.as_tensor(
-                        init_pose, dtype=torch.float32, device=self.env.device
-                    )
+                    torch.as_tensor(init_pose, dtype=torch.float32, device=self.device)
                     .unsqueeze_(0)
-                    .repeat(self.env.num_envs, 1)
+                    .repeat(self.num_envs, 1)
                 )
                 action = (
                     init_pose
-                    + torch.rand_like(
-                        action, dtype=torch.float32, device=self.env.device
-                    )
+                    + torch.rand_like(action, dtype=torch.float32, device=self.device)
                     * 0.2
                     - 0.1
                 )
@@ -156,14 +154,14 @@ class BaseEnvTest:
                 obs, reward, done, truncated, info = self.env.step(action)
 
         assert reward.shape == (
-            self.env.num_envs,
-        ), f"Expected reward shape ({self.env.num_envs},), got {reward.shape}"
+            self.num_envs,
+        ), f"Expected reward shape ({self.num_envs},), got {reward.shape}"
         assert done.shape == (
-            self.env.num_envs,
-        ), f"Expected done shape ({self.env.num_envs},), got {done.shape}"
+            self.num_envs,
+        ), f"Expected done shape ({self.num_envs},), got {done.shape}"
         assert truncated.shape == (
-            self.env.num_envs,
-        ), f"Expected truncated shape ({self.env.num_envs},), got {truncated.shape}"
+            self.num_envs,
+        ), f"Expected truncated shape ({self.num_envs},), got {truncated.shape}"
         assert (
             obs.get("cube_position") is not None
         ), "Expected 'cube_position' in the obs dict"

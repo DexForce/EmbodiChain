@@ -89,7 +89,6 @@ Registration System
 
     :param name: Unique identifier for the environment
     :param cls: Environment class (must inherit from BaseEnv or BaseEnv)  
-    :param max_episode_steps: Maximum steps per episode (optional)
     :param default_kwargs: Default keyword arguments for environment creation
 
 .. autofunction:: register_env
@@ -97,14 +96,13 @@ Registration System
     Decorator function for registering environment classes. This is the recommended way to register environments.
 
     :param uid: Unique identifier for the environment
-    :param max_episode_steps: Maximum steps per episode (optional)
     :param override: Whether to override existing environment with same ID
     :param kwargs: Additional registration parameters
     
     Example:
         .. code-block:: python
 
-            @register_env("MyEnv-v1", max_episode_steps=1000)
+            @register_env("MyEnv-v1")
             class MyCustomEnv(BaseEnv):
                 def __init__(self, **kwargs):
                     super().__init__(**kwargs)

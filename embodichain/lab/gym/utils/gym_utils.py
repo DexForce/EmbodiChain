@@ -23,6 +23,7 @@ import gymnasium
 from typing import Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
+from tensordict import TensorDict
 
 from embodichain.lab.sim.types import Device, Array
 from embodichain.lab.sim.objects import Robot
@@ -32,6 +33,7 @@ from dexsim.utility import log_debug, log_error
 
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
+    "embodichain.lab.gym.envs.managers.action_manager",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.randomization",
     "embodichain.lab.gym.envs.managers.record",
@@ -61,7 +63,7 @@ def convert_observation_to_space(
     """Convert observation to OpenAI gym observation space (recursively).
     Modified from `gym.envs.mujoco_env`
     """
-    if isinstance(observation, (dict)):
+    if isinstance(observation, (dict, TensorDict)):
         # CATUION: Explicitly create a list of key-value tuples
         # Otherwise, spaces.Dict will sort keys if a dict is provided
         space = spaces.Dict(
@@ -385,6 +387,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         EventCfg,
         ObservationCfg,
         RewardCfg,
+        ActionTermCfg,
         DatasetFunctorCfg,
     )
     from embodichain.utils import configclass
@@ -402,10 +405,13 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
     env_cfg = EmbodiedEnvCfg()
 
     # check all necessary keys
-    required_keys = ["id", "max_episodes", "env", "robot"]
+    required_keys = ["id", "env", "robot"]
     for key in required_keys:
         if key not in config:
             log_error(f"Missing required config key: {key}")
+
+    env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
+    env_cfg.num_envs = config.get("num_envs", 1)
 
     # parser robot config
     # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
@@ -430,6 +436,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         env_cfg.light.direct = [
             LightCfg.from_dict(l) for l in config["light"].get("direct", [])
         ]
+        env_cfg.light.indirect = config["light"].get("indirect", None)
 
     # parser background objects config
     if "background" in config:
@@ -472,6 +479,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
             cfg = ArticulationCfg.from_dict(obj_dict)
             env_cfg.articulation.append(cfg)
 
+    env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
@@ -606,6 +614,24 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
             )
 
             setattr(env_cfg.rewards, reward_name, reward)
+
+    # parse actions config (ActionManager)
+    env_cfg.actions = None
+    env_config = config["env"]
+    if "actions" in env_config:
+        env_cfg.actions = ComponentCfg()
+        for term_name, term_params in env_config["actions"].items():
+            term_params_modified = deepcopy(term_params)
+            term_func = find_function_from_modules(
+                term_params["func"],
+                manager_modules,
+                raise_if_not_found=True,
+            )
+            action_term = ActionTermCfg(
+                func=term_func,
+                params=term_params_modified.get("params", {}),
+            )
+            setattr(env_cfg.actions, term_name, action_term)
 
     return env_cfg
 
@@ -783,6 +809,27 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
+    """Merge command-line arguments with gym configuration.
+
+    Command-line arguments will override the corresponding values in the gym configuration.
+
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments.
+        gym_config (dict): The original gym configuration dictionary.
+
+    Returns:
+        dict: The merged gym configuration dictionary.
+    """
+    merged_config = deepcopy(gym_config)
+    merged_config["num_envs"] = args.num_envs
+    merged_config["device"] = args.device
+    merged_config["headless"] = args.headless
+    merged_config["enable_rt"] = args.enable_rt
+    merged_config["gpu_id"] = args.gpu_id
+    return merged_config
+
+
 def build_env_cfg_from_args(
     args: argparse.Namespace,
 ) -> tuple["EmbodiedEnvCfg", dict, dict]:
@@ -800,11 +847,14 @@ def build_env_cfg_from_args(
     from embodichain.lab.sim import SimulationManagerCfg
 
     gym_config = load_json(args.gym_config)
+    gym_config = merge_args_with_gym_config(args, gym_config)
+
     cfg: EmbodiedEnvCfg = config_to_cfg(
         gym_config, manager_modules=DEFAULT_MANAGER_MODULES
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+
     if args.preview:
         # In preview mode, we typically don't want to save data
         cfg.filter_dataset_saving = True
@@ -814,12 +864,225 @@ def build_env_cfg_from_args(
         action_config = load_json(args.action_config)
         action_config["action_config"] = action_config
 
-    cfg.num_envs = args.num_envs
     cfg.sim_cfg = SimulationManagerCfg(
-        headless=args.headless,
-        sim_device=args.device,
-        enable_rt=args.enable_rt,
-        gpu_id=args.gpu_id,
+        headless=gym_config["headless"],
+        sim_device=gym_config["device"],
+        enable_rt=gym_config["enable_rt"],
+        gpu_id=gym_config["gpu_id"],
     )
 
     return cfg, gym_config, action_config
+
+
+def init_rollout_buffer_from_gym_space(
+    obs_space: spaces.Space,
+    action_space: spaces.Space,
+    max_episode_steps: int,
+    num_envs: int,
+    device: Union[str, torch.device] = "cpu",
+) -> TensorDict:
+    """Initialize a rollout buffer based on the observation and action spaces.
+
+    Args:
+        obs_space (spaces.Space): The observation space of the environment.
+        action_space (spaces.Space): The action space of the environment.
+        max_episode_steps (int): The number of steps in an episode.
+        num_envs (int): The number of parallel environments.
+
+    Returns:
+        TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+    """
+
+    def _convert_space_dtype_to_torch_dtype(space: spaces.Space) -> torch.dtype:
+        if isinstance(space, spaces.Dict):
+            return {k: _convert_space_dtype_to_torch_dtype(v) for k, v in space.items()}
+        elif isinstance(space, spaces.Box):
+            if np.issubdtype(space.dtype, np.floating):
+                return torch.float32
+            elif np.issubdtype(space.dtype, np.int64):
+                return torch.int64
+            elif np.issubdtype(space.dtype, np.int32):
+                return torch.int32
+            elif np.issubdtype(space.dtype, np.uint16):
+                return torch.uint16
+            elif np.issubdtype(space.dtype, np.uint8):
+                return torch.uint8
+            elif np.issubdtype(space.dtype, np.bool_):
+                return torch.bool
+            else:
+                log_error(f"Unsupported space dtype: {space.dtype}")
+        else:
+            log_error(f"Space type {type(space)} is not supported yet.")
+
+    def _init_buffer_from_space(
+        space: spaces.Space, num_envs: int
+    ) -> Union[torch.Tensor, TensorDict]:
+        if isinstance(space, spaces.Dict):
+            return TensorDict(
+                {k: _init_buffer_from_space(v, num_envs) for k, v in space.items()},
+                batch_size=[num_envs],
+                device=device,
+            )
+        elif isinstance(space, spaces.Box):
+            return torch.zeros(
+                (num_envs, max_episode_steps, *space.shape[1:]),
+                dtype=_convert_space_dtype_to_torch_dtype(space),
+                device=device,
+            )
+        else:
+            log_error(f"Space type {type(space)} is not supported yet.")
+
+    rollout_buffer = TensorDict(
+        {
+            "obs": _init_buffer_from_space(obs_space, num_envs),
+            "actions": _init_buffer_from_space(action_space, num_envs),
+            "rewards": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.float32, device=device
+            ),
+        },
+        batch_size=[num_envs, max_episode_steps],
+        device=device,
+    )
+    return rollout_buffer
+
+
+def init_rollout_buffer_from_config(
+    config: dict,
+    max_episode_steps: int,
+    batch_size: int,
+    state_dim: int,
+    device: Union[str, torch.device] = "cpu",
+) -> TensorDict:
+    """Initialize a rollout buffer based on the environment configuration.
+
+    Args:
+        config (dict): The environment configuration dictionary.
+        max_episode_steps (int): The number of steps in an episode.
+        batch_size (int): The batch size for the rollout buffer.
+        state_dim (int): The dimension of the flattened state vector.
+
+    Returns:
+        TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+    """
+
+    # Parse sensor
+    sensor_desc = {}
+    for cfg in config.get("sensor", []):
+        desc = {}
+        width = cfg.get("width", 640)
+        height = cfg.get("height", 480)
+        desc["color"] = torch.zeros(
+            (
+                batch_size,
+                max_episode_steps,
+                height,
+                width,
+                4,
+            ),
+            dtype=torch.uint8,
+            device=device,
+        )
+        if cfg.get("enable_mask", False):
+            desc["mask"] = torch.zeros(
+                (
+                    batch_size,
+                    max_episode_steps,
+                    height,
+                    width,
+                ),
+                dtype=torch.int32,
+                device=device,
+            )
+        if cfg.get("enable_depth", False):
+            desc["depth"] = torch.zeros(
+                (
+                    batch_size,
+                    max_episode_steps,
+                    height,
+                    width,
+                ),
+                dtype=torch.float32,
+                device=device,
+            )
+
+        if cfg.get("sensor_type", "Camera") == "StereoCamera":
+            desc["color_right"] = torch.zeros(
+                (
+                    batch_size,
+                    max_episode_steps,
+                    height,
+                    width,
+                    4,
+                ),
+                dtype=torch.uint8,
+                device=device,
+            )
+            if "mask" in desc:
+                desc["mask_right"] = torch.zeros(
+                    (
+                        batch_size,
+                        max_episode_steps,
+                        height,
+                        width,
+                    ),
+                    dtype=torch.int32,
+                    device=device,
+                )
+            if "depth" in desc:
+                desc["depth_right"] = torch.zeros(
+                    (
+                        batch_size,
+                        max_episode_steps,
+                        height,
+                        width,
+                    ),
+                    dtype=torch.float32,
+                    device=device,
+                )
+
+        sensor_desc[cfg.get("uid", "camera")] = desc
+
+    # For simplicity, we initialize the observation buffer as a flat vector with dimension state_dim.
+    # In practice, you may want to initialize it according to the actual observation space structure.
+    rollout_buffer = TensorDict(
+        {
+            "obs": {
+                "robot": {
+                    "qpos": torch.zeros(
+                        (batch_size, max_episode_steps, state_dim),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                    "qvel": torch.zeros(
+                        (batch_size, max_episode_steps, state_dim),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                    "qf": torch.zeros(
+                        (batch_size, max_episode_steps, state_dim),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                },
+            },
+            # TODO: For action, we may support TensorDict structure in the future, which may include
+            # qpos, qvel and qf.
+            "actions": torch.zeros(
+                (batch_size, max_episode_steps, state_dim),
+                dtype=torch.float32,
+                device=device,
+            ),
+            "rewards": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.float32, device=device
+            ),
+        },
+        batch_size=[batch_size, max_episode_steps],
+        device=device,
+    )
+
+    if sensor_desc:
+        rollout_buffer["obs"]["sensor"] = TensorDict(
+            sensor_desc, batch_size=[batch_size, max_episode_steps], device=device
+        )
+
+    return rollout_buffer

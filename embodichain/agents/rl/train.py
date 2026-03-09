@@ -64,7 +64,9 @@ def train_from_config(config_path: str):
     seed = int(trainer_cfg.get("seed", 1))
     device_str = trainer_cfg.get("device", "cpu")
     iterations = int(trainer_cfg.get("iterations", 250))
-    buffer_size = int(trainer_cfg.get("buffer_size", 2048))
+    buffer_size = int(
+        trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 2048))
+    )
     model_type = trainer_cfg.get("model_type", "standard")
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
@@ -140,9 +142,6 @@ def train_from_config(config_path: str):
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
 
-    if num_envs is not None:
-        gym_env_cfg.num_envs = num_envs
-
     # Ensure sim configuration mirrors runtime overrides
     if gym_env_cfg.sim_cfg is None:
         gym_env_cfg.sim_cfg = SimulationManagerCfg()
@@ -179,24 +178,17 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
-<<<<<<< HEAD
-=======
-    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic/actor_only)
-    if policy_name.lower() == "actor_critic":
-        # Get observation dimension from flattened observation space
-        # flattened_observation_space returns Box space for RL training
-        obs_dim = env.flattened_observation_space.shape[-1]
-        action_dim = env.action_space.shape[-1]
->>>>>>> origin/main
 
-    # Get action_dim from config (required)
+    # Prefer explicit action_dim from config, but keep env-based fallback for older configs.
     action_dim = policy_block.get("action_dim")
     if action_dim is None:
-        raise ValueError(
-            "Missing 'action_dim' in policy config. "
-            "With TensorDict architecture, action dimension must be explicitly specified in config. "
-            'Example: {"policy": {"name": "actor_critic", "action_dim": 7, ...}}'
-        )
+        action_space = getattr(env, "action_space", None)
+        if action_space is None or not hasattr(action_space, "shape"):
+            raise ValueError(
+                "Unable to infer action_dim. Please set 'policy.action_dim' explicitly "
+                "or expose env.action_space.shape."
+            )
+        action_dim = int(action_space.shape[-1])
 
     # Infer obs_dim from environment sampling (no gym space dependency)
     # Env returns dict, we process it to infer dimensions
@@ -217,7 +209,8 @@ def train_from_config(config_path: str):
     obs_dim = sum(t.shape[-1] for t in obs_list)
 
     # Build policy based on type
-    if policy_name.lower() == "actor_critic":
+    policy_name_lower = policy_name.lower()
+    if policy_name_lower == "actor_critic":
         actor_cfg = policy_block.get("actor")
         critic_cfg = policy_block.get("critic")
         if actor_cfg is None or critic_cfg is None:
@@ -235,10 +228,7 @@ def train_from_config(config_path: str):
             actor=actor,
             critic=critic,
         )
-    elif policy_name.lower() == "actor_only":
-        obs_dim = env.flattened_observation_space.shape[-1]
-        action_dim = env.action_space.shape[-1]
-
+    elif policy_name_lower == "actor_only":
         actor_cfg = policy_block.get("actor")
         if actor_cfg is None:
             raise ValueError(
@@ -249,16 +239,10 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            env.flattened_observation_space,
-            env.action_space,
-            device,
+            action_dim=action_dim,
+            device=device,
             actor=actor,
         )
-    else:
-        policy = build_policy(
-            policy_block, env.flattened_observation_space, env.action_space, device
-        )
-        policy = build_policy(policy_block, action_dim=action_dim, device=device)
     else:
         policy = build_policy(policy_block, action_dim=action_dim, device=device)
 

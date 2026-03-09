@@ -16,6 +16,7 @@ Configured via the {class}`~cfg.RigidObjectCfg` class.
 | `attrs` | {class}`~cfg.RigidBodyAttributesCfg` | defaults in code | Physical attributes (mass, damping, friction, restitution, collision offsets, CCD, etc.). |
 | `init_pos` | `Sequence[float]` | `(0,0,0)` | Initial root position (x, y, z). |
 | `init_rot` | `Sequence[float]` | `(0,0,0)` (Euler degrees) | Initial root orientation (Euler angles in degrees) or provide `init_local_pose`. |
+| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
 | `uid` | `str` | `None` | Optional unique identifier for the object; manager will assign one if omitted. |
 
 ### Rigid Body Attributes ({class}`~cfg.RigidBodyAttributesCfg`)
@@ -72,6 +73,31 @@ sim.update()
 ```
 
 > Note: `scripts/tutorials/sim/create_scene.py` provides a minimal working example of adding a rigid cube and running the simulation loop.
+
+### USD Import
+
+You can import USD files (`.usd`, `.usda`, `.usdc`) as rigid objects:
+
+```python
+from embodichain.data import get_data_path
+
+# Import USD with properties from file
+usd_cfg = RigidObjectCfg(
+    shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
+    body_type="dynamic",
+    use_usd_properties=True  # Keep USD properties
+)
+obj = sim.add_rigid_object(cfg=usd_cfg)
+
+# Or override USD properties with config
+usd_cfg_override = RigidObjectCfg(
+    shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
+    body_type="dynamic",
+    use_usd_properties=False,  # Use config instead
+    attrs=RigidBodyAttributesCfg(mass=2.0)
+)
+obj2 = sim.add_rigid_object(cfg=usd_cfg_override)
+```
 
 ## Rigid Object Class — Common Methods & Attributes
 

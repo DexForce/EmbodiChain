@@ -20,11 +20,22 @@ from .cfg import (
     EventCfg,
     ObservationCfg,
     RewardCfg,
+    ActionTermCfg,
     DatasetFunctorCfg,
 )
 from .manager_base import Functor, ManagerBase
 from .event_manager import EventManager
 from .observation_manager import ObservationManager
 from .reward_manager import RewardManager
+from .action_manager import (
+    ActionManager,
+    ActionTerm,
+    DeltaQposTerm,
+    QposTerm,
+    QposNormalizedTerm,
+    EefPoseTerm,
+    QvelTerm,
+    QfTerm,
+)
 from .dataset_manager import DatasetManager
 from .datasets import *

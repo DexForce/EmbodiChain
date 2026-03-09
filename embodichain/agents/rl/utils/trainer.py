@@ -109,7 +109,9 @@ class Trainer:
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
-        self._stats_lock = threading.Lock()  # Protects curr_ret, curr_len, ret_window, len_window (async mode)
+        self._stats_lock = (
+            threading.Lock()
+        )  # Protects curr_ret, curr_len, ret_window, len_window (async mode)
 
         # Episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
@@ -341,8 +343,12 @@ class Trainer:
                 obs_copy = obs.clone()
                 self.policy.forward(obs_copy, deterministic=True)
                 actions = obs_copy["action"]
-
-                action_type = getattr(self.eval_env, "action_type", "delta_qpos")
+                am = getattr(self.eval_env, "action_manager", None)
+                action_type = (
+                    am.action_type
+                    if am
+                    else getattr(self.eval_env, "action_type", "delta_qpos")
+                )
                 action_dict = {action_type: actions}
 
                 # Environment step - env returns dict, convert to TensorDict at boundary

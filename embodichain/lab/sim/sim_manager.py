@@ -1041,9 +1041,35 @@ class SimulationManager:
         env_list = [self._env] if len(self._arenas) == 0 else self._arenas
         obj_list = []
 
-        for env in env_list:
-            art = env.load_urdf(cfg.fpath)
-            obj_list.append(art)
+        is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
+        if is_usd:
+            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
+            if len(env_list) > 1:
+                logger.log_error(f"Currently not supporting multiple arenas for USD.")
+            env = self._env
+            results = env.import_from_usd_file(cfg.fpath, return_object=True)
+            # print("USD import results:", results)
+
+            articulations_found = []
+            for key, value in results.items():
+                if isinstance(value, dexsim.engine.Articulation):
+                    articulations_found.append(value)
+
+            if len(articulations_found) == 0:
+                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
+            elif len(articulations_found) > 1:
+                logger.log_error(
+                    f"Multiple articulations found in USD file {cfg.fpath}. "
+                )
+            elif len(articulations_found) == 1:
+                obj_list.append(articulations_found[0])
+        else:
+            # non-usd file does not support this option, will be forced set False to avoid potential issues.
+            cfg.use_usd_properties = False
+
+            for env in env_list:
+                art = env.load_urdf(cfg.fpath)
+                obj_list.append(art)
 
         articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
 
@@ -1109,9 +1135,35 @@ class SimulationManager:
         env_list = [self._env] if len(self._arenas) == 0 else self._arenas
         obj_list = []
 
-        for env in env_list:
-            art = env.load_urdf(cfg.fpath)
-            obj_list.append(art)
+        is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
+        if is_usd:
+            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
+            if len(env_list) > 1:
+                logger.log_error(f"Currently not supporting multiple arenas for USD.")
+            env = self._env
+            results = env.import_from_usd_file(cfg.fpath, return_object=True)
+            # print("USD import results:", results)
+
+            articulations_found = []
+            for key, value in results.items():
+                if isinstance(value, dexsim.engine.Articulation):
+                    articulations_found.append(value)
+
+            if len(articulations_found) == 0:
+                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
+            elif len(articulations_found) > 1:
+                logger.log_error(
+                    f"Multiple articulations found in USD file {cfg.fpath}. "
+                )
+            elif len(articulations_found) == 1:
+                obj_list.append(articulations_found[0])
+        else:
+            # non-usd file does not support this option, will be forced set False to avoid potential issues.
+            cfg.use_usd_properties = False
+
+            for env in env_list:
+                art = env.load_urdf(cfg.fpath)
+                obj_list.append(art)
 
         robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
 

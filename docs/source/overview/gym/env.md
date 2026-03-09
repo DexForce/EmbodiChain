@@ -5,7 +5,7 @@
 
 The {class}`~envs.EmbodiedEnv` is the core environment class in EmbodiChain designed for complex Embodied AI tasks. It adopts a **configuration-driven** architecture, allowing users to define robots, sensors, objects, lighting, and automated behaviors (events) purely through configuration classes, minimizing the need for boilerplate code.
 
-For **Reinforcement Learning** tasks, EmbodiChain provides {class}`~envs.RLEnv`, a specialized subclass that extends {class}`~envs.EmbodiedEnv` with RL-specific utilities such as flexible action preprocessing, goal management, and standardized info structure.
+For **Reinforcement Learning** tasks, EmbodiChain provides the **Action Manager** (configured via ``actions`` in {class}`~envs.EmbodiedEnvCfg`), which handles action preprocessing (scaling, IK, delta_qpos, etc.) in a modular, configurable way. RL tasks inherit from {class}`~envs.EmbodiedEnv` directly and use the Action Manager for action processing.
 
 ## Core Architecture
 
@@ -17,7 +17,7 @@ EmbodiChain provides a hierarchy of environment classes for different task types
   * **Event Manager**: Domain randomization, scene setup, and dynamic asset swapping.
   * **Observation Manager**: Flexible observation space extensions.
   * **Dataset Manager**: Built-in support for demonstration data collection.
-* **{class}`~envs.RLEnv`**: Specialized environment for RL tasks, extending {class}`~envs.EmbodiedEnv` with action preprocessing, goal management, and standardized reward/info structure.
+* **Action Manager**: Configurable action preprocessing for RL tasks (delta_qpos, eef_pose, qvel, etc.), integrated into {class}`~envs.EmbodiedEnv` when ``actions`` is configured.
 
 ## Configuration System
 
@@ -44,12 +44,21 @@ Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it incl
 * **ignore_terminations** (bool): 
   Whether to ignore terminations when deciding when to auto reset. Terminations can be caused by the task reaching a success or fail state as defined in a task's evaluation function. If set to ``False``, episodes will stop early when termination conditions are met. If set to ``True``, episodes will only stop due to the timelimit, which is useful for modeling tasks as infinite horizon. Defaults to ``False``.
 
+* **max_episode_steps** (int): 
+  Maximum number of steps per episode. If set to ``-1``, episodes will not have a step limit and will only end due to success/failure conditions. Defaults to ``300``.
+
 ### EmbodiedEnvCfg Parameters
 
 The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional parameters:
 
 * **robot** ({class}`~embodichain.lab.sim.cfg.RobotCfg`): 
   Defines the agent in the scene. Supports loading robots from URDF/MJCF with specified initial state and control mode. This is a required field.
+
+* **control_parts** (List[str]): 
+  List of robot part names that are controlled by the environment's action space. This allows for flexible control schemes (e.g., controlling only the left arm or end-effector). Defaults to an empty list, in which case no robot parts are controlled.
+
+* **active_joint_ids** (List[int]): 
+  List of joint IDs that are active for control and observation. This is used to filter the robot's full joint state to only the relevant joints for the task. Defaults to an empty list, in which case all joints are considered active.
 
 * **sensor** (List[{class}`~embodichain.lab.sim.sensor.SensorCfg`]): 
   A list of sensors attached to the scene or robot. Common sensors include {class}`~embodichain.lab.sim.sensors.StereoCamera` for RGB-D and segmentation data. Defaults to an empty list.
@@ -81,11 +90,20 @@ The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional paramet
 * **dataset** (Union[object, None]): 
   Dataset collection settings. Defaults to None, in which case no dataset collection is performed. Please refer to the {class}`~envs.managers.DatasetManager` class for more details.
 
+* **actions** (Union[object, None]): 
+  Action Manager settings for RL tasks. When configured, preprocesses raw policy actions (e.g., delta_qpos, eef_pose) into robot control format. Replaces the legacy RLEnv. Defaults to None. See the {class}`~envs.managers.ActionManager` class for more details.
+
 * **extensions** (Union[Dict[str, Any], None]): 
-  Task-specific extension parameters that are automatically bound to the environment instance. This allows passing custom parameters (e.g., ``episode_length``, ``action_type``, ``action_scale``) without modifying the base configuration class. These parameters are accessible as instance attributes after environment initialization. For example, if ``extensions = {"episode_length": 500}``, you can access it via ``self.episode_length``. Defaults to None.
+  Task-specific extension parameters that are automatically bound to the environment instance. This allows passing custom parameters (e.g., ``success_threshold``) without modifying the base configuration class. For action configuration, use the ``actions`` field instead. These parameters are accessible as instance attributes after environment initialization. Defaults to None.
 
 * **filter_visual_rand** (bool): 
   Whether to filter out visual randomization functors. Useful for debugging motion and physics issues when visual randomization interferes with the debugging process. Defaults to ``False``.
+
+* **filter_dataset_saving** (bool): 
+  Whether to filter out dataset saving functors. Useful for debugging when dataset saving interferes with the debugging process. Defaults to ``False``.
+
+* **init_rollout_buffer** (bool): 
+  Whether to initialize the rollout buffer for data collection. If ``True``, the environment will create a rollout buffer matching the observation/action spaces for episode recording. Defaults to ``False``. If you plan to use the dataset manager for imitation learning, you should set this to ``True`` to enable episode recording.
 
 ### Example Configuration
 
@@ -110,11 +128,10 @@ class MyTaskEnvCfg(EmbodiedEnvCfg):
     observations = ...   # Custom observation spec
     dataset = ...        # Data collection settings
 
-    # 4. Task Extensions
-    extensions = {       # Task-specific parameters
-        "episode_length": 500,
-        "action_type": "delta_qpos",
-        "action_scale": 0.1,
+    # 4. Action Manager (for RL tasks)
+    actions = ...        # Action preprocessing (e.g., DeltaQposTerm with scale)
+    extensions = {       # Task-specific parameters (e.g., success_threshold)
+        "success_threshold": 0.1,
     }
 ```
 
@@ -172,38 +189,56 @@ The dataset manager is called automatically during {meth}`~envs.Env.step()`, ens
 
 ## Reinforcement Learning Environment
 
-For RL tasks, EmbodiChain provides {class}`~envs.RLEnv`, a specialized base class that extends {class}`~envs.EmbodiedEnv` with RL-specific utilities:
+For RL tasks, EmbodiChain uses the **Action Manager** integrated into {class}`~envs.EmbodiedEnv`:
 
-* **Action Preprocessing**: Flexible action transformation supporting delta_qpos, absolute qpos, joint velocity, joint force, and end-effector pose (with IK).
-* **Goal Management**: Built-in goal pose tracking and visualization with axis markers.
-* **Standardized Info Structure**: Template methods for computing task-specific success/failure conditions and metrics.
+* **Action Preprocessing**: Configurable via ``actions`` in {class}`~envs.EmbodiedEnvCfg`. Supports DeltaQposTerm, QposTerm, QposNormalizedTerm, EefPoseTerm, QvelTerm, QfTerm.
+* **Standardized Info Structure**: {class}`~envs.EmbodiedEnv` provides ``compute_task_state``, ``get_info``, and ``evaluate`` for task-specific success/failure and metrics.
 * **Episode Management**: Configurable episode length and truncation logic.
 
-### Configuration Extensions for RL
+### Action Manager Configuration
 
-RL environments use the ``extensions`` field to pass task-specific parameters:
+Configure action preprocessing via the ``actions`` field:
 
 ```python
-extensions = {
-    "action_type": "delta_qpos",      # Action type: delta_qpos, qpos, qvel, qf, eef_pose
-    "action_scale": 0.1,              # Scaling factor applied to all actions
-    "episode_length": 100,            # Maximum episode length
-    "success_threshold": 0.1,         # Task-specific success threshold (optional)
+from embodichain.lab.gym.envs.managers import ActionTermCfg, DeltaQposTerm
+from embodichain.utils import configclass
+
+@configclass
+class MyRLActionCfg:
+    delta_qpos: ActionTermCfg = ActionTermCfg(
+        func=DeltaQposTerm,
+        params={"scale": 0.1}
+    )
+
+# In EmbodiedEnvCfg:
+actions = MyRLActionCfg()
+extensions = {"success_threshold": 0.1}  # Task-specific parameters
+```
+
+In JSON config, use the ``actions`` section:
+
+```json
+"actions": {
+    "delta_qpos": {
+        "func": "DeltaQposTerm",
+        "params": { "scale": 0.1 }
+    }
 }
 ```
+
 
 ## Creating a Custom Task
 
 ### For Reinforcement Learning Tasks
 
-Inherit from {class}`~envs.RLEnv` and implement the task-specific logic:
+Inherit from {class}`~envs.EmbodiedEnv` and implement the task-specific logic. Configure the Action Manager via ``actions`` in your config:
 
 ```python
-from embodichain.lab.gym.envs import RLEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@register_env("MyRLTask-v0", max_episode_steps=100)
-class MyRLTaskEnv(RLEnv):
+@register_env("MyRLTask-v0")
+class MyRLTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
@@ -219,13 +254,6 @@ class MyRLTaskEnv(RLEnv):
         metrics = {"distance": ..., "angle_error": ...}
         
         return is_success, is_fail, metrics
-
-    def check_truncated(self, obs, info):
-        # Optional: Override to add custom truncation conditions
-        # Default: episode_length timeout
-        is_timeout = super().check_truncated(obs, info)
-        is_fallen = ...  # Custom condition (e.g., robot fell)
-        return is_timeout | is_fallen
 ```
 
 Configure rewards through the {class}`~envs.managers.RewardManager` in your environment config rather than overriding ``get_reward``.
@@ -238,14 +266,13 @@ Inherit from {class}`~envs.EmbodiedEnv` for IL tasks:
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@register_env("MyILTask-v0", max_episode_steps=500)
+@register_env("MyILTask-v0")
 class MyILTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
     def create_demo_action_list(self, *args, **kwargs):
         # Required: Generate scripted demonstrations for data collection
-        # Must set self.action_length = len(action_list) if returning actions
         pass
 
     def is_task_success(self, **kwargs):
@@ -267,7 +294,7 @@ For a complete example of a modular environment setup, please refer to the {ref}
 - {ref}`tutorial_create_basic_env` - Creating basic environments
 - {ref}`tutorial_modular_env` - Advanced modular environment setup
 - {ref}`tutorial_rl` - Reinforcement learning training guide
-- {doc}`/api_reference/embodichain/embodichain.lab.gym.envs` - Complete API reference for EmbodiedEnv, RLEnv, and configurations
+- {doc}`/api_reference/embodichain/embodichain.lab.gym.envs` - Complete API reference for EmbodiedEnv and configurations
 
 ```{toctree}
 :maxdepth: 1

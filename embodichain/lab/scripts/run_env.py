@@ -93,9 +93,6 @@ def generate_function(
                 _, _ = env.reset(options={"save_data": False})
                 break
 
-            # Successful execution: reset and save data
-            _, _ = env.reset()
-
         if valid:
             break
         else:

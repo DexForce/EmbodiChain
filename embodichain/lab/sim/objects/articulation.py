@@ -582,41 +582,52 @@ class Articulation(BatchEntity):
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
-        # Set articulation configuration in DexSim
-        set_dexsim_articulation_cfg(entities, self.cfg)
+        # Determine if we should use USD properties or cfg properties.
+        if not self.cfg.use_usd_properties:
+            # Set articulation configuration in DexSim
+            set_dexsim_articulation_cfg(entities, self.cfg)
 
-        # Init joint drive parameters.
-        num_entities = len(entities)
-        dof = self._data.dof
-        default_cfg = JointDrivePropertiesCfg()
-        self.default_joint_damping = torch.full(
-            (num_entities, dof), default_cfg.damping, dtype=torch.float32, device=device
-        )
-        self.default_joint_stiffness = torch.full(
-            (num_entities, dof),
-            default_cfg.stiffness,
-            dtype=torch.float32,
-            device=device,
-        )
-        self.default_joint_max_effort = torch.full(
-            (num_entities, dof),
-            default_cfg.max_effort,
-            dtype=torch.float32,
-            device=device,
-        )
-        self.default_joint_max_velocity = torch.full(
-            (num_entities, dof),
-            default_cfg.max_velocity,
-            dtype=torch.float32,
-            device=device,
-        )
-        self.default_joint_friction = torch.full(
-            (num_entities, dof),
-            default_cfg.friction,
-            dtype=torch.float32,
-            device=device,
-        )
-        self._set_default_joint_drive()
+            num_entities = len(entities)
+            dof = self._data.dof
+            default_cfg = JointDrivePropertiesCfg()
+            self.default_joint_damping = torch.full(
+                (num_entities, dof),
+                default_cfg.damping,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_stiffness = torch.full(
+                (num_entities, dof),
+                default_cfg.stiffness,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_max_effort = torch.full(
+                (num_entities, dof),
+                default_cfg.max_effort,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_max_velocity = torch.full(
+                (num_entities, dof),
+                default_cfg.max_velocity,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.default_joint_friction = torch.full(
+                (num_entities, dof),
+                default_cfg.friction,
+                dtype=torch.float32,
+                device=device,
+            )
+            self._set_default_joint_drive()
+        else:
+            # Read current properties from USD-loaded entities
+            self.default_joint_stiffness = self._data.joint_stiffness.clone()
+            self.default_joint_damping = self._data.joint_damping.clone()
+            self.default_joint_friction = self._data.joint_friction.clone()
+            self.default_joint_max_effort = self._data.qf_limits.clone()
+            self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
         self.pk_chain = None
         if self.cfg.build_pk_chain:
@@ -632,6 +643,8 @@ class Articulation(BatchEntity):
 
         # Stores mimic information for joints.
         self._mimic_info = entities[0].get_mimic_info()
+
+        self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
         # TODO: very weird that we must call update here to make sure the GPU indices are valid.
         if device.type == "cuda":
@@ -659,6 +672,15 @@ class Articulation(BatchEntity):
             int: The degree of freedom of the articulation.
         """
         return self._data.dof
+
+    @cached_property
+    def active_dof(self) -> int:
+        """Get the number of active degrees of freedom of the articulation.
+
+        Returns:
+            int: The number of active degrees of freedom of the articulation.
+        """
+        return len(self.active_joint_ids)
 
     @cached_property
     def num_links(self) -> int:
@@ -689,12 +711,21 @@ class Articulation(BatchEntity):
 
     @cached_property
     def joint_names(self) -> List[str]:
-        """Get the names of the actived joints in the articulation.
+        """Get the names of the joints in the articulation.
 
         Returns:
             List[str]: The names of the actived joints in the articulation.
         """
         return self._entities[0].get_actived_joint_names()
+
+    @cached_property
+    def active_joint_names(self) -> List[str]:
+        """Get the names of the active joints in the articulation.
+
+        Returns:
+            List[str]: The names of the active joints in the articulation.
+        """
+        return [self.joint_names[i] for i in self.active_joint_ids]
 
     @cached_property
     def all_joint_names(self) -> List[str]:

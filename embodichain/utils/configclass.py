@@ -78,7 +78,6 @@ def configclass(cls, **kwargs):
         @configclass
         class EnvCfg:
             num_envs: int = MISSING
-            episode_length: int = 2000
             viewer: ViewerCfg = ViewerCfg()
 
         # create configuration instance

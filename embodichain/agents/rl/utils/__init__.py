@@ -15,11 +15,18 @@
 # ----------------------------------------------------------------------------
 
 from .config import AlgorithmCfg
-from .helper import dict_to_tensordict, mean_scalar, pack_log_dict, compute_gae
+from .helper import (
+    compute_gae,
+    dict_to_tensordict,
+    flatten_dict_observation,
+    mean_scalar,
+    pack_log_dict,
+)
 
 __all__ = [
     "AlgorithmCfg",
     "dict_to_tensordict",
+    "flatten_dict_observation",
     "mean_scalar",
     "pack_log_dict",
     "compute_gae",

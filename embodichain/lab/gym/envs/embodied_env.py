@@ -22,6 +22,7 @@ import gymnasium as gym
 
 from dataclasses import MISSING
 from typing import Dict, Union, Sequence, Tuple, Any, List, Optional
+from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -44,9 +45,13 @@ from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
     RewardManager,
+    ActionManager,
     DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.lab.gym.utils.gym_utils import (
+    init_rollout_buffer_from_gym_space,
+)
 from embodichain.utils import configclass, logger
 
 
@@ -55,8 +60,50 @@ __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
 @configclass
 class EmbodiedEnvCfg(EnvCfg):
-    """Configuration class for the Embodied Environment. Inherits from EnvCfg and can be extended
-    with additional parameters if needed.
+    """Configuration for Embodied AI environments.
+
+    `EmbodiedEnvCfg` extends `EnvCfg` with high-level scene, robot, sensor,
+    object and manager declarations used to build modular embodied environments.
+    The configuration is intended to be declarative: the environment and its
+    managers (events, observations, rewards, dataset) are assembled from the
+    provided config fields with minimal additional code.
+
+    Typical usage: declare robots, sensors, lights, rigid objects/articulations,
+    and manager configurations. Additional task-specific parameters can be
+    supplied via the `extensions` dict and will be bound to the environment
+    instance as attributes during initialization.
+
+    Key fields
+    - **robot**: `RobotCfg` (required) — the agent definition (URDF/MJCF, initial
+        state, control mode, etc.).
+    - **control_parts**: Optional[List[str]] — named robot parts to control. If
+        `None`, all controllable joints are used.
+    - **active_joint_ids**: List[int] — explicit joint indices to use for
+        control (alternative to `control_parts`).
+    - **sensor**: List[`SensorCfg`] — sensors attached to the robot or scene
+        (cameras, depth, segmentation, force sensors, ...).
+    - **light**: `EnvLightCfg` — lighting configuration (direct lights now,
+        indirect/IBL planned for future releases).
+    - **background**, **rigid_object**, **rigid_object_group**, **articulation**:
+        scene object lists for static/kinematic props, dynamic objects, grouped
+        object pools, and articulated mechanisms respectively.
+    - **events**: Optional manager config — event functors for startup/reset/
+        periodic randomization and scripted behaviors.
+    - **observations**, **rewards**, **dataset**: Optional manager configs to
+        compose observation transforms, reward functors, and dataset/recorder
+        settings (auto-saving on episode completion).
+    - **extensions**: Optional[Dict[str, Any]] — arbitrary task-specific key/value
+        pairs (e.g. `success_threshold`, `control_frequency`) that are automatically
+        set on the config *and* bound to the environment instance.
+    - **filter_visual_rand** / **filter_dataset_saving**: booleans to disable
+        visual randomization or dataset saving for debugging purposes.
+    - **init_rollout_buffer**: bool — when true (or when a dataset manager is
+        present and dataset saving is enabled) the environment will initialize a
+        rollout buffer matching the observation/action spaces for episode
+        recording.
+
+    See `EmbodiedEnv` for usage patterns and the project documentation
+    for full examples showing how to declare environments from these configs.
     """
 
     @configclass
@@ -64,9 +111,19 @@ class EmbodiedEnvCfg(EnvCfg):
         direct: List[LightCfg] = []
 
         # TODO: support more types of indirect light in the future.
-        # indirect: Dict[str, Any] | None = None
+        indirect: dict[str, Any] | None = None
 
     robot: RobotCfg = MISSING
+
+    control_parts: list[str] | None = None
+    """List of robot parts to control. If None, all controllable joints will be used. 
+    This is useful when we want to control only a subset of the robot joints for certain tasks or demonstrations.
+    """
+
+    active_joint_ids: List[int] = []
+    """List of active joint IDs for control. User also can directly specify the active joint IDs instead of control \
+    parts. This is useful when the control parts are not well defined or we want to have more fine-grained control.
+    """
 
     sensor: List[SensorCfg] = []
 
@@ -106,16 +163,26 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.managers.DatasetManager` class for more details.
     """
 
+    actions: Union[object, None] = None
+    """Action manager settings. Defaults to None, in which case no action preprocessing is applied.
+
+    When configured, the ActionManager preprocesses raw policy actions (e.g., delta_qpos, eef_pose)
+    into robot control format.
+
+    Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
+    """
+
     extensions: Union[Dict[str, Any], None] = None
     """Extension parameters for task-specific configurations.
-    
-    This field can be used to pass additional parameters that are specific to certain environments
-    or tasks without modifying the base configuration class. For example:
-    - episode_length: Maximum episode length
-    - action_scale: Action scaling factor
-    - action_type: Action type (e.g., "delta_qpos", "qpos", "qvel")
+
+    This field can be used to pass additional parameters that are specific to certain
+    environments or tasks without modifying the base configuration class. For example:
+    - success_threshold: Task-specific success distance threshold
     - vr_joint_mapping: VR joint mapping for teleoperation
     - control_frequency: Control frequency for VR teleoperation
+
+    Note: Action configuration (e.g., delta_qpos, scale) should use the ``actions``
+    field and ActionManager, not extensions.
     """
 
     # Some helper attributes
@@ -130,6 +197,12 @@ class EmbodiedEnvCfg(EnvCfg):
     
     This is useful when we want to disable dataset saving for debug motion and physics issues.
     If no dataset manager is configured, this flag will have no effect.
+    """
+
+    init_rollout_buffer: bool = False
+    """Whether to initialize the rollout buffer in the environment.
+
+    If filter_dataset_saving is False and a dataset manager is configured, the rollout buffer will be initialized by default
     """
 
 
@@ -162,9 +235,6 @@ class EmbodiedEnv(BaseEnv):
         self.affordance_datas = {}
         self.action_bank = None
 
-        # TODO: Change to array like data structure to handle different demo action list length for across different arena.
-        self.action_length: int = 0  # Set by create_demo_action_list
-
         extensions = getattr(cfg, "extensions", {}) or {}
 
         for name, value in extensions.items():
@@ -174,22 +244,57 @@ class EmbodiedEnv(BaseEnv):
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
+        self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
 
         super().__init__(cfg, **kwargs)
 
         if self.cfg.dataset and not self.cfg.filter_dataset_saving:
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
+            self.cfg.init_rollout_buffer = True
 
-        self.episode_obs_buffer: Dict[int, List[EnvObs]] = {
-            i: [] for i in range(self.num_envs)
-        }
-        self.episode_action_buffer: Dict[int, List[EnvAction]] = {
-            i: [] for i in range(self.num_envs)
-        }
-        self.episode_success_status: Dict[int, bool] = {
-            i: False for i in range(self.num_envs)
-        }
+        # Rollout buffer for episode data collection.
+        # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
+        # The default key in the buffer are:
+        # - obs: the observation returned by the environment.
+        # - action: the action applied to the environment.
+        # - reward: the reward returned by the environment.
+        # TODO: we may add more keys and make the buffer extensible in the future.
+        # This buffer should also be support initialized from outside of the environment.
+        # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
+        self.rollout_buffer: TensorDict | None = None
+        self._max_rollout_steps = 0
+        if self.cfg.init_rollout_buffer:
+            self.rollout_buffer = init_rollout_buffer_from_gym_space(
+                obs_space=self.observation_space,
+                action_space=self.action_space,
+                max_episode_steps=self.max_episode_steps,
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            self._max_rollout_steps = self.rollout_buffer.shape[1]
+
+        self.current_rollout_step = 0
+
+        self.episode_success_status: torch.Tensor = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+
+    def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
+        """Set the rollout buffer for episode data collection.
+
+        This function can be used to set the rollout buffer from outside of the environment,
+        such as a shared rollout buffer initialized in model training process and passed to the environment for data collection.
+
+        Args:
+            rollout_buffer (TensorDict): The rollout buffer to be set. The shape of the buffer should be (num_envs, max_episode_steps, *data_shape) for each key.
+        """
+        if len(rollout_buffer.shape) != 2:
+            logger.log_error(
+                f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
+            )
+        self.rollout_buffer = rollout_buffer
+        self._max_rollout_steps = self.rollout_buffer.shape[1]
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -210,6 +315,16 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
+
+        if self.cfg.actions:
+            self.action_manager = ActionManager(self.cfg.actions, self)
+            # Override action space to match ActionManager output dim (e.g. EefPoseTerm uses 6/7D)
+            self.single_action_space = gym.spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(self.action_manager.total_action_dim,),
+                dtype=np.float32,
+            )
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -246,7 +361,6 @@ class EmbodiedEnv(BaseEnv):
             action_config: The configuration dict for the action bank.
         """
         self.action_bank = action_bank_cls(action_config)
-        misc_cfg = action_config.get("misc", {})
         try:
             this_class_name = self.action_bank.__class__.__name__
             node_func = {}
@@ -289,50 +403,55 @@ class EmbodiedEnv(BaseEnv):
         """
         return self.affordance_datas.get(key, default)
 
-    def _extract_single_env_data(self, data: Any, env_id: int) -> Any:
-        """Extract single environment data from batched data.
-
-        Args:
-            data: Batched data (dict, tensor, list, or primitive)
-            env_id: Environment index
-
-        Returns:
-            Data for the specified environment
-        """
-        if isinstance(data, dict):
-            return {
-                k: self._extract_single_env_data(v, env_id) for k, v in data.items()
-            }
-        elif isinstance(data, torch.Tensor):
-            return data[env_id] if data.ndim > 0 else data
-        elif isinstance(data, (list, tuple)):
-            return type(data)(
-                self._extract_single_env_data(item, env_id) for item in data
-            )
-        else:
-            return data
-
     def _hook_after_sim_step(
         self,
         obs: EnvObs,
         action: EnvAction,
+        rewards: torch.Tensor,
         dones: torch.Tensor,
-        terminateds: torch.Tensor,
         info: Dict,
         **kwargs,
     ):
-        # Extract and append data for each environment
-        for env_id in range(self.num_envs):
-            single_obs = self._extract_single_env_data(obs, env_id)
-            single_action = self._extract_single_env_data(action, env_id)
-            self.episode_obs_buffer[env_id].append(single_obs)
-            self.episode_action_buffer[env_id].append(single_action)
+        # TODO: We may make the data collection customizable for rollout buffer.
+        if self.rollout_buffer is not None:
+            buffer_device = self.rollout_buffer.device
+            if self.current_rollout_step < self._max_rollout_steps:
+                # Extract data into episode buffer.
+                self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
+                    obs.to(buffer_device), non_blocking=True
+                )
+                if isinstance(action, TensorDict):
+                    action_to_store = (
+                        action["qpos"]
+                        if "qpos" in action
+                        else (action["qvel"] if "qvel" in action else action["qf"])
+                    )
+                elif isinstance(action, torch.Tensor):
+                    action_to_store = action
+                else:
+                    logger.log_warning(
+                        f"Unexpected action type {type(action)} in _hook_after_sim_step; "
+                        "skipping action storage in rollout buffer."
+                    )
+                    action_to_store = None
+                if action_to_store is not None:
+                    self.rollout_buffer["actions"][
+                        :, self.current_rollout_step, ...
+                    ].copy_(action_to_store.to(buffer_device), non_blocking=True)
+                self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
+                    rewards.to(buffer_device), non_blocking=True
+                )
+                self.current_rollout_step += 1
+            else:
+                logger.log_warning(
+                    f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
+                        Data will not be recorded in the rollout buffer."
+                )
 
-            # Update success status if episode is done
-            if dones[env_id].item():
-                if "success" in info:
-                    success_value = info["success"]
-                    self.episode_success_status[env_id] = success_value[env_id].item()
+        # Update success status for all environments where episode is done
+        if "success" in info:
+            # info["success"] should be a tensor or array of shape (num_envs,)
+            self.episode_success_status[dones] = info["success"][dones]
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -374,46 +493,31 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
+        logger.log_debug(f"Initializing episode for env_ids: {env_ids}", color="blue")
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
-        if env_ids is None:
-            env_ids_to_process = list(range(self.num_envs))
-        elif isinstance(env_ids, torch.Tensor):
-            env_ids_to_process = env_ids.cpu().tolist()
-        else:
-            env_ids_to_process = list(env_ids)
+        env_ids_to_process = list(range(self.num_envs)) if env_ids is None else env_ids
 
         # Save dataset before clearing buffers for environments that are being reset
         if save_data and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
 
                 # Filter to only save successful episodes
-                successful_env_ids = [
-                    env_id
-                    for env_id in env_ids_to_process
-                    if (
-                        self.episode_success_status.get(env_id, False)
-                        or self._task_success[env_id].item()
-                    )
-                ]
+                successful_env_ids = self.episode_success_status | self._task_success
 
-                if successful_env_ids:
+                if successful_env_ids.any():
 
-                    # Convert back to tensor if needed
-                    successful_env_ids_tensor = torch.tensor(
-                        successful_env_ids, device=self.device
-                    )
                     self.dataset_manager.apply(
                         mode="save",
-                        env_ids=successful_env_ids_tensor,
+                        env_ids=successful_env_ids.nonzero(as_tuple=True)[0],
                     )
 
         # Clear episode buffers and reset success status for environments being reset
-        for env_id in env_ids_to_process:
-            self.episode_obs_buffer[env_id].clear()
-            self.episode_action_buffer[env_id].clear()
-            self.episode_success_status[env_id] = False
+        if self.rollout_buffer is not None:
+            self.current_rollout_step = 0
+
+        self.episode_success_status[env_ids_to_process] = False
 
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
@@ -440,20 +544,81 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             The action return.
         """
-        if isinstance(action, dict):
+        if isinstance(action, TensorDict):
             # Support multiple control modes simultaneously
             if "qpos" in action:
-                self.robot.set_qpos(qpos=action["qpos"])
+                self.robot.set_qpos(
+                    qpos=action["qpos"], joint_ids=self.active_joint_ids
+                )
             if "qvel" in action:
-                self.robot.set_qvel(qvel=action["qvel"])
+                self.robot.set_qvel(
+                    qvel=action["qvel"], joint_ids=self.active_joint_ids
+                )
             if "qf" in action:
-                self.robot.set_qf(qf=action["qf"])
+                self.robot.set_qf(qf=action["qf"], joint_ids=self.active_joint_ids)
         elif isinstance(action, torch.Tensor):
-            self.robot.set_qpos(qpos=action)
+            self.robot.set_qpos(qpos=action, joint_ids=self.active_joint_ids)
         else:
             logger.log_error(f"Unsupported action type: {type(action)}")
 
         return action
+
+    def compute_task_state(
+        self, **kwargs
+    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Compute task-specific state: success, fail, and metrics.
+
+        Override this method in subclass to define task-specific logic for RL tasks.
+
+        Returns:
+            Tuple of (success, fail, metrics):
+                - success: Boolean tensor of shape (num_envs,)
+                - fail: Boolean tensor of shape (num_envs,)
+                - metrics: Dict of metric tensors
+        """
+        success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        metrics: Dict[str, Any] = {}
+        return success, fail, metrics
+
+    def get_info(self, **kwargs) -> Dict[str, Any]:
+        """Get environment info dictionary.
+
+        Calls compute_task_state() to get task-specific success/fail/metrics when
+        available. Subclasses should override compute_task_state() for RL tasks.
+
+        Returns:
+            Info dictionary with success, fail, elapsed_steps, metrics
+        """
+        success, fail, metrics = self.compute_task_state(**kwargs)
+        info: Dict[str, Any] = {
+            "success": success,
+            "fail": fail,
+            "elapsed_steps": self._elapsed_steps,
+            "metrics": metrics,
+        }
+        return info
+
+    def evaluate(self, **kwargs) -> Dict[str, Any]:
+        """Evaluate the environment state.
+
+        Returns:
+            Evaluation dictionary with success and metrics
+        """
+        info = self.get_info(**kwargs)
+        eval_dict: Dict[str, Any] = {
+            "success": info["success"][0].item(),
+        }
+        if "metrics" in info:
+            for key, value in info["metrics"].items():
+                eval_dict[key] = value
+        return eval_dict
+
+    def _preprocess_action(self, action: EnvAction) -> EnvAction:
+        """Delegate to ActionManager when configured."""
+        if self.action_manager is not None:
+            return self.action_manager.process_action(action)
+        return super()._preprocess_action(action)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Setup the robot in the environment.
@@ -470,12 +635,41 @@ class EmbodiedEnv(BaseEnv):
         # Initialize the robot based on the configuration.
         robot: Robot = self.sim.add_robot(self.cfg.robot)
 
+        # Setup active joints for robot to control.
+        if self.cfg.control_parts:
+            if len(self.cfg.active_joint_ids) > 0:
+                logger.log_error(
+                    f"Both control_parts and active_joint_ids are specified in the configuration. Please specify only one of them."
+                )
+
+            # Check env control parts are valid
+            for part_name in self.cfg.control_parts:
+                if part_name not in robot.control_parts:
+                    logger.log_error(
+                        f"Invalid control part: {part_name}. The supported control parts are: {robot.control_parts}"
+                    )
+
+            for part_name in self.cfg.control_parts:
+                self.active_joint_ids.extend(
+                    robot.get_joint_ids(name=part_name, remove_mimic=True)
+                )
+        elif self.cfg.active_joint_ids:
+            # Check env active joint ids are valid
+            for joint_id in self.cfg.active_joint_ids:
+                if joint_id not in robot.active_joint_ids:
+                    logger.log_error(
+                        f"Invalid active joint id: {joint_id}. The supported active joint ids are: {robot.active_joint_ids}"
+                    )
+            self.active_joint_ids = self.cfg.active_joint_ids
+        else:
+            # Use all joints of the robot.
+            self.active_joint_ids = list(range(robot.dof))
+
         robot.build_pk_serial_chain()
 
-        # TODO: we may need control parts to group actual controlled joints ids.
-        # In this way, the action pass to env should be a dict or struct to store the
-        # joint ids as well.
-        qpos_limits = robot.body_data.qpos_limits[0].cpu().numpy()
+        qpos_limits = (
+            robot.body_data.qpos_limits[0, self.active_joint_ids].cpu().numpy()
+        )
         self.single_action_space = gym.spaces.Box(
             low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32
         )
@@ -498,8 +692,14 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_lights(self) -> None:
         """Setup the lights in the environment."""
+        # Set direct lights.
         for cfg in self.cfg.light.direct:
             self.sim.add_light(cfg=cfg)
+
+        # Set indirect lights.
+        if self.cfg.light.indirect is not None:
+            if "emission_light" in self.cfg.light.indirect:
+                self.sim.set_emission_light(**self.cfg.light.indirect["emission_light"])
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
@@ -600,14 +800,6 @@ class EmbodiedEnv(BaseEnv):
         This function should be implemented in subclasses to generate a sequence of actions
         that demonstrate a specific task or behavior within the environment.
 
-        Important:
-            Subclasses MUST set `self.action_length` to the length of the returned action list.
-            This is used by the environment to automatically detect episode truncation.
-            Example:
-                action_list = [...]  # Generate actions
-                self.action_length = len(action_list)
-                return action_list
-
         Returns:
             Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.
         """
@@ -618,7 +810,7 @@ class EmbodiedEnv(BaseEnv):
     def close(self) -> None:
         """Close the environment and release resources."""
         # Finalize dataset if present
-        if self.cfg.dataset:
+        if self.dataset_manager:
             self.dataset_manager.finalize()
 
         self.sim.destroy()

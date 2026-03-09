@@ -71,20 +71,28 @@ def build_policy(
         raise ValueError(
             f"Policy '{name}' is not registered. Available policies: {available}"
         )
-    policy_cls = _POLICY_REGISTRY[name]
     if name == "actor_critic":
+        policy_cls = _POLICY_REGISTRY[name]
         if actor is None or critic is None:
             raise ValueError(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
-        return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
-    elif name == "actor_only":
+        return policy_cls(
+            action_dim=action_dim,
+            device=device,
+            actor=actor,
+            critic=critic,
+        )
+    if name == "actor_only":
+        policy_cls = _POLICY_REGISTRY[name]
         if actor is None:
             raise ValueError("ActorOnly policy requires external 'actor' module.")
-        return policy_cls(obs_space, action_space, device, actor=actor)
-    else:
-        # Other policies should also use action_dim signature
-        return policy_cls(action_dim=action_dim, device=device)
+        return policy_cls(action_dim=action_dim, device=device, actor=actor)
+    if name == "vla":
+        return build_vla_policy(policy_block, action_dim=action_dim, device=device)
+
+    policy_cls = _POLICY_REGISTRY[name]
+    return policy_cls(action_dim=action_dim, device=device)
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
@@ -107,19 +115,13 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
 
 # default registrations
 register_policy("actor_critic", ActorCritic)
-<<<<<<< HEAD
 register_policy("vla", VLAPolicy)
-
-__all__ = [
-    "ActorCritic",
-    "VLAPolicy",
-=======
 register_policy("actor_only", ActorOnly)
 
 __all__ = [
     "ActorCritic",
+    "VLAPolicy",
     "ActorOnly",
->>>>>>> origin/main
     "register_policy",
     "get_registered_policy_names",
     "build_policy",

@@ -104,7 +104,7 @@
                 "mode": "modify",
                 "name": "robot/qpos",
                 "params": {
-                    "joint_ids": [12, 13, 14, 15]
+                    "joint_ids": [6, 13]
                 }
             },
             "block_1_pose": {

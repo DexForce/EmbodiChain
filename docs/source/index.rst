@@ -29,6 +29,7 @@ Table of Contents
 
    overview/sim/index
    overview/gym/index
+   overview/agents/online_data.md
    overview/rl/index
 
 .. toctree::
