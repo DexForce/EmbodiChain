@@ -212,14 +212,7 @@ class RigidObject(BatchEntity):
         self.is_shared_visual_material = False
 
         # Determine if we should use USD properties or cfg properties.
-        from embodichain.lab.sim.shapes import MeshCfg
-
-        is_usd_file = isinstance(cfg.shape, MeshCfg) and cfg.shape.fpath.endswith(
-            (".usd", ".usda", ".usdc")
-        )
-        use_cfg_properties = not (cfg.use_usd_properties and is_usd_file)
-
-        if use_cfg_properties:
+        if not self.cfg.use_usd_properties:
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
                 entity.set_physical_attr(cfg.attrs.attr())
@@ -879,13 +872,7 @@ class RigidObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 
-        from embodichain.lab.sim.shapes import MeshCfg
-
-        is_usd_file = isinstance(
-            self.cfg.shape, MeshCfg
-        ) and self.cfg.shape.fpath.endswith((".usd", ".usda", ".usdc"))
-        use_cfg_properties = not (self.cfg.use_usd_properties and is_usd_file)
-        if use_cfg_properties:
+        if not self.cfg.use_usd_properties:
             self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
         pos = torch.as_tensor(
