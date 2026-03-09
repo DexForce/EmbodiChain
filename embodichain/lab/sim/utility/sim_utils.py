@@ -240,7 +240,7 @@ def load_mesh_objects_from_cfg(
                 obj_list.append(rigidbodys_found[0])
                 return obj_list
         else:
-            # non-usd file does not support this option, will be ignored if set.
+            # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False
 
         for i, env in enumerate(env_list):
