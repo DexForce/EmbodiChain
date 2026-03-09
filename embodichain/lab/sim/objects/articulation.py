@@ -583,10 +583,7 @@ class Articulation(BatchEntity):
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
         # Determine if we should use USD properties or cfg properties.
-        is_usd_file = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
-        use_cfg_properties = not (cfg.use_usd_properties and is_usd_file)
-
-        if use_cfg_properties:
+        if not self.cfg.use_usd_properties:
             # Set articulation configuration in DexSim
             set_dexsim_articulation_cfg(entities, self.cfg)
 

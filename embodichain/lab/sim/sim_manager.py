@@ -1064,6 +1064,9 @@ class SimulationManager:
             elif len(articulations_found) == 1:
                 obj_list.append(articulations_found[0])
         else:
+            # non-usd file does not support this option, will be forced set False to avoid potential issues.
+            cfg.use_usd_properties = False
+
             for env in env_list:
                 art = env.load_urdf(cfg.fpath)
                 obj_list.append(art)
@@ -1155,6 +1158,9 @@ class SimulationManager:
             elif len(articulations_found) == 1:
                 obj_list.append(articulations_found[0])
         else:
+            # non-usd file does not support this option, will be forced set False to avoid potential issues.
+            cfg.use_usd_properties = False
+
             for env in env_list:
                 art = env.load_urdf(cfg.fpath)
                 obj_list.append(art)
