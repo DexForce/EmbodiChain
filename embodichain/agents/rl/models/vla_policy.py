@@ -77,14 +77,18 @@ class VLAPolicy(Policy):
             JointType,
             Modality,
         )
-        from dexechain.data.global_mapping import GlobalMapping  # pyright: ignore[reportMissingImports]
+        from dexechain.data.global_mapping import (
+            GlobalMapping,
+        )  # pyright: ignore[reportMissingImports]
         from dexechain.lab.gym.utils.gym_utils import (  # pyright: ignore[reportMissingImports]
             get_pk_serial_chain_from_robot_type,
         )
         from dexechain.lab.gym.utils.misc import (  # pyright: ignore[reportMissingImports]
             _data_key_to_control_part,
         )
-        from dexechain.utils.utility import get_right_name  # pyright: ignore[reportMissingImports]
+        from dexechain.utils.utility import (
+            get_right_name,
+        )  # pyright: ignore[reportMissingImports]
 
         self.ActionMode = ActionMode
         self.ControlParts = ControlParts
@@ -257,18 +261,14 @@ class VLAPolicy(Policy):
         right_arm_end = left_eef_end + arm_dofs_per_side
 
         return {
-            self.ControlParts.LEFT_ARM.value + self.JointType.QPOS.value: qpos[
-                :, :left_arm_end
-            ],
-            self.ControlParts.LEFT_EEF.value + self.EndEffector.GRIPPER.value: qpos[
-                :, left_arm_end:left_eef_end
-            ],
-            self.ControlParts.RIGHT_ARM.value + self.JointType.QPOS.value: qpos[
-                :, left_eef_end:right_arm_end
-            ],
-            self.ControlParts.RIGHT_EEF.value + self.EndEffector.GRIPPER.value: qpos[
-                :, right_arm_end:
-            ],
+            self.ControlParts.LEFT_ARM.value
+            + self.JointType.QPOS.value: qpos[:, :left_arm_end],
+            self.ControlParts.LEFT_EEF.value
+            + self.EndEffector.GRIPPER.value: qpos[:, left_arm_end:left_eef_end],
+            self.ControlParts.RIGHT_ARM.value
+            + self.JointType.QPOS.value: qpos[:, left_eef_end:right_arm_end],
+            self.ControlParts.RIGHT_EEF.value
+            + self.EndEffector.GRIPPER.value: qpos[:, right_arm_end:],
         }
 
     def _build_state_vector(
@@ -307,7 +307,9 @@ class VLAPolicy(Policy):
                     normalized = self.EefNormalizer.normalize_eef(
                         qpos_data, part, robot=self._runtime_robot
                     )
-                    state_entries[key] = self._fit_state_value(key, normalized, qpos.dtype)
+                    state_entries[key] = self._fit_state_value(
+                        key, normalized, qpos.dtype
+                    )
         else:
             state_entries = {
                 self.ControlParts.LEFT_ARM.value
@@ -321,7 +323,8 @@ class VLAPolicy(Policy):
                 self.ControlParts.LEFT_EEF.value
                 + self.EndEffector.GRIPPER.value: self._normalize_gripper(
                     qpos_chunks[
-                        self.ControlParts.LEFT_EEF.value + self.EndEffector.GRIPPER.value
+                        self.ControlParts.LEFT_EEF.value
+                        + self.EndEffector.GRIPPER.value
                     ],
                     self.ControlParts.LEFT_EEF.value + self.EndEffector.GRIPPER.value,
                 ),
@@ -365,9 +368,11 @@ class VLAPolicy(Policy):
                 ],
             )
             eef_pose_dict = {
-                key: value.to(self.device, dtype=qpos.dtype)
-                if isinstance(value, torch.Tensor)
-                else torch.as_tensor(value, device=self.device, dtype=qpos.dtype)
+                key: (
+                    value.to(self.device, dtype=qpos.dtype)
+                    if isinstance(value, torch.Tensor)
+                    else torch.as_tensor(value, device=self.device, dtype=qpos.dtype)
+                )
                 for key, value in eef_pose_dict.items()
             }
             state_entries.update(eef_pose_dict)
@@ -505,14 +510,15 @@ class VLAPolicy(Policy):
                 elif key.startswith(self.ControlParts.RIGHT_ARM.value):
                     value = (
                         qpos_chunks[
-                            self.ControlParts.RIGHT_ARM.value + self.JointType.QPOS.value
+                            self.ControlParts.RIGHT_ARM.value
+                            + self.JointType.QPOS.value
                         ]
                         + value
                     )
             elif self.EndEffector.GRIPPER.value in key:
-                value = self.gripper_closed_value + (
-                    1.0 - value
-                ) * (self.gripper_open_value - self.gripper_closed_value)
+                value = self.gripper_closed_value + (1.0 - value) * (
+                    self.gripper_open_value - self.gripper_closed_value
+                )
             decoded_parts.append(value)
 
         if not decoded_parts:
@@ -548,9 +554,7 @@ class VLAPolicy(Policy):
                     value = value.unsqueeze(0)
                 control_part = key.replace(self.EndEffector.GRIPPER.value, "")
                 target_dim = len(
-                    self._runtime_robot.get_joint_ids(
-                        control_part, remove_mimic=False
-                    )
+                    self._runtime_robot.get_joint_ids(control_part, remove_mimic=False)
                 )
                 if target_dim > value.shape[-1]:
                     value = value.repeat(1, target_dim)
@@ -595,9 +599,11 @@ class VLAPolicy(Policy):
         tensordict["value"] = self.value_head(critic_input)
         tensordict["policy_context"] = context
         tensordict["loc"] = mean_action
-        tensordict["scale"] = self.log_std.clamp(
-            self.log_std_min, self.log_std_max
-        ).exp().expand_as(mean_action)
+        tensordict["scale"] = (
+            self.log_std.clamp(self.log_std_min, self.log_std_max)
+            .exp()
+            .expand_as(mean_action)
+        )
         return tensordict
 
     @torch.no_grad()
