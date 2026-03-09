@@ -322,6 +322,8 @@ class Trainer:
             num_episodes: Number of episodes to evaluate
         """
         self.policy.eval()
+        if hasattr(self.policy, "bind_env"):
+            self.policy.bind_env(self.eval_env)
         episode_returns = []
         episode_lengths = []
 
@@ -342,18 +344,17 @@ class Trainer:
                 # Get deterministic actions for evaluation
                 obs_copy = obs.clone()
                 self.policy.forward(obs_copy, deterministic=True)
-                actions = obs_copy["action"]
-                am = getattr(self.eval_env, "action_manager", None)
-                action_type = (
-                    am.action_type
-                    if am
-                    else getattr(self.eval_env, "action_type", "delta_qpos")
+                actions = (
+                    obs_copy["env_action"]
+                    if "env_action" in obs_copy.keys()
+                    else obs_copy["action"]
                 )
-                action_dict = {action_type: actions}
+                am = getattr(self.eval_env, "action_manager", None)
+                env_action = {am.action_type: actions} if am else actions
 
                 # Environment step - env returns dict, convert to TensorDict at boundary
                 next_obs, reward, terminated, truncated, info = self.eval_env.step(
-                    action_dict
+                    env_action
                 )
                 next_obs = dict_to_tensordict(next_obs, self.device)
                 obs = next_obs

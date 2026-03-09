@@ -55,13 +55,16 @@ class SyncCollector(BaseCollector):
             self.policy.forward(current_td)
 
             # Extract action for environment step
-            action = current_td["action"]
-            action_type = getattr(self.env, "action_type", "delta_qpos")
-            action_dict = {action_type: action}
+            action = (
+                current_td["env_action"]
+                if "env_action" in current_td.keys()
+                else current_td["action"]
+            )
+            env_action = self._format_env_action(action)
 
             # Environment step - returns tuple (env returns dict, not TensorDict)
             next_obs, reward, terminated, truncated, env_info = self.env.step(
-                action_dict
+                env_action
             )
 
             # Convert env dict observation to TensorDict at boundary

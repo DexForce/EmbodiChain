@@ -49,10 +49,24 @@ class BaseCollector(ABC):
         self.policy = policy
         self.device = device
         self.on_step_callback = on_step_callback
+        if hasattr(self.policy, "bind_env"):
+            self.policy.bind_env(self.env)
 
         # Initialize observation
         obs_dict, _ = self.env.reset()
         self.obs_tensordict = dict_to_tensordict(obs_dict, self.device)
+
+    def _format_env_action(self, action: torch.Tensor):
+        """Format policy action for the target environment.
+
+        When an ActionManager is configured, the environment expects a mapping
+        keyed by the active action term name. Otherwise, the environment expects
+        a raw tensor that is applied directly as joint-space command.
+        """
+        action_manager = getattr(self.env, "action_manager", None)
+        if action_manager is not None:
+            return {action_manager.action_type: action}
+        return action
 
     @abstractmethod
     def collect(self, num_steps: int | None = None, **kwargs) -> TensorDict:

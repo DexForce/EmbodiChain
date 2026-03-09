@@ -72,7 +72,10 @@ class VLABuffer:
             rollout: TensorDict with batch_size=[N, T, ...]
         """
         with self._lock:
-            if rollout.batch_size[0] != self.num_envs or rollout.batch_size[1] != self.rollout_length:
+            if (
+                rollout.batch_size[0] != self.num_envs
+                or rollout.batch_size[1] != self.rollout_length
+            ):
                 raise ValueError(
                     f"Rollout shape {rollout.batch_size} does not match "
                     f"expected (N={self.num_envs}, T={self.rollout_length})"

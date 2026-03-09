@@ -1,0 +1,61 @@
+{
+    "trainer": {
+        "exp_name": "stack_bowls_vla_grpo",
+        "gym_config": "/root/workspace/research/embodichain/configs/gym/stack_bowls/gym_config.json",
+        "seed": 42,
+        "device": "cuda:0",
+        "headless": true,
+        "enable_rt": false,
+        "gpu_id": 0,
+        "num_envs": 8,
+        "iterations": 1000,
+        "buffer_size": 64,
+        "enable_eval": false,
+        "eval_freq": 0,
+        "save_freq": 100,
+        "use_wandb": false,
+        "wandb_project_name": "embodychain-stack_bowls",
+        "import_modules": [
+            "dexechain.lab.gym.envs.tasks.tableware.stack_bowls_v1.stack_bowls"
+        ],
+        "model_type": "standard"
+    },
+    "policy": {
+        "name": "vla",
+        "action_dim": 14,
+        "vla_config": {
+            "model_path": "/root/workspace/output/stack_bowls/checkpoint-19000",
+            "instruction": "Stack the bowls.",
+            "inference_horizon": 32,
+            "action_std_init": 0.01,
+            "robot_type": "CobotMagic",
+            "gripper_open_value": 0.05,
+            "gripper_closed_value": 0.0,
+            "action_key_order": [
+                "left_armdelta_qpos",
+                "left_eefgripper",
+                "right_armdelta_qpos",
+                "right_eefgripper"
+            ],
+            "model_config": {
+                "torch_dtype": "float32"
+            }
+        }
+    },
+    "algorithm": {
+        "name": "grpo",
+        "cfg": {
+            "learning_rate": 1e-5,
+            "n_epochs": 4,
+            "batch_size": 256,
+            "gamma": 0.99,
+            "clip_coef": 0.2,
+            "ent_coef": 0.001,
+            "kl_coef": 0.02,
+            "group_size": 4,
+            "eps": 1e-8,
+            "max_grad_norm": 1.0,
+            "truncate_at_first_done": true
+        }
+    }
+}

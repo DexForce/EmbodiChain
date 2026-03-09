@@ -15,7 +15,9 @@
 # ----------------------------------------------------------------------------
 
 import argparse
+import importlib
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -77,6 +79,8 @@ def train_from_config(config_path: str):
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
     num_envs = trainer_cfg.get("num_envs", None)
     wandb_project_name = trainer_cfg.get("wandb_project_name", "embodychain-generic")
+    filter_dataset_saving = bool(trainer_cfg.get("filter_dataset_saving", True))
+    import_modules = list(trainer_cfg.get("import_modules", []))
 
     # Device
     if not isinstance(device_str, str):
@@ -132,15 +136,30 @@ def train_from_config(config_path: str):
     if use_wandb:
         wandb.init(project=wandb_project_name, name=exp_name, config=cfg_json)
 
+    workspace_root = Path(__file__).resolve().parents[3]
+    dexechain_root = workspace_root / "embodichain"
+    if str(workspace_root) not in sys.path:
+        sys.path.append(str(workspace_root))
+    if str(dexechain_root) not in sys.path:
+        sys.path.append(str(dexechain_root))
+    for module_name in import_modules:
+        importlib.import_module(module_name)
+
     gym_config_path = Path(trainer_cfg["gym_config"])
     logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_json(str(gym_config_path))
+    if filter_dataset_saving:
+        gym_config_data = deepcopy(gym_config_data)
+        gym_config_data.get("env", {}).pop("dataset", None)
     gym_env_cfg = config_to_cfg(
         gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
     )
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
+    gym_env_cfg.filter_dataset_saving = filter_dataset_saving
+    if filter_dataset_saving:
+        gym_env_cfg.init_rollout_buffer = False
 
     # Ensure sim configuration mirrors runtime overrides
     if gym_env_cfg.sim_cfg is None:
@@ -171,6 +190,8 @@ def train_from_config(config_path: str):
         eval_gym_env_cfg = deepcopy(gym_env_cfg)
         eval_gym_env_cfg.num_envs = num_eval_envs
         eval_gym_env_cfg.sim_cfg.headless = True
+        eval_gym_env_cfg.filter_dataset_saving = True
+        eval_gym_env_cfg.init_rollout_buffer = False
         eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
         logger.log_info(
             f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"

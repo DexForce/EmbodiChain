@@ -23,7 +23,7 @@ import torch
 from tensordict import TensorDict
 
 
-def dict_to_tensordict(obs_dict: dict, device: torch.device) -> TensorDict:
+def dict_to_tensordict(obs_dict: dict | TensorDict, device: torch.device) -> TensorDict:
     """Convert a nested observation dict into a TensorDict.
 
     Args:
@@ -34,10 +34,10 @@ def dict_to_tensordict(obs_dict: dict, device: torch.device) -> TensorDict:
         TensorDict with an outer ``"observation"`` key.
     """
 
-    def _recursive_convert(data: dict) -> dict:
+    def _recursive_convert(data: dict | TensorDict) -> dict:
         result = {}
         for key, value in data.items():
-            if isinstance(value, dict):
+            if isinstance(value, (dict, TensorDict)):
                 result[key] = _recursive_convert(value)
             elif isinstance(value, torch.Tensor):
                 result[key] = value.to(device)
@@ -54,6 +54,14 @@ def dict_to_tensordict(obs_dict: dict, device: torch.device) -> TensorDict:
                 if batch_size is not None:
                     return batch_size
         return None
+
+    if isinstance(obs_dict, TensorDict):
+        obs_td = obs_dict.to(device)
+        return TensorDict(
+            {"observation": obs_td},
+            batch_size=obs_td.batch_size,
+            device=device,
+        )
 
     converted = _recursive_convert(obs_dict)
     batch_size = _get_first_tensor_batch_size(converted)

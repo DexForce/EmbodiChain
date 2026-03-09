@@ -146,12 +146,15 @@ class AsyncCollector(BaseCollector):
                         self.policy.train()
                         self.policy.forward(current_td)
 
-                    action = current_td["action"]
-                    action_type = getattr(self.env, "action_type", "delta_qpos")
-                    action_dict = {action_type: action}
+                    action = (
+                        current_td["env_action"]
+                        if "env_action" in current_td.keys()
+                        else current_td["action"]
+                    )
+                    env_action = self._format_env_action(action)
 
-                    next_obs_dict, reward, terminated, truncated, env_info = self.env.step(
-                        action_dict
+                    next_obs_dict, reward, terminated, truncated, env_info = (
+                        self.env.step(env_action)
                     )
 
                     next_obs_td = dict_to_tensordict(next_obs_dict, self.device)
