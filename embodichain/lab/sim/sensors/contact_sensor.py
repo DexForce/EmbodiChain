@@ -361,8 +361,12 @@ class ContactSensor(BaseSensor):
         point_size: float = 3.0,
     ):
         if visible:
-            contact_position_arena = self._data_buffer["position"]
-            contact_offsets = self._sim.arena_offsets[self._data_buffer["env_ids"]]
+            contact_position_arena = self._data_buffer["position"][
+                : self._curr_contact_num
+            ]
+            contact_offsets = self._sim.arena_offsets[
+                self._data_buffer["env_ids"][: self._curr_contact_num]
+            ]
             contact_position_world = contact_position_arena + contact_offsets
             if self._visualizer is None:
                 # create new visualizer
