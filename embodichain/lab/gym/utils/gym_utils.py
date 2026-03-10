@@ -716,6 +716,7 @@ def assign_data_to_dict(data_dict: TensorDict, name: str, value: Any) -> None:
     """
     keys = name.split("/")
     current_data = data_dict
+    batch_size = current_data.batch_size
 
     for key in keys[:-1]:
         if key not in current_data or not isinstance(current_data.get(key), TensorDict):
@@ -725,6 +726,7 @@ def assign_data_to_dict(data_dict: TensorDict, name: str, value: Any) -> None:
         current_data = current_data[key]
 
     last_key = keys[-1]
+    current_data.batch_size = batch_size  # Ensure the batch size is consistent
     current_data[last_key] = value
 
 
