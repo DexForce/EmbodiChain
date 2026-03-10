@@ -78,4 +78,17 @@ smv_tag_whitelist = r"^v\d+\.\d+\.\d+$"
 smv_branch_whitelist = r"^(main|dev)$"
 smv_remote_whitelist = r"^origin$"
 smv_released_pattern = r"^tags/v\d+\.\d+\.\d+$"
-smv_outputdir_format = "{ref.name}"
+
+# Output directory structure: versioned docs in subdirectories
+smv_outputdir_format = "docs/{ref.name}"
+
+# Generate links to latest version (for tags, point to the tag; for branches, point to branch)
+smv_latest_version = "main"
+smv_github_template = {
+    "edit": "https://github.com/DexForce/EmbodiChain/edit/main/docs/source/",
+    "issues": "https://github.com/DexForce/EmbodiChain/issues/",
+    "repo": "https://github.com/DexForce/EmbodiChain",
+}
+
+# Use pre-existing buildinfo
+smv_build_info = True
