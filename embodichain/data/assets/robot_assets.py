@@ -307,9 +307,9 @@ class UniversalRobots(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UniversalRobots.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UniversalRobots_v2.zip"
             ),
-            "dbd12f7e36cef4e5025b82f748233b80",
+            "4dd4ee5a86125364a9e8cbcd4aafc31a",
         )
         prefix = "UniversalRobots"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
