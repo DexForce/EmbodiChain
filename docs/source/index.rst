@@ -20,6 +20,7 @@ Table of Contents
 
    quick_start/install.md
    tutorial/index
+   guides/index
    quick_start/docs.md
 
 .. toctree::
@@ -29,7 +30,6 @@ Table of Contents
 
    overview/sim/index
    overview/gym/index
-   overview/agents/online_data.md
    overview/rl/index
 
 .. toctree::
@@ -37,9 +37,11 @@ Table of Contents
    :caption: Features
    :glob:
 
+   features/online_data.md
    features/agents.md
    features/workspace_analyzer/index*
    features/interaction/index*
+   features/toolkits/index*
 
 .. toctree::
    :maxdepth: 1
@@ -48,7 +50,6 @@ Table of Contents
 
    resources/robot/index*
    resources/task/index*
-   resources/toolkits/index*
    resources/roadmap.md
 
 .. toctree::

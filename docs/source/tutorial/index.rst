@@ -9,6 +9,7 @@ Tutorials
    create_softbody
    rigid_object_group
    robot
+   add_robot
    solver
    sensor
    motion_gen
