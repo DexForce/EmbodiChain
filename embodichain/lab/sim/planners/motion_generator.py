@@ -201,8 +201,8 @@ class MotionGenerator:
 
     def plan(
         self,
-        current_state: Dict,
-        target_states: List[Dict],
+        current_state: PlanState,
+        target_states: List[PlanState],
         sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME,
         sample_interval: Union[float, int] = 0.01,
         **kwargs,
@@ -220,11 +220,8 @@ class MotionGenerator:
         velocity and acceleration constraints, but does not check for collisions.
 
         Args:
-            current_state: Dictionary containing current state:
-                - "position": Current joint positions (required)
-                - "velocity": Current joint velocities (optional, defaults to zeros)
-                - "acceleration": Current joint accelerations (optional, defaults to zeros)
-            target_states: List of target state dictionaries, each with same format as current_state
+            current_state: PlanState
+            target_states: List of PlanState
             sample_method: Sampling method (TIME or QUANTITY)
             sample_interval: Sampling interval (time in seconds for TIME method, or number of points for QUANTITY)
             **kwargs: Additional arguments
@@ -238,37 +235,6 @@ class MotionGenerator:
                 - times: np.ndarray (N,), time stamps for each point
                 - duration: float, total trajectory duration
         """
-        # Validate inputs
-        if len(current_state["position"]) != self.dof:
-            logger.log_warning(
-                f"Current state position dimension {len(current_state['position'])} "
-                f"does not match robot DOF {self.dof}"
-            )
-            return False, None, None, None, None, 0.0
-
-        for i, target in enumerate(target_states):
-            if len(target["position"]) != self.dof:
-                logger.log_warning(
-                    f"Target state {i} position dimension {len(target['position'])} "
-                    f"does not match robot DOF {self.dof}"
-                )
-                return False, None, None, None, None, 0.0
-
-        # pack state
-        init_plan_state = PlanState(
-            move_type=MoveType.JOINT_MOVE,
-            move_part=MovePart.ALL,
-            qpos=current_state["position"],
-            qvel=current_state["velocity"],
-            qacc=current_state["acceleration"],
-        )
-        target_plan_states = []
-        for state in target_states:
-            plan_state = PlanState(
-                move_type=MoveType.JOINT_MOVE, qpos=state["position"]
-            )
-            target_plan_states.append(plan_state)
-
         # Plan trajectory using selected planner
         (
             success,
@@ -278,8 +244,8 @@ class MotionGenerator:
             times,
             duration,
         ) = self.planner.plan(
-            current_state=init_plan_state,
-            target_states=target_plan_states,
+            current_state=current_state,
+            target_states=target_states,
             sample_method=sample_method,
             sample_interval=sample_interval,
         )
@@ -503,10 +469,24 @@ class MotionGenerator:
             self._create_state_dict(pos) for pos in interpolate_qpos_list[1:]
         ]
 
+        init_plan_state = PlanState(
+            move_type=MoveType.JOINT_MOVE,
+            move_part=MovePart.ALL,
+            qpos=current_state["position"],
+            qvel=current_state["velocity"],
+            qacc=current_state["acceleration"],
+        )
+        target_plan_states = []
+        for state in target_states:
+            plan_state = PlanState(
+                move_type=MoveType.JOINT_MOVE, qpos=state["position"]
+            )
+            target_plan_states.append(plan_state)
+
         # Plan trajectory using internal plan method
         success, positions, velocities, accelerations, times, duration = self.plan(
-            current_state=current_state,
-            target_states=target_states,
+            current_state=init_plan_state,
+            target_states=target_plan_states,
             sample_method=sample_method,
             sample_interval=sample_num,
             **kwargs,
