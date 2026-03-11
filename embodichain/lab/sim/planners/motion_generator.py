@@ -24,6 +24,7 @@ from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.utils import logger
+from embodichain.lab.sim.planners.utils import PlanState, MoveType, MovePart
 
 
 class PlannerType(Enum):
@@ -128,7 +129,7 @@ class MotionGenerator:
         )
 
         if planner_type == "toppra":
-            return ToppraPlanner(self.dof, max_constraints)
+            return ToppraPlanner(dofs=self.dof, max_constraints=max_constraints)
         else:
             logger.log_error(
                 f"Unknown planner type '{planner_type}'. "
@@ -253,6 +254,21 @@ class MotionGenerator:
                 )
                 return False, None, None, None, None, 0.0
 
+        # pack state
+        init_plan_state = PlanState(
+            move_type=MoveType.JOINT_MOVE,
+            move_part=MovePart.ALL,
+            qpos=current_state["position"],
+            qvel=current_state["velocity"],
+            qacc=current_state["acceleration"],
+        )
+        target_plan_states = []
+        for state in target_states:
+            plan_state = PlanState(
+                move_type=MoveType.JOINT_MOVE, qpos=state["position"]
+            )
+            target_plan_states.append(plan_state)
+
         # Plan trajectory using selected planner
         (
             success,
@@ -262,8 +278,8 @@ class MotionGenerator:
             times,
             duration,
         ) = self.planner.plan(
-            current_state=current_state,
-            target_states=target_states,
+            current_state=init_plan_state,
+            target_states=target_plan_states,
             sample_method=sample_method,
             sample_interval=sample_interval,
         )

@@ -18,6 +18,7 @@ import numpy as np
 from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import BasePlanner
+from embodichain.lab.sim.planners.utils import PlanState
 
 from typing import TYPE_CHECKING, Union, Tuple
 
@@ -33,24 +34,25 @@ ta.setup_logging(level="WARN")
 
 
 class ToppraPlanner(BasePlanner):
-    def __init__(self, dofs, max_constraints):
+    def __init__(self, **kwargs):
         r"""Initialize the TOPPRA trajectory planner.
 
         Args:
             dofs: Number of degrees of freedom
             max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
         """
-        super().__init__(dofs, max_constraints)
+        super().__init__(**kwargs)
 
         # Create TOPPRA-specific constraint arrays (symmetric format)
         # This format is required by TOPPRA library
+        max_constraints = kwargs.get("max_constraints", None)
         self.vlims = np.array([[-v, v] for v in max_constraints["velocity"]])
         self.alims = np.array([[-a, a] for a in max_constraints["acceleration"]])
 
     def plan(
         self,
-        current_state: dict,
-        target_states: list[dict],
+        current_state: PlanState,
+        target_states: list[PlanState],
         **kwargs,
     ):
         r"""Execute trajectory planning.
@@ -75,28 +77,25 @@ class ToppraPlanner(BasePlanner):
             logger.log_error("At least 2 sample points required", ValueError)
 
         # Check waypoints
-        if len(current_state["position"]) != self.dofs:
+        if len(current_state.qpos) != self.dofs:
             logger.log_info("Current wayponit does not align")
             return False, None, None, None, None, None
         for target in target_states:
-            if len(target["position"]) != self.dofs:
+            if len(target.qpos) != self.dofs:
                 logger.log_info("Target Wayponits does not align")
                 return False, None, None, None, None, None
 
         if (
             len(target_states) == 1
             and np.sum(
-                np.abs(
-                    np.array(target_states[0]["position"])
-                    - np.array(current_state["position"])
-                )
+                np.abs(np.array(target_states[0].qpos) - np.array(current_state.qpos))
             )
             < 1e-3
         ):
             logger.log_info("Only two same waypoints, do not plan")
             return (
                 True,
-                np.array([current_state["position"], target_states[0]["position"]]),
+                np.array([current_state.qpos, target_states[0].qpos]),
                 np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
                 np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
                 0,
@@ -104,11 +103,10 @@ class ToppraPlanner(BasePlanner):
             )
 
         # Build waypoints
-        waypoints = [np.array(current_state["position"])]
+        waypoints = [np.array(current_state.qpos)]
         for target in target_states:
-            waypoints.append(np.array(target["position"]))
+            waypoints.append(np.array(target.qpos))
         waypoints = np.array(waypoints)
-
         # Create spline interpolation
         # NOTE: Suitable for dense waypoints
         ss = np.linspace(0, 1, len(waypoints))

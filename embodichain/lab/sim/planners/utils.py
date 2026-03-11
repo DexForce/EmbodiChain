@@ -17,6 +17,9 @@
 from enum import Enum
 from typing import Union
 from embodichain.utils import logger
+import torch
+from enum import Enum
+from dataclasses import dataclass
 
 
 class TrajectorySampleMethod(Enum):
@@ -53,3 +56,32 @@ class TrajectorySampleMethod(Enum):
     def __str__(self):
         """Override string representation for better readability."""
         return self.value.capitalize()
+
+
+class MovePart(Enum):
+    LEFT = 0
+    RIGHT = 1
+    BOTH = 2
+    TORSO = 3
+    ALL = 4
+
+
+class MoveType(Enum):
+    TOOL = 0
+    TCP_MOVE = 1
+    JOINT_MOVE = 2
+    SYNC = 3
+    PAUSE = 4
+
+
+@dataclass
+class PlanState:
+    move_type: MoveType = MoveType.PAUSE
+    move_part: MovePart = MovePart.LEFT
+    xpos: torch.Tensor = None
+    qpos: torch.Tensor = None
+    qacc: torch.Tensor = None
+    qvel: torch.Tensor = None
+    is_open: bool = True
+    is_world_coordinate: bool = True
+    pause_seconds: float = 0.0

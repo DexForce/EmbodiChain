@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.utils import logger
+from embodichain.lab.sim.planners.utils import PlanState
 
 
 class BasePlanner(ABC):
@@ -34,15 +35,15 @@ class BasePlanner(ABC):
         max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
     """
 
-    def __init__(self, dofs: int, max_constraints: Dict[str, List[float]]):
-        self.dofs = dofs
-        self.max_constraints = max_constraints
+    def __init__(self, **kwargs):
+        self.dofs = kwargs.get("dofs", None)
+        self.max_constraints = kwargs.get("max_constraints", None)
 
     @abstractmethod
     def plan(
         self,
-        current_state: Dict,
-        target_states: List[Dict],
+        current_state: PlanState,
+        target_states: list[PlanState],
         **kwargs,
     ) -> Tuple[
         bool,
