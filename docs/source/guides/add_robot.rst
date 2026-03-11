@@ -1,7 +1,7 @@
 .. _tutorial_add_robot:
 
 Adding a New Robot
-=================
+==================
 
 .. currentmodule:: embodichain.lab.sim.robots
 
@@ -17,7 +17,7 @@ Choose the approach based on your robot's complexity.
 ---
 
 Prerequisites
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 Before adding a new robot, ensure you have:
 
@@ -37,7 +37,7 @@ File: ``embodichain/lab/sim/robots/my_robot.py``
 .. dropdown:: Complete Example: CobotMagic-style Robot
    :icon: code
 
-   .. literalinclude:: ../../../../embodichain/lab/sim/robots/cobotmagic.py
+   .. literalinclude:: ../../../embodichain/lab/sim/robots/cobotmagic.py
       :language: python
       :linenos:
 
@@ -304,7 +304,7 @@ Regardless of the approach, your robot config needs these core parameters:
 +---------------------+------------------------+----------------------------------+
 | ``solver_cfg``      | Dict[str, SolverCfg]   | IK solver configurations        |
 +---------------------+------------------------+----------------------------------+
-| ``drive_pros``      | JointDrivePropertiesCfg| Joint stiffness, damping, force |
+| ``drive_pros``      | JointDrivePropertiesCfg | Joint stiffness, damping, force |
 +---------------------+------------------------+----------------------------------+
 | ``attrs``           | RigidBodyAttributesCfg | Mass, friction, damping         |
 +---------------------+------------------------+----------------------------------+
@@ -493,13 +493,13 @@ Recommended Structure
    ## Quick Initialization Example
 
    ```python
-   from embarodichain.lab.sim import SimulationManager, SimulationManagerCfg
-   from embarodichain.lab.sim.robots import MyRobotCfg
+   from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+   from embodichain.lab.sim.robots import MyRobotCfg
 
    config = SimulationManagerCfg(headless=False, sim_device="cpu", num_envs=2)
    sim = SimulationManager(config)
 
-   robot = sim.add_robot(cfg=MyRobotCfg().from_dict({}))
+   robot = sim.add_robot(cfg=MyRobotCfg.from_dict({}))
    ```
 
    ---
