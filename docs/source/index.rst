@@ -42,6 +42,7 @@ Table of Contents
    features/workspace_analyzer/index*
    features/interaction/index*
    features/toolkits/index*
+   features/urdf_assembly
 
 .. toctree::
    :maxdepth: 1

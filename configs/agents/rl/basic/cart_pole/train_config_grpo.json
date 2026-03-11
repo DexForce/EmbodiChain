@@ -14,7 +14,7 @@
         "save_freq": 200,
         "use_wandb": true,
         "enable_eval": true,
-        "wandb_project_name": "embodychain-cart_pole",
+        "wandb_project_name": "embodichain-cart_pole",
         "events": {
             "eval": {
                 "record_camera": {
