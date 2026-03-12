@@ -7,10 +7,10 @@ This module contains RL policy networks and related model implementations, suppo
 ### Policy
 - Abstract base class for RL policies; all policies must inherit from it.
 - Unified interface:
-    - `forward(tensordict, deterministic=False)`: Write action, log prob, and value into a `TensorDict`.
+    - `get_action(tensordict, deterministic=False)`: Sample actions into a `TensorDict` without gradients.
+    - `forward(tensordict, deterministic=False)`: Low-level action/value write path used by policy implementations.
     - `get_value(tensordict)`: Estimate state value into a `TensorDict`.
-    - `evaluate_actions(tensordict)`: Evaluate action probabilities, entropy, and value from a `TensorDict`.
-- `get_action(obs, deterministic=False)` is retained as a compatibility layer for evaluation and legacy callers.
+    - `evaluate_actions(tensordict)`: Return optimization-time policy outputs from a `TensorDict`.
 - Supports GPU deployment and distributed training.
 
 ### ActorCritic
@@ -30,15 +30,26 @@ This module contains RL policy networks and related model implementations, suppo
 - Supports orthogonal initialization and output reshaping.
 
 ### Factory Functions
-- `build_policy(policy_block, obs_dim, action_dim, device, ...)`: Automatically build policy from config.
+- `build_policy(policy_block, obs_space, action_space, device, ...)`: Automatically build policy from config.
 - `build_mlp_from_cfg(module_cfg, in_dim, out_dim)`: Automatically build MLP from config.
 
 ## Usage Example
 ```python
 actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
 critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
-policy = build_policy(policy_block, obs_dim, action_dim, device, actor=actor, critic=critic)
-action, log_prob, value = policy.get_action(obs)
+policy = build_policy(
+    policy_block,
+    env.flattened_observation_space,
+    env.action_space,
+    device,
+    actor=actor,
+    critic=critic,
+)
+step_td = TensorDict({"obs": obs}, batch_size=[obs.shape[0]], device=obs.device)
+step_td = policy.get_action(step_td)
+action = step_td["action"]
+log_prob = step_td["sample_log_prob"]
+value = step_td["value"]
 ```
 
 ## Extension and Customization

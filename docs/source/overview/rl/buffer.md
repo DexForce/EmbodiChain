@@ -5,61 +5,64 @@ This module implements the data buffer for RL training, responsible for storing 
 ## Main Classes and Structure
 
 ### RolloutBuffer
-- Used for on-policy algorithms (such as PPO, GRPO), efficiently stores observations, actions, rewards, dones, values, and logprobs for each step.
-- Supports multi-environment parallelism (shape: [T, N, ...]), all data allocated on GPU.
+- Used for on-policy algorithms (such as PPO, GRPO), storing a shared rollout `TensorDict` for collector and algorithm stages.
+- Supports multi-environment parallelism with rollout batch shape `[N, T]`, all data allocated on GPU.
 - Structure fields:
-  - `obs`: Observation tensor, float32, shape [T, N, obs_dim]
-  - `actions`: Action tensor, float32, shape [T, N, action_dim]
-  - `rewards`: Reward tensor, float32, shape [T, N]
-  - `dones`: Done flags, bool, shape [T, N]
-  - `values`: Value estimates, float32, shape [T, N]
-  - `logprobs`: Action log probabilities, float32, shape [T, N]
-  - `_extras`: Algorithm-specific fields (e.g., advantages, returns), dict[str, Tensor]
+  - `obs`: Flattened observation tensor, float32, shape `[N, T, obs_dim]`
+  - `action`: Action tensor, float32, shape `[N, T, action_dim]`
+  - `sample_log_prob`: Action log probabilities, float32, shape `[N, T]`
+  - `value`: Value estimates, float32, shape `[N, T]`
+  - `next.reward`: Reward tensor, float32, shape `[N, T]`
+  - `next.done`: Done flags, bool, shape `[N, T]`
+  - `next.terminated`: Termination flags, bool, shape `[N, T]`
+  - `next.truncated`: Truncation flags, bool, shape `[N, T]`
+  - `next.value`: Bootstrap next-state values, float32, shape `[N, T]`
+  - Algorithm-added fields such as `advantage`, `return`, `seq_mask`, and `seq_return`
 
 ## Main Methods
-- `add(obs, action, reward, done, value, logprob)`: Add one step of data.
-- `set_extras(extras)`: Attach algorithm-related tensors (e.g., advantages, returns).
-- `iterate_minibatches(batch_size)`: Randomly sample minibatches, returns dict (including all fields and extras).
-- Supports efficient GPU shuffle and indexing for large-scale training.
+- `start_rollout()`: Returns the shared preallocated rollout `TensorDict` for collector write-in.
+- `add(rollout)`: Marks the shared rollout as ready for consumption.
+- `get(flatten=True)`: Returns the stored rollout, optionally flattened over `[N, T]`.
+- `iterate_minibatches(rollout, batch_size, device)`: Shared batching utility in `buffer/utils.py`.
 
 ## Usage Example
 ```python
-buffer = RolloutBuffer(num_steps, num_envs, obs_dim, action_dim, device)
-for t in range(num_steps):
-    buffer.add(obs, action, reward, done, value, logprob)
-buffer.set_extras({"advantages": adv, "returns": ret})
-for batch in buffer.iterate_minibatches(batch_size):
-    # batch["obs"], batch["actions"], batch["advantages"] ...
+buffer = RolloutBuffer(num_envs, rollout_len, obs_dim, action_dim, device)
+rollout = collector.collect(num_steps=rollout_len, rollout=buffer.start_rollout())
+buffer.add(rollout)
+
+rollout = buffer.get(flatten=False)
+for batch in iterate_minibatches(rollout.reshape(-1), batch_size, device):
+    # batch["obs"], batch["action"], batch["advantage"] ...
     pass
 ```
 
 ## Design and Extension
-- Supports multi-environment parallel collection, compatible with Gymnasium/IsaacGym environments.
-- All data is allocated on GPU to avoid frequent CPU-GPU copying.
-- The extras field can be flexibly extended to meet different algorithm needs (e.g., GAE, TD-lambda, distributional advantages).
-- The iterator automatically shuffles to improve training stability.
-- Compatible with various RL algorithms (PPO, GRPO, A2C, SAC, etc.), custom fields and sampling logic supported.
+- Supports multi-environment parallel collection, compatible with Gymnasium-style vectorized environments.
+- All tensors are preallocated on device to avoid frequent CPU-GPU copying.
+- Algorithm-specific fields are attached directly onto the shared rollout `TensorDict` during optimization.
+- The shared minibatch iterator automatically shuffles flattened rollout entries for PPO/GRPO style updates.
 
 ## Code Example
 ```python
 class RolloutBuffer:
-    def __init__(self, num_steps, num_envs, obs_dim, action_dim, device):
-        # Initialize tensors
+    def __init__(self, num_envs, rollout_len, obs_dim, action_dim, device):
+        # Preallocate rollout TensorDict
         ...
-    def add(self, obs, action, reward, done, value, logprob):
-        # Add data
+    def start_rollout(self):
+        # Return shared rollout storage
         ...
-    def set_extras(self, extras):
-        # Attach algorithm-related tensors
+    def add(self, rollout):
+        # Mark rollout as full
         ...
-    def iterate_minibatches(self, batch_size):
-        # Random minibatch sampling
+    def get(self, flatten=True):
+        # Consume rollout
         ...
 ```
 
 ## Practical Tips
-- It is recommended to call set_extras after each rollout to ensure advantage/return tensors align with main data.
-- When using iterate_minibatches, set batch_size appropriately for training stability.
-- Extend the extras field as needed for custom sampling and statistics.
+- The rollout buffer stores flattened RL observations; structured observations should be flattened or encoded before entering this buffer.
+- `next.value` is kept for bootstrap convenience, while `next.obs` is intentionally not stored to reduce duplicated memory.
+- Use `buffer/utils.py` for shared minibatch iteration instead of duplicating batching logic in each algorithm.
 
 ---

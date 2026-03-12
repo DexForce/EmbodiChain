@@ -109,7 +109,7 @@ Policy Configuration
 The ``policy`` section defines the neural network policy:
 
 - **name**: Policy name (e.g., "actor_critic", "vla")
-- **action_dim**: Policy output action dimension; must match ``env.action_space``
+- **action_dim**: Optional policy output action dimension. If omitted, it is inferred from ``env.action_space``.
 - **actor**: Actor network configuration (required for actor_critic)
 - **critic**: Critic network configuration (required for actor_critic)
 
@@ -119,7 +119,6 @@ Example:
 
    "policy": {
      "name": "actor_critic",
-     "action_dim": 8,
      "actor": {
        "type": "mlp",
        "network_cfg": {
@@ -235,7 +234,7 @@ Training Process
 
 The training process follows this sequence:
 
-1. **Rollout Phase**: ``SyncCollector`` interacts with the environment and writes policy-side fields into a shared rollout ``TensorDict``. ``EmbodiedEnv`` writes environment-side ``next.*`` fields into the same rollout via ``set_rollout_buffer()``.
+1. **Rollout Phase**: ``SyncCollector`` interacts with the environment and writes policy-side fields into a shared rollout ``TensorDict``. ``EmbodiedEnv`` writes environment-side step fields such as ``next.reward``, ``next.done``, ``next.terminated``, and ``next.truncated`` into the same rollout via ``set_rollout_buffer()``.
 2. **Advantage/Return Computation**: Algorithm computes advantages and returns from the collected rollout (e.g. GAE for PPO, step-wise group normalization for GRPO)
 3. **Update Phase**: Algorithm updates the policy with ``update(rollout)``
 4. **Logging**: Trainer logs training losses and aggregated metrics to TensorBoard and Weights & Biases
@@ -255,6 +254,10 @@ All policies must inherit from the ``Policy`` abstract base class:
    class Policy(nn.Module, ABC):
        device: torch.device
        
+       def get_action(self, tensordict, deterministic: bool = False):
+           """Samples action, sample_log_prob, and value into the TensorDict."""
+           ...
+       
        @abstractmethod
        def forward(self, tensordict, deterministic: bool = False):
            """Writes action, sample_log_prob, and value into the TensorDict."""
@@ -267,7 +270,7 @@ All policies must inherit from the ``Policy`` abstract base class:
        
        @abstractmethod
        def evaluate_actions(self, tensordict):
-           """Writes log_prob, entropy, and value into the TensorDict."""
+           """Returns a new TensorDict with log_prob, entropy, and value."""
            raise NotImplementedError
 
 Available Policies
@@ -332,12 +335,16 @@ To add a new policy:
            self.device = device
            # Initialize your networks here
        
+       def get_action(self, tensordict, deterministic=False):
+           ...
        def forward(self, tensordict, deterministic=False):
            ...
        def get_value(self, tensordict):
            ...
        def evaluate_actions(self, tensordict):
            ...
+
+Current built-in MLP policies use flattened observations in the training path. If your policy requires structured or multi-modal inputs, keep the richer ``obs_space`` interface and define a matching rollout/collector schema.
 
 Adding a New Environment
 ------------------------
