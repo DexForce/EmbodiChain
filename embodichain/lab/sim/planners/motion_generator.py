@@ -49,6 +49,13 @@ class MotionGenerator:
         "toppra": ToppraPlanner,
     }
 
+    @classmethod
+    def register_planner_type(cls, name: str, planner_class):
+        """
+        Register a new planner type.
+        """
+        cls._support_planner_dict[name] = planner_class
+
     def __init__(
         self,
         robot: Robot,
@@ -72,13 +79,6 @@ class MotionGenerator:
         self.planner = self._create_planner(
             planner_type, default_velocity, default_acceleration, **kwargs
         )
-
-    @classmethod
-    def register_planner_type(cls, name: str, planner_class):
-        """
-        Register a new planner type.
-        """
-        cls._support_planner_dict[name] = planner_class
 
     def _create_planner(
         self,
@@ -106,12 +106,12 @@ class MotionGenerator:
                 f"Supported types: {[e for e in self._support_planner_dict.keys()]}",
                 ValueError,
             )
-        cfg = {
-            "dofs": self.dof,
-            "max_constraints": self._get_constraints(
-                default_velocity, default_acceleration, **kwargs
-            ),
-        }
+        cfg = kwargs.copy()
+        cfg["dofs"] = self.dof
+        cfg["max_constraints"] = self._get_constraints(
+            default_velocity, default_acceleration, **kwargs
+        )
+        cfg["robot"] = self.robot
         return planner_class(**cfg)
 
     def _get_constraints(
