@@ -570,12 +570,6 @@ class EmbodiedEnv(BaseEnv):
     ) -> None:
         """Write environment-side fields into an externally managed RL rollout buffer."""
         buffer_device = self.rollout_buffer.device
-        obs_to_store = (
-            flatten_dict_observation(obs) if isinstance(obs, TensorDict) else obs
-        )
-        self.rollout_buffer["next", "obs"][:, self.current_rollout_step].copy_(
-            obs_to_store.to(buffer_device), non_blocking=True
-        )
         self.rollout_buffer["next", "reward"][:, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )

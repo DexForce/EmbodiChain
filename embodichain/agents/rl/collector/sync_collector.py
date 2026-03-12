@@ -89,7 +89,6 @@ class SyncCollector(BaseCollector):
                 self._write_env_step(
                     rollout=rollout,
                     step_idx=step_idx,
-                    next_obs_td=next_obs_td,
                     reward=reward,
                     terminated=terminated,
                     truncated=truncated,
@@ -108,8 +107,9 @@ class SyncCollector(BaseCollector):
         next_values = torch.zeros_like(rollout["value"])
         next_values[:, :-1] = rollout["value"][:, 1:]
 
+        final_obs = flatten_dict_observation(self.obs_td)
         last_next_td = TensorDict(
-            {"obs": rollout["next", "obs"][:, -1]},
+            {"obs": final_obs},
             batch_size=[rollout.batch_size[0]],
             device=self.device,
         )
@@ -144,14 +144,12 @@ class SyncCollector(BaseCollector):
         self,
         rollout: TensorDict,
         step_idx: int,
-        next_obs_td: TensorDict,
         reward: torch.Tensor,
         terminated: torch.Tensor,
         truncated: torch.Tensor,
     ) -> None:
         """Populate transition-side fields when the environment does not own the rollout."""
         done = terminated | truncated
-        rollout["next", "obs"][:, step_idx] = flatten_dict_observation(next_obs_td)
         rollout["next", "reward"][:, step_idx] = reward.to(self.device)
         rollout["next", "done"][:, step_idx] = done.to(self.device)
         rollout["next", "terminated"][:, step_idx] = terminated.to(self.device)

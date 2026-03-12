@@ -112,13 +112,6 @@ class RolloutBuffer:
                     device=self.device,
                 ),
                 "next": {
-                    "obs": torch.empty(
-                        self.num_envs,
-                        self.rollout_len,
-                        self.obs_dim,
-                        dtype=torch.float32,
-                        device=self.device,
-                    ),
                     "reward": torch.empty(
                         self.num_envs,
                         self.rollout_len,

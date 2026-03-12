@@ -87,9 +87,6 @@ class _FakeEnv:
         truncated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         if self.rollout_buffer is not None:
-            self.rollout_buffer["next", "obs"][:, self.current_rollout_step] = (
-                flatten_dict_observation(next_obs)
-            )
             self.rollout_buffer["next", "reward"][:, self.current_rollout_step] = reward
             self.rollout_buffer["next", "done"][:, self.current_rollout_step] = (
                 terminated | truncated
@@ -158,8 +155,7 @@ def test_shared_rollout_collects_policy_and_env_fields():
     assert stored.batch_size == torch.Size([num_envs, rollout_len])
     assert torch.allclose(stored["obs"][:, 0], torch.zeros(num_envs, obs_dim))
     assert torch.allclose(
-        stored["next", "obs"][:, 0],
-        torch.ones(num_envs, obs_dim),
+        stored["value"][:, 1], torch.ones(num_envs, dtype=torch.float32)
     )
     assert torch.allclose(
         stored["action"][:, 0],
@@ -213,11 +209,9 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
             device=env.device,
         )
         next_obs, reward, terminated, truncated, _ = env.step({"delta_qpos": action})
-        next_obs_flat = flatten_dict_observation(next_obs).cpu()
         done = (terminated | truncated).cpu()
 
         assert env.current_rollout_step == 1
-        assert torch.allclose(rollout["next", "obs"][:, 0].cpu(), next_obs_flat)
         assert torch.allclose(rollout["next", "reward"][:, 0].cpu(), reward.cpu())
         assert torch.equal(rollout["next", "done"][:, 0].cpu(), done)
         assert torch.equal(rollout["next", "terminated"][:, 0].cpu(), terminated.cpu())
