@@ -142,7 +142,7 @@ class GRPO(BaseAlgorithm):
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
 
-                eval_batch = self.policy.evaluate_actions(batch.clone())
+                eval_batch = self.policy.evaluate_actions(batch)
                 logprobs = eval_batch["sample_log_prob"]
                 entropy = eval_batch["entropy"]
                 ratio = (logprobs - old_logprobs).exp()
@@ -161,7 +161,7 @@ class GRPO(BaseAlgorithm):
 
                 if self.ref_policy is not None:
                     with torch.no_grad():
-                        ref_batch = self.ref_policy.evaluate_actions(batch.clone())
+                        ref_batch = self.ref_policy.evaluate_actions(batch)
                         ref_logprobs = ref_batch["sample_log_prob"]
                     log_ref_over_pi = ref_logprobs - logprobs
                     kl_per = torch.exp(log_ref_over_pi) - log_ref_over_pi - 1.0

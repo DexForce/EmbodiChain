@@ -81,9 +81,12 @@ class ActorOnly(Policy):
         obs = tensordict["obs"]
         action = tensordict["action"]
         dist = self._distribution(obs)
-        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
-        tensordict["entropy"] = dist.entropy().sum(dim=-1)
-        tensordict["value"] = torch.zeros(
-            obs.shape[0], device=self.device, dtype=obs.dtype
+        return TensorDict(
+            {
+                "sample_log_prob": dist.log_prob(action).sum(dim=-1),
+                "entropy": dist.entropy().sum(dim=-1),
+                "value": torch.zeros(obs.shape[0], device=self.device, dtype=obs.dtype),
+            },
+            batch_size=tensordict.batch_size,
+            device=tensordict.device,
         )
-        return tensordict

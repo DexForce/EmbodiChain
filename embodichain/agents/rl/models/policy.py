@@ -90,12 +90,12 @@ class Policy(nn.Module, ABC):
 
     @abstractmethod
     def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
-        """Evaluate actions and write log prob, entropy, and values.
+        """Evaluate actions and return current policy outputs.
 
         Args:
             tensordict: TensorDict containing `obs` and `action`.
 
         Returns:
-            TensorDict with `sample_log_prob`, `entropy`, and `value` populated.
+            A new TensorDict containing `sample_log_prob`, `entropy`, and `value`.
         """
         raise NotImplementedError

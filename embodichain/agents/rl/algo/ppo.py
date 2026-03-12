@@ -67,7 +67,7 @@ class PPO(BaseAlgorithm):
                 returns = batch["return"].clone()
                 batch_advantages = ((batch["advantage"] - adv_mean) / adv_std).detach()
 
-                eval_batch = self.policy.evaluate_actions(batch.clone())
+                eval_batch = self.policy.evaluate_actions(batch)
                 logprobs = eval_batch["sample_log_prob"]
                 entropy = eval_batch["entropy"]
                 values = eval_batch["value"]
