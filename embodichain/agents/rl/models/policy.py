@@ -60,12 +60,13 @@ class Policy(nn.Module, ABC):
             - log_prob: Log probability of the action, shape (batch_size,)
             - value: Value estimate, shape (batch_size,)
         """
-        td = TensorDict(
-            {"observation": obs},
-            batch_size=[obs.shape[0]],
-            device=obs.device,
-        )
-        td = self.forward(td, deterministic=deterministic)
+        with torch.no_grad():
+            td = TensorDict(
+                {"observation": obs},
+                batch_size=[obs.shape[0]],
+                device=obs.device,
+            )
+            td = self.forward(td, deterministic=deterministic)
         return td["action"], td["sample_log_prob"], td["value"]
 
     @abstractmethod

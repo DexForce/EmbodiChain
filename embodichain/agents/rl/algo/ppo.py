@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import math
-from typing import Dict
+from typing import Dict, Iterator
 
 import torch
 from tensordict import TensorDict
@@ -109,10 +109,8 @@ class PPO(BaseAlgorithm):
 
     def _iterate_minibatches(
         self, rollout: TensorDict, batch_size: int
-    ) -> list[TensorDict]:
+    ) -> Iterator[TensorDict]:
         total = rollout.batch_size[0]
         indices = torch.randperm(total, device=self.device)
-        return [
-            rollout[indices[start : start + batch_size]]
-            for start in range(0, total, batch_size)
-        ]
+        for start in range(0, total, batch_size):
+            yield rollout[indices[start : start + batch_size]]

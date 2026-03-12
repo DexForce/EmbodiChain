@@ -41,6 +41,7 @@ class SyncCollector(BaseCollector):
         self.policy = policy
         self.device = device
         self.reset_every_rollout = reset_every_rollout
+        self._supports_shared_rollout = hasattr(self.env, "set_rollout_buffer")
         self.obs_td = self._reset_env()
 
     def collect(
@@ -62,7 +63,7 @@ class SyncCollector(BaseCollector):
                 "Preallocated rollout batch size mismatch: "
                 f"expected ({self.env.num_envs}, {num_steps}), got {tuple(rollout.batch_size)}."
             )
-        if hasattr(self.env, "set_rollout_buffer"):
+        if self._supports_shared_rollout:
             self.env.set_rollout_buffer(rollout)
 
         for step_idx in range(num_steps):
@@ -73,10 +74,6 @@ class SyncCollector(BaseCollector):
                 device=self.device,
             )
             self.policy.forward(step_td)
-            rollout["observation"][:, step_idx] = obs_tensor
-            rollout["action"][:, step_idx] = step_td["action"]
-            rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
-            rollout["value"][:, step_idx] = step_td["value"]
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(
                 self._to_action_dict(step_td["action"])
@@ -87,6 +84,15 @@ class SyncCollector(BaseCollector):
                 step_idx=step_idx,
                 step_td=step_td,
             )
+            if not self._supports_shared_rollout:
+                self._write_env_step(
+                    rollout=rollout,
+                    step_idx=step_idx,
+                    next_obs_td=next_obs_td,
+                    reward=reward,
+                    terminated=terminated,
+                    truncated=truncated,
+                )
 
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
@@ -132,3 +138,22 @@ class SyncCollector(BaseCollector):
         rollout["action"][:, step_idx] = step_td["action"]
         rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
         rollout["value"][:, step_idx] = step_td["value"]
+
+    def _write_env_step(
+        self,
+        rollout: TensorDict,
+        step_idx: int,
+        next_obs_td: TensorDict,
+        reward: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+    ) -> None:
+        """Populate transition-side fields when the environment does not own the rollout."""
+        done = terminated | truncated
+        rollout["next", "observation"][:, step_idx] = flatten_dict_observation(
+            next_obs_td
+        )
+        rollout["next", "reward"][:, step_idx] = reward.to(self.device)
+        rollout["next", "done"][:, step_idx] = done.to(self.device)
+        rollout["next", "terminated"][:, step_idx] = terminated.to(self.device)
+        rollout["next", "truncated"][:, step_idx] = truncated.to(self.device)
