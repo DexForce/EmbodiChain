@@ -52,7 +52,9 @@ class _FakePolicy:
 
 
 class _FakeEnv:
-    def __init__(self, num_envs: int, obs_dim: int, action_dim: int, device: torch.device):
+    def __init__(
+        self, num_envs: int, obs_dim: int, action_dim: int, device: torch.device
+    ):
         self.num_envs = num_envs
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -87,12 +89,12 @@ class _FakeEnv:
             self.rollout_buffer["next", "done"][:, self.current_rollout_step] = (
                 terminated | truncated
             )
-            self.rollout_buffer["next", "terminated"][:, self.current_rollout_step] = (
-                terminated
-            )
-            self.rollout_buffer["next", "truncated"][:, self.current_rollout_step] = (
-                truncated
-            )
+            self.rollout_buffer["next", "terminated"][
+                :, self.current_rollout_step
+            ] = terminated
+            self.rollout_buffer["next", "truncated"][
+                :, self.current_rollout_step
+            ] = truncated
             self.current_rollout_step += 1
 
         self._obs = next_obs
@@ -213,12 +215,8 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
         assert torch.allclose(rollout["next", "observation"][:, 0].cpu(), next_obs_flat)
         assert torch.allclose(rollout["next", "reward"][:, 0].cpu(), reward.cpu())
         assert torch.equal(rollout["next", "done"][:, 0].cpu(), done)
-        assert torch.equal(
-            rollout["next", "terminated"][:, 0].cpu(), terminated.cpu()
-        )
-        assert torch.equal(
-            rollout["next", "truncated"][:, 0].cpu(), truncated.cpu()
-        )
+        assert torch.equal(rollout["next", "terminated"][:, 0].cpu(), terminated.cpu())
+        assert torch.equal(rollout["next", "truncated"][:, 0].cpu(), truncated.cpu())
     finally:
         env.close()
         if SimulationManager.is_instantiated():
