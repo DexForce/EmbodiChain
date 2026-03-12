@@ -260,7 +260,13 @@ class Trainer:
             # Run episode until all environments complete
             while not done_mask.all():
                 # Get deterministic actions from policy
-                actions, _, _ = self.policy.get_action(obs, deterministic=True)
+                action_td = TensorDict(
+                    {"obs": obs},
+                    batch_size=[num_envs],
+                    device=self.device,
+                )
+                action_td = self.policy.get_action(action_td, deterministic=True)
+                actions = action_td["action"]
                 am = getattr(self.eval_env, "action_manager", None)
                 action_type = (
                     am.action_type

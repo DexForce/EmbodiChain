@@ -74,7 +74,7 @@ class SyncCollector(BaseCollector):
                 batch_size=[obs_tensor.shape[0]],
                 device=self.device,
             )
-            self.policy.forward(step_td)
+            step_td = self.policy.get_action(step_td)
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(
                 self._to_action_dict(step_td["action"])

@@ -46,6 +46,11 @@ class _FakePolicy:
         tensordict["value"] = obs.mean(dim=-1)
         return tensordict
 
+    def get_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        return self.forward(tensordict)
+
     def get_value(self, tensordict: TensorDict) -> TensorDict:
         tensordict["value"] = tensordict["obs"].mean(dim=-1)
         return tensordict

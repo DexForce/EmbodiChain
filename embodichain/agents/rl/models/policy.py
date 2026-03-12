@@ -46,28 +46,19 @@ class Policy(nn.Module, ABC):
         super().__init__()
 
     def get_action(
-        self, obs: torch.Tensor, deterministic: bool = False
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compatibility layer for tensor-only callers.
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Sample actions into the provided TensorDict without gradients.
 
         Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
+            tensordict: Input TensorDict containing `obs`.
             deterministic: If True, return the mean action; otherwise sample
 
         Returns:
-            Tuple of (action, log_prob, value):
-            - action: Sampled action tensor of shape (batch_size, action_dim)
-            - log_prob: Log probability of the action, shape (batch_size,)
-            - value: Value estimate, shape (batch_size,)
+            TensorDict with `action`, `sample_log_prob`, and `value` populated.
         """
         with torch.no_grad():
-            td = TensorDict(
-                {"obs": obs},
-                batch_size=[obs.shape[0]],
-                device=obs.device,
-            )
-            td = self.forward(td, deterministic=deterministic)
-        return td["action"], td["sample_log_prob"], td["value"]
+            return self.forward(tensordict, deterministic=deterministic)
 
     @abstractmethod
     def forward(
