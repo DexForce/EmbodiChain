@@ -275,7 +275,7 @@ class EmbodiedEnv(BaseEnv):
                 device=self.device,
             )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
-            self._rollout_buffer_mode = "episode"
+            self._rollout_buffer_mode = "expert"
 
         self.current_rollout_step = 0
 
@@ -420,8 +420,8 @@ class EmbodiedEnv(BaseEnv):
         # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
             if self.current_rollout_step < self._max_rollout_steps:
-                if self._rollout_buffer_mode == "external_rl":
-                    self._write_external_rl_rollout_step(
+                if self._rollout_buffer_mode == "rl":
+                    self._write_rl_rollout_step(
                         obs=obs,
                         rewards=rewards,
                         dones=dones,
@@ -507,10 +507,7 @@ class EmbodiedEnv(BaseEnv):
                     )
 
         # Clear episode buffers and reset success status for environments being reset
-        if (
-            self.rollout_buffer is not None
-            and self._rollout_buffer_mode != "external_rl"
-        ):
+        if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
 
         self.episode_success_status[env_ids_to_process] = False
@@ -525,10 +522,10 @@ class EmbodiedEnv(BaseEnv):
             self.reward_manager.reset(env_ids=env_ids)
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
-        """Infer whether the rollout buffer is env-owned episode data or external RL data."""
+        """Infer whether the rollout buffer is expert recording or RL training data."""
         if "next" in rollout_buffer.keys() and "observation" in rollout_buffer.keys():
-            return "external_rl"
-        return "episode"
+            return "rl"
+        return "expert"
 
     def _write_episode_rollout_step(
         self,
@@ -563,7 +560,7 @@ class EmbodiedEnv(BaseEnv):
             rewards.to(buffer_device), non_blocking=True
         )
 
-    def _write_external_rl_rollout_step(
+    def _write_rl_rollout_step(
         self,
         obs: EnvObs,
         rewards: torch.Tensor,
@@ -585,7 +582,6 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer["next", "done"][:, self.current_rollout_step].copy_(
             dones.to(buffer_device), non_blocking=True
         )
-
         terminateds = (
             terminateds
             if terminateds is not None
