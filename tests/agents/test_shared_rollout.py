@@ -40,14 +40,14 @@ class _FakePolicy:
         pass
 
     def forward(self, tensordict: TensorDict) -> TensorDict:
-        obs = tensordict["observation"]
+        obs = tensordict["obs"]
         tensordict["action"] = obs[:, : self.action_dim] * 0.25
         tensordict["sample_log_prob"] = obs.sum(dim=-1) * 0.1
         tensordict["value"] = obs.mean(dim=-1)
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
-        tensordict["value"] = tensordict["observation"].mean(dim=-1)
+        tensordict["value"] = tensordict["obs"].mean(dim=-1)
         return tensordict
 
 
@@ -82,7 +82,7 @@ class _FakeEnv:
         truncated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         if self.rollout_buffer is not None:
-            self.rollout_buffer["next", "observation"][:, self.current_rollout_step] = (
+            self.rollout_buffer["next", "obs"][:, self.current_rollout_step] = (
                 flatten_dict_observation(next_obs)
             )
             self.rollout_buffer["next", "reward"][:, self.current_rollout_step] = reward
@@ -151,9 +151,9 @@ def test_shared_rollout_collects_policy_and_env_fields():
     stored = buffer.get(flatten=False)
 
     assert stored.batch_size == torch.Size([num_envs, rollout_len])
-    assert torch.allclose(stored["observation"][:, 0], torch.zeros(num_envs, obs_dim))
+    assert torch.allclose(stored["obs"][:, 0], torch.zeros(num_envs, obs_dim))
     assert torch.allclose(
-        stored["next", "observation"][:, 0],
+        stored["next", "obs"][:, 0],
         torch.ones(num_envs, obs_dim),
     )
     assert torch.allclose(
@@ -212,7 +212,7 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
         done = (terminated | truncated).cpu()
 
         assert env.current_rollout_step == 1
-        assert torch.allclose(rollout["next", "observation"][:, 0].cpu(), next_obs_flat)
+        assert torch.allclose(rollout["next", "obs"][:, 0].cpu(), next_obs_flat)
         assert torch.allclose(rollout["next", "reward"][:, 0].cpu(), reward.cpu())
         assert torch.equal(rollout["next", "done"][:, 0].cpu(), done)
         assert torch.equal(rollout["next", "terminated"][:, 0].cpu(), terminated.cpu())

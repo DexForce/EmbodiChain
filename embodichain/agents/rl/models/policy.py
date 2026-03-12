@@ -62,7 +62,7 @@ class Policy(nn.Module, ABC):
         """
         with torch.no_grad():
             td = TensorDict(
-                {"observation": obs},
+                {"obs": obs},
                 batch_size=[obs.shape[0]],
                 device=obs.device,
             )
@@ -81,7 +81,7 @@ class Policy(nn.Module, ABC):
         """Write value estimate for the given observations into the TensorDict.
 
         Args:
-            tensordict: Input TensorDict containing `observation`.
+            tensordict: Input TensorDict containing `obs`.
 
         Returns:
             TensorDict with `value` populated.
@@ -93,7 +93,7 @@ class Policy(nn.Module, ABC):
         """Evaluate actions and write log prob, entropy, and values.
 
         Args:
-            tensordict: TensorDict containing `observation` and `action`.
+            tensordict: TensorDict containing `obs` and `action`.
 
         Returns:
             TensorDict with `sample_log_prob`, `entropy`, and `value` populated.

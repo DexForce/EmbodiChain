@@ -59,7 +59,7 @@ class ActorOnly(Policy):
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
     ) -> TensorDict:
-        obs = tensordict["observation"]
+        obs = tensordict["obs"]
         dist = self._distribution(obs)
         mean = dist.mean
         action = mean if deterministic else dist.sample()
@@ -71,14 +71,14 @@ class ActorOnly(Policy):
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
-        obs = tensordict["observation"]
+        obs = tensordict["obs"]
         tensordict["value"] = torch.zeros(
             obs.shape[0], device=self.device, dtype=obs.dtype
         )
         return tensordict
 
     def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
-        obs = tensordict["observation"]
+        obs = tensordict["obs"]
         action = tensordict["action"]
         dist = self._distribution(obs)
         tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)

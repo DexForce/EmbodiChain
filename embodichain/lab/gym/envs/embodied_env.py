@@ -523,7 +523,7 @@ class EmbodiedEnv(BaseEnv):
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
         """Infer whether the rollout buffer is expert recording or RL training data."""
-        if "next" in rollout_buffer.keys() and "observation" in rollout_buffer.keys():
+        if "next" in rollout_buffer.keys() and "obs" in rollout_buffer.keys():
             return "rl"
         return "expert"
 
@@ -573,7 +573,7 @@ class EmbodiedEnv(BaseEnv):
         obs_to_store = (
             flatten_dict_observation(obs) if isinstance(obs, TensorDict) else obs
         )
-        self.rollout_buffer["next", "observation"][:, self.current_rollout_step].copy_(
+        self.rollout_buffer["next", "obs"][:, self.current_rollout_step].copy_(
             obs_to_store.to(buffer_device), non_blocking=True
         )
         self.rollout_buffer["next", "reward"][:, self.current_rollout_step].copy_(

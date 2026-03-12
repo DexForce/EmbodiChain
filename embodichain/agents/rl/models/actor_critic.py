@@ -73,7 +73,7 @@ class ActorCritic(Policy):
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
     ) -> TensorDict:
-        obs = tensordict["observation"]
+        obs = tensordict["obs"]
         dist = self._distribution(obs)
         mean = dist.mean
         action = mean if deterministic else dist.sample()
@@ -83,11 +83,11 @@ class ActorCritic(Policy):
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
-        tensordict["value"] = self.critic(tensordict["observation"]).squeeze(-1)
+        tensordict["value"] = self.critic(tensordict["obs"]).squeeze(-1)
         return tensordict
 
     def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
-        obs = tensordict["observation"]
+        obs = tensordict["obs"]
         action = tensordict["action"]
         dist = self._distribution(obs)
         tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)

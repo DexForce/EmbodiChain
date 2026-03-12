@@ -70,7 +70,7 @@ class SyncCollector(BaseCollector):
         for step_idx in range(num_steps):
             obs_tensor = flatten_dict_observation(self.obs_td)
             step_td = TensorDict(
-                {"observation": obs_tensor},
+                {"obs": obs_tensor},
                 batch_size=[obs_tensor.shape[0]],
                 device=self.device,
             )
@@ -109,7 +109,7 @@ class SyncCollector(BaseCollector):
         next_values[:, :-1] = rollout["value"][:, 1:]
 
         last_next_td = TensorDict(
-            {"observation": rollout["next", "observation"][:, -1]},
+            {"obs": rollout["next", "obs"][:, -1]},
             batch_size=[rollout.batch_size[0]],
             device=self.device,
         )
@@ -135,7 +135,7 @@ class SyncCollector(BaseCollector):
         step_td: TensorDict,
     ) -> None:
         """Write policy-side fields for one transition into the shared rollout TensorDict."""
-        rollout["observation"][:, step_idx] = step_td["observation"]
+        rollout["obs"][:, step_idx] = step_td["obs"]
         rollout["action"][:, step_idx] = step_td["action"]
         rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
         rollout["value"][:, step_idx] = step_td["value"]
@@ -151,9 +151,7 @@ class SyncCollector(BaseCollector):
     ) -> None:
         """Populate transition-side fields when the environment does not own the rollout."""
         done = terminated | truncated
-        rollout["next", "observation"][:, step_idx] = flatten_dict_observation(
-            next_obs_td
-        )
+        rollout["next", "obs"][:, step_idx] = flatten_dict_observation(next_obs_td)
         rollout["next", "reward"][:, step_idx] = reward.to(self.device)
         rollout["next", "done"][:, step_idx] = done.to(self.device)
         rollout["next", "terminated"][:, step_idx] = terminated.to(self.device)

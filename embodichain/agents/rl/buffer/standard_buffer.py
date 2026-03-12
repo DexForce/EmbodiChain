@@ -85,7 +85,7 @@ class RolloutBuffer:
         """Preallocate rollout storage with batch shape `[num_envs, time]`."""
         return TensorDict(
             {
-                "observation": torch.empty(
+                "obs": torch.empty(
                     self.num_envs,
                     self.rollout_len,
                     self.obs_dim,
@@ -112,7 +112,7 @@ class RolloutBuffer:
                     device=self.device,
                 ),
                 "next": {
-                    "observation": torch.empty(
+                    "obs": torch.empty(
                         self.num_envs,
                         self.rollout_len,
                         self.obs_dim,
