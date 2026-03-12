@@ -184,11 +184,9 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
-    action_dim = policy_block.get("action_dim")
-    if action_dim is None:
-        raise ValueError("Policy config must define 'action_dim'.")
-    action_dim = int(action_dim)
     env_action_dim = env.action_space.shape[-1]
+    action_dim = policy_block.get("action_dim", env_action_dim)
+    action_dim = int(action_dim)
     if action_dim != env_action_dim:
         raise ValueError(
             f"Configured policy.action_dim={action_dim} does not match env action dim {env_action_dim}."
@@ -207,8 +205,8 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            obs_dim,
-            action_dim,
+            env.observation_space,
+            env.action_space,
             device,
             actor=actor,
             critic=critic,
@@ -224,13 +222,15 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            obs_dim,
-            action_dim,
+            env.observation_space,
+            env.action_space,
             device,
             actor=actor,
         )
     else:
-        policy = build_policy(policy_block, obs_dim, action_dim, device)
+        policy = build_policy(
+            policy_block, env.observation_space, env.action_space, device
+        )
 
     # Build Algorithm via factory
     algo_name = algo_block["name"].lower()

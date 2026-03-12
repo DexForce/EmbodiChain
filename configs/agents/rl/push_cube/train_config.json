@@ -38,7 +38,6 @@
     },
     "policy": {
         "name": "actor_critic",
-        "action_dim": 8,
         "actor": {
             "type": "mlp",
             "network_cfg": {
