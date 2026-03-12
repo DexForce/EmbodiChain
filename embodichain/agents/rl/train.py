@@ -169,6 +169,7 @@ def train_from_config(config_path: str):
     sample_obs, _ = env.reset()
     sample_obs_td = dict_to_tensordict(sample_obs, device)
     obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
+    flat_obs_space = env.flattened_observation_space
 
     # Create evaluation environment only if enabled
     eval_env = None
@@ -205,7 +206,7 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            env.observation_space,
+            flat_obs_space,
             env.action_space,
             device,
             actor=actor,
@@ -222,7 +223,7 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            env.observation_space,
+            flat_obs_space,
             env.action_space,
             device,
             actor=actor,
