@@ -20,8 +20,9 @@ from typing import Dict, Iterator
 import torch
 from tensordict import TensorDict
 
-from embodichain.agents.rl.utils import AlgorithmCfg, compute_gae
+from embodichain.agents.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
+from .common import compute_gae
 from .base import BaseAlgorithm
 
 
