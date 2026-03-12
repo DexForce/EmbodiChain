@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from typing import Dict, Type
 import torch
-from gymnasium import spaces
 
 from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
@@ -45,8 +44,8 @@ def get_policy_class(name: str) -> Type[Policy] | None:
 
 def build_policy(
     policy_block: dict,
-    obs_space: spaces.Space,
-    action_space: spaces.Space,
+    obs_dim: int,
+    action_dim: int,
     device: torch.device,
     actor: torch.nn.Module | None = None,
     critic: torch.nn.Module | None = None,
@@ -64,13 +63,24 @@ def build_policy(
             raise ValueError(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
-        return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
+        return policy_cls(
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            device=device,
+            actor=actor,
+            critic=critic,
+        )
     elif name == "actor_only":
         if actor is None:
             raise ValueError("ActorOnly policy requires external 'actor' module.")
-        return policy_cls(obs_space, action_space, device, actor=actor)
+        return policy_cls(
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            device=device,
+            actor=actor,
+        )
     else:
-        return policy_cls(obs_space, action_space, device)
+        return policy_cls(obs_dim=obs_dim, action_dim=action_dim, device=device)
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:

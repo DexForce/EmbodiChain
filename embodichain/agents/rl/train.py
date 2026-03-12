@@ -29,6 +29,7 @@ from copy import deepcopy
 from embodichain.agents.rl.models import build_policy, get_registered_policy_names
 from embodichain.agents.rl.models import build_mlp_from_cfg
 from embodichain.agents.rl.algo import build_algo, get_registered_algo_names
+from embodichain.agents.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.agents.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.tasks.rl import build_env
@@ -64,7 +65,9 @@ def train_from_config(config_path: str):
     seed = int(trainer_cfg.get("seed", 1))
     device_str = trainer_cfg.get("device", "cpu")
     iterations = int(trainer_cfg.get("iterations", 250))
-    rollout_steps = int(trainer_cfg.get("rollout_steps", 2048))
+    buffer_size = int(
+        trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 2048))
+    )
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
@@ -163,6 +166,9 @@ def train_from_config(config_path: str):
     )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
+    sample_obs, _ = env.reset()
+    sample_obs_td = dict_to_tensordict(sample_obs, device)
+    obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
 
     # Create evaluation environment only if enabled
     eval_env = None
@@ -178,13 +184,17 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
+    action_dim = policy_block.get("action_dim")
+    if action_dim is None:
+        raise ValueError("Policy config must define 'action_dim'.")
+    action_dim = int(action_dim)
+    env_action_dim = env.action_space.shape[-1]
+    if action_dim != env_action_dim:
+        raise ValueError(
+            f"Configured policy.action_dim={action_dim} does not match env action dim {env_action_dim}."
+        )
     # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic/actor_only)
     if policy_name.lower() == "actor_critic":
-        # Get observation dimension from flattened observation space
-        # flattened_observation_space returns Box space for RL training
-        obs_dim = env.flattened_observation_space.shape[-1]
-        action_dim = env.action_space.shape[-1]
-
         actor_cfg = policy_block.get("actor")
         critic_cfg = policy_block.get("critic")
         if actor_cfg is None or critic_cfg is None:
@@ -197,16 +207,13 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            env.flattened_observation_space,
-            env.action_space,
+            obs_dim,
+            action_dim,
             device,
             actor=actor,
             critic=critic,
         )
     elif policy_name.lower() == "actor_only":
-        obs_dim = env.flattened_observation_space.shape[-1]
-        action_dim = env.action_space.shape[-1]
-
         actor_cfg = policy_block.get("actor")
         if actor_cfg is None:
             raise ValueError(
@@ -217,15 +224,13 @@ def train_from_config(config_path: str):
 
         policy = build_policy(
             policy_block,
-            env.flattened_observation_space,
-            env.action_space,
+            obs_dim,
+            action_dim,
             device,
             actor=actor,
         )
     else:
-        policy = build_policy(
-            policy_block, env.flattened_observation_space, env.action_space, device
-        )
+        policy = build_policy(policy_block, obs_dim, action_dim, device)
 
     # Build Algorithm via factory
     algo_name = algo_block["name"].lower()
@@ -276,7 +281,7 @@ def train_from_config(config_path: str):
         policy=policy,
         env=env,
         algorithm=algo,
-        num_steps=rollout_steps,
+        buffer_size=buffer_size,
         batch_size=algo_cfg["batch_size"],
         writer=writer,
         eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
@@ -299,7 +304,7 @@ def train_from_config(config_path: str):
         f"Algorithm: {algo_name} (available: {get_registered_algo_names()})"
     )
 
-    total_steps = int(iterations * rollout_steps * env.num_envs)
+    total_steps = int(iterations * buffer_size * env.num_envs)
     logger.log_info(f"Total steps: {total_steps} (iterations≈{iterations})")
 
     try:

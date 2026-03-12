@@ -14,6 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .rollout_buffer import RolloutBuffer
+from .standard_buffer import RolloutBuffer
 
 __all__ = ["RolloutBuffer"]

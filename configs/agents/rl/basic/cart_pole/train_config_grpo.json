@@ -9,7 +9,7 @@
         "gpu_id": 0,
         "num_envs": 64,
         "iterations": 1000,
-        "rollout_steps": 1024,
+        "buffer_size": 1024,
         "eval_freq": 200,
         "save_freq": 200,
         "use_wandb": true,
@@ -36,6 +36,7 @@
     },
     "policy": {
         "name": "actor_only",
+        "action_dim": 2,
         "actor": {
             "type": "mlp",
             "network_cfg": {

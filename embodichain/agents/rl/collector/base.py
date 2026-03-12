@@ -16,19 +16,22 @@
 
 from __future__ import annotations
 
-from typing import Dict
-import torch
+from abc import ABC, abstractmethod
+from typing import Callable
+
 from tensordict import TensorDict
 
+__all__ = ["BaseCollector"]
 
-class BaseAlgorithm:
-    """Base class for RL algorithms.
 
-    Algorithms only implement policy updates over collected rollouts.
-    """
+class BaseCollector(ABC):
+    """Base class for rollout collectors."""
 
-    device: torch.device
-
-    def update(self, rollout: TensorDict) -> Dict[str, float]:
-        """Update policy using collected data and return training losses."""
+    @abstractmethod
+    def collect(
+        self,
+        num_steps: int,
+        on_step_callback: Callable[[TensorDict, dict], None] | None = None,
+    ) -> TensorDict:
+        """Collect a rollout and return it as a TensorDict."""
         raise NotImplementedError

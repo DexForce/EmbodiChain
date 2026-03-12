@@ -14,21 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from __future__ import annotations
+from .base import BaseCollector
+from .sync_collector import SyncCollector
 
-from typing import Dict
-import torch
-from tensordict import TensorDict
-
-
-class BaseAlgorithm:
-    """Base class for RL algorithms.
-
-    Algorithms only implement policy updates over collected rollouts.
-    """
-
-    device: torch.device
-
-    def update(self, rollout: TensorDict) -> Dict[str, float]:
-        """Update policy using collected data and return training losses."""
-        raise NotImplementedError
+__all__ = ["BaseCollector", "SyncCollector"]

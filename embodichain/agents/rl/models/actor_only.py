@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
+from tensordict import TensorDict
+
 from .policy import Policy
 
 
@@ -33,14 +33,14 @@ class ActorOnly(Policy):
 
     def __init__(
         self,
-        obs_space,
-        action_space,
+        obs_dim: int,
+        action_dim: int,
         device: torch.device,
         actor: nn.Module,
     ):
         super().__init__()
-        self.obs_dim = obs_space.shape[-1]
-        self.action_dim = action_space.shape[-1]
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
         self.device = device
 
         self.actor = actor
@@ -50,31 +50,40 @@ class ActorOnly(Policy):
         self.log_std_min = -5.0
         self.log_std_max = 2.0
 
-    @torch.no_grad()
-    def get_action(
-        self, obs: torch.Tensor, deterministic: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _distribution(self, obs: torch.Tensor) -> Normal:
         mean = self.actor(obs)
         log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
         std = log_std.exp().expand(mean.shape[0], -1)
-        dist = Normal(mean, std)
+        return Normal(mean, std)
+
+    def forward(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        obs = tensordict["observation"]
+        dist = self._distribution(obs)
+        mean = dist.mean
         action = mean if deterministic else dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=-1)
-        value = torch.zeros(obs.shape[0], device=self.device, dtype=obs.dtype)
-        return action, log_prob, value
+        tensordict["action"] = action
+        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+        tensordict["value"] = torch.zeros(
+            obs.shape[0], device=self.device, dtype=obs.dtype
+        )
+        return tensordict
 
-    @torch.no_grad()
-    def get_value(self, obs: torch.Tensor) -> torch.Tensor:
-        return torch.zeros(obs.shape[0], device=self.device, dtype=obs.dtype)
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
+        obs = tensordict["observation"]
+        tensordict["value"] = torch.zeros(
+            obs.shape[0], device=self.device, dtype=obs.dtype
+        )
+        return tensordict
 
-    def evaluate_actions(
-        self, obs: torch.Tensor, actions: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean = self.actor(obs)
-        log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
-        std = log_std.exp().expand(mean.shape[0], -1)
-        dist = Normal(mean, std)
-        log_prob = dist.log_prob(actions).sum(dim=-1)
-        entropy = dist.entropy().sum(dim=-1)
-        value = torch.zeros(obs.shape[0], device=self.device, dtype=obs.dtype)
-        return log_prob, entropy, value
+    def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
+        obs = tensordict["observation"]
+        action = tensordict["action"]
+        dist = self._distribution(obs)
+        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+        tensordict["entropy"] = dist.entropy().sum(dim=-1)
+        tensordict["value"] = torch.zeros(
+            obs.shape[0], device=self.device, dtype=obs.dtype
+        )
+        return tensordict

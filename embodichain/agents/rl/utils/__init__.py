@@ -15,9 +15,11 @@
 # ----------------------------------------------------------------------------
 
 from .config import AlgorithmCfg
-from .helper import flatten_dict_observation
+from .helper import compute_gae, dict_to_tensordict, flatten_dict_observation
 
 __all__ = [
     "AlgorithmCfg",
+    "compute_gae",
+    "dict_to_tensordict",
     "flatten_dict_observation",
 ]

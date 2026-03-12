@@ -14,13 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
-from typing import Dict, Any, Tuple, Callable
+import math
+from typing import Dict
 
+import torch
 from tensordict import TensorDict
 
-from embodichain.agents.rl.utils import AlgorithmCfg, flatten_dict_observation
-from embodichain.agents.rl.buffer import RolloutBuffer
+from embodichain.agents.rl.utils import AlgorithmCfg, compute_gae
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
 
@@ -36,112 +36,24 @@ class PPOCfg(AlgorithmCfg):
 
 
 class PPO(BaseAlgorithm):
-    """PPO algorithm operating via Policy and RolloutBuffer (algo-agnostic design)."""
+    """PPO algorithm consuming TensorDict rollouts."""
 
     def __init__(self, cfg: PPOCfg, policy):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
-        self.buffer: RolloutBuffer | None = None
         # no per-rollout aggregation for dense logging
 
-    def _compute_gae(
-        self, rewards: torch.Tensor, values: torch.Tensor, dones: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Internal method to compute GAE. Only called by collect_rollout."""
-        T, N = rewards.shape
-        advantages = torch.zeros_like(rewards, device=self.device)
-        last_adv = torch.zeros(N, device=self.device)
-        for t in reversed(range(T)):
-            next_value = values[t + 1] if t < T - 1 else torch.zeros_like(values[0])
-            not_done = (~dones[t]).float()
-            delta = rewards[t] + self.cfg.gamma * next_value * not_done - values[t]
-            last_adv = (
-                delta + self.cfg.gamma * self.cfg.gae_lambda * not_done * last_adv
-            )
-            advantages[t] = last_adv
-        returns = advantages + values
-        return advantages, returns
+    def update(self, rollout: TensorDict) -> Dict[str, float]:
+        """Update the policy using a collected rollout."""
+        rollout = rollout.clone()
+        compute_gae(rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda)
+        flat_rollout = rollout.reshape(math.prod(rollout.batch_size))
 
-    def initialize_buffer(
-        self, num_steps: int, num_envs: int, obs_dim: int, action_dim: int
-    ):
-        """Initialize the rollout buffer. Called by trainer before first rollout."""
-        self.buffer = RolloutBuffer(
-            num_steps, num_envs, obs_dim, action_dim, self.device
-        )
-
-    def collect_rollout(
-        self,
-        env,
-        policy,
-        obs: torch.Tensor,
-        num_steps: int,
-        on_step_callback: Callable | None = None,
-    ) -> Dict[str, Any]:
-        """Collect a rollout. Algorithm controls the data collection process."""
-        if self.buffer is None:
-            raise RuntimeError(
-                "Buffer not initialized. Call initialize_buffer() first."
-            )
-
-        policy.train()
-        self.buffer.step = 0
-        current_obs = obs
-
-        for t in range(num_steps):
-            # Get action from policy
-            actions, log_prob, value = policy.get_action(
-                current_obs, deterministic=False
-            )
-
-            # Wrap action as dict for env processing
-            am = getattr(env, "action_manager", None)
-            action_type = (
-                am.action_type if am else getattr(env, "action_type", "delta_qpos")
-            )
-            action_dict = {action_type: actions}
-
-            # Step environment
-            result = env.step(action_dict)
-            next_obs, reward, terminated, truncated, env_info = result
-            done = terminated | truncated
-            # Light dtype normalization
-            reward = reward.float()
-            done = done.bool()
-
-            # Flatten TensorDict observation from ObservationManager if needed
-            if isinstance(next_obs, TensorDict):
-                next_obs = flatten_dict_observation(next_obs)
-
-            # Add to buffer
-            self.buffer.add(current_obs, actions, reward, done, value, log_prob)
-
-            # Dense logging is handled in Trainer.on_step via info; no aggregation here
-            # Call callback for statistics and logging
-            if on_step_callback is not None:
-                on_step_callback(current_obs, actions, reward, done, env_info, next_obs)
-
-            current_obs = next_obs
-
-        # Compute advantages/returns and attach to buffer extras
-        adv, ret = self._compute_gae(
-            self.buffer.rewards, self.buffer.values, self.buffer.dones
-        )
-        self.buffer.set_extras({"advantages": adv, "returns": ret})
-
-        # No aggregated logging results; Trainer performs dense per-step logging
-        return {}
-
-    def update(self) -> dict:
-        """Update the policy using the collected rollout buffer."""
-        if self.buffer is None:
-            raise RuntimeError("Buffer not initialized. Call collect_rollout() first.")
-
-        # Normalize advantages (optional, common default)
-        adv = self.buffer._extras.get("advantages")
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+        advantages = flat_rollout["advantage"]
+        adv_mean = advantages.mean()
+        adv_std = advantages.std().clamp_min(1e-8)
 
         total_actor_loss = 0.0
         total_value_loss = 0.0
@@ -149,23 +61,22 @@ class PPO(BaseAlgorithm):
         total_steps = 0
 
         for _ in range(self.cfg.n_epochs):
-            for batch in self.buffer.iterate_minibatches(self.cfg.batch_size):
-                obs = batch["obs"]
-                actions = batch["actions"]
-                old_logprobs = batch["logprobs"]
-                returns = batch["returns"]
-                advantages = (
-                    (batch["advantages"] - adv.mean()) / (adv.std() + 1e-8)
-                ).detach()
+            for batch in self._iterate_minibatches(flat_rollout, self.cfg.batch_size):
+                old_logprobs = batch["sample_log_prob"].clone()
+                returns = batch["return"].clone()
+                batch_advantages = ((batch["advantage"] - adv_mean) / adv_std).detach()
 
-                logprobs, entropy, values = self.policy.evaluate_actions(obs, actions)
+                eval_batch = self.policy.evaluate_actions(batch.clone())
+                logprobs = eval_batch["sample_log_prob"]
+                entropy = eval_batch["entropy"]
+                values = eval_batch["value"]
                 ratio = (logprobs - old_logprobs).exp()
-                surr1 = ratio * advantages
+                surr1 = ratio * batch_advantages
                 surr2 = (
                     torch.clamp(
                         ratio, 1.0 - self.cfg.clip_coef, 1.0 + self.cfg.clip_coef
                     )
-                    * advantages
+                    * batch_advantages
                 )
                 actor_loss = -torch.min(surr1, surr2).mean()
                 value_loss = torch.nn.functional.mse_loss(values, returns)
@@ -184,7 +95,7 @@ class PPO(BaseAlgorithm):
                 )
                 self.optimizer.step()
 
-                bs = obs.shape[0]
+                bs = batch.batch_size[0]
                 total_actor_loss += actor_loss.item() * bs
                 total_value_loss += value_loss.item() * bs
                 total_entropy += (-entropy_loss.item()) * bs
@@ -195,3 +106,13 @@ class PPO(BaseAlgorithm):
             "value_loss": total_value_loss / max(1, total_steps),
             "entropy": total_entropy / max(1, total_steps),
         }
+
+    def _iterate_minibatches(
+        self, rollout: TensorDict, batch_size: int
+    ) -> list[TensorDict]:
+        total = rollout.batch_size[0]
+        indices = torch.randperm(total, device=self.device)
+        return [
+            rollout[indices[start : start + batch_size]]
+            for start in range(0, total, batch_size)
+        ]
