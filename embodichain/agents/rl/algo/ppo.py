@@ -15,11 +15,12 @@
 # ----------------------------------------------------------------------------
 
 import math
-from typing import Dict, Iterator
+from typing import Dict
 
 import torch
 from tensordict import TensorDict
 
+from embodichain.agents.rl.buffer import iterate_minibatches
 from embodichain.agents.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .common import compute_gae
@@ -62,7 +63,9 @@ class PPO(BaseAlgorithm):
         total_steps = 0
 
         for _ in range(self.cfg.n_epochs):
-            for batch in self._iterate_minibatches(flat_rollout, self.cfg.batch_size):
+            for batch in iterate_minibatches(
+                flat_rollout, self.cfg.batch_size, self.device
+            ):
                 old_logprobs = batch["sample_log_prob"].clone()
                 returns = batch["return"].clone()
                 batch_advantages = ((batch["advantage"] - adv_mean) / adv_std).detach()
@@ -107,11 +110,3 @@ class PPO(BaseAlgorithm):
             "value_loss": total_value_loss / max(1, total_steps),
             "entropy": total_entropy / max(1, total_steps),
         }
-
-    def _iterate_minibatches(
-        self, rollout: TensorDict, batch_size: int
-    ) -> Iterator[TensorDict]:
-        total = rollout.batch_size[0]
-        indices = torch.randperm(total, device=self.device)
-        for start in range(0, total, batch_size):
-            yield rollout[indices[start : start + batch_size]]

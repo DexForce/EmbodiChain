@@ -14,7 +14,21 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .standard_buffer import RolloutBuffer
-from .utils import iterate_minibatches
+from __future__ import annotations
 
-__all__ = ["RolloutBuffer", "iterate_minibatches"]
+from collections.abc import Iterator
+
+import torch
+from tensordict import TensorDict
+
+__all__ = ["iterate_minibatches"]
+
+
+def iterate_minibatches(
+    rollout: TensorDict, batch_size: int, device: torch.device
+) -> Iterator[TensorDict]:
+    """Yield shuffled minibatches from a flattened rollout."""
+    total = rollout.batch_size[0]
+    indices = torch.randperm(total, device=device)
+    for start in range(0, total, batch_size):
+        yield rollout[indices[start : start + batch_size]]

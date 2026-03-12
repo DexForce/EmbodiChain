@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
-from typing import Dict, Iterator
+from typing import Dict
 
 import torch
 from tensordict import TensorDict
 
+from embodichain.agents.rl.buffer import iterate_minibatches
 from embodichain.agents.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
@@ -137,7 +138,9 @@ class GRPO(BaseAlgorithm):
         total_weight = 0.0
 
         for _ in range(self.cfg.n_epochs):
-            for batch in self._iterate_minibatches(flat_rollout, self.cfg.batch_size):
+            for batch in iterate_minibatches(
+                flat_rollout, self.cfg.batch_size, self.device
+            ):
                 old_logprobs = batch["sample_log_prob"].clone()
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
@@ -194,11 +197,3 @@ class GRPO(BaseAlgorithm):
             "entropy": total_entropy / max(1.0, total_weight),
             "approx_ref_kl": total_kl / max(1.0, total_weight),
         }
-
-    def _iterate_minibatches(
-        self, rollout: TensorDict, batch_size: int
-    ) -> Iterator[TensorDict]:
-        total = rollout.batch_size[0]
-        indices = torch.randperm(total, device=self.device)
-        for start in range(0, total, batch_size):
-            yield rollout[indices[start : start + batch_size]]
