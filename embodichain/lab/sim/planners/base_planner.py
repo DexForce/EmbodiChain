@@ -17,6 +17,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple, Union
+import torch
 import matplotlib.pyplot as plt
 
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
@@ -38,6 +39,7 @@ class BasePlanner(ABC):
     def __init__(self, **kwargs):
         self.dofs = kwargs.get("dofs", None)
         self.max_constraints = kwargs.get("max_constraints", None)
+        self.device = kwargs.get("device", torch.device("cpu"))
 
     @abstractmethod
     def plan(
@@ -47,10 +49,10 @@ class BasePlanner(ABC):
         **kwargs,
     ) -> Tuple[
         bool,
-        np.ndarray | None,
-        np.ndarray | None,
-        np.ndarray | None,
-        np.ndarray | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
         float,
     ]:
         r"""Execute trajectory planning.
@@ -65,10 +67,10 @@ class BasePlanner(ABC):
         Returns:
             Tuple of (success, positions, velocities, accelerations, times, duration):
                 - success: bool, whether planning succeeded
-                - positions: np.ndarray (N, DOF), joint positions along trajectory
-                - velocities: np.ndarray (N, DOF), joint velocities along trajectory
-                - accelerations: np.ndarray (N, DOF), joint accelerations along trajectory
-                - times: np.ndarray (N,), time stamps for each point
+                - positions: torch.Tensor (N, DOF), joint positions along trajectory
+                - velocities: torch.Tensor (N, DOF), joint velocities along trajectory
+                - accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory
+                - times: torch.Tensor (N,), time stamps for each point
                 - duration: float, total trajectory duration
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)

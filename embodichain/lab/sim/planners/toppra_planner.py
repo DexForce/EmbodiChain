@@ -19,6 +19,7 @@ from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import BasePlanner
 from embodichain.lab.sim.planners.utils import PlanState
+import torch
 
 from typing import TYPE_CHECKING, Union, Tuple
 
@@ -162,9 +163,11 @@ class ToppraPlanner(BasePlanner):
 
         return (
             True,
-            np.array(positions),
-            np.array(velocities),
-            np.array(accelerations),
-            ts,
+            torch.tensor(np.array(positions), dtype=torch.float32, device=self.device),
+            torch.tensor(np.array(velocities), dtype=torch.float32, device=self.device),
+            torch.tensor(
+                np.array(accelerations), dtype=torch.float32, device=self.device
+            ),
+            torch.tensor(ts, dtype=torch.float32, device=self.device),
             duration,
         )

@@ -70,7 +70,7 @@ class MotionGenerator:
         self.robot = robot
         self.sim = sim
         self.collision_margin = collision_margin
-        self.uid = uid
+        self.uid = uid  # control part
 
         # Get robot DOF using get_joint_ids for specified control part (None for whole body)
         self.dof = len(robot.get_joint_ids(uid))
@@ -185,10 +185,10 @@ class MotionGenerator:
         **kwargs,
     ) -> Tuple[
         bool,
-        np.ndarray | None,
-        np.ndarray | None,
-        np.ndarray | None,
-        np.ndarray | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
         float,
     ]:
         r"""Plan trajectory without collision checking.
@@ -206,10 +206,10 @@ class MotionGenerator:
         Returns:
             Tuple of (success, positions, velocities, accelerations, times, duration):
                 - success: bool, whether planning succeeded
-                - positions: np.ndarray (N, DOF), joint positions along trajectory
-                - velocities: np.ndarray (N, DOF), joint velocities along trajectory
-                - accelerations: np.ndarray (N, DOF), joint accelerations along trajectory
-                - times: np.ndarray (N,), time stamps for each point
+                - positions: torch.Tensor (N, DOF), joint positions along trajectory
+                - velocities: torch.Tensor (N, DOF), joint velocities along trajectory
+                - accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory
+                - times: torch.Tensor (N,), time stamps for each point
                 - duration: float, total trajectory duration
         """
         # Plan trajectory using selected planner
@@ -473,10 +473,7 @@ class MotionGenerator:
             logger.log_error("Failed to plan trajectory")
 
         # Convert positions to list
-        out_qpos_list = (
-            positions.tolist() if isinstance(positions, np.ndarray) else positions
-        )
-
+        out_qpos_list = positions.to("cpu").numpy().tolist()
         out_qpos_list = (
             torch.tensor(out_qpos_list)
             if not isinstance(out_qpos_list, torch.Tensor)
