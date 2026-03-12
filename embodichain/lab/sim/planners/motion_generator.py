@@ -27,13 +27,6 @@ from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import PlanState, MoveType, MovePart
 
 
-class PlannerType(Enum):
-    r"""Enumeration for different planner types."""
-
-    TOPPRA = "toppra"
-    """TOPPRA planner for time-optimal trajectory planning."""
-
-
 class MotionGenerator:
     r"""Unified motion generator for robot trajectory planning.
 
@@ -52,12 +45,16 @@ class MotionGenerator:
         **kwargs: Additional arguments passed to planner initialization
     """
 
+    _support_planner_dict = {
+        "toppra": ToppraPlanner,
+    }
+
     def __init__(
         self,
         robot: Robot,
         uid: str,
         sim=None,
-        planner_type: Union[str, PlannerType] = "toppra",
+        planner_type: str = "toppra",
         default_velocity: float = 0.2,
         default_acceleration: float = 0.5,
         collision_margin: float = 0.01,
@@ -72,38 +69,16 @@ class MotionGenerator:
         self.dof = len(robot.get_joint_ids(uid))
 
         # Create planner based on planner_type
-        self.planner_type = self._parse_planner_type(planner_type)
         self.planner = self._create_planner(
-            self.planner_type, default_velocity, default_acceleration, **kwargs
+            planner_type, default_velocity, default_acceleration, **kwargs
         )
 
-    def _parse_planner_type(self, planner_type: Union[str, PlannerType]) -> str:
-        r"""Parse planner type from string or enum.
-
-        Args:
-            planner_type: Planner type as string or PlannerType enum
-
-        Returns:
-            Planner type as string
+    @classmethod
+    def register_planner_type(cls, name: str, planner_class):
         """
-        if isinstance(planner_type, PlannerType):
-            return planner_type.value
-        elif isinstance(planner_type, str):
-            planner_type_lower = planner_type.lower()
-            # Validate planner type
-            valid_types = [e.value for e in PlannerType]
-            if planner_type_lower not in valid_types:
-                logger.log_warning(
-                    f"Unknown planner type '{planner_type}', using 'toppra'. "
-                    f"Valid types: {valid_types}"
-                )
-                return "toppra"
-            return planner_type_lower
-        else:
-            logger.log_error(
-                f"planner_type must be str or PlannerType, got {type(planner_type)}",
-                TypeError,
-            )
+        Register a new planner type.
+        """
+        cls._support_planner_dict[name] = planner_class
 
     def _create_planner(
         self,
@@ -124,18 +99,20 @@ class MotionGenerator:
             Planner instance
         """
         # Get constraints from robot or use defaults
-        max_constraints = self._get_constraints(
-            default_velocity, default_acceleration, **kwargs
-        )
-
-        if planner_type == "toppra":
-            return ToppraPlanner(dofs=self.dof, max_constraints=max_constraints)
-        else:
+        planner_class = self._support_planner_dict.get(planner_type, None)
+        if planner_class is None:
             logger.log_error(
-                f"Unknown planner type '{planner_type}'. "
-                f"Supported types: {[e.value for e in PlannerType]}",
+                f"Unsupported planner type '{planner_type}'. "
+                f"Supported types: {[e for e in self._support_planner_dict.keys()]}",
                 ValueError,
             )
+        cfg = {
+            "dofs": self.dof,
+            "max_constraints": self._get_constraints(
+                default_velocity, default_acceleration, **kwargs
+            ),
+        }
+        return planner_class(**cfg)
 
     def _get_constraints(
         self, default_velocity: float, default_acceleration: float, **kwargs
