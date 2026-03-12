@@ -5,20 +5,17 @@ This module contains the core implementations of reinforcement learning algorith
 ## Main Classes and Functions
 
 ### BaseAlgorithm
-- Abstract base class for RL algorithms, defining common interfaces such as buffer initialization, data collection, and update.
+- Abstract base class for RL algorithms, defining a single update interface over a collected rollout.
 - Key methods:
-  - `initialize_buffer(num_steps, num_envs, obs_dim, action_dim)`: Initialize the trajectory buffer.
-  - `collect_rollout(env, policy, obs, num_steps, on_step_callback)`: Collect interaction data.
-  - `update()`: Update the policy based on collected data.
-- Designed to be algorithm-agnostic; Trainer only depends on this interface to support various RL algorithms.
-- Supports multi-environment parallel collection, compatible with Gymnasium/IsaacGym environments.
+  - `update(rollout)`: Update the policy based on a shared rollout `TensorDict`.
+- Designed to be algorithm-agnostic; `Trainer` handles collection while algorithms focus on loss computation and optimization.
+- Supports multi-environment parallel collection through a shared `[N, T]` rollout `TensorDict`.
 
 ### PPO
 - Mainstream on-policy algorithm, supports Generalized Advantage Estimation (GAE), policy update, and hyperparameter configuration.
 - Key methods:
-  - `_compute_gae(rewards, values, dones)`: Generalized Advantage Estimation.
-  - `collect_rollout`: Collect trajectories and compute advantages/returns.
-  - `update`: Multi-epoch minibatch optimization, including entropy, value, and policy loss, with gradient clipping.
+  - `compute_gae(rollout, gamma, gae_lambda)`: Generalized Advantage Estimation over a shared rollout `TensorDict`.
+  - `update(rollout)`: Multi-epoch minibatch optimization, including entropy, value, and policy loss, with gradient clipping.
 - Supports custom callbacks, detailed logging, and GPU acceleration.
 - Typical training flow: collect rollout → compute advantage/return → multi-epoch minibatch optimization.
 - Supports advantage normalization, entropy regularization, value loss weighting, etc.
@@ -31,8 +28,7 @@ This module contains the core implementations of reinforcement learning algorith
 - Key methods:
   - `_compute_step_returns_and_mask(rewards, dones)`: Step-wise discounted returns and valid-step mask.
   - `_compute_step_group_advantages(step_returns, seq_mask)`: Per-step group normalization with masked mean/std.
-  - `collect_rollout`: Collect trajectories and compute step-wise advantages.
-  - `update`: Multi-epoch minibatch optimization with optional KL penalty.
+  - `update(rollout)`: Multi-epoch minibatch optimization with optional KL penalty.
 - Supports both **Embodied AI** (dense reward, from-scratch training) and **VLA** (sparse reward, fine-tuning) modes via `kl_coef` configuration.
 
 ### Config Classes
@@ -43,19 +39,11 @@ This module contains the core implementations of reinforcement learning algorith
 ## Code Example
 ```python
 class BaseAlgorithm:
-    def initialize_buffer(self, num_steps, num_envs, obs_dim, action_dim):
-        ...
-    def collect_rollout(self, env, policy, obs, num_steps, on_step_callback=None):
-        ...
-    def update(self):
+    def update(self, rollout):
         ...
 
 class PPO(BaseAlgorithm):
-    def _compute_gae(self, rewards, values, dones):
-        ...
-    def collect_rollout(self, ...):
-        ...
-    def update(self):
+    def update(self, rollout):
         ...
 ```
 
@@ -71,10 +59,9 @@ class PPO(BaseAlgorithm):
 - Typical usage:
 ```python
 algo = PPO(cfg, policy)
-buffer = algo.initialize_buffer(...)
-for _ in range(num_iterations):
-    algo.collect_rollout(...)
-    algo.update()
+rollout = collector.collect(buffer_size, rollout=buffer.start_rollout())
+buffer.add(rollout)
+algo.update(buffer.get(flatten=False))
 ```
 
 ---

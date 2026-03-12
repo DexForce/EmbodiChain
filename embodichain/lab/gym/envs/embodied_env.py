@@ -264,6 +264,7 @@ class EmbodiedEnv(BaseEnv):
         # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
         self.rollout_buffer: TensorDict | None = None
         self._max_rollout_steps = 0
+        self._rollout_buffer_mode: str | None = None
         if self.cfg.init_rollout_buffer:
             self.rollout_buffer = init_rollout_buffer_from_gym_space(
                 obs_space=self.observation_space,
@@ -273,6 +274,7 @@ class EmbodiedEnv(BaseEnv):
                 device=self.device,
             )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
+            self._rollout_buffer_mode = "episode"
 
         self.current_rollout_step = 0
 
@@ -295,6 +297,8 @@ class EmbodiedEnv(BaseEnv):
             )
         self.rollout_buffer = rollout_buffer
         self._max_rollout_steps = self.rollout_buffer.shape[1]
+        self.current_rollout_step = 0
+        self._rollout_buffer_mode = self._infer_rollout_buffer_mode(rollout_buffer)
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -416,31 +420,20 @@ class EmbodiedEnv(BaseEnv):
         if self.rollout_buffer is not None:
             buffer_device = self.rollout_buffer.device
             if self.current_rollout_step < self._max_rollout_steps:
-                # Extract data into episode buffer.
-                self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
-                    obs.to(buffer_device), non_blocking=True
-                )
-                if isinstance(action, TensorDict):
-                    action_to_store = (
-                        action["qpos"]
-                        if "qpos" in action
-                        else (action["qvel"] if "qvel" in action else action["qf"])
+                if self._rollout_buffer_mode == "external_rl":
+                    self._write_external_rl_rollout_step(
+                        obs=obs,
+                        rewards=rewards,
+                        dones=dones,
+                        terminateds=kwargs.get("terminateds"),
+                        truncateds=kwargs.get("truncateds"),
                     )
-                elif isinstance(action, torch.Tensor):
-                    action_to_store = action
                 else:
-                    logger.log_warning(
-                        f"Unexpected action type {type(action)} in _hook_after_sim_step; "
-                        "skipping action storage in rollout buffer."
+                    self._write_episode_rollout_step(
+                        obs=obs,
+                        action=action,
+                        rewards=rewards,
                     )
-                    action_to_store = None
-                if action_to_store is not None:
-                    self.rollout_buffer["actions"][
-                        :, self.current_rollout_step, ...
-                    ].copy_(action_to_store.to(buffer_device), non_blocking=True)
-                self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
-                    rewards.to(buffer_device), non_blocking=True
-                )
                 self.current_rollout_step += 1
             else:
                 logger.log_warning(
@@ -514,7 +507,10 @@ class EmbodiedEnv(BaseEnv):
                     )
 
         # Clear episode buffers and reset success status for environments being reset
-        if self.rollout_buffer is not None:
+        if (
+            self.rollout_buffer is not None
+            and self._rollout_buffer_mode != "external_rl"
+        ):
             self.current_rollout_step = 0
 
         self.episode_success_status[env_ids_to_process] = False
@@ -527,6 +523,87 @@ class EmbodiedEnv(BaseEnv):
         # reset reward manager for environments that need a reset
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)
+
+    def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
+        """Infer whether the rollout buffer is env-owned episode data or external RL data."""
+        if "next" in rollout_buffer.keys() and "observation" in rollout_buffer.keys():
+            return "external_rl"
+        return "episode"
+
+    def _write_episode_rollout_step(
+        self,
+        obs: EnvObs,
+        action: EnvAction,
+        rewards: torch.Tensor,
+    ) -> None:
+        """Write one step into the legacy episode recording rollout buffer."""
+        buffer_device = self.rollout_buffer.device
+        self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
+            obs.to(buffer_device), non_blocking=True
+        )
+        if isinstance(action, TensorDict):
+            action_to_store = (
+                action["qpos"]
+                if "qpos" in action
+                else (action["qvel"] if "qvel" in action else action["qf"])
+            )
+        elif isinstance(action, torch.Tensor):
+            action_to_store = action
+        else:
+            logger.log_warning(
+                f"Unexpected action type {type(action)} in _hook_after_sim_step; "
+                "skipping action storage in rollout buffer."
+            )
+            action_to_store = None
+        if action_to_store is not None:
+            self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
+                action_to_store.to(buffer_device), non_blocking=True
+            )
+        self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
+            rewards.to(buffer_device), non_blocking=True
+        )
+
+    def _write_external_rl_rollout_step(
+        self,
+        obs: EnvObs,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        terminateds: torch.Tensor | None,
+        truncateds: torch.Tensor | None,
+    ) -> None:
+        """Write environment-side fields into an externally managed RL rollout buffer."""
+        from embodichain.agents.rl.utils import flatten_dict_observation
+
+        buffer_device = self.rollout_buffer.device
+        obs_to_store = (
+            flatten_dict_observation(obs) if isinstance(obs, TensorDict) else obs
+        )
+        self.rollout_buffer["next", "observation"][:, self.current_rollout_step].copy_(
+            obs_to_store.to(buffer_device), non_blocking=True
+        )
+        self.rollout_buffer["next", "reward"][:, self.current_rollout_step].copy_(
+            rewards.to(buffer_device), non_blocking=True
+        )
+        self.rollout_buffer["next", "done"][:, self.current_rollout_step].copy_(
+            dones.to(buffer_device), non_blocking=True
+        )
+
+        terminateds = (
+            terminateds
+            if terminateds is not None
+            else torch.zeros_like(dones, dtype=torch.bool)
+        )
+        truncateds = (
+            truncateds
+            if truncateds is not None
+            else torch.zeros_like(dones, dtype=torch.bool)
+        )
+        self.rollout_buffer["next", "terminated"][:, self.current_rollout_step].copy_(
+            terminateds.to(buffer_device), non_blocking=True
+        )
+        self.rollout_buffer["next", "truncated"][:, self.current_rollout_step].copy_(
+            truncateds.to(buffer_device), non_blocking=True
+        )
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.

@@ -20,7 +20,7 @@ This module implements the main RL training loop, logging management, and event-
 
 ## Main Methods
 - `train(total_timesteps)`: Main training loop, automatically collects data, updates policy, and logs.
-- `_collect_rollout()`: Collect one rollout, supports custom callback statistics.
+- `_collect_rollout()`: Collect one rollout through `SyncCollector`, supports custom callback statistics.
 - `_log_train(losses)`: Log training loss, reward, sampling speed, etc.
 - `_eval_once()`: Periodic evaluation, records evaluation metrics.
 - `save_checkpoint()`: Save model parameters and training state.
@@ -35,7 +35,7 @@ This module implements the main RL training loop, logging management, and event-
 
 ## Usage Example
 ```python
-trainer = Trainer(policy, env, algorithm, num_steps, batch_size, writer, ...)
+trainer = Trainer(policy, env, algorithm, buffer_size, batch_size, writer, ...)
 trainer.train(total_steps)
 trainer.save_checkpoint()
 ```
@@ -44,6 +44,7 @@ trainer.save_checkpoint()
 - Custom event modules can be implemented for environment reset, data collection, evaluation, etc.
 - Supports multi-environment parallelism and distributed training.
 - Training process can be flexibly adjusted via config files.
+- The current trainer uses a shared rollout `TensorDict`: collector writes policy-side fields and `EmbodiedEnv` writes environment-side `next.*` fields through `set_rollout_buffer()`.
 
 ## Practical Tips
 - It is recommended to perform periodic evaluation and model saving to prevent loss of progress during training.

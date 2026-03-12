@@ -46,15 +46,26 @@ class SyncCollector(BaseCollector):
     def collect(
         self,
         num_steps: int,
+        rollout: TensorDict | None = None,
         on_step_callback: Callable[[TensorDict, dict], None] | None = None,
     ) -> TensorDict:
         self.policy.train()
         if self.reset_every_rollout:
             self.obs_td = self._reset_env()
 
-        rollout_steps: list[TensorDict] = []
+        if rollout is None:
+            raise ValueError(
+                "SyncCollector.collect() requires a preallocated rollout TensorDict."
+            )
+        if tuple(rollout.batch_size) != (self.env.num_envs, num_steps):
+            raise ValueError(
+                "Preallocated rollout batch size mismatch: "
+                f"expected ({self.env.num_envs}, {num_steps}), got {tuple(rollout.batch_size)}."
+            )
+        if hasattr(self.env, "set_rollout_buffer"):
+            self.env.set_rollout_buffer(rollout)
 
-        for _ in range(num_steps):
+        for step_idx in range(num_steps):
             obs_tensor = flatten_dict_observation(self.obs_td)
             step_td = TensorDict(
                 {"observation": obs_tensor},
@@ -62,33 +73,26 @@ class SyncCollector(BaseCollector):
                 device=self.device,
             )
             self.policy.forward(step_td)
+            rollout["observation"][:, step_idx] = obs_tensor
+            rollout["action"][:, step_idx] = step_td["action"]
+            rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
+            rollout["value"][:, step_idx] = step_td["value"]
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(
                 self._to_action_dict(step_td["action"])
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
-            next_obs_tensor = flatten_dict_observation(next_obs_td)
-            done = (terminated | truncated).bool()
-
-            step_td["next"] = TensorDict(
-                {
-                    "observation": next_obs_tensor,
-                    "reward": reward.float(),
-                    "done": done,
-                    "terminated": terminated.bool(),
-                    "truncated": truncated.bool(),
-                },
-                batch_size=step_td.batch_size,
-                device=self.device,
+            self._write_step(
+                rollout=rollout,
+                step_idx=step_idx,
+                step_td=step_td,
             )
-            rollout_steps.append(step_td.clone())
 
             if on_step_callback is not None:
-                on_step_callback(step_td, env_info)
+                on_step_callback(rollout[:, step_idx], env_info)
 
             self.obs_td = next_obs_td
 
-        rollout = torch.stack(rollout_steps, dim=1)
         self._attach_next_values(rollout)
         return rollout
 
@@ -116,3 +120,15 @@ class SyncCollector(BaseCollector):
             am.action_type if am else getattr(self.env, "action_type", "delta_qpos")
         )
         return {action_type: action}
+
+    def _write_step(
+        self,
+        rollout: TensorDict,
+        step_idx: int,
+        step_td: TensorDict,
+    ) -> None:
+        """Write policy-side fields for one transition into the shared rollout TensorDict."""
+        rollout["observation"][:, step_idx] = step_td["observation"]
+        rollout["action"][:, step_idx] = step_td["action"]
+        rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
+        rollout["value"][:, step_idx] = step_td["value"]

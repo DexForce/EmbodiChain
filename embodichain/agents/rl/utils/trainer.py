@@ -77,8 +77,21 @@ class Trainer:
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
+        num_envs = getattr(self.env, "num_envs", None)
+        if num_envs is None:
+            raise RuntimeError("Env must expose num_envs for trainer statistics.")
+        obs_dim = getattr(self.policy, "obs_dim", None)
+        action_dim = getattr(self.policy, "action_dim", None)
+        if obs_dim is None or action_dim is None:
+            raise RuntimeError("Policy must expose obs_dim and action_dim.")
 
-        self.buffer = RolloutBuffer()
+        self.buffer = RolloutBuffer(
+            num_envs=num_envs,
+            rollout_len=self.buffer_size,
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            device=self.device,
+        )
         self.collector = SyncCollector(
             env=self.env,
             policy=self.policy,
@@ -89,9 +102,6 @@ class Trainer:
                 )
             ),
         )
-        num_envs = getattr(self.env, "num_envs", None)
-        if num_envs is None:
-            raise RuntimeError("Env must expose num_envs for trainer statistics.")
 
         # episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
@@ -152,7 +162,7 @@ class Trainer:
             """Callback called at each step during rollout collection."""
             reward = tensordict["next", "reward"]
             done = tensordict["next", "done"]
-            # Episode stats (stay on device; convert only when episode ends)
+            # Episode stats
             self.curr_ret += reward
             self.curr_len += 1
             done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
@@ -179,6 +189,7 @@ class Trainer:
 
         rollout = self.collector.collect(
             num_steps=self.buffer_size,
+            rollout=self.buffer.start_rollout(),
             on_step_callback=on_step,
         )
         self.buffer.add(rollout)

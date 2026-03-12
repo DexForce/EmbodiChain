@@ -31,6 +31,7 @@ class BaseCollector(ABC):
     def collect(
         self,
         num_steps: int,
+        rollout: TensorDict | None = None,
         on_step_callback: Callable[[TensorDict, dict], None] | None = None,
     ) -> TensorDict:
         """Collect a rollout and return it as a TensorDict."""

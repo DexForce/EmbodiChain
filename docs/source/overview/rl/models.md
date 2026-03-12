@@ -7,9 +7,10 @@ This module contains RL policy networks and related model implementations, suppo
 ### Policy
 - Abstract base class for RL policies; all policies must inherit from it.
 - Unified interface:
-    - `get_action(obs, deterministic=False)`: Sample or output actions.
-    - `get_value(obs)`: Estimate state value.
-    - `evaluate_actions(obs, actions)`: Evaluate action probabilities, entropy, and value.
+    - `forward(tensordict, deterministic=False)`: Write action, log prob, and value into a `TensorDict`.
+    - `get_value(tensordict)`: Estimate state value into a `TensorDict`.
+    - `evaluate_actions(tensordict)`: Evaluate action probabilities, entropy, and value from a `TensorDict`.
+- `get_action(obs, deterministic=False)` is retained as a compatibility layer for evaluation and legacy callers.
 - Supports GPU deployment and distributed training.
 
 ### ActorCritic
@@ -19,8 +20,8 @@ This module contains RL policy networks and related model implementations, suppo
 - Actor-only policy without Critic. Used with GRPO (Group Relative Policy Optimization), which estimates advantages via group-level return comparison instead of a value function.
 - Supports Gaussian action distributions, learnable log_std, suitable for continuous action spaces.
 - Key methods:
-    - `get_action`: Actor network outputs mean, samples action, returns log_prob and critic value.
-    - `evaluate_actions`: Used for loss calculation in PPO/SAC algorithms.
+    - `forward`: Actor network outputs mean, samples action, and writes policy outputs into a `TensorDict`.
+    - `evaluate_actions`: Used for loss calculation in PPO/GRPO algorithms.
 - Custom actor/critic network architectures supported (e.g., MLP/CNN/Transformer).
 
 ### MLP
@@ -29,14 +30,14 @@ This module contains RL policy networks and related model implementations, suppo
 - Supports orthogonal initialization and output reshaping.
 
 ### Factory Functions
-- `build_policy(policy_block, obs_space, action_space, device, ...)`: Automatically build policy from config.
+- `build_policy(policy_block, obs_dim, action_dim, device, ...)`: Automatically build policy from config.
 - `build_mlp_from_cfg(module_cfg, in_dim, out_dim)`: Automatically build MLP from config.
 
 ## Usage Example
 ```python
 actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
 critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
-policy = build_policy(policy_block, obs_space, action_space, device, actor=actor, critic=critic)
+policy = build_policy(policy_block, obs_dim, action_dim, device, actor=actor, critic=critic)
 action, log_prob, value = policy.get_action(obs)
 ```
 
