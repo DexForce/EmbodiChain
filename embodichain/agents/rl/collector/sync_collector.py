@@ -44,6 +44,7 @@ class SyncCollector(BaseCollector):
         self._supports_shared_rollout = hasattr(self.env, "set_rollout_buffer")
         self.obs_td = self._reset_env()
 
+    @torch.no_grad()
     def collect(
         self,
         num_steps: int,

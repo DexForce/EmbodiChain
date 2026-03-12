@@ -52,6 +52,7 @@ from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_gym_space,
 )
+from embodichain.agents.rl.utils import flatten_dict_observation
 from embodichain.utils import configclass, logger
 
 
@@ -571,8 +572,6 @@ class EmbodiedEnv(BaseEnv):
         truncateds: torch.Tensor | None,
     ) -> None:
         """Write environment-side fields into an externally managed RL rollout buffer."""
-        from embodichain.agents.rl.utils import flatten_dict_observation
-
         buffer_device = self.rollout_buffer.device
         obs_to_store = (
             flatten_dict_observation(obs) if isinstance(obs, TensorDict) else obs
