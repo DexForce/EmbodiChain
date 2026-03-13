@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.utils import logger
-from embodichain.lab.sim.planners.motion_generator import PlanState
+from .utils import MovePart, MoveType, PlanState
 
 
 class BasePlanner(ABC):
