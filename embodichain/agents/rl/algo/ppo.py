@@ -14,7 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import math
 from typing import Dict
 
 import torch

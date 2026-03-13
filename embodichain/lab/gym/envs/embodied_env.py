@@ -52,7 +52,6 @@ from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_gym_space,
 )
-from embodichain.agents.rl.utils import flatten_dict_observation
 from embodichain.utils import configclass, logger
 
 
@@ -299,7 +298,15 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer = rollout_buffer
         self._rollout_buffer_mode = self._infer_rollout_buffer_mode(rollout_buffer)
         if self._rollout_buffer_mode == "rl":
-            self._max_rollout_steps = self.rollout_buffer.batch_size[1] - 1
+            batch_size = self.rollout_buffer.batch_size
+            if len(batch_size) != 2:
+                message = (
+                    f"Invalid RL rollout buffer batch size: {batch_size}. "
+                    "Expected a 2D batch layout [num_envs, time + 1] for RL rollouts."
+                )
+                logger.log_error(message)
+                raise ValueError(message)
+            self._max_rollout_steps = batch_size[1] - 1
         else:
             if len(rollout_buffer.shape) != 2:
                 logger.log_error(
@@ -530,9 +537,15 @@ class EmbodiedEnv(BaseEnv):
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
         """Infer whether the rollout buffer is expert recording or RL training data."""
-        if {"obs", "action", "reward", "done", "value"}.issubset(
-            set(rollout_buffer.keys())
-        ):
+        if {
+            "obs",
+            "action",
+            "reward",
+            "done",
+            "value",
+            "terminated",
+            "truncated",
+        }.issubset(set(rollout_buffer.keys())):
             return "rl"
         return "expert"
 
