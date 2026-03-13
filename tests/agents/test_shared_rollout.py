@@ -87,14 +87,14 @@ class _FakeEnv:
         truncated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         if self.rollout_buffer is not None:
-            self.rollout_buffer["next", "reward"][:, self.current_rollout_step] = reward
-            self.rollout_buffer["next", "done"][:, self.current_rollout_step] = (
+            self.rollout_buffer["reward"][:, self.current_rollout_step] = reward
+            self.rollout_buffer["done"][:, self.current_rollout_step] = (
                 terminated | truncated
             )
-            self.rollout_buffer["next", "terminated"][
+            self.rollout_buffer["terminated"][
                 :, self.current_rollout_step
             ] = terminated
-            self.rollout_buffer["next", "truncated"][
+            self.rollout_buffer["truncated"][
                 :, self.current_rollout_step
             ] = truncated
             self.current_rollout_step += 1
@@ -152,8 +152,13 @@ def test_shared_rollout_collects_policy_and_env_fields():
     buffer.add(rollout)
     stored = buffer.get(flatten=False)
 
-    assert stored.batch_size == torch.Size([num_envs, rollout_len])
+    assert stored.batch_size == torch.Size([num_envs, rollout_len + 1])
+    assert stored["obs"].shape == torch.Size([num_envs, rollout_len + 1, obs_dim])
     assert torch.allclose(stored["obs"][:, 0], torch.zeros(num_envs, obs_dim))
+    assert torch.allclose(
+        stored["obs"][:, -1],
+        torch.full((num_envs, obs_dim), float(rollout_len), dtype=torch.float32),
+    )
     assert torch.allclose(
         stored["value"][:, 1], torch.ones(num_envs, dtype=torch.float32)
     )
@@ -166,12 +171,16 @@ def test_shared_rollout_collects_policy_and_env_fields():
         torch.full((num_envs,), 0.5, dtype=torch.float32),
     )
     assert torch.allclose(
-        stored["next", "reward"][:, 2],
+        stored["reward"][:, 2],
         torch.full((num_envs,), 1.0, dtype=torch.float32),
     )
     assert torch.allclose(
-        stored["next", "value"][:, -1],
+        stored["value"][:, -1],
         torch.full((num_envs,), 4.0, dtype=torch.float32),
+    )
+    assert torch.allclose(
+        stored["action"][:, -1],
+        torch.zeros(num_envs, action_dim, dtype=torch.float32),
     )
 
 
@@ -212,10 +221,10 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
         done = (terminated | truncated).cpu()
 
         assert env.current_rollout_step == 1
-        assert torch.allclose(rollout["next", "reward"][:, 0].cpu(), reward.cpu())
-        assert torch.equal(rollout["next", "done"][:, 0].cpu(), done)
-        assert torch.equal(rollout["next", "terminated"][:, 0].cpu(), terminated.cpu())
-        assert torch.equal(rollout["next", "truncated"][:, 0].cpu(), truncated.cpu())
+        assert torch.allclose(rollout["reward"][:, 0].cpu(), reward.cpu())
+        assert torch.equal(rollout["done"][:, 0].cpu(), done)
+        assert torch.equal(rollout["terminated"][:, 0].cpu(), terminated.cpu())
+        assert torch.equal(rollout["truncated"][:, 0].cpu(), truncated.cpu())
     finally:
         env.close()
         if SimulationManager.is_instantiated():

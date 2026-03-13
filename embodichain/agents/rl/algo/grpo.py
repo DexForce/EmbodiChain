@@ -23,7 +23,7 @@ from typing import Dict
 import torch
 from tensordict import TensorDict
 
-from embodichain.agents.rl.buffer import iterate_minibatches
+from embodichain.agents.rl.buffer import iterate_minibatches, transition_view
 from embodichain.agents.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
@@ -121,16 +121,19 @@ class GRPO(BaseAlgorithm):
                 f"num_envs={num_envs}, group_size={self.cfg.group_size}."
             )
 
-        rewards = rollout["next", "reward"].float()
-        dones = rollout["next", "done"].bool()
+        rewards = rollout["reward"][:, :-1].float()
+        dones = rollout["done"][:, :-1].bool()
         step_returns, seq_mask = self._compute_step_returns_and_mask(rewards, dones)
-        rollout["advantage"] = self._compute_step_group_advantages(
+        rollout["advantage"] = torch.zeros_like(rollout["reward"], dtype=torch.float32)
+        rollout["advantage"][:, :-1] = self._compute_step_group_advantages(
             step_returns, seq_mask
         )
-        rollout["seq_mask"] = seq_mask
-        rollout["seq_return"] = step_returns
+        rollout["seq_mask"] = torch.zeros_like(rollout["reward"], dtype=torch.float32)
+        rollout["seq_mask"][:, :-1] = seq_mask
+        rollout["seq_return"] = torch.zeros_like(rollout["reward"], dtype=torch.float32)
+        rollout["seq_return"][:, :-1] = step_returns
 
-        flat_rollout = rollout.reshape(math.prod(rollout.batch_size))
+        flat_rollout = transition_view(rollout, flatten=True)
 
         total_actor_loss = 0.0
         total_entropy = 0.0

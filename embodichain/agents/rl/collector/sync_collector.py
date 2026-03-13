@@ -59,19 +59,21 @@ class SyncCollector(BaseCollector):
             raise ValueError(
                 "SyncCollector.collect() requires a preallocated rollout TensorDict."
             )
-        if tuple(rollout.batch_size) != (self.env.num_envs, num_steps):
+        if tuple(rollout.batch_size) != (self.env.num_envs, num_steps + 1):
             raise ValueError(
                 "Preallocated rollout batch size mismatch: "
-                f"expected ({self.env.num_envs}, {num_steps}), got {tuple(rollout.batch_size)}."
+                f"expected ({self.env.num_envs}, {num_steps + 1}), got {tuple(rollout.batch_size)}."
             )
+        self._validate_rollout(rollout, num_steps)
         if self._supports_shared_rollout:
             self.env.set_rollout_buffer(rollout)
 
+        initial_obs = flatten_dict_observation(self.obs_td)
+        rollout["obs"][:, 0] = initial_obs
         for step_idx in range(num_steps):
-            obs_tensor = flatten_dict_observation(self.obs_td)
             step_td = TensorDict(
-                {"obs": obs_tensor},
-                batch_size=[obs_tensor.shape[0]],
+                {"obs": rollout["obs"][:, step_idx]},
+                batch_size=[rollout.batch_size[0]],
                 device=self.device,
             )
             step_td = self.policy.get_action(step_td)
@@ -93,29 +95,26 @@ class SyncCollector(BaseCollector):
                     terminated=terminated,
                     truncated=truncated,
                 )
+            rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
 
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
 
             self.obs_td = next_obs_td
 
-        self._attach_next_values(rollout)
+        self._attach_final_value(rollout)
         return rollout
 
-    def _attach_next_values(self, rollout: TensorDict) -> None:
-        """Populate `next.value` for GAE bootstrap."""
-        next_values = torch.zeros_like(rollout["value"])
-        next_values[:, :-1] = rollout["value"][:, 1:]
-
-        final_obs = flatten_dict_observation(self.obs_td)
+    def _attach_final_value(self, rollout: TensorDict) -> None:
+        """Populate the bootstrap value for the final observed state."""
+        final_obs = rollout["obs"][:, -1]
         last_next_td = TensorDict(
             {"obs": final_obs},
             batch_size=[rollout.batch_size[0]],
             device=self.device,
         )
         self.policy.get_value(last_next_td)
-        next_values[:, -1] = last_next_td["value"]
-        rollout["next", "value"] = next_values
+        rollout["value"][:, -1] = last_next_td["value"]
 
     def _reset_env(self) -> TensorDict:
         obs, _ = self.env.reset()
@@ -135,7 +134,6 @@ class SyncCollector(BaseCollector):
         step_td: TensorDict,
     ) -> None:
         """Write policy-side fields for one transition into the shared rollout TensorDict."""
-        rollout["obs"][:, step_idx] = step_td["obs"]
         rollout["action"][:, step_idx] = step_td["action"]
         rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
         rollout["value"][:, step_idx] = step_td["value"]
@@ -150,7 +148,27 @@ class SyncCollector(BaseCollector):
     ) -> None:
         """Populate transition-side fields when the environment does not own the rollout."""
         done = terminated | truncated
-        rollout["next", "reward"][:, step_idx] = reward.to(self.device)
-        rollout["next", "done"][:, step_idx] = done.to(self.device)
-        rollout["next", "terminated"][:, step_idx] = terminated.to(self.device)
-        rollout["next", "truncated"][:, step_idx] = truncated.to(self.device)
+        rollout["reward"][:, step_idx] = reward.to(self.device)
+        rollout["done"][:, step_idx] = done.to(self.device)
+        rollout["terminated"][:, step_idx] = terminated.to(self.device)
+        rollout["truncated"][:, step_idx] = truncated.to(self.device)
+
+    def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
+        """Validate rollout layout expected by the collector."""
+        expected_shapes = {
+            "obs": (self.env.num_envs, num_steps + 1, self.policy.obs_dim),
+            "action": (self.env.num_envs, num_steps + 1, self.policy.action_dim),
+            "sample_log_prob": (self.env.num_envs, num_steps + 1),
+            "value": (self.env.num_envs, num_steps + 1),
+            "reward": (self.env.num_envs, num_steps + 1),
+            "done": (self.env.num_envs, num_steps + 1),
+            "terminated": (self.env.num_envs, num_steps + 1),
+            "truncated": (self.env.num_envs, num_steps + 1),
+        }
+        for key, expected_shape in expected_shapes.items():
+            actual_shape = tuple(rollout[key].shape)
+            if actual_shape != expected_shape:
+                raise ValueError(
+                    f"Preallocated rollout field '{key}' shape mismatch: "
+                    f"expected {expected_shape}, got {actual_shape}."
+                )

@@ -20,7 +20,7 @@ from typing import Dict
 import torch
 from tensordict import TensorDict
 
-from embodichain.agents.rl.buffer import iterate_minibatches
+from embodichain.agents.rl.buffer import iterate_minibatches, transition_view
 from embodichain.agents.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .common import compute_gae
@@ -51,7 +51,7 @@ class PPO(BaseAlgorithm):
         """Update the policy using a collected rollout."""
         rollout = rollout.clone()
         compute_gae(rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda)
-        flat_rollout = rollout.reshape(math.prod(rollout.batch_size))
+        flat_rollout = transition_view(rollout, flatten=True)
 
         advantages = flat_rollout["advantage"]
         adv_mean = advantages.mean()

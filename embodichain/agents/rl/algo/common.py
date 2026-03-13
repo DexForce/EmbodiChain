@@ -25,18 +25,20 @@ __all__ = ["compute_gae"]
 def compute_gae(
     rollout: TensorDict, gamma: float, gae_lambda: float
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute GAE over a rollout with batch shape `[num_envs, time]`.
+    """Compute GAE over a rollout stored as `[num_envs, time + 1]`.
 
     Args:
-        rollout: Rollout TensorDict containing `value` and `next` transition data.
+        rollout: Rollout TensorDict where `value[:, -1]` stores the bootstrap
+            value for the final observation and transition-only fields reserve
+            their last slot as padding.
         gamma: Discount factor.
         gae_lambda: GAE lambda coefficient.
 
     Returns:
         Tuple of `(advantages, returns)`, both shaped `[num_envs, time]`.
     """
-    rewards = rollout["next", "reward"].float()
-    dones = rollout["next", "done"].bool()
+    rewards = rollout["reward"][:, :-1].float()
+    dones = rollout["done"][:, :-1].bool()
     values = rollout["value"].float()
 
     if rewards.ndim != 2:
@@ -44,29 +46,23 @@ def compute_gae(
             f"Expected reward tensor with shape [num_envs, time], got {rewards.shape}."
         )
 
-    next_values = _get_next_values(rollout, values)
     num_envs, time_dim = rewards.shape
-    advantages = torch.zeros_like(rewards)
+    if values.shape != (num_envs, time_dim + 1):
+        raise ValueError(
+            "Expected value tensor with shape [num_envs, time + 1], got "
+            f"{values.shape} for rewards shape {rewards.shape}."
+        )
+    advantages = torch.zeros_like(rollout["reward"].float())
     last_advantage = torch.zeros(num_envs, device=rewards.device, dtype=rewards.dtype)
 
     for t in reversed(range(time_dim)):
         not_done = (~dones[:, t]).float()
-        delta = rewards[:, t] + gamma * next_values[:, t] * not_done - values[:, t]
+        delta = rewards[:, t] + gamma * values[:, t + 1] * not_done - values[:, t]
         last_advantage = delta + gamma * gae_lambda * not_done * last_advantage
         advantages[:, t] = last_advantage
 
-    returns = advantages + values
+    returns = torch.zeros_like(advantages)
+    returns[:, :-1] = advantages[:, :-1] + values[:, :-1]
     rollout["advantage"] = advantages
     rollout["return"] = returns
-    return advantages, returns
-
-
-def _get_next_values(rollout: TensorDict, values: torch.Tensor) -> torch.Tensor:
-    """Resolve next-step values for GAE bootstrap."""
-    next_value = rollout.get(("next", "value"), None)
-    if next_value is not None:
-        return next_value.float()
-
-    next_values = torch.zeros_like(values)
-    next_values[:, :-1] = values[:, 1:]
-    return next_values
+    return advantages[:, :-1], returns[:, :-1]

@@ -16,16 +16,22 @@
 
 from __future__ import annotations
 
-import math
-
 import torch
 from tensordict import TensorDict
+
+from .utils import transition_view
 
 __all__ = ["RolloutBuffer"]
 
 
 class RolloutBuffer:
-    """Single-rollout buffer backed by a preallocated TensorDict."""
+    """Single-rollout buffer backed by a preallocated TensorDict.
+
+    The shared rollout uses a uniform `[num_envs, time + 1]` layout. For
+    transition-only fields such as `action`, `reward`, and `done`, the final
+    time index is reused as padding so the collector, environment, and
+    algorithms can share a single TensorDict batch shape.
+    """
 
     def __init__(
         self,
@@ -56,15 +62,20 @@ class RolloutBuffer:
             raise ValueError(
                 "RolloutBuffer only accepts its shared rollout TensorDict."
             )
-        if tuple(rollout.batch_size) != (self.num_envs, self.rollout_len):
+        if tuple(rollout.batch_size) != (self.num_envs, self.rollout_len + 1):
             raise ValueError(
                 "Rollout batch size does not match buffer allocation: "
-                f"expected ({self.num_envs}, {self.rollout_len}), got {tuple(rollout.batch_size)}."
+                f"expected ({self.num_envs}, {self.rollout_len + 1}), got {tuple(rollout.batch_size)}."
             )
+        self._validate_rollout_layout(rollout)
         self._is_full = True
 
     def get(self, flatten: bool = True) -> TensorDict:
-        """Return the stored rollout and clear the buffer."""
+        """Return the stored rollout and clear the buffer.
+
+        When `flatten` is True, the rollout is first converted to a transition
+        view that drops the padded final slot from transition-only fields.
+        """
         if not self._is_full:
             raise RuntimeError("RolloutBuffer is empty.")
 
@@ -74,77 +85,68 @@ class RolloutBuffer:
         if not flatten:
             return rollout
 
-        total_batch = math.prod(rollout.batch_size)
-        return rollout.reshape(total_batch)
+        return transition_view(rollout, flatten=True)
 
     def is_full(self) -> bool:
         """Return whether a rollout is waiting to be consumed."""
         return self._is_full
 
     def _allocate_rollout(self) -> TensorDict:
-        """Preallocate rollout storage with batch shape `[num_envs, time]`."""
+        """Preallocate rollout storage with uniform `[num_envs, time + 1]` shape."""
         return TensorDict(
             {
                 "obs": torch.empty(
                     self.num_envs,
-                    self.rollout_len,
+                    self.rollout_len + 1,
                     self.obs_dim,
                     dtype=torch.float32,
                     device=self.device,
                 ),
                 "action": torch.empty(
                     self.num_envs,
-                    self.rollout_len,
+                    self.rollout_len + 1,
                     self.action_dim,
                     dtype=torch.float32,
                     device=self.device,
                 ),
                 "sample_log_prob": torch.empty(
                     self.num_envs,
-                    self.rollout_len,
+                    self.rollout_len + 1,
                     dtype=torch.float32,
                     device=self.device,
                 ),
                 "value": torch.empty(
                     self.num_envs,
-                    self.rollout_len,
+                    self.rollout_len + 1,
                     dtype=torch.float32,
                     device=self.device,
                 ),
-                "next": {
-                    "reward": torch.empty(
-                        self.num_envs,
-                        self.rollout_len,
-                        dtype=torch.float32,
-                        device=self.device,
-                    ),
-                    "done": torch.empty(
-                        self.num_envs,
-                        self.rollout_len,
-                        dtype=torch.bool,
-                        device=self.device,
-                    ),
-                    "terminated": torch.empty(
-                        self.num_envs,
-                        self.rollout_len,
-                        dtype=torch.bool,
-                        device=self.device,
-                    ),
-                    "truncated": torch.empty(
-                        self.num_envs,
-                        self.rollout_len,
-                        dtype=torch.bool,
-                        device=self.device,
-                    ),
-                    "value": torch.empty(
-                        self.num_envs,
-                        self.rollout_len,
-                        dtype=torch.float32,
-                        device=self.device,
-                    ),
-                },
+                "reward": torch.empty(
+                    self.num_envs,
+                    self.rollout_len + 1,
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                "done": torch.empty(
+                    self.num_envs,
+                    self.rollout_len + 1,
+                    dtype=torch.bool,
+                    device=self.device,
+                ),
+                "terminated": torch.empty(
+                    self.num_envs,
+                    self.rollout_len + 1,
+                    dtype=torch.bool,
+                    device=self.device,
+                ),
+                "truncated": torch.empty(
+                    self.num_envs,
+                    self.rollout_len + 1,
+                    dtype=torch.bool,
+                    device=self.device,
+                ),
             },
-            batch_size=[self.num_envs, self.rollout_len],
+            batch_size=[self.num_envs, self.rollout_len + 1],
             device=self.device,
         )
 
@@ -153,3 +155,34 @@ class RolloutBuffer:
         for key in ("advantage", "return", "seq_mask", "seq_return", "entropy"):
             if key in self._rollout.keys():
                 del self._rollout[key]
+        self._reset_padding_slot()
+
+    def _reset_padding_slot(self) -> None:
+        """Reset the last transition-only slot reused as padding."""
+        last_idx = self.rollout_len
+        self._rollout["action"][:, last_idx].zero_()
+        self._rollout["sample_log_prob"][:, last_idx].zero_()
+        self._rollout["reward"][:, last_idx].zero_()
+        self._rollout["done"][:, last_idx].fill_(False)
+        self._rollout["terminated"][:, last_idx].fill_(False)
+        self._rollout["truncated"][:, last_idx].fill_(False)
+
+    def _validate_rollout_layout(self, rollout: TensorDict) -> None:
+        """Validate the expected tensor shapes for the shared rollout."""
+        expected_shapes = {
+            "obs": (self.num_envs, self.rollout_len + 1, self.obs_dim),
+            "action": (self.num_envs, self.rollout_len + 1, self.action_dim),
+            "sample_log_prob": (self.num_envs, self.rollout_len + 1),
+            "value": (self.num_envs, self.rollout_len + 1),
+            "reward": (self.num_envs, self.rollout_len + 1),
+            "done": (self.num_envs, self.rollout_len + 1),
+            "terminated": (self.num_envs, self.rollout_len + 1),
+            "truncated": (self.num_envs, self.rollout_len + 1),
+        }
+        for key, expected_shape in expected_shapes.items():
+            actual_shape = tuple(rollout[key].shape)
+            if actual_shape != expected_shape:
+                raise ValueError(
+                    f"Rollout field '{key}' shape mismatch: expected {expected_shape}, "
+                    f"got {actual_shape}."
+                )

@@ -160,8 +160,8 @@ class Trainer:
         # Callback function for statistics and logging
         def on_step(tensordict: TensorDict, info: dict):
             """Callback called at each step during rollout collection."""
-            reward = tensordict["next", "reward"]
-            done = tensordict["next", "done"]
+            reward = tensordict["reward"]
+            done = tensordict["done"]
             # Episode stats
             self.curr_ret += reward
             self.curr_len += 1

@@ -15,6 +15,6 @@
 # ----------------------------------------------------------------------------
 
 from .standard_buffer import RolloutBuffer
-from .utils import iterate_minibatches
+from .utils import iterate_minibatches, transition_view
 
-__all__ = ["RolloutBuffer", "iterate_minibatches"]
+__all__ = ["RolloutBuffer", "iterate_minibatches", "transition_view"]
