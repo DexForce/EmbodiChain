@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -112,7 +114,7 @@ def _sim_worker_fn(
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config.get("headless", True),
         sim_device=gym_config.get("device", "cpu"),
-        enable_rt=gym_config.get("enable_rt", True),
+        render_cfg=RenderCfg(renderer=gym_config.get("renderer", "legacy")),
         gpu_id=gym_config.get("gpu_id", 0),
     )
 

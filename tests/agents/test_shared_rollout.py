@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -188,7 +190,7 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=True,
         sim_device=torch.device("cpu"),
-        enable_rt=False,
+        render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy"),
         gpu_id=0,
     )
 

@@ -31,6 +31,7 @@ from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -57,7 +58,9 @@ def main():
     )
     parser.add_argument("--headless", action="store_true", help="Run in headless mode")
     parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
+        "--renderer",
+        default="hybrid",
+        help="Renderer backend to use: legacy, hybrid, or fast-rt",
     )
     args = parser.parse_args()
 
@@ -67,7 +70,7 @@ def main():
         headless=True,
         sim_device=args.device,
         arena_space=3.0,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
     )

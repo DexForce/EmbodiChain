@@ -23,7 +23,7 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from dexsim.utility.path import get_resources_data_path
@@ -49,10 +49,9 @@ def main():
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
     )
     parser.add_argument(
-        "--enable_rt",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing for better visuals",
+        "--renderer",
+        default="hybrid",
+        help="Renderer to use (legacy, fastrt, hybrid)",
     )
     args = parser.parse_args()
 
@@ -63,7 +62,9 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        enable_rt=args.enable_rt,  # Enable ray tracing for better visuals
+        render_cfg=RenderCfg(
+            renderer=args.renderer,
+        ),
         num_envs=args.num_envs,
         arena_space=3.0,
     )

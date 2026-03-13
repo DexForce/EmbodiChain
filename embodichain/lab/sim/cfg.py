@@ -23,6 +23,7 @@ from typing import Sequence, Union, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
+    Renderer,
     PhysicalAttr,
     ActorType,
     AxisArrowType,
@@ -38,6 +39,41 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+
+
+@configclass
+class RenderCfg:
+    renderer: Literal["legacy", "hybrid", "fast-rt"] = "hybrid"
+    """Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', and 'fast-rt'.
+    
+    Note: 
+    - 'legacy' is the traditional rasterization-based renderer.
+    - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering, 
+        providing a balance between performance and visual quality.
+    - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
+    """
+
+    enable_denoiser: bool = True
+    """Whether to enable denoising. Only valid when renderer is 'hybrid' or 'fast-rt'."""
+
+    spp: int = 64
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
+
+    def to_dexsim_flags(self):
+        if self.renderer == "legacy":
+            return Renderer.FILAMENT
+        elif self.renderer == "hybrid":
+            return Renderer.HYBRID
+        elif self.renderer == "fast-rt":
+            return Renderer.FASTRT
+        else:
+            logger.log_error(
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'legacy', 'hybrid', or 'fast-rt'."
+            )
+
+    @property
+    def is_legacy(self):
+        return self.renderer == "legacy"
 
 
 @configclass

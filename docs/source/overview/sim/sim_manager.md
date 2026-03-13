@@ -33,7 +33,7 @@ sim_config = SimulationManagerCfg(
 | `width` | `int` | `1920` | The width of the simulation window. |
 | `height` | `int` | `1080` | The height of the simulation window. |
 | `headless` | `bool` | `False` | Whether to run the simulation in headless mode (no Window). |
-| `enable_rt` | `bool` | `False` | Whether to enable ray tracing rendering. |
+| `renderer` | `bool` | `False` | Whether to enable ray tracing rendering. |
 | `enable_denoiser` | `bool` | `True` | Whether to enable denoising for ray tracing rendering. |
 | `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when ray tracing is enabled and denoiser is False. |
 | `gpu_id` | `int` | `0` | The gpu index that the simulation engine will be used. Affects gpu physics device. |

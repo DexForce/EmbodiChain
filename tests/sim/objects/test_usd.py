@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -39,7 +41,10 @@ class BaseUsdTest:
 
     def setup_simulation(self, sim_device):
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS, enable_rt=False
+            headless=True,
+            sim_device=sim_device,
+            num_envs=NUM_ARENAS,
+            render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy"),
         )
         self.sim = SimulationManager(config)
 

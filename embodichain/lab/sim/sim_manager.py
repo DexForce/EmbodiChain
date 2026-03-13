@@ -67,6 +67,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
@@ -103,14 +104,8 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run the simulation in headless mode (no Window)."""
 
-    enable_rt: bool = False
-    """Whether to enable ray tracing rendering."""
-
-    enable_denoiser: bool = True
-    """Whether to enable denoising for ray tracing rendering."""
-
-    spp: int = 64
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when ray tracing is enabled and enable_denoiser is False."""
+    render_cfg: RenderCfg = field(default_factory=RenderCfg)
+    """The rendering configuration parameters."""
 
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
@@ -187,7 +182,7 @@ class SimulationManager:
         # Mark as initialized
         self.instance_id = instance_id
 
-        if sim_config.enable_rt and instance_id > 0:
+        if not sim_config.render_cfg.is_legacy and instance_id > 0:
             logger.log_error(
                 f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
             )
@@ -239,7 +234,7 @@ class SimulationManager:
 
         # set unique material path to accelerate material creation.
         # TODO: This will be removed.
-        if self.sim_config.enable_rt is False:
+        if self.sim_config.render_cfg.is_legacy:
             self._env.set_unique_mat_path(
                 os.path.join(self._material_cache_dir, "default_mat")
             )
@@ -331,7 +326,7 @@ class SimulationManager:
         """
         return instance_id in cls._instances
 
-    @property
+    @cached_property
     def num_envs(self) -> int:
         """Get the number of arenas in the simulation.
 
@@ -346,10 +341,10 @@ class SimulationManager:
         world_config = dexsim.get_world_config()
         return self.device.type == "cuda" and world_config.enable_gpu_sim
 
-    @property
+    @cached_property
     def is_rt_enabled(self) -> bool:
         """Check if Ray Tracing rendering backend is enabled."""
-        return self.sim_config.enable_rt
+        return not self.sim_config.render_cfg.is_legacy
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -391,11 +386,10 @@ class SimulationManager:
         world_config.length_tolerance = sim_config.physics_config.length_tolerance
         world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
 
-        if sim_config.enable_rt:
-            world_config.renderer = dexsim.types.Renderer.FASTRT
-            if sim_config.enable_denoiser is False:
-                world_config.raytrace_config.spp = sim_config.spp
-                world_config.raytrace_config.open_denoise = False
+        world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+        if sim_config.render_cfg.enable_denoiser is False:
+            world_config.raytrace_config.spp = sim_config.render_cfg.spp
+            world_config.raytrace_config.open_denoise = False
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
@@ -520,7 +514,7 @@ class SimulationManager:
             for i in range(step):
                 self._world.update(physics_dt)
 
-            if self.sim_config.enable_rt is False:
+            if self.sim_config.render_cfg.is_legacy:
                 self._sync_gpu_data()
 
         else:
@@ -658,6 +652,7 @@ class SimulationManager:
         plane_collision = self._env.create_cube(
             default_length, default_length, default_length / 10
         )
+        plane_collision.set_visible(False)
         plane_collision_pose = np.eye(4, dtype=float)
         plane_collision_pose[2, 3] = -default_length / 20 - 0.001
         plane_collision.set_local_pose(plane_collision_pose)
@@ -681,7 +676,7 @@ class SimulationManager:
             )
         )
 
-        if self.sim_config.enable_rt:
+        if self.is_rt_enabled:
             self.set_emission_light([1.0, 1.0, 1.0], 80.0)
         else:
             self.set_indirect_lighting("lab_day")

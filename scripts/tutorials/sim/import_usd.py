@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
 #
@@ -60,7 +62,9 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        enable_rt=True,  # Enable ray tracing for better visuals
+        render_cfg=RenderCfg(
+            renderer="fast-rt" if True else "legacy"
+        ),  # Enable ray tracing for better visuals
         num_envs=1,
         arena_space=3.0,
     )

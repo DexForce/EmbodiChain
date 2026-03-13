@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -211,10 +213,12 @@ if __name__ == "__main__":
     from embodichain.lab.sim import SimulationManagerCfg
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--enable_rt", action="store_true", help="Enable ray tracing")
+    parser.add_argument("--renderer", action="store_true", help="Enable ray tracing")
     args = parser.parse_args()
 
-    env_cfg = ExampleCfg(sim_cfg=SimulationManagerCfg(enable_rt=args.enable_rt))
+    env_cfg = ExampleCfg(
+        sim_cfg=SimulationManagerCfg(render_cfg=RenderCfg(renderer=args.renderer))
+    )
 
     # Create the Gym environment
     env = gym.make("ModularEnv-v1", cfg=env_cfg)

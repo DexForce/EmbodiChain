@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -55,7 +57,9 @@ def parse_arguments():
         description="Create and simulate a robot in SimulationManager"
     )
     parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
+        "--renderer",
+        action="store_true",
+        help="Renderer backend to use: legacy, hybrid, or fast-rt",
     )
     return parser.parse_args()
 
@@ -73,7 +77,7 @@ def initialize_simulation(args):
     config = SimulationManagerCfg(
         headless=True,
         sim_device="cuda",
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
     )
     sim = SimulationManager(config)

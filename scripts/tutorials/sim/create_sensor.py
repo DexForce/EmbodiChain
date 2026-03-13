@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -85,7 +87,9 @@ def main():
     )
     parser.add_argument("--headless", action="store_true", help="Run in headless mode")
     parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
+        "--renderer",
+        action="store_true",
+        help="Renderer backend to use: legacy, hybrid, or fast-rt",
     )
     parser.add_argument(
         "--attach_sensor",
@@ -100,7 +104,7 @@ def main():
         headless=True,
         sim_device=args.device,
         arena_space=3.0,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
     )
