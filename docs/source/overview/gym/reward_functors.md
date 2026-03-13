@@ -66,7 +66,7 @@ This page lists all available reward functors that can be used with the Reward M
 ## Usage Example
 
 ```python
-from embodyichain.lab.gym.envs.managers.cfg import RewardCfg, SceneEntityCfg
+from embodichain.lab.gym.envs.managers.cfg import RewardCfg, SceneEntityCfg
 
 # Example: Distance-based reward with exponential shaping
 rewards = {

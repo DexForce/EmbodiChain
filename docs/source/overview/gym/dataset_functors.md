@@ -69,7 +69,7 @@ The LeRobotRecorder saves the following data for each frame:
 ## Usage Example
 
 ```python
-from embodyichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
+from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 
 # Example: Record episodes in LeRobot format
 dataset = {
