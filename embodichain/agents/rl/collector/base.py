@@ -14,11 +14,25 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .config import AlgorithmCfg
-from .helper import dict_to_tensordict, flatten_dict_observation
+from __future__ import annotations
 
-__all__ = [
-    "AlgorithmCfg",
-    "dict_to_tensordict",
-    "flatten_dict_observation",
-]
+from abc import ABC, abstractmethod
+from typing import Callable
+
+from tensordict import TensorDict
+
+__all__ = ["BaseCollector"]
+
+
+class BaseCollector(ABC):
+    """Base class for rollout collectors."""
+
+    @abstractmethod
+    def collect(
+        self,
+        num_steps: int,
+        rollout: TensorDict | None = None,
+        on_step_callback: Callable[[TensorDict, dict], None] | None = None,
+    ) -> TensorDict:
+        """Collect a rollout and return it as a TensorDict."""
+        raise NotImplementedError

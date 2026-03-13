@@ -7,9 +7,10 @@ This module contains RL policy networks and related model implementations, suppo
 ### Policy
 - Abstract base class for RL policies; all policies must inherit from it.
 - Unified interface:
-    - `get_action(obs, deterministic=False)`: Sample or output actions.
-    - `get_value(obs)`: Estimate state value.
-    - `evaluate_actions(obs, actions)`: Evaluate action probabilities, entropy, and value.
+    - `get_action(tensordict, deterministic=False)`: Sample actions into a `TensorDict` without gradients.
+    - `forward(tensordict, deterministic=False)`: Low-level action/value write path used by policy implementations.
+    - `get_value(tensordict)`: Estimate state value into a `TensorDict`.
+    - `evaluate_actions(tensordict)`: Return optimization-time policy outputs from a `TensorDict`.
 - Supports GPU deployment and distributed training.
 
 ### ActorCritic
@@ -19,8 +20,8 @@ This module contains RL policy networks and related model implementations, suppo
 - Actor-only policy without Critic. Used with GRPO (Group Relative Policy Optimization), which estimates advantages via group-level return comparison instead of a value function.
 - Supports Gaussian action distributions, learnable log_std, suitable for continuous action spaces.
 - Key methods:
-    - `get_action`: Actor network outputs mean, samples action, returns log_prob and critic value.
-    - `evaluate_actions`: Used for loss calculation in PPO/SAC algorithms.
+    - `forward`: Actor network outputs mean, samples action, and writes policy outputs into a `TensorDict`.
+    - `evaluate_actions`: Used for loss calculation in PPO/GRPO algorithms.
 - Custom actor/critic network architectures supported (e.g., MLP/CNN/Transformer).
 
 ### MLP
@@ -36,8 +37,19 @@ This module contains RL policy networks and related model implementations, suppo
 ```python
 actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
 critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
-policy = build_policy(policy_block, obs_space, action_space, device, actor=actor, critic=critic)
-action, log_prob, value = policy.get_action(obs)
+policy = build_policy(
+    policy_block,
+    env.flattened_observation_space,
+    env.action_space,
+    device,
+    actor=actor,
+    critic=critic,
+)
+step_td = TensorDict({"obs": obs}, batch_size=[obs.shape[0]], device=obs.device)
+step_td = policy.get_action(step_td)
+action = step_td["action"]
+log_prob = step_td["sample_log_prob"]
+value = step_td["value"]
 ```
 
 ## Extension and Customization
