@@ -165,7 +165,7 @@ For a complete list of available observation functors, please refer to {doc}`obs
 
 ### Dataset Manager
 
-For Imitation Learning (IL) tasks, the Dataset Manager automates data collection through dataset functors. It currently supports:
+For Imitation Learning (IL) tasks, the Dataset Manager automates data collection through dataset functors. For a complete list of available dataset functors and their parameters, please refer to {doc}`dataset_functors`. It currently supports:
 
 * **LeRobot Format** (via {class}`~envs.managers.datasets.LeRobotRecorder`):
   Standard format for LeRobot training pipelines. Includes support for task instructions, robot metadata, success flags, and optional video recording.
@@ -191,7 +191,7 @@ The dataset manager is called automatically during {meth}`~envs.Env.step()`, ens
 
 For RL tasks, EmbodiChain uses the **Action Manager** integrated into {class}`~envs.EmbodiedEnv`:
 
-* **Action Preprocessing**: Configurable via ``actions`` in {class}`~envs.EmbodiedEnvCfg`. Supports DeltaQposTerm, QposTerm, QposNormalizedTerm, EefPoseTerm, QvelTerm, QfTerm.
+* **Action Preprocessing**: Configurable via ``actions`` in {class}`~envs.EmbodiedEnvCfg`. Supports DeltaQposTerm, QposTerm, QposNormalizedTerm, EefPoseTerm, QvelTerm, QfTerm. For a complete list of available action terms, please refer to {doc}`action_functors`.
 * **Standardized Info Structure**: {class}`~envs.EmbodiedEnv` provides ``compute_task_state``, ``get_info``, and ``evaluate`` for task-specific success/failure and metrics.
 * **Episode Management**: Configurable episode length and truncation logic.
 
@@ -256,7 +256,7 @@ class MyRLTaskEnv(EmbodiedEnv):
         return is_success, is_fail, metrics
 ```
 
-Configure rewards through the {class}`~envs.managers.RewardManager` in your environment config rather than overriding ``get_reward``.
+Configure rewards through the {class}`~envs.managers.RewardManager` in your environment config rather than overriding ``get_reward``. For a complete list of available reward functors, please refer to {doc}`reward_functors`.
 
 ### For Imitation Learning Tasks
 
@@ -301,4 +301,7 @@ For a complete example of a modular environment setup, please refer to the {ref}
 
 event_functors.md
 observation_functors.md
+reward_functors.md
+action_functors.md
+dataset_functors.md
 ```
