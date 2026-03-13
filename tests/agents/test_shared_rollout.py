@@ -91,12 +91,8 @@ class _FakeEnv:
             self.rollout_buffer["done"][:, self.current_rollout_step] = (
                 terminated | truncated
             )
-            self.rollout_buffer["terminated"][
-                :, self.current_rollout_step
-            ] = terminated
-            self.rollout_buffer["truncated"][
-                :, self.current_rollout_step
-            ] = truncated
+            self.rollout_buffer["terminated"][:, self.current_rollout_step] = terminated
+            self.rollout_buffer["truncated"][:, self.current_rollout_step] = truncated
             self.current_rollout_step += 1
 
         self._obs = next_obs
