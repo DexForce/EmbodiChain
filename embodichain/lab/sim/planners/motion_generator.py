@@ -25,6 +25,48 @@ from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import PlanState, MoveType, MovePart
+from dataclasses import dataclass
+
+
+class MovePart(Enum):
+    """Enumeration for different robot parts to move."""
+
+    LEFT = 0  # left arm|eef
+    RIGHT = 1  # right arm|eef
+    BOTH = 2  # left arm|eef and right arm|eef
+    TORSO = 3  # torso for humanoid robot
+    ALL = 4  # all joints of the robot. Only for joint control.
+
+
+class MoveType(Enum):
+    """Enumeration for different types of movements."""
+
+    TOOL = 0  # Tool open or close
+    TCP_MOVE = 1  # Move the end-effector to a target pose (xpos) using IK and trajectory planning
+    JOINT_MOVE = (
+        2  # Directly move joints to target angles (qpos) using trajectory planning
+    )
+    SYNC = 3  # Synchronized left and right arm movement (for dual-arm robots)
+    PAUSE = 4  # Pause for a specified duration (use pause_seconds in PlanState)
+
+
+@dataclass
+class PlanState:
+    """Data class representing the state for a motion plan."""
+
+    move_type: MoveType = MoveType.PAUSE  # Type of movement
+    move_part: MovePart = MovePart.LEFT  # Part of the robot to move
+    xpos: torch.Tensor = None  # target tcp pose (4x4 matrix) for TCP_MOVE
+    qpos: torch.Tensor = None  # target joint angles for JOINT_MOVE (shape: (DOF,))
+    qvel: torch.Tensor = None  # target joint velocities for JOINT_MOVE (shape: (DOF,))
+    qacc: torch.Tensor = (
+        None  # target joint accelerations for JOINT_MOVE (shape: (DOF,))
+    )
+    is_open: bool = True  # for TOOL move type, whether to open or close the tool
+    is_world_coordinate: bool = (
+        True  # whether the target pose is in world coordinates (True) or relative to current pose (False)
+    )
+    pause_seconds: float = 0.0  # duration to pause for PAUSE move type
 
 
 class MotionGenerator:
@@ -60,7 +102,6 @@ class MotionGenerator:
         self,
         robot: Robot,
         uid: str,
-        sim=None,
         planner_type: str = "toppra",
         default_velocity: float = 0.2,
         default_acceleration: float = 0.5,
@@ -68,7 +109,6 @@ class MotionGenerator:
         **kwargs,
     ):
         self.robot = robot
-        self.sim = sim
         self.collision_margin = collision_margin
         self.uid = uid  # control part
 
