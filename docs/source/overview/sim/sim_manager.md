@@ -85,6 +85,44 @@ The manager provides methods to add, retrieve and remove various simulation asse
 
 For more details on simulation assets, please refer to their respective documentation pages.
 
+### USD Import and Export
+
+#### Importing USD Files
+
+EmbodiChain supports importing USD files (`.usd`, `.usda`, `.usdc`) for both rigid objects and articulations. When importing USD files, you can choose whether to use the physical properties defined in the USD file or override them with configuration values:
+
+```python
+# Import rigid object with USD properties
+rigid_cfg = RigidObjectCfg(
+    shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
+    use_usd_properties=True  # Use properties from USD file
+)
+obj = sim.add_rigid_object(cfg=rigid_cfg)
+
+# Import articulation with USD properties
+robot_cfg = ArticulationCfg(
+    fpath=get_data_path("path/to/robot.usd"),
+    use_usd_properties=True  # Use joint drive properties from USD
+)
+robot = sim.add_articulation(cfg=robot_cfg)
+```
+
+#### Exporting to USD
+
+You can export the current simulation scene to a USD file using the `export_usd()` method:
+
+```python
+# Export the entire scene to USD
+sim.export_usd("my_scene.usda")
+```
+
+This exports all objects, articulations, robots, and their current states to a USD file, which can be:
+- Reimported into EmbodiChain with preserved properties
+- Opened in USD-compatible tools (e.g., USD Viewer, Omniverse)
+- Used as assets for other simulations
+
+See `scripts/tutorials/sim/export_usd.py` for a complete example.
+
 ## Simulation Loop
 
 ### Manual Update mode

@@ -55,7 +55,7 @@ class BaseUsdTest:
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
                 use_usd_properties=False,
-                init_pos=[0.0, 0.0, 0.1],
+                init_pos=[0.0, 1.0, 0.1],
                 attrs=default_attr,
             )
         )
@@ -109,7 +109,7 @@ class BaseUsdTest:
                 fpath=h1_path,
                 build_pk_chain=False,
                 use_usd_properties=True,
-                init_pos=[0.0, 0.0, 1.2],
+                init_pos=[1.0, 0.0, 1.2],
             )
         )
 
@@ -148,7 +148,7 @@ class BaseUsdTest:
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
                 use_usd_properties=True,
-                init_pos=[0.0, 0.0, 0.1],
+                init_pos=[1.0, 1.0, 0.1],
             )
         )
         body0 = sugar_box._entities[0].get_physical_body()
@@ -159,6 +159,9 @@ class BaseUsdTest:
         # assert(body0.get_angular_damping()==0.05)
         # assert(body0.get_solver_iteration_counts()==(4, 1))
         # assert(body0.get_max_angular_velocity()==100)
+
+    def export_usd(self):
+        self.sim.export_usd("test_export.usda")
 
     def teardown_method(self):
         """Clean up resources after each test method."""
@@ -181,6 +184,7 @@ if __name__ == "__main__":
     test.setup_method()
     test.test_import_rigid()
     test.test_import_articulation()
+    test.export_usd()
     test.test_usd_properties()
 
     # from IPython import embed

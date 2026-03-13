@@ -216,6 +216,15 @@ class RigidObject(BatchEntity):
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
                 entity.set_physical_attr(cfg.attrs.attr())
+        else:
+            # Read current properties from USD-loaded entities and write back to cfg
+            # Use first entity as reference
+            first_entity: MeshObject = entities[0]
+
+            cfg.body_scale = tuple(first_entity.get_body_scale())
+            cfg.attrs = RigidBodyAttributesCfg().from_dict(
+                first_entity.get_physical_attr().as_dict()
+            )
 
         if device.type == "cuda":
             self._world.update(0.001)
@@ -872,8 +881,7 @@ class RigidObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 
-        if not self.cfg.use_usd_properties:
-            self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
+        self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
