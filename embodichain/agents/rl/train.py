@@ -73,7 +73,7 @@ def train_from_config(config_path: str):
     enable_rt = bool(trainer_cfg.get("enable_rt", False))
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
     num_envs = trainer_cfg.get("num_envs", None)
-    wandb_project_name = trainer_cfg.get("wandb_project_name", "embodychain-generic")
+    wandb_project_name = trainer_cfg.get("wandb_project_name", "embodichain-generic")
 
     # Device
     if not isinstance(device_str, str):

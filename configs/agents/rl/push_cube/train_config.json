@@ -16,7 +16,7 @@
         "eval_freq": 2,
         "save_freq": 200,
         "use_wandb": false,
-        "wandb_project_name": "embodychain-push_cube",
+        "wandb_project_name": "embodichain-push_cube",
         "events": {
             "eval": {
                 "record_camera": {

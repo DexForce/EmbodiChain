@@ -1,7 +1,7 @@
 Reinforcement Learning
 ======================
 
-This section introduces the overall architecture and submodules of the embodychain RL (Reinforcement Learning) module. The RL framework supports mainstream algorithms (such as PPO) and provides flexible components for policy, buffer, trainer, etc., making it easy to extend and customize.
+This section introduces the overall architecture and submodules of the embodichain RL (Reinforcement Learning) module. The RL framework supports mainstream algorithms (such as PPO) and provides flexible components for policy, buffer, trainer, etc., making it easy to extend and customize.
 
 .. contents:: Table of contents
     :local:
@@ -10,7 +10,7 @@ This section introduces the overall architecture and submodules of the embodycha
 Overview
 --------
 
-The embodychain RL module is used to train agents to accomplish tasks in simulation environments. It mainly includes algorithm implementations, policy networks, data buffers, training processes, and utility tools.
+The embodichain RL module is used to train agents to accomplish tasks in simulation environments. It mainly includes algorithm implementations, policy networks, data buffers, training processes, and utility tools.
 
 Architecture Diagram Example
 ---------------------------

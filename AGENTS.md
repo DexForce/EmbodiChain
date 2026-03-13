@@ -207,7 +207,17 @@ Include:
 
 ### Adding a New Robot
 
-Refer to `embodichain/lab/sim/robots/` for existing examples (`dexforce_w1`, `cobotmagic`). Each robot needs: a config (`cfg.py`), parameters (`params.py`), types (`types.py`), and utilities (`utils.py`).
+Refer to `docs/source/tutorial/add_robot.rst` for a detailed guide. The basic structure requires:
+
+- A config class (inheriting from `RobotCfg`)
+- URDF configuration for the robot
+- Control parts definition
+- IK solver configuration
+- Drive properties for joint physics
+
+For complex robots with multiple variants (like `dexforce_w1`), use a package structure with `types.py`, `params.py`, `utils.py`, and `cfg.py`.
+
+Also add robot documentation in `docs/source/resources/robot/` (see existing examples: `cobotmagic.md`, `dexforce_w1.md`) and update `docs/source/resources/robot/index.rst` to include the new robot.
 
 ### Adding a New Task Environment
 
