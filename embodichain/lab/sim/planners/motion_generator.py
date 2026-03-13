@@ -24,7 +24,6 @@ from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.utils import logger
-from embodichain.lab.sim.planners.utils import PlanState, MoveType, MovePart
 from dataclasses import dataclass
 
 
