@@ -44,7 +44,7 @@ trainer.save_checkpoint()
 - Custom event modules can be implemented for environment reset, data collection, evaluation, etc.
 - Supports multi-environment parallelism and distributed training.
 - Training process can be flexibly adjusted via config files.
-- The current trainer uses a shared rollout `TensorDict`: collector writes policy-side fields and `EmbodiedEnv` writes environment-side `next.*` fields through `set_rollout_buffer()`.
+- The current trainer uses a shared rollout `TensorDict` with uniform `[N, T + 1]` layout: collector writes policy-side fields, `EmbodiedEnv` writes environment-side step fields through `set_rollout_buffer()`, and algorithms consume the valid first `T` steps through `transition_view()`.
 
 ## Practical Tips
 - It is recommended to perform periodic evaluation and model saving to prevent loss of progress during training.

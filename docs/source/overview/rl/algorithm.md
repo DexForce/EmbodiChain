@@ -9,12 +9,12 @@ This module contains the core implementations of reinforcement learning algorith
 - Key methods:
   - `update(rollout)`: Update the policy based on a shared rollout `TensorDict`.
 - Designed to be algorithm-agnostic; `Trainer` handles collection while algorithms focus on loss computation and optimization.
-- Supports multi-environment parallel collection through a shared `[N, T]` rollout `TensorDict`.
+- Consumes a shared `[N, T + 1]` rollout `TensorDict` and typically converts it to a transition-aligned view over the valid first `T` steps before optimization.
 
 ### PPO
 - Mainstream on-policy algorithm, supports Generalized Advantage Estimation (GAE), policy update, and hyperparameter configuration.
 - Key methods:
-  - `compute_gae(rollout, gamma, gae_lambda)`: Generalized Advantage Estimation over a shared rollout `TensorDict`.
+  - `compute_gae(rollout, gamma, gae_lambda)`: Generalized Advantage Estimation over a shared rollout `TensorDict`, using `value[:, -1]` as the bootstrap value and ignoring the padded final transition slot.
   - `update(rollout)`: Multi-epoch minibatch optimization, including entropy, value, and policy loss, with gradient clipping.
 - Supports custom callbacks, detailed logging, and GPU acceleration.
 - Typical training flow: collect rollout → compute advantage/return → multi-epoch minibatch optimization.

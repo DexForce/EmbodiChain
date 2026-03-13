@@ -234,8 +234,8 @@ Training Process
 
 The training process follows this sequence:
 
-1. **Rollout Phase**: ``SyncCollector`` interacts with the environment and writes policy-side fields into a shared rollout ``TensorDict``. ``EmbodiedEnv`` writes environment-side step fields such as ``next.reward``, ``next.done``, ``next.terminated``, and ``next.truncated`` into the same rollout via ``set_rollout_buffer()``.
-2. **Advantage/Return Computation**: Algorithm computes advantages and returns from the collected rollout (e.g. GAE for PPO, step-wise group normalization for GRPO)
+1. **Rollout Phase**: ``SyncCollector`` interacts with the environment and writes policy-side fields into a shared rollout ``TensorDict`` with uniform ``[N, T + 1]`` layout. ``EmbodiedEnv`` writes environment-side step fields such as ``reward``, ``done``, ``terminated``, and ``truncated`` into the same rollout via ``set_rollout_buffer()``. The final slot of transition-only fields is reserved as padding, while ``obs[:, -1]`` and ``value[:, -1]`` remain valid bootstrap data.
+2. **Advantage/Return Computation**: Algorithm computes advantages and returns from the collected rollout (e.g. GAE for PPO, step-wise group normalization for GRPO) and converts it to a transition-aligned view over the valid first ``T`` steps before minibatch optimization.
 3. **Update Phase**: Algorithm updates the policy with ``update(rollout)``
 4. **Logging**: Trainer logs training losses and aggregated metrics to TensorBoard and Weights & Biases
 5. **Evaluation** (periodic): Trainer evaluates the current policy
