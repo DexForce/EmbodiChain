@@ -23,11 +23,11 @@ interface for RL algorithms (e.g., PPO, SAC) to interact with.
 
 from __future__ import annotations
 
-from typing import Tuple
 from abc import ABC, abstractmethod
 import torch.nn as nn
 
 import torch
+from tensordict import TensorDict
 
 
 class Policy(nn.Module, ABC):
@@ -45,50 +45,48 @@ class Policy(nn.Module, ABC):
     def __init__(self) -> None:
         super().__init__()
 
-    @abstractmethod
     def get_action(
-        self, obs: torch.Tensor, deterministic: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Sample an action from the policy.
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Sample actions into the provided TensorDict without gradients.
 
         Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
+            tensordict: Input TensorDict containing `obs`.
             deterministic: If True, return the mean action; otherwise sample
 
         Returns:
-            Tuple of (action, log_prob, value):
-            - action: Sampled action tensor of shape (batch_size, action_dim)
-            - log_prob: Log probability of the action, shape (batch_size,)
-            - value: Value estimate, shape (batch_size,)
+            TensorDict with `action`, `sample_log_prob`, and `value` populated.
+        """
+        with torch.no_grad():
+            return self.forward(tensordict, deterministic=deterministic)
+
+    @abstractmethod
+    def forward(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Write sampled actions and value estimates into the TensorDict."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
+        """Write value estimate for the given observations into the TensorDict.
+
+        Args:
+            tensordict: Input TensorDict containing `obs`.
+
+        Returns:
+            TensorDict with `value` populated.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def get_value(self, obs: torch.Tensor) -> torch.Tensor:
-        """Get value estimate for given observations.
+    def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
+        """Evaluate actions and return current policy outputs.
 
         Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
+            tensordict: TensorDict containing `obs` and `action`.
 
         Returns:
-            Value estimate tensor of shape (batch_size,)
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def evaluate_actions(
-        self, obs: torch.Tensor, actions: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Evaluate actions and compute log probabilities, entropy, and values.
-
-        Args:
-            obs: Observation tensor of shape (batch_size, obs_dim)
-            actions: Action tensor of shape (batch_size, action_dim)
-
-        Returns:
-            Tuple of (log_prob, entropy, value):
-            - log_prob: Log probability of actions, shape (batch_size,)
-            - entropy: Entropy of the action distribution, shape (batch_size,)
-            - value: Value estimate, shape (batch_size,)
+            A new TensorDict containing `sample_log_prob`, `entropy`, and `value`.
         """
         raise NotImplementedError

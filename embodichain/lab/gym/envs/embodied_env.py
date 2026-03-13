@@ -264,6 +264,7 @@ class EmbodiedEnv(BaseEnv):
         # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
         self.rollout_buffer: TensorDict | None = None
         self._max_rollout_steps = 0
+        self._rollout_buffer_mode: str | None = None
         if self.cfg.init_rollout_buffer:
             self.rollout_buffer = init_rollout_buffer_from_gym_space(
                 obs_space=self.observation_space,
@@ -273,6 +274,7 @@ class EmbodiedEnv(BaseEnv):
                 device=self.device,
             )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
+            self._rollout_buffer_mode = "expert"
 
         self.current_rollout_step = 0
 
@@ -287,14 +289,31 @@ class EmbodiedEnv(BaseEnv):
         such as a shared rollout buffer initialized in model training process and passed to the environment for data collection.
 
         Args:
-            rollout_buffer (TensorDict): The rollout buffer to be set. The shape of the buffer should be (num_envs, max_episode_steps, *data_shape) for each key.
+            rollout_buffer (TensorDict): The rollout buffer to be set. RL
+                rollouts use a uniform `[num_envs, time + 1]` layout so all
+                fields share the same batch shape; the last slot of
+                transition-only fields is reserved as padding. Expert buffers
+                keep the legacy `[num_envs, time]` batch layout.
         """
-        if len(rollout_buffer.shape) != 2:
-            logger.log_error(
-                f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
-            )
         self.rollout_buffer = rollout_buffer
-        self._max_rollout_steps = self.rollout_buffer.shape[1]
+        self._rollout_buffer_mode = self._infer_rollout_buffer_mode(rollout_buffer)
+        if self._rollout_buffer_mode == "rl":
+            batch_size = self.rollout_buffer.batch_size
+            if len(batch_size) != 2:
+                message = (
+                    f"Invalid RL rollout buffer batch size: {batch_size}. "
+                    "Expected a 2D batch layout [num_envs, time + 1] for RL rollouts."
+                )
+                logger.log_error(message)
+                raise ValueError(message)
+            self._max_rollout_steps = batch_size[1] - 1
+        else:
+            if len(rollout_buffer.shape) != 2:
+                logger.log_error(
+                    f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
+                )
+            self._max_rollout_steps = self.rollout_buffer.shape[1]
+        self.current_rollout_step = 0
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -414,33 +433,21 @@ class EmbodiedEnv(BaseEnv):
     ):
         # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
-            buffer_device = self.rollout_buffer.device
             if self.current_rollout_step < self._max_rollout_steps:
-                # Extract data into episode buffer.
-                self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
-                    obs.to(buffer_device), non_blocking=True
-                )
-                if isinstance(action, TensorDict):
-                    action_to_store = (
-                        action["qpos"]
-                        if "qpos" in action
-                        else (action["qvel"] if "qvel" in action else action["qf"])
+                if self._rollout_buffer_mode == "rl":
+                    self._write_rl_rollout_step(
+                        obs=obs,
+                        rewards=rewards,
+                        dones=dones,
+                        terminateds=kwargs.get("terminateds"),
+                        truncateds=kwargs.get("truncateds"),
                     )
-                elif isinstance(action, torch.Tensor):
-                    action_to_store = action
                 else:
-                    logger.log_warning(
-                        f"Unexpected action type {type(action)} in _hook_after_sim_step; "
-                        "skipping action storage in rollout buffer."
+                    self._write_episode_rollout_step(
+                        obs=obs,
+                        action=action,
+                        rewards=rewards,
                     )
-                    action_to_store = None
-                if action_to_store is not None:
-                    self.rollout_buffer["actions"][
-                        :, self.current_rollout_step, ...
-                    ].copy_(action_to_store.to(buffer_device), non_blocking=True)
-                self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
-                    rewards.to(buffer_device), non_blocking=True
-                )
                 self.current_rollout_step += 1
             else:
                 logger.log_warning(
@@ -514,7 +521,7 @@ class EmbodiedEnv(BaseEnv):
                     )
 
         # Clear episode buffers and reset success status for environments being reset
-        if self.rollout_buffer is not None:
+        if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
 
         self.episode_success_status[env_ids_to_process] = False
@@ -527,6 +534,86 @@ class EmbodiedEnv(BaseEnv):
         # reset reward manager for environments that need a reset
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)
+
+    def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
+        """Infer whether the rollout buffer is expert recording or RL training data."""
+        if {
+            "obs",
+            "action",
+            "reward",
+            "done",
+            "value",
+            "terminated",
+            "truncated",
+        }.issubset(set(rollout_buffer.keys())):
+            return "rl"
+        return "expert"
+
+    def _write_episode_rollout_step(
+        self,
+        obs: EnvObs,
+        action: EnvAction,
+        rewards: torch.Tensor,
+    ) -> None:
+        """Write one step into the legacy episode recording rollout buffer."""
+        buffer_device = self.rollout_buffer.device
+        self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
+            obs.to(buffer_device), non_blocking=True
+        )
+        if isinstance(action, TensorDict):
+            action_to_store = (
+                action["qpos"]
+                if "qpos" in action
+                else (action["qvel"] if "qvel" in action else action["qf"])
+            )
+        elif isinstance(action, torch.Tensor):
+            action_to_store = action
+        else:
+            logger.log_warning(
+                f"Unexpected action type {type(action)} in _hook_after_sim_step; "
+                "skipping action storage in rollout buffer."
+            )
+            action_to_store = None
+        if action_to_store is not None:
+            self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
+                action_to_store.to(buffer_device), non_blocking=True
+            )
+        self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
+            rewards.to(buffer_device), non_blocking=True
+        )
+
+    def _write_rl_rollout_step(
+        self,
+        obs: EnvObs,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        terminateds: torch.Tensor | None,
+        truncateds: torch.Tensor | None,
+    ) -> None:
+        """Write environment-side fields into an externally managed RL rollout buffer."""
+        buffer_device = self.rollout_buffer.device
+        self.rollout_buffer["reward"][:, self.current_rollout_step].copy_(
+            rewards.to(buffer_device), non_blocking=True
+        )
+        self.rollout_buffer["done"][:, self.current_rollout_step].copy_(
+            dones.to(buffer_device), non_blocking=True
+        )
+        terminateds = (
+            terminateds
+            if terminateds is not None
+            else torch.zeros_like(dones, dtype=torch.bool)
+        )
+        truncateds = (
+            truncateds
+            if truncateds is not None
+            else torch.zeros_like(dones, dtype=torch.bool)
+        )
+        self.rollout_buffer["terminated"][:, self.current_rollout_step].copy_(
+            terminateds.to(buffer_device), non_blocking=True
+        )
+        self.rollout_buffer["truncated"][:, self.current_rollout_step].copy_(
+            truncateds.to(buffer_device), non_blocking=True
+        )
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.

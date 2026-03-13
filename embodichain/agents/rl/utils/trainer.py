@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple, Callable
+from typing import Dict
 import time
 import numpy as np
 import torch
@@ -25,6 +25,8 @@ from collections import deque
 import wandb
 from tensordict import TensorDict
 
+from embodichain.agents.rl.buffer import RolloutBuffer
+from embodichain.agents.rl.collector import SyncCollector
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from .helper import flatten_dict_observation
 
@@ -37,7 +39,7 @@ class Trainer:
         policy,
         env,
         algorithm,
-        num_steps: int,
+        buffer_size: int,
         batch_size: int,
         writer: SummaryWriter | None,
         eval_freq: int,
@@ -54,7 +56,7 @@ class Trainer:
         self.env = env
         self.eval_env = eval_env
         self.algorithm = algorithm
-        self.num_steps = num_steps
+        self.buffer_size = buffer_size
         self.batch_size = batch_size
         self.writer = writer
         self.eval_freq = eval_freq
@@ -75,28 +77,31 @@ class Trainer:
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
+        num_envs = getattr(self.env, "num_envs", None)
+        if num_envs is None:
+            raise RuntimeError("Env must expose num_envs for trainer statistics.")
+        obs_dim = getattr(self.policy, "obs_dim", None)
+        action_dim = getattr(self.policy, "action_dim", None)
+        if obs_dim is None or action_dim is None:
+            raise RuntimeError("Policy must expose obs_dim and action_dim.")
 
-        # initial obs (assume env returns torch tensors already on target device)
-        obs, _ = self.env.reset()
-
-        # Initialize algorithm's buffer
-        # Flatten TensorDict observations from ObservationManager to tensor for RL algorithms
-        if isinstance(obs, TensorDict):
-            obs_tensor = flatten_dict_observation(obs)
-            obs_dim = obs_tensor.shape[-1]
-            num_envs = obs_tensor.shape[0]
-            # Store flattened observation for RL training
-            self.obs = obs_tensor
-
-        action_space = getattr(self.env, "action_space", None)
-        action_dim = action_space.shape[-1] if action_space else None
-        if action_dim is None:
-            raise RuntimeError(
-                "Env must expose action_space with shape for buffer initialization."
-            )
-
-        # Algorithm manages its own buffer
-        self.algorithm.initialize_buffer(num_steps, num_envs, obs_dim, action_dim)
+        self.buffer = RolloutBuffer(
+            num_envs=num_envs,
+            rollout_len=self.buffer_size,
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            device=self.device,
+        )
+        self.collector = SyncCollector(
+            env=self.env,
+            policy=self.policy,
+            device=self.device,
+            reset_every_rollout=bool(
+                getattr(
+                    getattr(self.algorithm, "cfg", None), "reset_every_rollout", False
+                )
+            ),
+        )
 
         # episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
@@ -137,7 +142,7 @@ class Trainer:
         print(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
             self._collect_rollout()
-            losses = self.algorithm.update()
+            losses = self.algorithm.update(self.buffer.get(flatten=False))
             self._log_train(losses)
             if (
                 self.eval_freq > 0
@@ -150,12 +155,14 @@ class Trainer:
 
     @torch.no_grad()
     def _collect_rollout(self):
-        """Collect a rollout. Algorithm controls the data collection process."""
+        """Collect a rollout with the synchronous collector."""
 
         # Callback function for statistics and logging
-        def on_step(obs, actions, reward, done, info, next_obs):
+        def on_step(tensordict: TensorDict, info: dict):
             """Callback called at each step during rollout collection."""
-            # Episode stats (stay on device; convert only when episode ends)
+            reward = tensordict["reward"]
+            done = tensordict["done"]
+            # Episode stats
             self.curr_ret += reward
             self.curr_len += 1
             done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
@@ -167,10 +174,7 @@ class Trainer:
                 self.curr_ret[done_idx] = 0
                 self.curr_len[done_idx] = 0
 
-            # Update global step and observation
-            # next_obs is already flattened in algorithm's collect_rollout
-            self.obs = next_obs
-            self.global_step += next_obs.shape[0]
+            self.global_step += tensordict.batch_size[0]
 
             if isinstance(info, dict):
                 rewards_dict = info.get("rewards")
@@ -183,14 +187,12 @@ class Trainer:
                 if log_dict and self.use_wandb:
                     wandb.log(log_dict, step=self.global_step)
 
-        # Algorithm controls data collection
-        result = self.algorithm.collect_rollout(
-            env=self.env,
-            policy=self.policy,
-            obs=self.obs,
-            num_steps=self.num_steps,
+        rollout = self.collector.collect(
+            num_steps=self.buffer_size,
+            rollout=self.buffer.start_rollout(),
             on_step_callback=on_step,
         )
+        self.buffer.add(rollout)
 
     def _log_train(self, losses: Dict[str, float]):
         if self.writer:
@@ -258,7 +260,13 @@ class Trainer:
             # Run episode until all environments complete
             while not done_mask.all():
                 # Get deterministic actions from policy
-                actions, _, _ = self.policy.get_action(obs, deterministic=True)
+                action_td = TensorDict(
+                    {"obs": obs},
+                    batch_size=[num_envs],
+                    device=self.device,
+                )
+                action_td = self.policy.get_action(action_td, deterministic=True)
+                actions = action_td["action"]
                 am = getattr(self.eval_env, "action_manager", None)
                 action_type = (
                     am.action_type

@@ -20,6 +20,7 @@ from typing import Dict, Tuple, Type, Any
 import torch
 
 from .base import BaseAlgorithm
+from .common import compute_gae
 from .ppo import PPOCfg, PPO
 from .grpo import GRPOCfg, GRPO
 
@@ -51,6 +52,7 @@ __all__ = [
     "PPO",
     "GRPOCfg",
     "GRPO",
+    "compute_gae",
     "get_registered_algo_names",
     "build_algo",
 ]

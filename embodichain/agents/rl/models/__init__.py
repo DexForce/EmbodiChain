@@ -16,9 +16,11 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Dict, Type
-import torch
+
 from gymnasium import spaces
+import torch
 
 from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
@@ -43,15 +45,30 @@ def get_policy_class(name: str) -> Type[Policy] | None:
     return _POLICY_REGISTRY.get(name)
 
 
+def _resolve_space_dim(space_or_dim: spaces.Space | int, name: str) -> int:
+    """Resolve a flattened feature dimension from an integer or simple Box space."""
+    if isinstance(space_or_dim, int):
+        return space_or_dim
+    if isinstance(space_or_dim, spaces.Box) and len(space_or_dim.shape) > 0:
+        return int(space_or_dim.shape[-1])
+    raise TypeError(
+        f"{name} must be an int or a flat Box space for MLP-based policies, got {type(space_or_dim)!r}."
+    )
+
+
 def build_policy(
     policy_block: dict,
-    obs_space: spaces.Space,
-    action_space: spaces.Space,
+    obs_space: spaces.Space | int,
+    action_space: spaces.Space | int,
     device: torch.device,
     actor: torch.nn.Module | None = None,
     critic: torch.nn.Module | None = None,
 ) -> Policy:
-    """Build policy strictly from json-like block: { name: ..., cfg: {...} }"""
+    """Build a policy from config using spaces for extensibility.
+
+    Built-in MLP policies still resolve flattened `obs_dim` / `action_dim`, while
+    custom policies may accept richer `obs_space` / `action_space` inputs.
+    """
     name = policy_block["name"].lower()
     if name not in _POLICY_REGISTRY:
         available = ", ".join(get_registered_policy_names())
@@ -59,18 +76,50 @@ def build_policy(
             f"Policy '{name}' is not registered. Available policies: {available}"
         )
     policy_cls = _POLICY_REGISTRY[name]
+
     if name == "actor_critic":
         if actor is None or critic is None:
             raise ValueError(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
-        return policy_cls(obs_space, action_space, device, actor=actor, critic=critic)
+        obs_dim = _resolve_space_dim(obs_space, "obs_space")
+        action_dim = _resolve_space_dim(action_space, "action_space")
+        return policy_cls(
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            device=device,
+            actor=actor,
+            critic=critic,
+        )
     elif name == "actor_only":
         if actor is None:
             raise ValueError("ActorOnly policy requires external 'actor' module.")
-        return policy_cls(obs_space, action_space, device, actor=actor)
-    else:
-        return policy_cls(obs_space, action_space, device)
+        obs_dim = _resolve_space_dim(obs_space, "obs_space")
+        action_dim = _resolve_space_dim(action_space, "action_space")
+        return policy_cls(
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            device=device,
+            actor=actor,
+        )
+
+    init_params = inspect.signature(policy_cls.__init__).parameters
+    build_kwargs: dict[str, object] = {"device": device}
+    if "obs_space" in init_params:
+        build_kwargs["obs_space"] = obs_space
+    elif "obs_dim" in init_params:
+        build_kwargs["obs_dim"] = _resolve_space_dim(obs_space, "obs_space")
+
+    if "action_space" in init_params:
+        build_kwargs["action_space"] = action_space
+    elif "action_dim" in init_params:
+        build_kwargs["action_dim"] = _resolve_space_dim(action_space, "action_space")
+
+    if "actor" in init_params and actor is not None:
+        build_kwargs["actor"] = actor
+    if "critic" in init_params and critic is not None:
+        build_kwargs["critic"] = critic
+    return policy_cls(**build_kwargs)
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
