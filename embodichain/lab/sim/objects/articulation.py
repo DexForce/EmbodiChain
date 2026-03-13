@@ -629,6 +629,24 @@ class Articulation(BatchEntity):
             self.default_joint_max_effort = self._data.qf_limits.clone()
             self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
+            # Write the USD properties back to cfg
+            usd_drive_pros = self.cfg.drive_pros
+            usd_drive_pros.stiffness = (
+                self.default_joint_stiffness[0].cpu().numpy().tolist()
+            )
+            usd_drive_pros.damping = (
+                self.default_joint_damping[0].cpu().numpy().tolist()
+            )
+            usd_drive_pros.friction = (
+                self.default_joint_friction[0].cpu().numpy().tolist()
+            )
+            usd_drive_pros.max_effort = (
+                self.default_joint_max_effort[0].cpu().numpy().tolist()
+            )
+            usd_drive_pros.max_velocity = (
+                self.default_joint_max_velocity[0].cpu().numpy().tolist()
+            )
+
         self.pk_chain = None
         if self.cfg.build_pk_chain:
             self.pk_chain = create_pk_chain(
