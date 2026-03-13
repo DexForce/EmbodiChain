@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -59,7 +61,7 @@ def initialize_simulation():
     config = SimulationManagerCfg(
         headless=True,
         sim_device="cpu",
-        enable_rt=True,
+        render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy"),
         physics_dt=1.0 / 100.0,
     )
     sim = SimulationManager(config)

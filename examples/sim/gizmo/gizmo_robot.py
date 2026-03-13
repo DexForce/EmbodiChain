@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -45,7 +47,7 @@ def main():
         "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
     )
     parser.add_argument(
-        "--enable_rt",
+        "--renderer",
         action="store_true",
         default=False,
         help="Enable ray tracing for better visuals",
@@ -58,7 +60,7 @@ def main():
         height=1080,
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
     )
 
     sim = SimulationManager(sim_cfg)

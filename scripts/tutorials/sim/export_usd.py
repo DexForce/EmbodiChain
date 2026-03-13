@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -48,7 +50,9 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
+        "--renderer",
+        action="store_true",
+        help="Renderer backend to use: legacy, hybrid, or fast-rt",
     )
     parser.add_argument("--headless", action="store_true", help="Enable headless mode")
     parser.add_argument(
@@ -73,14 +77,14 @@ def initialize_simulation(args) -> SimulationManager:
     config = SimulationManagerCfg(
         headless=True,
         sim_device=args.device,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=1,
         arena_space=2.5,
     )
     sim = SimulationManager(config)
 
-    if args.enable_rt:
+    if args.renderer != "legacy":
         light = sim.add_light(
             cfg=LightCfg(
                 uid="main_light",

@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -37,7 +39,7 @@ NUM_ENVS = 4
 
 
 class ContactTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device, renderer="legacy"):
         sim_cfg = SimulationManagerCfg(
             width=1920,
             height=1080,
@@ -45,7 +47,9 @@ class ContactTest:
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device=sim_device,
-            enable_rt=enable_rt,  # Enable ray tracing for better visuals
+            render_cfg=RenderCfg(
+                renderer=renderer
+            ),  # Enable ray tracing for better visuals
         )
 
         # Create the simulation instance
@@ -216,25 +220,35 @@ class ContactTest:
 
 class TestContactRaster(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+        self.setup_simulation(
+            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+        )
 
 
 class TestContactRasterCuda(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+        self.setup_simulation(
+            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+        )
 
 
 class TestContactFastRT(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+        self.setup_simulation(
+            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+        )
 
 
 class TestContactFastRTCuda(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+        self.setup_simulation(
+            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+        )
 
 
 if __name__ == "__main__":
     test = ContactTest()
-    test.setup_simulation("cuda", enable_rt=True)
+    test.setup_simulation(
+        "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+    )
     test.test_fetch_contact()

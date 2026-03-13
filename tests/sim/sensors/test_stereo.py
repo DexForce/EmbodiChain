@@ -1,3 +1,5 @@
+from embodiedichain.lab.sim.cfg import RenderCfg
+
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -24,10 +26,13 @@ NUM_ENVS = 4
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device, renderer="legacy"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
+            headless=True,
+            sim_device=sim_device,
+            render_cfg=RenderCfg(renderer=renderer),
+            num_envs=NUM_ENVS,
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
@@ -143,19 +148,27 @@ class StereoCameraTest:
 
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+        self.setup_simulation(
+            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+        )
 
 
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+        self.setup_simulation(
+            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+        )
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+        self.setup_simulation(
+            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+        )
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+        self.setup_simulation(
+            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+        )
