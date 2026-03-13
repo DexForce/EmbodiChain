@@ -18,7 +18,7 @@ import numpy as np
 from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import BasePlanner
-from embodichain.lab.sim.planners.utils import PlanState
+from embodichain.lab.sim.planners.motion_generator import PlanState
 import torch
 
 from typing import TYPE_CHECKING, Union, Tuple
