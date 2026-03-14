@@ -215,6 +215,26 @@ class BaseRigidObjectTest:
         )
         self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
 
+        # Read back velocities from the duck and verify they match the values set.
+        duck_lin_vel = self.duck.body_data.lin_vel
+        duck_ang_vel = self.duck.body_data.ang_vel
+
+        assert duck_lin_vel.shape == lin_vel.shape, (
+            f"Linear velocity shape mismatch: expected {lin_vel.shape}, "
+            f"got {duck_lin_vel.shape}"
+        )
+        assert duck_ang_vel.shape == ang_vel.shape, (
+            f"Angular velocity shape mismatch: expected {ang_vel.shape}, "
+            f"got {duck_ang_vel.shape}"
+        )
+
+        assert torch.allclose(
+            duck_lin_vel, lin_vel
+        ), f"Linear velocity not set correctly: expected {lin_vel}, got {duck_lin_vel}"
+        assert torch.allclose(
+            duck_ang_vel, ang_vel
+        ), f"Angular velocity not set correctly: expected {ang_vel}, got {duck_ang_vel}"
+
     def test_set_visual_material(self):
         """Test that set_material correctly assigns the material to the duck."""
 
