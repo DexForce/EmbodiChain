@@ -26,6 +26,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from dexsim.utility.path import get_resources_data_path
 
 
@@ -36,23 +37,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Run simulation in headless mode",
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
-    )
-    parser.add_argument(
-        "--renderer",
-        default="hybrid",
-        help="Renderer to use (legacy, fastrt, hybrid)",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Configure the simulation

@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -36,6 +34,7 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     RobotCfg,
     LightCfg,
     SoftObjectCfg,
@@ -43,6 +42,7 @@ from embodichain.lab.sim.cfg import (
     SoftbodyPhysicalAttributesCfg,
     URDFCfg,
 )
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import MeshCfg
 
 
@@ -56,11 +56,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--renderer",
-        action="store_true",
-        help="Renderer backend to use: legacy, hybrid, or fast-rt",
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 
