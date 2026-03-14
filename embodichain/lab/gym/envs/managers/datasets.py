@@ -287,6 +287,7 @@ class LeRobotRecorder(Functor):
             robot_type=robot_type,
             features=features,
             use_videos=self.use_videos,
+            metadata_buffer_size=1,
         )
         logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 

@@ -55,7 +55,7 @@ dependencies = [
 
 [project.optional-dependencies]
 lerobot = [
-  "lerobot==0.4.2"
+  "lerobot==0.4.4"
 ]
 
 [tool.setuptools.dynamic]
