@@ -122,7 +122,7 @@ def main(args, env, gym_config):
             debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
         )
-    
+
     # Final reset.
     _, _ = env.reset()
 

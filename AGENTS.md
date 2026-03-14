@@ -1,11 +1,5 @@
 # EmbodiChain — Developer Reference
 
-EmbodiChain is an **end-to-end, GPU-accelerated, modular platform** for building generalized Embodied Intelligence, developed by DexForce Technology Co., Ltd. It provides a simulation lab, gym environments, RL training infrastructure, and agentic frameworks for robot learning research.
-
-- **License**: Apache 2.0
-- **Repository**: https://github.com/DexForce/EmbodiChain
-
----
 
 ## Project Structure
 
@@ -13,6 +7,8 @@ EmbodiChain is an **end-to-end, GPU-accelerated, modular platform** for building
 EmbodiChain/
 ├── embodichain/                  # Main Python package
 │   ├── agents/                   # AI agents
+│   │   ├── datasets/             # Datasets and data loaders for model training
+│   │   ├── engine/               # Online Data Streaming Engine
 │   │   ├── hierarchy/            # LLM-based hierarchical agents (task, code, validation)
 │   │   ├── mllm/                 # Multimodal LLM prompt scaffolding
 │   │   └── rl/                   # RL agents: PPO algo, rollout buffer, actor-critic models
