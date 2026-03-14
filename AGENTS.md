@@ -7,7 +7,7 @@
 EmbodiChain/
 ├── embodichain/                  # Main Python package
 │   ├── agents/                   # AI agents
-│   │   ├── datasets/             # Datasets and data loaders for model training 
+│   │   ├── datasets/             # Datasets and data loaders for model training
 │   │   ├── engine/               # Online Data Streaming Engine
 │   │   ├── hierarchy/            # LLM-based hierarchical agents (task, code, validation)
 │   │   ├── mllm/                 # Multimodal LLM prompt scaffolding
