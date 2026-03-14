@@ -200,6 +200,21 @@ class BaseRigidObjectTest:
         # Test clear dynamics
         self.duck.clear_dynamics()
 
+    def test_set_velocity(self):
+        """Test that set_velocity correctly assigns linear and angular velocity to the duck."""
+
+        lin_vel = (
+            torch.tensor([0.0, 5.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        ang_vel = (
+            torch.tensor([0.0, 0.0, 5.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
+
     def test_set_visual_material(self):
         """Test that set_material correctly assigns the material to the duck."""
 

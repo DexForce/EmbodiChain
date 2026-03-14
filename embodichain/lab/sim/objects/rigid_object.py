@@ -513,6 +513,67 @@ class RigidObject(BatchEntity):
                     data_type=RigidBodyGPUAPIWriteType.TORQUE,
                 )
 
+    def set_velocity(
+        self,
+        lin_vel: torch.Tensor | None = None,
+        ang_vel: torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set linear and/or angular velocity for the rigid object.
+
+        Args:
+            lin_vel (torch.Tensor | None, optional): The linear velocity to set with shape (N, 3). Defaults to None.
+            ang_vel (torch.Tensor | None, optional): The angular velocity to set with shape (N, 3). Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        if lin_vel is None and ang_vel is None:
+            logger.log_warning(
+                "Both lin_vel and ang_vel are None. No velocity will be set."
+            )
+            return
+
+        if self.is_non_dynamic:
+            logger.log_warning("Cannot set velocity for non-dynamic rigid body.")
+            return
+
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if lin_vel is not None and len(local_env_ids) != len(lin_vel):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match lin_vel length {len(lin_vel)}."
+            )
+
+        if ang_vel is not None and len(local_env_ids) != len(ang_vel):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match ang_vel length {len(ang_vel)}."
+            )
+
+        if self.device.type == "cpu":
+            for i, env_idx in enumerate(local_env_ids):
+                if lin_vel is not None:
+                    self._entities[env_idx].set_linear_velocity(
+                        lin_vel[i].cpu().numpy()
+                    )
+                if ang_vel is not None:
+                    self._entities[env_idx].set_angular_velocity(
+                        ang_vel[i].cpu().numpy()
+                    )
+        else:
+            indices = self.body_data.gpu_indices[local_env_ids]
+            torch.cuda.synchronize(self.device)
+            if lin_vel is not None:
+                self._ps.gpu_apply_rigid_body_data(
+                    data=lin_vel,
+                    gpu_indices=indices,
+                    data_type=RigidBodyGPUAPIWriteType.LINEAR_VELOCITY,
+                )
+            if ang_vel is not None:
+                self._ps.gpu_apply_rigid_body_data(
+                    data=ang_vel,
+                    gpu_indices=indices,
+                    data_type=RigidBodyGPUAPIWriteType.ANGULAR_VELOCITY,
+                )
+
     def set_attrs(
         self,
         attrs: Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]],
