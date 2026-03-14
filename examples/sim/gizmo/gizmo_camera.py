@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -30,9 +28,10 @@ torch.set_printoptions(precision=4, sci_mode=False)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, CameraCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def main():
@@ -42,20 +41,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create and simulate a camera with gizmo in SimulationManager"
     )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Device to run simulation on",
-    )
-    parser.add_argument("--headless", action="store_true", help="Run in headless mode")
-    parser.add_argument(
-        "--renderer",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing for better visuals",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Configure the simulation

@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -30,6 +28,7 @@ from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     LightCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
@@ -40,7 +39,7 @@ from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 
 
@@ -54,21 +53,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--num_envs", type=int, default=9, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--renderer",
-        action="store_true",
-        help="Renderer backend to use: legacy, hybrid, or fast-rt",
-    )
-    parser.add_argument("--headless", action="store_true", help="Enable headless mode")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 

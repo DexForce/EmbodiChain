@@ -37,6 +37,7 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
 )
 from embodichain.data import get_data_path
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def main():
@@ -46,22 +47,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of environments to simulate"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Device to run simulation on",
-    )
-    parser.add_argument("--headless", action="store_true", help="Run in headless mode")
-    parser.add_argument(
-        "--renderer",
-        default="hybrid",
-        help="Renderer backend to use: legacy, hybrid, or fast-rt",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Initialize simulation

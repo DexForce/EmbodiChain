@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -25,7 +23,9 @@ import argparse
 import time
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
 )
@@ -43,21 +43,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Run simulation in headless mode",
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--renderer",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing for better visuals",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Configure the simulation
