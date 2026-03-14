@@ -14,12 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from enum import Enum
-from typing import Union
-from embodichain.utils import logger
 import torch
-from enum import Enum
+
 from dataclasses import dataclass
+from enum import Enum
+from typing import Union, __all__
+
+from embodichain.utils import logger
+
+
+__all__ = ["TrajectorySampleMethod", "MovePart", "MoveType", "PlanState", "PlanResult"]
 
 
 class TrajectorySampleMethod(Enum):
@@ -81,19 +85,58 @@ class MoveType(Enum):
 
 
 @dataclass
-class PlanState:
-    """Data class representing the state for a motion plan."""
+class PlanResult:
+    r"""Data class representing the result of a motion plan."""
 
-    move_type: MoveType = MoveType.PAUSE  # Type of movement
-    move_part: MovePart = MovePart.LEFT  # Part of the robot to move
-    xpos: torch.Tensor = None  # target tcp pose (4x4 matrix) for TCP_MOVE
-    qpos: torch.Tensor = None  # target joint angles for JOINT_MOVE (shape: (DOF,))
-    qvel: torch.Tensor = None  # target joint velocities for JOINT_MOVE (shape: (DOF,))
-    qacc: torch.Tensor = (
-        None  # target joint accelerations for JOINT_MOVE (shape: (DOF,))
-    )
-    is_open: bool = True  # for TOOL move type, whether to open or close the tool
-    is_world_coordinate: bool = (
-        True  # whether the target pose is in world coordinates (True) or relative to current pose (False)
-    )
-    pause_seconds: float = 0.0  # duration to pause for PAUSE move type
+    success: bool
+    """Whether planning succeeded."""
+
+    positions: torch.Tensor | None = None
+    """Joint positions along trajectory with shape `(N, DOF)`."""
+
+    velocities: torch.Tensor | None = None
+    """Joint velocities along trajectory with shape `(N, DOF)`."""
+
+    accelerations: torch.Tensor | None = None
+    """Joint accelerations along trajectory with shape `(N, DOF)`."""
+
+    times: torch.Tensor | None = None
+    """Time stamps for each point with shape `(N,)`."""
+
+    duration: float = 0.0
+    """Total trajectory duration in seconds."""
+
+    error_msg: str | None = None
+    """Optional error message if planning failed."""
+
+
+@dataclass
+class PlanState:
+    r"""Data class representing the state for a motion plan."""
+
+    move_type: MoveType = MoveType.PAUSE
+    """Type of movement used by the plan."""
+
+    move_part: MovePart = MovePart.LEFT
+    """Robot part that should move."""
+
+    xpos: torch.Tensor = None
+    """Target TCP pose (4x4 matrix) for `MoveType.TCP_MOVE`."""
+
+    qpos: torch.Tensor = None
+    """Target joint angles for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+
+    qvel: torch.Tensor = None
+    """Target joint velocities for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+
+    qacc: torch.Tensor = None
+    """Target joint accelerations for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+
+    is_open: bool = True
+    """For `MoveType.TOOL`, indicates whether to open (`True`) or close (`False`) the tool."""
+
+    is_world_coordinate: bool = True
+    """`True` if the target pose is in world coordinates, `False` if relative to the current pose."""
+
+    pause_seconds: float = 0.0
+    """Duration of a pause when `move_type` is `MoveType.PAUSE`."""

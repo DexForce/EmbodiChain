@@ -24,7 +24,7 @@ from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.utils import logger
-from .utils import MovePart, MoveType, PlanState
+from .utils import MovePart, MoveType, PlanState, PlanResult
 
 
 class MotionGenerator:
@@ -181,14 +181,7 @@ class MotionGenerator:
         sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME,
         sample_interval: Union[float, int] = 0.01,
         **kwargs,
-    ) -> Tuple[
-        bool,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        float,
-    ]:
+    ) -> PlanResult:
         r"""Plan trajectory without collision checking.
 
         This method generates a smooth trajectory using the selected planner that satisfies
@@ -202,30 +195,18 @@ class MotionGenerator:
             **kwargs: Additional arguments
 
         Returns:
-            Tuple of (success, positions, velocities, accelerations, times, duration):
-                - success: bool, whether planning succeeded
-                - positions: torch.Tensor (N, DOF), joint positions along trajectory
-                - velocities: torch.Tensor (N, DOF), joint velocities along trajectory
-                - accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory
-                - times: torch.Tensor (N,), time stamps for each point
-                - duration: float, total trajectory duration
+            PlanResult containing the planned trajectory details.
         """
         # Plan trajectory using selected planner
-        (
-            success,
-            positions,
-            velocities,
-            accelerations,
-            times,
-            duration,
-        ) = self.planner.plan(
+        result = self.planner.plan(
             current_state=current_state,
             target_states=target_states,
             sample_method=sample_method,
             sample_interval=sample_interval,
+            **kwargs,
         )
 
-        return success, positions, velocities, accelerations, times, duration
+        return result
 
     def plan_with_collision(
         self,
@@ -459,7 +440,7 @@ class MotionGenerator:
             target_plan_states.append(plan_state)
 
         # Plan trajectory using internal plan method
-        success, positions, velocities, accelerations, times, duration = self.plan(
+        plan_result = self.plan(
             current_state=init_plan_state,
             target_states=target_plan_states,
             sample_method=sample_method,
@@ -467,11 +448,11 @@ class MotionGenerator:
             **kwargs,
         )
 
-        if not success or positions is None:
+        if not plan_result.success or plan_result.positions is None:
             logger.log_error("Failed to plan trajectory")
 
         # Convert positions to list
-        out_qpos_list = positions.to("cpu").numpy().tolist()
+        out_qpos_list = plan_result.positions.to("cpu").numpy().tolist()
         out_qpos_list = (
             torch.tensor(out_qpos_list)
             if not isinstance(out_qpos_list, torch.Tensor)

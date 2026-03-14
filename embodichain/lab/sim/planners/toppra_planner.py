@@ -14,14 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import torch
 import numpy as np
+
 from embodichain.utils import logger
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import BasePlanner
-from .utils import MovePart, MoveType, PlanState
-import torch
-
-from typing import TYPE_CHECKING, Union, Tuple
+from .utils import MovePart, MoveType, PlanState, PlanResult
 
 try:
     import toppra as ta
@@ -55,7 +54,7 @@ class ToppraPlanner(BasePlanner):
         current_state: PlanState,
         target_states: list[PlanState],
         **kwargs,
-    ):
+    ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
@@ -63,7 +62,7 @@ class ToppraPlanner(BasePlanner):
             target_states: List of dictionaries containing target states
 
         Returns:
-            Tuple of (success, positions, velocities, accelerations, times, duration)
+            PlanResult containing the planned trajectory details.
         """
         sample_method = kwargs.get("sample_method", TrajectorySampleMethod.TIME)
         sample_interval = kwargs.get("sample_interval", 0.01)
@@ -79,12 +78,10 @@ class ToppraPlanner(BasePlanner):
 
         # Check waypoints
         if len(current_state.qpos) != self.dofs:
-            logger.log_info("Current wayponit does not align")
-            return False, None, None, None, None, None
+            logger.log_error("Current waypoint does not align")
         for target in target_states:
             if len(target.qpos) != self.dofs:
-                logger.log_info("Target Wayponits does not align")
-                return False, None, None, None, None, None
+                logger.log_error("Target waypoints do not align")
 
         if (
             len(target_states) == 1
@@ -93,14 +90,28 @@ class ToppraPlanner(BasePlanner):
             )
             < 1e-3
         ):
-            logger.log_info("Only two same waypoints, do not plan")
-            return (
-                True,
-                np.array([current_state.qpos, target_states[0].qpos]),
-                np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
-                np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
-                0,
-                0,
+            logger.log_warning("Only two same waypoints, returning trivial trajectory.")
+            return PlanResult(
+                success=True,
+                positions=torch.as_tensor(
+                    np.array([current_state.qpos, target_states[0].qpos]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                velocities=torch.as_tensor(
+                    np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                accelerations=torch.as_tensor(
+                    np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                times=torch.as_tensor(
+                    [0.0, 0.0], dtype=torch.float32, device=self.device
+                ),
+                duration=0.0,
             )
 
         # Build waypoints
@@ -133,14 +144,16 @@ class ToppraPlanner(BasePlanner):
             parametrizer="ParametrizeConstAccel",
             gridpt_min_nb_points=max(100, 10 * len(waypoints)),
         )
-        # NOTES:合理设置gridpt_min_nb_points对加速度约束很重要
+        # NOTES: Important to set a large number of grid points for better performance in dense waypoint scenarios.
 
         # Compute parameterized trajectory
         jnt_traj = instance.compute_trajectory()
         if jnt_traj is None:
             # raise RuntimeError("Unable to find feasible trajectory")
             logger.log_info("Unable to find feasible trajectory")
-            return False, None, None, None, None, None
+            return PlanResult(
+                success=False, error_msg="Unable to find feasible trajectory"
+            )
 
         duration = jnt_traj.duration
         # Sample trajectory points
@@ -161,13 +174,17 @@ class ToppraPlanner(BasePlanner):
             velocities.append(jnt_traj.evald(t))
             accelerations.append(jnt_traj.evaldd(t))
 
-        return (
-            True,
-            torch.tensor(np.array(positions), dtype=torch.float32, device=self.device),
-            torch.tensor(np.array(velocities), dtype=torch.float32, device=self.device),
-            torch.tensor(
+        return PlanResult(
+            success=True,
+            positions=torch.as_tensor(
+                np.array(positions), dtype=torch.float32, device=self.device
+            ),
+            velocities=torch.as_tensor(
+                np.array(velocities), dtype=torch.float32, device=self.device
+            ),
+            accelerations=torch.as_tensor(
                 np.array(accelerations), dtype=torch.float32, device=self.device
             ),
-            torch.tensor(ts, dtype=torch.float32, device=self.device),
-            duration,
+            times=torch.as_tensor(ts, dtype=torch.float32, device=self.device),
+            duration=duration,
         )
