@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple
-
 import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
+from tensordict import TensorDict
+
 from .mlp import MLP
 from .policy import Policy
 
@@ -36,23 +36,21 @@ class ActorCritic(Policy):
     This allows seamless swapping with other policy implementations (e.g., VLAPolicy)
     without modifying RL algorithm code.
 
-    Implements:
-      - get_action(obs, deterministic=False) -> (action, log_prob, value)
-      - get_value(obs)
-      - evaluate_actions(obs, actions) -> (log_prob, entropy, value)
+    Implements TensorDict-native interfaces while preserving `get_action()`
+    compatibility for evaluation and legacy call-sites.
     """
 
     def __init__(
         self,
-        obs_space,
-        action_space,
+        obs_dim: int,
+        action_dim: int,
         device: torch.device,
         actor: nn.Module,
         critic: nn.Module,
     ):
         super().__init__()
-        self.obs_dim = obs_space.shape[-1]
-        self.action_dim = action_space.shape[-1]
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
         self.device = device
 
         # Require external injection of actor and critic
@@ -66,31 +64,38 @@ class ActorCritic(Policy):
         self.log_std_min = -5.0
         self.log_std_max = 2.0
 
-    @torch.no_grad()
-    def get_action(
-        self, obs: torch.Tensor, deterministic: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _distribution(self, obs: torch.Tensor) -> Normal:
         mean = self.actor(obs)
         log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
         std = log_std.exp().expand(mean.shape[0], -1)
-        dist = Normal(mean, std)
+        return Normal(mean, std)
+
+    def forward(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        obs = tensordict["obs"]
+        dist = self._distribution(obs)
+        mean = dist.mean
         action = mean if deterministic else dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=-1)
-        value = self.critic(obs).squeeze(-1)
-        return action, log_prob, value
+        tensordict["action"] = action
+        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+        tensordict["value"] = self.critic(obs).squeeze(-1)
+        return tensordict
 
-    @torch.no_grad()
-    def get_value(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.critic(obs).squeeze(-1)
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
+        tensordict["value"] = self.critic(tensordict["obs"]).squeeze(-1)
+        return tensordict
 
-    def evaluate_actions(
-        self, obs: torch.Tensor, actions: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean = self.actor(obs)
-        log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
-        std = log_std.exp().expand(mean.shape[0], -1)
-        dist = Normal(mean, std)
-        log_prob = dist.log_prob(actions).sum(dim=-1)
-        entropy = dist.entropy().sum(dim=-1)
-        value = self.critic(obs).squeeze(-1)
-        return log_prob, entropy, value
+    def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
+        obs = tensordict["obs"]
+        action = tensordict["action"]
+        dist = self._distribution(obs)
+        return TensorDict(
+            {
+                "sample_log_prob": dist.log_prob(action).sum(dim=-1),
+                "entropy": dist.entropy().sum(dim=-1),
+                "value": self.critic(obs).squeeze(-1),
+            },
+            batch_size=tensordict.batch_size,
+            device=tensordict.device,
+        )

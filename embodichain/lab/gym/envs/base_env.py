@@ -645,6 +645,8 @@ class BaseEnv(gym.Env):
             rewards=rewards,
             dones=dones,
             info=info,
+            terminateds=terminateds,
+            truncateds=truncateds,
             **kwargs,
         )
 

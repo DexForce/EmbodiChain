@@ -9,7 +9,7 @@
         "gpu_id": 0,
         "num_envs": 64,
         "iterations": 1000,
-        "rollout_steps": 1024,
+        "buffer_size": 1024,
         "enable_eval": true,
         "num_eval_envs": 16,
         "num_eval_episodes": 3,

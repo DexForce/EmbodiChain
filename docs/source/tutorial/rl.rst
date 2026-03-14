@@ -57,14 +57,14 @@ Configuration Sections
 Runtime Settings
 ^^^^^^^^^^^^^^^^
 
-The ``runtime`` section controls experiment setup:
+The ``trainer`` section controls experiment setup:
 
 - **exp_name**: Experiment name (used for output directories)
 - **seed**: Random seed for reproducibility
-- **cuda**: Whether to use GPU (default: true)
+- **device**: Runtime device string, e.g. ``"cpu"`` or ``"cuda:0"``
 - **headless**: Whether to run simulation in headless mode
 - **iterations**: Number of training iterations
-- **rollout_steps**: Steps per rollout (e.g., 1024)
+- **buffer_size**: Steps collected per rollout (e.g., 1024)
 - **eval_freq**: Frequency of evaluation (in steps)
 - **save_freq**: Frequency of checkpoint saving (in steps)
 - **use_wandb**: Whether to enable Weights & Biases logging (set in JSON config)
@@ -109,7 +109,7 @@ Policy Configuration
 The ``policy`` section defines the neural network policy:
 
 - **name**: Policy name (e.g., "actor_critic", "vla")
-- **cfg**: Policy-specific hyperparameters (empty for actor_critic)
+- **action_dim**: Optional policy output action dimension. If omitted, it is inferred from ``env.action_space``.
 - **actor**: Actor network configuration (required for actor_critic)
 - **critic**: Critic network configuration (required for actor_critic)
 
@@ -119,16 +119,19 @@ Example:
 
    "policy": {
      "name": "actor_critic",
-     "cfg": {},
      "actor": {
        "type": "mlp",
-       "hidden_sizes": [256, 256],
-       "activation": "relu"
+       "network_cfg": {
+         "hidden_sizes": [256, 256],
+         "activation": "relu"
+       }
      },
      "critic": {
        "type": "mlp",
-       "hidden_sizes": [256, 256],
-       "activation": "relu"
+       "network_cfg": {
+         "hidden_sizes": [256, 256],
+         "activation": "relu"
+       }
      }
    }
 
@@ -231,9 +234,9 @@ Training Process
 
 The training process follows this sequence:
 
-1. **Rollout Phase**: Algorithm collects trajectories by interacting with the environment (via ``collect_rollout``). During this phase, the trainer performs dense per-step logging of rewards and metrics from environment info.
-2. **Advantage/Return Computation**: Algorithm computes advantages and returns (e.g. GAE for PPO, step-wise group normalization for GRPO; stored in buffer extras)
-3. **Update Phase**: Algorithm updates the policy using collected data (e.g., PPO)
+1. **Rollout Phase**: ``SyncCollector`` interacts with the environment and writes policy-side fields into a shared rollout ``TensorDict`` with uniform ``[N, T + 1]`` layout. ``EmbodiedEnv`` writes environment-side step fields such as ``reward``, ``done``, ``terminated``, and ``truncated`` into the same rollout via ``set_rollout_buffer()``. The final slot of transition-only fields is reserved as padding, while ``obs[:, -1]`` and ``value[:, -1]`` remain valid bootstrap data.
+2. **Advantage/Return Computation**: Algorithm computes advantages and returns from the collected rollout (e.g. GAE for PPO, step-wise group normalization for GRPO) and converts it to a transition-aligned view over the valid first ``T`` steps before minibatch optimization.
+3. **Update Phase**: Algorithm updates the policy with ``update(rollout)``
 4. **Logging**: Trainer logs training losses and aggregated metrics to TensorBoard and Weights & Biases
 5. **Evaluation** (periodic): Trainer evaluates the current policy
 6. **Checkpointing** (periodic): Trainer saves model checkpoints
@@ -251,23 +254,23 @@ All policies must inherit from the ``Policy`` abstract base class:
    class Policy(nn.Module, ABC):
        device: torch.device
        
+       def get_action(self, tensordict, deterministic: bool = False):
+           """Samples action, sample_log_prob, and value into the TensorDict."""
+           ...
+       
        @abstractmethod
-       def get_action(
-           self, obs: torch.Tensor, deterministic: bool = False
-       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-           """Returns (action, log_prob, value)"""
+       def forward(self, tensordict, deterministic: bool = False):
+           """Writes action, sample_log_prob, and value into the TensorDict."""
            raise NotImplementedError
        
        @abstractmethod
-       def get_value(self, obs: torch.Tensor) -> torch.Tensor:
-           """Returns value estimate"""
+       def get_value(self, tensordict):
+           """Writes value estimate into the TensorDict."""
            raise NotImplementedError
        
        @abstractmethod
-       def evaluate_actions(
-           self, obs: torch.Tensor, actions: torch.Tensor
-       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-           """Returns (log_prob, entropy, value)"""
+       def evaluate_actions(self, tensordict):
+           """Returns a new TensorDict with log_prob, entropy, and value."""
            raise NotImplementedError
 
 Available Policies
@@ -292,13 +295,13 @@ Adding a New Algorithm
 To add a new algorithm:
 
 1. Create a new algorithm class in ``embodichain/agents/rl/algo/``
-2. Implement ``initialize_buffer()``, ``collect_rollout()``, and ``update()`` methods
+2. Implement ``update(rollout)`` and consume the shared rollout ``TensorDict``
 3. Register in ``algo/__init__.py``:
 
 .. code-block:: python
 
+   from tensordict import TensorDict
    from embodichain.agents.rl.algo import BaseAlgorithm, register_algo
-   from embodichain.agents.rl.buffer import RolloutBuffer
    
    @register_algo("my_algo")
    class MyAlgorithm(BaseAlgorithm):
@@ -306,24 +309,11 @@ To add a new algorithm:
            self.cfg = cfg
            self.policy = policy
            self.device = torch.device(cfg.device)
-           self.buffer = None
        
-       def initialize_buffer(self, num_steps, num_envs, obs_dim, action_dim):
-           """Initialize the algorithm's buffer."""
-           self.buffer = RolloutBuffer(num_steps, num_envs, obs_dim, action_dim, self.device)
-       
-       def collect_rollout(self, env, policy, obs, num_steps, on_step_callback=None):
-           """Control data collection process (interact with env, fill buffer, compute advantages/returns)."""
-           # Collect trajectories
-           # Compute advantages/returns (e.g., GAE for on-policy algorithms)
-           # Attach extras to buffer: self.buffer.set_extras({"advantages": adv, "returns": ret})
-           # Return empty dict (dense logging handled in trainer)
-           return {}
-       
-       def update(self):
-           """Update the policy using collected data."""
-           # Access extras from buffer: self.buffer._extras.get("advantages")
-           # Use self.buffer to update policy
+       def update(self, rollout: TensorDict):
+           """Update the policy using a collected rollout."""
+           # compute advantages / returns from rollout
+           # optimize policy parameters
            return {"loss": 0.0}
 
 Adding a New Policy
@@ -340,17 +330,21 @@ To add a new policy:
    
    @register_policy("my_policy")
    class MyPolicy(Policy):
-       def __init__(self, obs_space, action_space, device, config):
+       def __init__(self, obs_dim, action_dim, device, config):
            super().__init__()
            self.device = device
            # Initialize your networks here
        
-       def get_action(self, obs, deterministic=False):
+       def get_action(self, tensordict, deterministic=False):
            ...
-       def get_value(self, obs):
+       def forward(self, tensordict, deterministic=False):
            ...
-       def evaluate_actions(self, obs, actions):
+       def get_value(self, tensordict):
            ...
+       def evaluate_actions(self, tensordict):
+           ...
+
+Current built-in MLP policies use flattened observations in the training path. If your policy requires structured or multi-modal inputs, keep the richer ``obs_space`` interface and define a matching rollout/collector schema.
 
 Adding a New Environment
 ------------------------
@@ -414,7 +408,7 @@ Best Practices
 
 - **Observation Format**: Environments should provide consistent observation shape/types (torch.float32) and a single ``done = terminated | truncated``.
 
-- **Algorithm Interface**: Algorithms must implement ``initialize_buffer()``, ``collect_rollout()``, and ``update()`` methods. The algorithm completely controls data collection and buffer management.
+- **Algorithm Interface**: Algorithms implement ``update(rollout)`` and consume a shared rollout ``TensorDict``. Collection is handled by ``SyncCollector`` plus environment-side rollout writes in ``EmbodiedEnv``.
 
 - **Reward Configuration**: Use the ``RewardManager`` in your environment config to define reward components. Organize reward components in ``info["rewards"]`` dictionary and metrics in ``info["metrics"]`` dictionary. The trainer performs dense per-step logging directly from environment info.
 

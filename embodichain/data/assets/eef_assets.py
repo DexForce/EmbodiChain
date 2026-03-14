@@ -117,6 +117,36 @@ class DH_PGC_140_50_M(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
+class DH_AG95(EmbodiChainDataset):
+    """Dataset class for the DH Robotics AG95 end-effector gripper.
+       DexForce modified connector and finger.
+
+    Reference:
+        https://www.dh-robotics.com/product/ag
+
+    Directory structure:
+        DH_AG95/
+            dh_ag95.urdf
+
+    Example usage:
+        >>> from embodichain.data.eef_dataset import DH95
+        >>> dataset = DH_AG95()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("DH_AG95/dh_ag95.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "DH_AG95.zip"),
+            "34b6f3c2f649697ea7f12814b6a50529",
+        )
+        prefix = "DH_AG95"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
 class ZH_CTM2F110(EmbodiChainDataset):
     """Dataset class for the Zhixing Robot Technology CTM2F110 end-effector gripper.
 
@@ -209,6 +239,39 @@ class InspireHand(EmbodiChainDataset):
             "c60132a6f03866fb021cca5b6d72845e",
         )
         prefix = "InspireHand"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class Robotiq(EmbodiChainDataset):
+    """Dataset class for the Robotiq robotic gripper.
+
+    Reference:
+        https://robotiq.com/products/adaptive-grippers#Two-Finger-Gripper
+
+    Directory structure:
+        Robotiq/
+            robotiq_arg2f_85/
+                robotiq_arg2f_85.urdf
+            robotiq_arg2f_140/
+                robotiq_arg2f_140.urdf
+
+    Example usage:
+        >>> from embodichain.data.eef_dataset import Robotiq
+        >>> dataset = Robotiq()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf"))
+        >>> print(get_data_path("Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "Robotiq.zip"),
+            "9cc84f3a2bfc3a80f428b8ed6864fbeb",
+        )
+        prefix = "Robotiq"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)

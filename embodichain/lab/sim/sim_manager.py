@@ -1705,6 +1705,23 @@ class SimulationManager:
             if uid not in excluded_uids:
                 sensor.reset(env_ids)
 
+    def export_usd(self, fpath: str) -> bool:
+        """Export the current simulation scene to a USD file.
+
+        Args:
+            fpath (str): The file path to save the USD file.
+
+        Returns:
+            bool: True if export is successful, False otherwise.
+        """
+        try:
+            self._env.export_to_usd_file(fpath)
+            logger.log_info(f"Simulation scene exported to USD file: {fpath}")
+            return True
+        except Exception as e:
+            logger.log_error(f"Failed to export simulation scene to USD: {e}")
+            return False
+
     def destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
         # Clean up all gizmos before destroying the simulation

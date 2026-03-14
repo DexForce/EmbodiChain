@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .rollout_buffer import RolloutBuffer
+from .standard_buffer import RolloutBuffer
+from .utils import iterate_minibatches, transition_view
 
-__all__ = ["RolloutBuffer"]
+__all__ = ["RolloutBuffer", "iterate_minibatches", "transition_view"]

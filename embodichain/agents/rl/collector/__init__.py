@@ -14,11 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .config import AlgorithmCfg
-from .helper import dict_to_tensordict, flatten_dict_observation
+from .base import BaseCollector
+from .sync_collector import SyncCollector
 
-__all__ = [
-    "AlgorithmCfg",
-    "dict_to_tensordict",
-    "flatten_dict_observation",
-]
+__all__ = ["BaseCollector", "SyncCollector"]
