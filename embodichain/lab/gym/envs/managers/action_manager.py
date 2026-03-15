@@ -14,26 +14,36 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Action manager for processing policy actions into robot control commands.
+
+This module provides the :class:`ActionManager` class which handles the interpretation
+and preprocessing of raw actions from the policy into the format expected by the robot.
+
+The concrete action term implementations (e.g., :class:`QposTerm`, :class:`DeltaQposTerm`)
+are available in :mod:`actions` module.
+"""
+
 from __future__ import annotations
 
 import inspect
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 from prettytable import PrettyTable
 from tensordict import TensorDict
 
 from embodichain.lab.sim.types import EnvAction
-from embodichain.utils.math import matrix_from_euler, matrix_from_quat
-
 from embodichain.utils.string import string_to_callable
+from embodichain.utils import logger
 
 from .cfg import ActionTermCfg
 from .manager_base import Functor, ManagerBase
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+__all__ = ["ActionTerm", "ActionManager"]
 
 
 class ActionTerm(Functor):
@@ -92,6 +102,11 @@ class ActionManager(ManagerBase):
         """
         self._term_names: list[str] = []
         self._terms: dict[str, ActionTerm] = {}
+        self._term_modes: dict[str, Literal["pre", "post"]] = {}
+        self._mode_term_names: dict[Literal["pre", "post"], list[str]] = {
+            "pre": [],
+            "post": [],
+        }
         super().__init__(cfg, env)
 
     def __str__(self) -> str:
@@ -99,12 +114,14 @@ class ActionManager(ManagerBase):
         msg = f"<ActionManager> contains {len(self._term_names)} active term(s).\n"
         table = PrettyTable()
         table.title = "Active Action Terms"
-        table.field_names = ["Index", "Name", "Dimension"]
+        table.field_names = ["Index", "Name", "Mode", "Dimension"]
         table.align["Name"] = "l"
+        table.align["Mode"] = "c"
         table.align["Dimension"] = "r"
         for index, name in enumerate(self._term_names):
             term = self._terms[name]
-            table.add_row([index, name, term.action_dim])
+            mode = self._term_modes.get(name, "pre")
+            table.add_row([index, name, mode, term.action_dim])
         msg += table.get_string()
         msg += "\n"
         return msg
@@ -113,6 +130,19 @@ class ActionManager(ManagerBase):
     def active_functors(self) -> list[str]:
         """Name of active action terms."""
         return self._term_names
+
+    def get_functors_by_mode(
+        self, mode: Literal["pre", "post"]
+    ) -> list[tuple[str, ActionTerm]]:
+        """Get action terms filtered by mode.
+
+        Args:
+            mode: The mode to filter by ("pre" or "post").
+
+        Returns:
+            List of (name, term) tuples for terms with the specified mode.
+        """
+        return [(name, self._terms[name]) for name in self._mode_term_names[mode]]
 
     @property
     def action_type(self) -> str:
@@ -124,27 +154,58 @@ class ActionManager(ManagerBase):
         """Total dimension of actions (sum of all term dimensions)."""
         return sum(t.action_dim for t in self._terms.values())
 
-    def process_action(self, action: EnvAction) -> EnvAction:
+    def get_action_dim_by_mode(self, mode: Literal["pre", "post"]) -> int:
+        """Get total action dimension for terms of a specific mode.
+
+        Args:
+            mode: The mode to filter by ("pre" or "post").
+
+        Returns:
+            Sum of action dimensions for terms with the specified mode.
+        """
+        mode_terms = self.get_functors_by_mode(mode)
+        return sum(term.action_dim for _, term in mode_terms)
+
+    def process_action(
+        self, action: EnvAction, mode: Literal["pre", "post"] = "pre"
+    ) -> EnvAction:
         """Process raw action from policy into robot control format.
 
         Supports:
-        1. Tensor input: Passed to the active (first) term.
+        1. Tensor input: Passed to the active (first) term of the specified mode.
         2. Dict/TensorDict input: Uses key matching term name; raises an error if no match.
 
         Args:
             action: Raw action from policy (tensor or dict).
+            mode: The processing mode - "pre" for preprocessing (default) or "post"
+                for postprocessing. When "post", only terms with mode="post" are applied.
 
         Returns:
             TensorDict action ready for robot control.
         """
+        # Filter terms by mode
+        mode_terms = self._mode_term_names[mode]
+
+        if not mode_terms:
+            logger.log_error(
+                f"No action terms found for mode '{mode}'. "
+                f"Available terms: {self._term_names}",
+                error_type=ValueError,
+            )
+
+        # TODO: We should refactor the action manager to support multiple active terms.
         if not isinstance(action, (dict, TensorDict)):
-            return self._terms[self._term_names[0]].process_action(action)
+            return self._terms[mode_terms[0]].process_action(action)
 
         # Dict input: find matching term
-        for term_name in self._term_names:
+        for term_name in mode_terms:
             if term_name in action:
                 return self._terms[term_name].process_action(action[term_name])
-        raise ValueError(f"No valid action keys. Expected one of: {self._term_names}")
+
+        logger.log_error(
+            f"No valid action keys. Expected one of: {mode_terms}",
+            error_type=ValueError,
+        )
 
     def get_term(self, name: str) -> ActionTerm:
         """Get action term by name."""
@@ -166,192 +227,30 @@ class ActionManager(ManagerBase):
             if term_cfg is None:
                 continue
             if not isinstance(term_cfg, ActionTermCfg):
-                raise TypeError(
+                logger.log_error(
                     f"Configuration for the term '{term_name}' is not of type ActionTermCfg. "
-                    f"Received: '{type(term_cfg)}'."
+                    f"Received: '{type(term_cfg)}'.",
+                    error_type=TypeError,
                 )
             # Resolve string to callable (skip base class params check for ActionTerm)
             if isinstance(term_cfg.func, str):
                 term_cfg.func = string_to_callable(term_cfg.func)
             if not callable(term_cfg.func):
-                raise AttributeError(
+                logger.log_error(
                     f"The action term '{term_name}' is not callable. "
-                    f"Received: '{term_cfg.func}'"
+                    f"Received: '{term_cfg.func}'",
+                    error_type=TypeError,
                 )
             if inspect.isclass(term_cfg.func) and not issubclass(
                 term_cfg.func, ActionTerm
             ):
-                raise TypeError(
+                logger.log_error(
                     f"Configuration for the term '{term_name}' must be a subclass of "
-                    f"ActionTerm. Received: '{type(term_cfg.func)}'."
+                    f"ActionTerm. Received: '{type(term_cfg.func)}'.",
+                    error_type=TypeError,
                 )
             self._process_functor_cfg_at_play(term_name, term_cfg)
             self._term_names.append(term_name)
             self._terms[term_name] = term_cfg.func
-
-
-# ----------------------------------------------------------------------------
-# Concrete ActionTerm implementations
-# ----------------------------------------------------------------------------
-
-
-class DeltaQposTerm(ActionTerm):
-    """Delta joint position action: current_qpos + scale * action -> qpos."""
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        scaled = action * self._scale
-        current_qpos = self._env.robot.get_qpos()
-        qpos = current_qpos + scaled
-        batch_size = qpos.shape[0]
-        return TensorDict({"qpos": qpos}, batch_size=[batch_size], device=self.device)
-
-
-class QposTerm(ActionTerm):
-    """Absolute joint position action: scale * action -> qpos."""
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        qpos = action * self._scale
-        batch_size = qpos.shape[0]
-        return TensorDict({"qpos": qpos}, batch_size=[batch_size], device=self.device)
-
-
-class QposNormalizedTerm(ActionTerm):
-    """Normalized action in [-1, 1] -> denormalize to joint limits -> qpos.
-
-    The policy output is scaled by ``params.scale`` before denormalization.
-    With scale=1.0 (default), action in [-1, 1] maps to [low, high].
-    With scale<1.0, the effective range shrinks toward the center (e.g. scale=0.5
-    maps to 25%-75% of joint range). Use scale=1.0 for standard normalized control.
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        scaled = action * self._scale
-        qpos_limits = self._env.robot.body_data.qpos_limits[
-            0, self._env.active_joint_ids
-        ]
-        low = qpos_limits[:, 0]
-        high = qpos_limits[:, 1]
-        qpos = low + (scaled + 1.0) * 0.5 * (high - low)
-        batch_size = qpos.shape[0]
-        return TensorDict({"qpos": qpos}, batch_size=[batch_size], device=self.device)
-
-
-class EefPoseTerm(ActionTerm):
-    """End-effector pose (6D or 7D) -> IK -> qpos.
-
-    On IK failure, falls back to current_qpos for that env.
-    Returns ``ik_success`` in the TensorDict so reward/observation
-    can penalize or condition on IK failures.
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-        self._pose_dim = cfg.params.get("pose_dim", 7)  # 6 for euler, 7 for quat
-
-    @property
-    def action_dim(self) -> int:
-        return self._pose_dim
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        scaled = action * self._scale
-        current_qpos = self._env.robot.get_qpos()
-        batch_size = scaled.shape[0]
-        target_pose = (
-            torch.eye(4, device=self.device).unsqueeze(0).repeat(batch_size, 1, 1)
-        )
-        if scaled.shape[-1] == 6:
-            target_pose[:, :3, 3] = scaled[:, :3]
-            target_pose[:, :3, :3] = matrix_from_euler(scaled[:, 3:6])
-        elif scaled.shape[-1] == 7:
-            target_pose[:, :3, 3] = scaled[:, :3]
-            target_pose[:, :3, :3] = matrix_from_quat(scaled[:, 3:7])
-        else:
-            raise ValueError(
-                f"EEF pose action must be 6D or 7D, got {scaled.shape[-1]}D"
-            )
-        # Batch IK: robot.compute_ik supports (n_envs, 4, 4) pose and (n_envs, dof) seed
-        ret, qpos_ik = self._env.robot.compute_ik(
-            pose=target_pose,
-            joint_seed=current_qpos,
-        )
-        # Fallback to current_qpos where IK failed
-        result_qpos = torch.where(
-            ret.unsqueeze(-1).expand_as(qpos_ik), qpos_ik, current_qpos
-        )
-        return TensorDict(
-            {"qpos": result_qpos, "ik_success": ret},
-            batch_size=[batch_size],
-            device=self.device,
-        )
-
-
-class QvelTerm(ActionTerm):
-    """Joint velocity action: scale * action -> qvel."""
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        qvel = action * self._scale
-        batch_size = qvel.shape[0]
-        return TensorDict({"qvel": qvel}, batch_size=[batch_size], device=self.device)
-
-
-class QfTerm(ActionTerm):
-    """Joint force/torque action: scale * action -> qf."""
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        qf = action * self._scale
-        batch_size = qf.shape[0]
-        return TensorDict({"qf": qf}, batch_size=[batch_size], device=self.device)
-
-
-__all__ = [
-    "ActionTerm",
-    "ActionManager",
-    "ActionTermCfg",
-    "DeltaQposTerm",
-    "QposTerm",
-    "QposNormalizedTerm",
-    "EefPoseTerm",
-    "QvelTerm",
-    "QfTerm",
-]
+            self._term_modes[term_name] = term_cfg.mode
+            self._mode_term_names[term_cfg.mode].append(term_name)
