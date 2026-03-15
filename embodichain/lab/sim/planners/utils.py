@@ -91,6 +91,9 @@ class PlanResult:
     success: bool | torch.Tensor = False
     """Whether planning succeeded."""
 
+    xpos_list: torch.Tensor | None = None
+    """End-effector poses along trajectory with shape `(N, 4, 4)`."""
+
     positions: torch.Tensor | None = None
     """Joint positions along trajectory with shape `(N, DOF)`."""
 

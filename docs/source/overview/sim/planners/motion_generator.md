@@ -23,7 +23,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners.motion_generator import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.lab.sim.solvers.pink_solver import PinkSolverCfg
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
@@ -67,11 +67,16 @@ robot_cfg = RobotCfg(
 robot = sim.add_robot(cfg=robot_cfg)
 
 motion_gen = MotionGenerator(
-    robot=robot,
-    uid="arm",
-    planner_type="toppra",
-    default_velocity=0.2,
-    default_acceleration=0.5
+    cfg=MotionGenCfg(
+        planner_cfg=ToppraPlannerCfg(
+            robot_uid="UR10_test",
+            control_part="arm",
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
+        )
+    )
 )
 
 ```
@@ -117,11 +122,11 @@ You can estimate the number of sampling points required for a trajectory before 
 
 ```python
 # Estimate based on joint configurations (qpos_list)
-qpos_list = [
+qpos_list = torch.as_tensor([
     [0, 0, 0, 0, 0, 0],
     [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
     [1, 1, 1, 1, 1, 1]
-]
+])
 sample_count = motion_gen.estimate_trajectory_sample_count(
     qpos_list=qpos_list,  # List of joint positions
     step_size=0.01, # unit: m

@@ -234,13 +234,13 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         """Test estimation of trajectory sample count"""
         if xpos_or_qpos == "xpos":
             estimated_num = self.motion_gen.estimate_trajectory_sample_count(
-                xpos_list=self.xpos_list,
+                xpos_list=torch.as_tensor(np.array(self.xpos_list)),
                 step_size=0.01,
                 angle_step=np.pi / 90,
             )
         else:
             estimated_num = self.motion_gen.estimate_trajectory_sample_count(
-                qpos_list=self.qpos_list,
+                qpos_list=torch.as_tensor(np.array(self.qpos_list)),
                 step_size=0.01,
                 angle_step=np.pi / 90,
             )

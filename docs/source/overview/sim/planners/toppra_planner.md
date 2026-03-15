@@ -16,7 +16,7 @@
 ```python
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner, ToppraPlannerCfg
 cfg = ToppraPlannerCfg(
-    dofs=6,
+    robot_uid="UR5",
     constraints={
         "velocity": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         "acceleration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]

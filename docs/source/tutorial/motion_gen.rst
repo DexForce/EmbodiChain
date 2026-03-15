@@ -35,23 +35,34 @@ Typical Usage
 
 .. code-block:: python
 
-   from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+   from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 
-   # Assume you have a robot instance and uid
-   motion_gen = MotionGenerator(
-       robot=robot,
-       uid="arm",
-       default_velocity=0.2,
-       default_acceleration=0.5
+   # Assume you have a robot instance and arm_name
+   motion_cfg = MotionGenCfg(
+       planner_cfg=ToppraPlannerCfg(
+           robot_uid=robot.uid,
+           control_part=arm_name,
+           constraints={
+               "velocity": 0.2,
+               "acceleration": 0.5,
+           },
+       )
    )
+   motion_gen = MotionGenerator(cfg=motion_cfg)
 
    # Plan a joint-space trajectory
-   current_state = {"position": [0, 0, 0, 0, 0, 0]}
-   target_states = [{"position": [0.5, 0.2, 0, 0, 0, 0]}]
-   success, positions, velocities, accelerations, times, duration = motion_gen.plan(
+   current_state = PlanState(position=np.array([0., 0., 0., 0., 0., 0.]))
+   target_states = [PlanState(position=np.array([0.5, 0.2, 0., 0., 0., 0.]))]
+   plan_result = motion_gen.plan(
        current_state=current_state,
        target_states=target_states
    )
+   success = plan_result.success
+   positions = plan_result.positions
+   velocities = plan_result.velocities
+   accelerations = plan_result.accelerations
+   times = plan_result.t_series
+   duration = plan_result.duration
 
    # Generate a discrete trajectory (joint or Cartesian)
    qpos_list, xpos_list = motion_gen.create_discrete_trajectory(
@@ -66,35 +77,36 @@ API Reference
 
 .. code-block:: python
 
-   MotionGenerator(
-       robot: Robot,
-       uid: str,
-       sim=None,
-       planner_type="toppra",
-       default_velocity=0.2,
-       default_acceleration=0.5,
-       collision_margin=0.01,
-       **kwargs
+   motion_cfg = MotionGenCfg(
+       planner_cfg=ToppraPlannerCfg(
+           robot_uid=robot.uid,
+           control_part=arm_name,
+           constraints={
+               "velocity": 0.2,
+               "acceleration": 0.5,
+           },
+       )
    )
+   MotionGenerator(cfg=motion_cfg)
 
-- ``robot``: Robot instance, must support get_joint_ids, compute_fk, compute_ik
-- ``uid``: Unique robot identifier (e.g., "arm")
-- ``planner_type``: Planner type (default: "toppra")
-- ``default_velocity``, ``default_acceleration``: Default joint constraints
+- ``cfg``: MotionGenCfg instance, containing the specific planner's configuration (like ``ToppraPlannerCfg``)
+- ``robot_uid``: Robot unique identifier
+- ``control_part``: The specific part or arm you're controlling
+- ``constraints``: Dictionary constraints of matching dimensions for each joint
 
 **plan**
 
 .. code-block:: python
 
    plan(
-       current_state: Dict,
-       target_states: List[Dict],
+       current_state: PlanState,
+       target_states: List[PlanState],
        sample_method=TrajectorySampleMethod.TIME,
        sample_interval=0.01,
        **kwargs
-   ) -> Tuple[bool, positions, velocities, accelerations, times, duration]
+   ) -> PlanResult
 
-- Plans a time-optimal trajectory (joint space), returns trajectory arrays and duration.
+- Plans a time-optimal trajectory (joint space), returning a ``PlanResult`` data class.
 
 **create_discrete_trajectory**
 
@@ -122,8 +134,7 @@ API Reference
        qpos_list=None,
        step_size=0.01,
        angle_step=np.pi/90,
-       **kwargs
-   ) -> int
+   ) -> torch.Tensor
 
 - Estimates the number of samples needed for a trajectory.
 
