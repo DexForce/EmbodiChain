@@ -112,13 +112,54 @@ class MockArticulation:
         self._pose = torch.zeros(num_envs, 7)
         self._pose[:, 3] = 1.0  # quaternion w = 1 (identity rotation)
 
+    def _matrix_to_quat_pos(self, pose_matrix):
+        """Convert 4x4 matrix to (position, quaternion) format.
+
+        Args:
+            pose_matrix: (N, 4, 4) transformation matrix
+
+        Returns:
+            (N, 7) tensor with position (3) + quaternion (4)
+        """
+        # Extract position
+        pos = pose_matrix[:, :3, 3]  # (N, 3)
+
+        # Extract rotation matrix and convert to quaternion
+        rot = pose_matrix[:, :3, :3]  # (N, 3, 3)
+
+        # Simple quaternion from rotation matrix
+        # This is a simplified conversion - not full Davenport q
+        quat = torch.zeros(pose_matrix.shape[0], 4)
+        quat[:, 3] = 1.0  # default to identity
+
+        # Check if rotation is close to identity
+        for i in range(pose_matrix.shape[0]):
+            r = rot[i]
+            # Trace of rotation matrix
+            trace = r[0, 0] + r[1, 1] + r[2, 2]
+            if trace > 0:
+                quat[i, 3] = (trace + 1.0) ** 0.5 / 2.0
+                quat[i, 0] = (r[2, 1] - r[1, 2]) / (4 * quat[i, 3])
+                quat[i, 1] = (r[0, 2] - r[2, 0]) / (4 * quat[i, 3])
+                quat[i, 2] = (r[1, 0] - r[0, 1]) / (4 * quat[i, 3])
+
+        # Normalize quaternion
+        quat = quat / quat.norm(dim=1, keepdim=True)
+
+        return torch.cat([pos, quat], dim=1)
+
     def get_local_pose(self, to_matrix: bool = False):
         """Returns pose in (N, 7) format: position (3) + quaternion (4)."""
         return self._pose
 
     def set_local_pose(self, pose, env_ids=None):
+        """Set pose from 4x4 matrix or (N, 7) format."""
+        if pose.dim() == 3:
+            # 4x4 matrix format - convert to (N, 7)
+            pose = self._matrix_to_quat_pos(pose)
+
         if env_ids is not None:
-            self._pose[env_ids] = pose[env_ids] if pose.dim() > 2 else pose
+            self._pose[env_ids] = pose[env_ids] if pose.dim() > 1 else pose
         else:
             self._pose = pose
 
@@ -219,7 +260,7 @@ from embodichain.lab.gym.envs.managers.events import (
 from embodichain.lab.gym.envs.managers.randomization.physics import (
     randomize_rigid_object_mass,
 )
-from embodychain.lab.gym.envs.managers.randomization.spatial import (
+from embodichain.lab.gym.envs.managers.randomization.spatial import (
     randomize_articulation_root_pose,
 )
 
