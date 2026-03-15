@@ -317,7 +317,7 @@ def randomize_articulation_root_pose(
     articulation: Articulation = env.sim.get_articulation(entity_cfg.uid)
 
     # Get current root pose
-    current_root_pose = articulation.get_local_pose()[env_ids]  
+    current_root_pose = articulation.get_local_pose()[env_ids]
 
     # Extract position and rotation from current pose
     init_pos = current_root_pose[:, :3]
