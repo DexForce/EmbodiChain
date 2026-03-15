@@ -57,6 +57,8 @@ This page lists all available event functors that can be used with the Event Man
   - Vary end-effector initial poses by solving inverse kinematics. The randomization is performed relative to the current end-effector pose.
 * - ``randomize_robot_qpos``
   - Randomize robot joint configurations. Supports both relative and absolute joint position randomization, and can target specific joints.
+* - ``randomize_articulation_root_pose``
+  - Randomize the root pose (position and rotation) of an articulation. Supports both relative and absolute pose randomization. Similar to randomize_rigid_object_pose but for multi-link rigid body systems.
 * - ``randomize_target_pose``
   - Randomize a virtual target pose and store it in env state. Generates random target poses without requiring a physical object in the scene.
 * - ``planner_grid_cell_sampler``
