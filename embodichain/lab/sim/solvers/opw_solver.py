@@ -34,7 +34,6 @@ from embodichain.utils.warp.kinematics.opw_solver import (
 )
 from embodichain.utils.device_utils import standardize_device_string
 
-
 if TYPE_CHECKING:
     from typing import Self
 

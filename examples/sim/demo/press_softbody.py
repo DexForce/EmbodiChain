@@ -34,6 +34,7 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     RobotCfg,
     LightCfg,
     SoftObjectCfg,
@@ -41,6 +42,7 @@ from embodichain.lab.sim.cfg import (
     SoftbodyPhysicalAttributesCfg,
     URDFCfg,
 )
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import MeshCfg
 
 
@@ -54,9 +56,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -73,7 +73,7 @@ def initialize_simulation(args):
     config = SimulationManagerCfg(
         headless=True,
         sim_device="cuda",
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
     )
     sim = SimulationManager(config)

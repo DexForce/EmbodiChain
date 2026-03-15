@@ -24,7 +24,6 @@ from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.utils.math import sample_uniform
 from embodichain.utils import logger
 
-
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 

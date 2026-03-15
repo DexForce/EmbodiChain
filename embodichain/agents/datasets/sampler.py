@@ -20,7 +20,6 @@ import random
 from abc import ABC, abstractmethod
 from typing import Callable, Iterator, List, Optional, Union
 
-
 __all__ = [
     "ChunkSizeSampler",
     "UniformChunkSampler",

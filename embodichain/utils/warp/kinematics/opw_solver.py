@@ -18,7 +18,6 @@ import warp as wp
 import numpy as np
 from typing import Tuple
 
-
 wp_vec48f = wp.types.vector(length=48, dtype=float)
 wp_vec6f = wp.types.vector(length=6, dtype=float)
 

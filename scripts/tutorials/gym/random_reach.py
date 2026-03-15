@@ -112,19 +112,12 @@ if __name__ == "__main__":
     import argparse
     import time
 
+    from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+
     parser = argparse.ArgumentParser(
         description="Demo for running a random reach environment."
     )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="number of environments to run"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
-    parser.add_argument("--headless", action="store_true", help="run in headless mode")
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     env = gym.make(

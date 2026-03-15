@@ -28,7 +28,6 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim.solvers import SolverCfg
 from embodichain.lab.sim.cfg import RobotCfg, URDFCfg
 
-
 all = [
     "ChassisManager",
     "TorsoManager",

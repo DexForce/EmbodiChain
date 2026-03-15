@@ -23,19 +23,21 @@ from tensordict import TensorDict
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, SensorCfg, CameraCfg
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
 from embodichain.data import get_data_path
-
 
 NUM_ENVS = 4
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device, renderer="legacy"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
+            headless=True,
+            sim_device=sim_device,
+            render_cfg=RenderCfg(renderer=renderer),
+            num_envs=NUM_ENVS,
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
@@ -142,25 +144,35 @@ class CameraTest:
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+        self.setup_simulation(
+            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+        )
 
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+        self.setup_simulation(
+            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+        )
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+        self.setup_simulation(
+            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+        )
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+        self.setup_simulation(
+            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+        )
 
 
 if __name__ == "__main__":
     test = CameraTest()
-    test.setup_simulation("cpu", enable_rt=False)
+    test.setup_simulation(
+        "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+    )
     test.test_attach_to_parent()

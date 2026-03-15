@@ -29,6 +29,7 @@ from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -44,9 +45,10 @@ from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
-def initialize_simulation():
+def initialize_simulation(args):
     """
     Initialize the simulation environment based on the provided arguments.
 
@@ -58,8 +60,7 @@ def initialize_simulation():
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cpu",
-        enable_rt=True,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
     )
     sim = SimulationManager(config)
@@ -529,13 +530,17 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Scoop ice task simulation")
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args()
+
     """
     Main function to demonstrate robot simulation.
 
     This function initializes the simulation, creates the robot and other objects,
     and performs the scoop ice task.
     """
-    sim = initialize_simulation()
+    sim = initialize_simulation(args)
 
     # Create simulation objects
     robot = create_robot(sim)

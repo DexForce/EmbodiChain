@@ -89,7 +89,7 @@ You can customize the simulation with the following command-line options:
    python scripts/tutorials/sim/create_sensor.py --headless
 
    # Enable ray tracing rendering
-   python scripts/tutorials/sim/create_sensor.py --enable_rt
+   python scripts/tutorials/sim/create_sensor.py --renderer
 
    # Attach the camera to the robot end-effector
    python scripts/tutorials/sim/create_sensor.py --attach_sensor

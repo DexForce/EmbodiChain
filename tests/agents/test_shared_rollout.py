@@ -21,6 +21,7 @@ from copy import deepcopy
 import torch
 from tensordict import TensorDict
 
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.agents.rl.collector import SyncCollector
 from embodichain.agents.rl.utils import flatten_dict_observation
@@ -188,7 +189,7 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=True,
         sim_device=torch.device("cpu"),
-        enable_rt=False,
+        render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy"),
         gpu_id=0,
     )
 
