@@ -23,7 +23,7 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import CobotMagicCfg
 
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 
 
 def to_numpy(tensor):
@@ -85,13 +85,17 @@ class BaseTestMotionGenerator(object):
 
         cls.arm_name = "left_arm"
 
-        cls.motion_gen = MotionGenerator(
-            robot=cls.robot,
-            uid=cls.arm_name,
-            planner_type="toppra",
-            default_velocity=0.2,
-            default_acceleration=0.5,
+        cls.motion_cfg = MotionGenCfg(
+            planner_cfg=ToppraPlannerCfg(
+                robot_uid=cls.robot.uid,
+                control_part=cls.arm_name,
+                constraints={
+                    "velocity": 0.2,
+                    "acceleration": 0.5,
+                },
+            )
         )
+        cls.motion_gen = MotionGenerator(cfg=cls.motion_cfg)
 
         # Test data for trajectory generation
         qpos_fk = torch.tensor(

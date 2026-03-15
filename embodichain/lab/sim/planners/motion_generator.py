@@ -16,15 +16,30 @@
 
 import torch
 import numpy as np
+
+from dataclasses import MISSING
 from typing import Dict, List, Tuple, Union, Any
-from enum import Enum
 from scipy.spatial.transform import Rotation, Slerp
 
-from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
+from embodichain.lab.sim.planners import (
+    BasePlannerCfg,
+    BasePlanner,
+    ToppraPlanner,
+    ToppraPlannerCfg,
+)
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.objects.robot import Robot
-from embodichain.utils import logger
+from embodichain.utils import logger, configclass
 from .utils import MovePart, MoveType, PlanState, PlanResult
+
+
+__all__ = ["MotionGenerator", "MotionGenCfg"]
+
+
+@configclass
+class MotionGenCfg:
+
+    planner_cfg: BasePlannerCfg = MISSING
 
 
 class MotionGenerator:
@@ -46,104 +61,44 @@ class MotionGenerator:
     """
 
     _support_planner_dict = {
-        "toppra": ToppraPlanner,
+        "toppra": (ToppraPlanner, ToppraPlannerCfg),
     }
 
     @classmethod
-    def register_planner_type(cls, name: str, planner_class):
+    def register_planner_type(cls, name: str, planner_class, planner_cfg_class):
         """
         Register a new planner type.
         """
-        cls._support_planner_dict[name] = planner_class
+        cls._support_planner_dict[name] = (planner_class, planner_cfg_class)
 
-    def __init__(
-        self,
-        robot: Robot,
-        uid: str,
-        planner_type: str = "toppra",
-        default_velocity: float = 0.2,
-        default_acceleration: float = 0.5,
-        collision_margin: float = 0.01,
-        **kwargs,
-    ):
-        self.robot = robot
-        self.collision_margin = collision_margin
-        self.uid = uid  # control part
-
-        # Get robot DOF using get_joint_ids for specified control part (None for whole body)
-        self.dof = len(robot.get_joint_ids(uid))
+    def __init__(self, cfg: MotionGenCfg):
 
         # Create planner based on planner_type
-        self.planner = self._create_planner(
-            planner_type, default_velocity, default_acceleration, **kwargs
-        )
+        self.planner: BasePlanner = self._create_planner(cfg.planner_cfg)
+
+        self.robot = self.planner.robot
+        self.uid = self.planner.cfg.control_part
+        self.dof = self.planner.dofs
 
     def _create_planner(
         self,
-        planner_type: str,
-        default_velocity: float,
-        default_acceleration: float,
-        **kwargs,
-    ) -> Any:
+        planner_cfg: BasePlannerCfg,
+    ) -> BasePlanner:
         r"""Create planner instance based on planner type.
 
         Args:
-            planner_type: Type of planner to create
-            default_velocity: Default velocity limit
-            default_acceleration: Default acceleration limit
-            **kwargs: Additional arguments for planner initialization
+            planner_cfg: Configuration object for the planner, must include 'planner_type' attribute
 
         Returns:
             Planner instance
         """
-        # Get constraints from robot or use defaults
-        planner_class = self._support_planner_dict.get(planner_type, None)
-        if planner_class is None:
-            logger.log_error(
-                f"Unsupported planner type '{planner_type}'. "
-                f"Supported types: {[e for e in self._support_planner_dict.keys()]}",
-                ValueError,
-            )
-        cfg = kwargs.copy()
-        cfg["dofs"] = self.dof
-        cfg["max_constraints"] = self._get_constraints(
-            default_velocity, default_acceleration, **kwargs
-        )
-        cfg["robot"] = self.robot
-        return planner_class(**cfg)
+        from embodichain.utils.utility import get_class_instance
 
-    def _get_constraints(
-        self, default_velocity: float, default_acceleration: float, **kwargs
-    ) -> Dict[str, List[float]]:
-        r"""Get velocity and acceleration constraints for the robot.
+        cls = get_class_instance(
+            "embodichain.lab.sim.planners", f"{planner_cfg.planner_type}Planner"
+        )(cfg=planner_cfg)
 
-        Priority:
-        1. kwargs['max_constraints'] if provided
-        2. Robot's built-in constraints (if available)
-        3. Default values
-
-        Args:
-            default_velocity: Default velocity limit
-            default_acceleration: Default acceleration limit
-            **kwargs: Additional arguments
-
-        Returns:
-            Dictionary with 'velocity' and 'acceleration' constraints
-        """
-        # Check if constraints are provided in kwargs
-        if "max_constraints" in kwargs and kwargs["max_constraints"] is not None:
-            constraints = kwargs["max_constraints"]
-            if isinstance(constraints, dict) and "velocity" in constraints:
-                return constraints
-
-        # Try to get constraints from robot (if available)
-        # TODO: Add robot.get_joint_limits() or similar if available in future
-
-        # Use default constraints
-        return {
-            "velocity": [default_velocity] * self.dof,
-            "acceleration": [default_acceleration] * self.dof,
-        }
+        return cls
 
     def _create_state_dict(
         self, position: np.ndarray, velocity: np.ndarray | None = None
@@ -207,24 +162,6 @@ class MotionGenerator:
         )
 
         return result
-
-    def plan_with_collision(
-        self,
-        current_state: Dict,
-        target_states: List[Dict],
-        sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME,
-        sample_interval: Union[float, int] = 0.01,
-        collision_check_interval: float = 0.01,
-        **kwargs,
-    ) -> None:
-        r"""Plan trajectory with collision checking.
-
-        TODO: This method is not yet implemented. It should:
-        1. Generate a trajectory using the selected planner
-        2. Check for collisions along the trajectory
-        3. Return failure if collisions are detected
-        """
-        pass
 
     def create_discrete_trajectory(
         self,

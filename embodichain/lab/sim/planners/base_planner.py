@@ -14,31 +14,57 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import numpy as np
-from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Union
 import torch
+import numpy as np
+
+from abc import ABC, abstractmethod
+from dataclasses import MISSING
 import matplotlib.pyplot as plt
 
 from embodichain.utils import logger
+from embodichain.utils import configclass
+from embodichain.lab.sim.sim_manager import SimulationManager
 from .utils import PlanState, PlanResult
+
+
+__all__ = ["BasePlannerCfg", "BasePlanner"]
+
+
+@configclass
+class BasePlannerCfg:
+
+    robot_uid: str = MISSING
+    """UID of the robot to control. Must correspond to a robot added to the simulation with this UID."""
+
+    control_part: str | None = None
+    """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
+
+    planner_type: str = "Base"
 
 
 class BasePlanner(ABC):
     r"""Base class for trajectory planners.
 
     This class provides common functionality that can be shared across different
-    planner implementations, such as constraint checking and trajectory visualization.
+    planner implementations.
 
     Args:
-        dofs: Number of degrees of freedom
-        max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
+        cfg: Configuration object for the planner.
     """
 
-    def __init__(self, **kwargs):
-        self.dofs = kwargs.get("dofs", None)
-        self.max_constraints = kwargs.get("max_constraints", None)
-        self.device = kwargs.get("device", torch.device("cpu"))
+    def __init__(self, cfg: BasePlannerCfg):
+        self.cfg = cfg
+
+        if cfg.robot_uid is MISSING:
+            logger.log_error("robot_uid is required in planner config", ValueError)
+
+        self.robot = SimulationManager.get_instance().get_robot(cfg.robot_uid)
+        if self.robot is None:
+            logger.log_error(f"Robot with uid {cfg.robot_uid} not found", ValueError)
+
+        joint_ids = self.robot.get_joint_ids(cfg.control_part, remove_mimic=True)
+        self.dofs = len(joint_ids)
+        self.device = self.robot.device
 
     @abstractmethod
     def plan(
@@ -72,7 +98,7 @@ class BasePlanner(ABC):
         r"""Check if the trajectory satisfies velocity and acceleration constraints.
 
         This method checks whether the given velocities and accelerations satisfy
-        the constraints defined in max_constraints. It allows for some tolerance
+        the constraints defined in constraints. It allows for some tolerance
         to account for numerical errors in dense waypoint scenarios.
 
         Args:
@@ -91,12 +117,16 @@ class BasePlanner(ABC):
         """
         device = vels.device
 
-        # Convert max_constraints to tensors for vectorized constraint checking
+        # Convert constraints to tensors for vectorized constraint checking
+        if not hasattr(self.cfg, "constraints") or self.cfg.constraints is None:
+            logger.log_error("constraints not found in planner config")
+            return True
+
         max_vel = torch.tensor(
-            self.max_constraints["velocity"], dtype=vels.dtype, device=device
+            self.cfg.constraints["velocity"], dtype=vels.dtype, device=device
         )
         max_acc = torch.tensor(
-            self.max_constraints["acceleration"], dtype=accs.dtype, device=device
+            self.cfg.constraints["acceleration"], dtype=accs.dtype, device=device
         )
 
         # To support batching, we compute along all dimensions except the last one (DOF)
@@ -207,10 +237,13 @@ class BasePlanner(ABC):
                     )
 
         # Plot constraints (only for first joint to avoid clutter)
-        if self.dofs > 0:
+        has_constraints = (
+            hasattr(self.cfg, "constraints") and self.cfg.constraints is not None
+        )
+        if self.dofs > 0 and has_constraints:
             plot_idx = 1
             if vels is not None:
-                max_vel = self.max_constraints["velocity"][0]
+                max_vel = self.cfg.constraints["velocity"][0]
                 axs[plot_idx].plot(
                     time_steps,
                     [-max_vel] * len(time_steps),
@@ -221,7 +254,7 @@ class BasePlanner(ABC):
                 plot_idx += 1
 
             if accs is not None:
-                max_acc = self.max_constraints["acceleration"][0]
+                max_acc = self.cfg.constraints["acceleration"][0]
                 axs[plot_idx].plot(
                     time_steps,
                     [-max_acc] * len(time_steps),

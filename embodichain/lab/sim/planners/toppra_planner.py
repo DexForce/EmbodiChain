@@ -17,10 +17,10 @@
 import torch
 import numpy as np
 
-from embodichain.utils import logger
+from embodichain.utils import logger, configclass
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.base_planner import BasePlanner
-from .utils import MovePart, MoveType, PlanState, PlanResult
+from embodichain.lab.sim.planners.base_planner import BasePlanner, BasePlannerCfg
+from .utils import PlanState, PlanResult
 
 try:
     import toppra as ta
@@ -33,21 +33,53 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
+__all__ = ["ToppraPlannerCfg", "ToppraPlanner"]
+
+
+@configclass
+class ToppraPlannerCfg(BasePlannerCfg):
+
+    constraints: dict = {
+        "velocity": 0.2,
+        "acceleration": 0.5,
+    }
+    """Constraints for the planner, including velocity and acceleration limits. Should be a 
+    dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    """
+
+    planner_type: str = "Toppra"
+
+
 class ToppraPlanner(BasePlanner):
-    def __init__(self, **kwargs):
+    def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 
         Args:
-            dofs: Number of degrees of freedom
-            max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
+            cfg: Configuration object containing ToppraPlanner settings
         """
-        super().__init__(**kwargs)
+        super().__init__(cfg)
 
         # Create TOPPRA-specific constraint arrays (symmetric format)
         # This format is required by TOPPRA library
-        max_constraints = kwargs.get("max_constraints", None)
-        self.vlims = np.array([[-v, v] for v in max_constraints["velocity"]])
-        self.alims = np.array([[-a, a] for a in max_constraints["acceleration"]])
+        if isinstance(cfg.constraints["velocity"], float):
+            self.vlims = np.array(
+                [
+                    [-cfg.constraints["velocity"], cfg.constraints["velocity"]]
+                    for _ in range(self.dofs)
+                ]
+            )
+        else:
+            self.vlims = np.array(cfg.constraints["velocity"])
+
+        if isinstance(cfg.constraints["acceleration"], float):
+            self.alims = np.array(
+                [
+                    [-cfg.constraints["acceleration"], cfg.constraints["acceleration"]]
+                    for _ in range(self.dofs)
+                ]
+            )
+        else:
+            self.alims = np.array(cfg.constraints["acceleration"])
 
     def plan(
         self,
@@ -108,9 +140,7 @@ class ToppraPlanner(BasePlanner):
                     dtype=torch.float32,
                     device=self.device,
                 ),
-                times=torch.as_tensor(
-                    [0.0, 0.0], dtype=torch.float32, device=self.device
-                ),
+                dt=torch.as_tensor([0.0, 0.0], dtype=torch.float32, device=self.device),
                 duration=0.0,
             )
 
@@ -150,10 +180,8 @@ class ToppraPlanner(BasePlanner):
         jnt_traj = instance.compute_trajectory()
         if jnt_traj is None:
             # raise RuntimeError("Unable to find feasible trajectory")
-            logger.log_info("Unable to find feasible trajectory")
-            return PlanResult(
-                success=False, error_msg="Unable to find feasible trajectory"
-            )
+            logger.log_warning("Unable to find feasible trajectory")
+            return PlanResult(success=False)
 
         duration = jnt_traj.duration
         # Sample trajectory points
@@ -185,6 +213,6 @@ class ToppraPlanner(BasePlanner):
             accelerations=torch.as_tensor(
                 np.array(accelerations), dtype=torch.float32, device=self.device
             ),
-            times=torch.as_tensor(ts, dtype=torch.float32, device=self.device),
+            dt=torch.as_tensor(ts, dtype=torch.float32, device=self.device),
             duration=duration,
         )

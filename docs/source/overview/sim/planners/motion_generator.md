@@ -81,15 +81,13 @@ motion_gen = MotionGenerator(
 #### Joint Space Planning
 
 ```python
-current_state = {
-    "position": [0, 0, 0, 0, 0, 0],
-    "velocity": [0, 0, 0, 0, 0, 0],
-    "acceleration": [0, 0, 0, 0, 0, 0]
-}
+from embodichain.lab.sim.planners.utils import PlanState
+
+current_state = PlanState(qpos=[0, 0, 0, 0, 0, 0])
 target_states = [
-    {"position": [1, 1, 1, 1, 1, 1]}
+    PlanState(qpos=[1, 1, 1, 1, 1, 1])
 ]
-success, positions, velocities, accelerations, times, duration = motion_gen.plan(
+result = motion_gen.plan(
     current_state=current_state,
     target_states=target_states,
     sample_method=TrajectorySampleMethod.TIME,

@@ -88,7 +88,7 @@ class MoveType(Enum):
 class PlanResult:
     r"""Data class representing the result of a motion plan."""
 
-    success: bool
+    success: bool | torch.Tensor = False
     """Whether planning succeeded."""
 
     positions: torch.Tensor | None = None
@@ -100,14 +100,11 @@ class PlanResult:
     accelerations: torch.Tensor | None = None
     """Joint accelerations along trajectory with shape `(N, DOF)`."""
 
-    times: torch.Tensor | None = None
-    """Time stamps for each point with shape `(N,)`."""
+    dt: torch.Tensor | None = None
+    """Time duration between each point with shape `(N,)`."""
 
-    duration: float = 0.0
+    duration: float | torch.Tensor = 0.0
     """Total trajectory duration in seconds."""
-
-    error_msg: str | None = None
-    """Optional error message if planning failed."""
 
 
 @dataclass
@@ -120,16 +117,16 @@ class PlanState:
     move_part: MovePart = MovePart.LEFT
     """Robot part that should move."""
 
-    xpos: torch.Tensor = None
+    xpos: torch.Tensor | None = None
     """Target TCP pose (4x4 matrix) for `MoveType.TCP_MOVE`."""
 
-    qpos: torch.Tensor = None
+    qpos: torch.Tensor | None = None
     """Target joint angles for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
 
-    qvel: torch.Tensor = None
+    qvel: torch.Tensor | None = None
     """Target joint velocities for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
 
-    qacc: torch.Tensor = None
+    qacc: torch.Tensor | None = None
     """Target joint accelerations for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
 
     is_open: bool = True
