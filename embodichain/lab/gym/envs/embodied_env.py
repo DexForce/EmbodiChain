@@ -707,6 +707,12 @@ class EmbodiedEnv(BaseEnv):
             return self.action_manager.process_action(action)
         return super()._preprocess_action(action)
 
+    def _postprocess_action(self, action):
+        if self.action_manager is not None:
+            pass
+            # return self.action_manager.postprocess_action(action)
+        return super()._postprocess_action(action)
+
     def _setup_robot(self, **kwargs) -> Robot:
         """Setup the robot in the environment.
 
