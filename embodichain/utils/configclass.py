@@ -20,7 +20,6 @@ from dataclasses import MISSING, Field, dataclass, field, replace
 from typing import Any, ClassVar
 from .string import callable_to_string, string_to_callable
 
-
 _CONFIGCLASS_METHODS = ["to_dict", "replace", "copy", "validate"]
 """List of class methods added at runtime to dataclass."""
 

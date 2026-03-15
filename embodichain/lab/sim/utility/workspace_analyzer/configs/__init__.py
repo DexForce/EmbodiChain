@@ -36,7 +36,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs.metric_config import
     DensityConfig,
 )
 
-
 __all__ = [
     "CacheConfig",
     "DimensionConstraint",

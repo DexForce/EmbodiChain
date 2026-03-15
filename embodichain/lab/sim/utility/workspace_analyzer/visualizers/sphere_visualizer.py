@@ -33,7 +33,6 @@ if OPEN3D_AVAILABLE:
 
 from embodichain.utils import logger
 
-
 __all__ = ["SphereVisualizer"]
 
 

@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -27,6 +25,7 @@ from multiprocessing.synchronize import Event as MpEvent
 from tensordict import TensorDict
 from tqdm import tqdm
 
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 

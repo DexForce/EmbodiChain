@@ -22,7 +22,6 @@ from typing import Iterable, List, Sequence, Tuple, Union
 import torch
 import torch.nn as nn
 
-
 ActivationName = Union[str, None]
 
 
