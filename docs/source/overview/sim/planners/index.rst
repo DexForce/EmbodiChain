@@ -31,6 +31,6 @@ See also
 .. toctree::
     :maxdepth: 1
 
-    motion_generator.md
     toppra_planner.md
     trajectory_sample_method.md
+    motion_generator.md

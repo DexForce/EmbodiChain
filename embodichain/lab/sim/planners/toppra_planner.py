@@ -14,12 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import torch
 import numpy as np
-from embodichain.utils import logger
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.base_planner import BasePlanner
 
-from typing import TYPE_CHECKING, Union, Tuple
+from embodichain.utils import logger, configclass
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.planners.base_planner import BasePlanner, BasePlannerCfg
+from .utils import PlanState, PlanResult
 
 try:
     import toppra as ta
@@ -32,27 +33,60 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
+__all__ = ["ToppraPlannerCfg", "ToppraPlanner"]
+
+
+@configclass
+class ToppraPlannerCfg(BasePlannerCfg):
+
+    constraints: dict = {
+        "velocity": 0.2,
+        "acceleration": 0.5,
+    }
+    """Constraints for the planner, including velocity and acceleration limits. Should be a 
+    dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    """
+
+    planner_type: str = "Toppra"
+
+
 class ToppraPlanner(BasePlanner):
-    def __init__(self, dofs, max_constraints):
+    def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 
         Args:
-            dofs: Number of degrees of freedom
-            max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
+            cfg: Configuration object containing ToppraPlanner settings
         """
-        super().__init__(dofs, max_constraints)
+        super().__init__(cfg)
 
         # Create TOPPRA-specific constraint arrays (symmetric format)
         # This format is required by TOPPRA library
-        self.vlims = np.array([[-v, v] for v in max_constraints["velocity"]])
-        self.alims = np.array([[-a, a] for a in max_constraints["acceleration"]])
+        if isinstance(cfg.constraints["velocity"], float):
+            self.vlims = np.array(
+                [
+                    [-cfg.constraints["velocity"], cfg.constraints["velocity"]]
+                    for _ in range(self.dofs)
+                ]
+            )
+        else:
+            self.vlims = np.array(cfg.constraints["velocity"])
+
+        if isinstance(cfg.constraints["acceleration"], float):
+            self.alims = np.array(
+                [
+                    [-cfg.constraints["acceleration"], cfg.constraints["acceleration"]]
+                    for _ in range(self.dofs)
+                ]
+            )
+        else:
+            self.alims = np.array(cfg.constraints["acceleration"])
 
     def plan(
         self,
-        current_state: dict,
-        target_states: list[dict],
+        current_state: PlanState,
+        target_states: list[PlanState],
         **kwargs,
-    ):
+    ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
@@ -60,7 +94,7 @@ class ToppraPlanner(BasePlanner):
             target_states: List of dictionaries containing target states
 
         Returns:
-            Tuple of (success, positions, velocities, accelerations, times, duration)
+            PlanResult containing the planned trajectory details.
         """
         sample_method = kwargs.get("sample_method", TrajectorySampleMethod.TIME)
         sample_interval = kwargs.get("sample_interval", 0.01)
@@ -75,40 +109,46 @@ class ToppraPlanner(BasePlanner):
             logger.log_error("At least 2 sample points required", ValueError)
 
         # Check waypoints
-        if len(current_state["position"]) != self.dofs:
-            logger.log_info("Current wayponit does not align")
-            return False, None, None, None, None, None
+        if len(current_state.qpos) != self.dofs:
+            logger.log_error("Current waypoint does not align")
         for target in target_states:
-            if len(target["position"]) != self.dofs:
-                logger.log_info("Target Wayponits does not align")
-                return False, None, None, None, None, None
+            if len(target.qpos) != self.dofs:
+                logger.log_error("Target waypoints do not align")
 
         if (
             len(target_states) == 1
             and np.sum(
-                np.abs(
-                    np.array(target_states[0]["position"])
-                    - np.array(current_state["position"])
-                )
+                np.abs(np.array(target_states[0].qpos) - np.array(current_state.qpos))
             )
             < 1e-3
         ):
-            logger.log_info("Only two same waypoints, do not plan")
-            return (
-                True,
-                np.array([current_state["position"], target_states[0]["position"]]),
-                np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
-                np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
-                0,
-                0,
+            logger.log_warning("Only two same waypoints, returning trivial trajectory.")
+            return PlanResult(
+                success=True,
+                positions=torch.as_tensor(
+                    np.array([current_state.qpos, target_states[0].qpos]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                velocities=torch.as_tensor(
+                    np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                accelerations=torch.as_tensor(
+                    np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                dt=torch.as_tensor([0.0, 0.0], dtype=torch.float32, device=self.device),
+                duration=0.0,
             )
 
         # Build waypoints
-        waypoints = [np.array(current_state["position"])]
+        waypoints = [np.array(current_state.qpos)]
         for target in target_states:
-            waypoints.append(np.array(target["position"]))
+            waypoints.append(np.array(target.qpos))
         waypoints = np.array(waypoints)
-
         # Create spline interpolation
         # NOTE: Suitable for dense waypoints
         ss = np.linspace(0, 1, len(waypoints))
@@ -134,14 +174,14 @@ class ToppraPlanner(BasePlanner):
             parametrizer="ParametrizeConstAccel",
             gridpt_min_nb_points=max(100, 10 * len(waypoints)),
         )
-        # NOTES:合理设置gridpt_min_nb_points对加速度约束很重要
+        # NOTES: Important to set a large number of grid points for better performance in dense waypoint scenarios.
 
         # Compute parameterized trajectory
         jnt_traj = instance.compute_trajectory()
         if jnt_traj is None:
             # raise RuntimeError("Unable to find feasible trajectory")
-            logger.log_info("Unable to find feasible trajectory")
-            return False, None, None, None, None, None
+            logger.log_warning("Unable to find feasible trajectory")
+            return PlanResult(success=False)
 
         duration = jnt_traj.duration
         # Sample trajectory points
@@ -162,11 +202,17 @@ class ToppraPlanner(BasePlanner):
             velocities.append(jnt_traj.evald(t))
             accelerations.append(jnt_traj.evaldd(t))
 
-        return (
-            True,
-            np.array(positions),
-            np.array(velocities),
-            np.array(accelerations),
-            ts,
-            duration,
+        return PlanResult(
+            success=True,
+            positions=torch.as_tensor(
+                np.array(positions), dtype=torch.float32, device=self.device
+            ),
+            velocities=torch.as_tensor(
+                np.array(velocities), dtype=torch.float32, device=self.device
+            ),
+            accelerations=torch.as_tensor(
+                np.array(accelerations), dtype=torch.float32, device=self.device
+            ),
+            dt=torch.as_tensor(ts, dtype=torch.float32, device=self.device),
+            duration=duration,
         )

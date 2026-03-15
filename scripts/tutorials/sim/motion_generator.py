@@ -88,14 +88,24 @@ def main():
     # # Generate trajectory points
     qpos_list, xpos_list = create_demo_trajectory(robot, arm_name)
 
-    # Initialize motion generator
-    motion_generator = MotionGenerator(
-        robot=robot,
-        uid=arm_name,
-        planner_type="toppra",
-        default_velocity=0.2,
-        default_acceleration=0.5,
+    from embodichain.lab.sim.planners import (
+        MotionGenerator,
+        MotionGenCfg,
+        ToppraPlannerCfg,
     )
+
+    # Initialize motion generator
+    motion_cfg = MotionGenCfg(
+        planner_cfg=ToppraPlannerCfg(
+            robot_uid=robot.uid,
+            control_part=arm_name,
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
+        )
+    )
+    motion_generator = MotionGenerator(cfg=motion_cfg)
 
     # Joint space trajectory
     out_qpos_list, _ = motion_generator.create_discrete_trajectory(

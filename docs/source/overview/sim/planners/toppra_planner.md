@@ -14,38 +14,35 @@
 ### Initialization
 
 ```python
-from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
-planner = ToppraPlanner(
-    dofs=6,
-    max_constraints={
+from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner, ToppraPlannerCfg
+cfg = ToppraPlannerCfg(
+    robot_uid="UR5",
+    constraints={
         "velocity": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         "acceleration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
     }
 )
+planner = ToppraPlanner(cfg=cfg)
 ```
 
 ### Planning
 
 ```python
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod, PlanState
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
-success, positions, velocities, accelerations, times, duration = planner.plan(
-    current_state={
-        "position": [0, 0, 0, 0, 0, 0],
-        "velocity": [0, 0, 0, 0, 0, 0],
-        "acceleration": [0, 0, 0, 0, 0, 0]
-    },
+result = planner.plan(
+    current_state=PlanState(qpos=[0, 0, 0, 0, 0, 0]),
     target_states=[
-        {"position": [1, 1, 1, 1, 1, 1]}
+        PlanState(qpos=[1, 1, 1, 1, 1, 1])
     ],
     sample_method=TrajectorySampleMethod.TIME,
     sample_interval=0.01
 )
 ```
 
-- `positions`, `velocities`, `accelerations` are arrays of sampled trajectory points.
-- `times` is the array of time stamps.
-- `duration` is the total trajectory time.
+- `result.positions`, `result.velocities`, `result.accelerations` are arrays of sampled trajectory points.
+- `result.dt` is the array of time stamps.
+- `result.duration` is the total trajectory time.
 
 ## Notes
 
