@@ -24,7 +24,6 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.data import get_data_path
 
-
 # Define control parts
 CONTROL_PARTS = {
     "left_arm": [

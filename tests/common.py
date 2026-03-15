@@ -17,7 +17,6 @@
 from unittest import TestLoader
 from fnmatch import fnmatchcase
 
-
 __all__ = ["UnittestMetaclass", "OrderedTestLoader"]
 
 
