@@ -1,5 +1,11 @@
 # EmbodiChain — Developer Reference
 
+## Package Name
+
+**IMPORTANT**: The Python package name is `embodichain` (all lowercase, one word).
+- Repository folder: `EmbodiChain` (PascalCase)
+- Python package: `embodichain` (lowercase)
+- NEVER use: `embodiedchain`, `embodyichain`, or any other variant
 
 ## Project Structure
 
