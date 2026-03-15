@@ -19,10 +19,10 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING, Union, List
 
-from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.objects import RigidObject, Robot, Articulation
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
-from embodichain.utils.math import sample_uniform, matrix_from_euler
+from embodichain.utils.math import sample_uniform, matrix_from_euler, matrix_from_quat
 from embodichain.utils import logger
 
 
@@ -104,7 +104,7 @@ def get_random_pose(
 
 def randomize_rigid_object_pose(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     position_range: tuple[list[float], list[float]] | None = None,
     rotation_range: tuple[list[float], list[float]] | None = None,
@@ -116,7 +116,7 @@ def randomize_rigid_object_pose(
 
     Args:
         env (EmbodiedEnv): The environment instance.
-        env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
+        env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
         position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
         rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
@@ -163,7 +163,7 @@ def randomize_rigid_object_pose(
 
 def randomize_robot_eef_pose(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     position_range: tuple[list[float], list[float]] | None = None,
     rotation_range: tuple[list[float], list[float]] | None = None,
@@ -176,7 +176,7 @@ def randomize_robot_eef_pose(
 
     Args:
         env (EmbodiedEnv): The environment instance.
-        env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
+        env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
         robot_name (str): The name of the robot.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
         position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
@@ -227,7 +227,7 @@ def randomize_robot_eef_pose(
 
 def randomize_robot_qpos(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     qpos_range: tuple[list[float], list[float]] | None = None,
     relative_qpos: bool = True,
@@ -237,7 +237,7 @@ def randomize_robot_qpos(
 
     Args:
         env (EmbodiedEnv): The environment instance.
-        env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
+        env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
         qpos_range (tuple[list[float], list[float]] | None): The range for the joint position randomization.
         relative_qpos (bool): Whether to randomize the joint positions relative to the current joint positions. Default is True.
@@ -277,9 +277,74 @@ def randomize_robot_qpos(
     env.sim.update(step=1)
 
 
+def randomize_articulation_root_pose(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    entity_cfg: SceneEntityCfg,
+    position_range: tuple[list[float], list[float]] | None = None,
+    rotation_range: tuple[list[float], list[float]] | None = None,
+    relative_position: bool = True,
+    relative_rotation: bool = False,
+    physics_update_step: int = -1,
+) -> None:
+    """Randomize the root pose of an articulation in the environment.
+
+    This function randomizes the position and/or rotation of an articulation's root link.
+    The articulation's root is the base frame that all other links are attached to.
+
+    Args:
+        env (EmbodiedEnv): The environment instance.
+        env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
+        entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
+        position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
+            Format: [[x_min, y_min, z_min], [x_max, y_max, z_max]].
+        rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
+            The rotation is represented as Euler angles (roll, pitch, yaw) in degrees.
+        relative_position (bool): Whether to randomize the position relative to the articulation's
+            initial position. Default is True.
+        relative_rotation (bool): Whether to randomize the rotation relative to the articulation's
+            initial rotation. Default is False.
+        physics_update_step (int): The number of physics update steps to apply after randomization.
+            Default is -1 (no update).
+
+    .. note::
+        This function is similar to :func:`randomize_rigid_object_pose` but operates on
+        articulations (multi-link rigid body systems) rather than single rigid objects.
+    """
+    if entity_cfg.uid not in env.sim.get_articulation_uid_list():
+        return
+
+    articulation: Articulation = env.sim.get_articulation(entity_cfg.uid)
+
+    # Get current root pose
+    current_root_pose = articulation.get_local_pose()[env_ids]
+
+    # Extract position and rotation from current pose
+    init_pos = current_root_pose[:, :3]
+    quat = current_root_pose[:, 3:7]  # (N, 4) quaternion
+    # Convert quaternion to rotation matrix
+    init_rot = matrix_from_quat(quat)
+
+    # Generate random pose using the same logic as rigid_object_pose
+    pose = get_random_pose(
+        init_pos=init_pos,
+        init_rot=init_rot,
+        position_range=position_range,
+        rotation_range=rotation_range,
+        relative_position=relative_position,
+        relative_rotation=relative_rotation,
+    )
+
+    articulation.set_local_pose(pose, env_ids=env_ids)
+    articulation.clear_dynamics(env_ids=env_ids)
+
+    if physics_update_step > 0:
+        env.sim.update(step=physics_update_step)
+
+
 def randomize_target_pose(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: torch.Tensor | None,
     position_range: tuple[list[float], list[float]],
     rotation_range: tuple[list[float], list[float]] | None = None,
     relative_position: bool = False,
@@ -294,7 +359,7 @@ def randomize_target_pose(
 
     Args:
         env (EmbodiedEnv): The environment instance.
-        env_ids (Union[torch.Tensor, None]): The environment IDs to apply the randomization.
+        env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
         position_range (tuple[list[float], list[float]]): The range for the position randomization.
         rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
             The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
@@ -382,7 +447,7 @@ class planner_grid_cell_sampler(Functor):
         self._grid_state: dict[int, torch.Tensor] = {}
         self._grid_cell_sizes: dict[int, tuple[float, float]] = {}
 
-    def reset(self, env_ids: Union[torch.Tensor, None] = None) -> None:
+    def reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Reset the grid sampling state.
 
         Args:
@@ -404,7 +469,7 @@ class planner_grid_cell_sampler(Functor):
     def __call__(
         self,
         env: EmbodiedEnv,
-        env_ids: Union[torch.Tensor, None],
+        env_ids: torch.Tensor | None,
         position_range: tuple[list[float], list[float]],
         reference_height: float,
         object_uid_list: list[str],
