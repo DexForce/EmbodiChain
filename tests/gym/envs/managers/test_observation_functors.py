@@ -1,0 +1,378 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Tests for observation functors."""
+
+from __future__ import annotations
+
+import pytest
+import torch
+
+from unittest.mock import MagicMock, Mock, patch
+
+
+class MockRobot:
+    """Mock robot for observation functor tests."""
+
+    def __init__(self, num_envs: int = 4, num_joints: int = 6):
+        self.num_envs = num_envs
+        self.num_joints = num_joints
+        self.device = torch.device("cpu")
+        self.joint_names = [f"joint_{i}" for i in range(num_joints)]
+        self._qpos = torch.zeros(num_envs, num_joints)
+        self._qvel = torch.zeros(num_envs, num_joints)
+
+        # Mock body_data
+        self.body_data = Mock()
+        self.body_data.qpos = self._qpos
+        self.body_data.qvel = self._qvel
+        self.body_data.qpos_limits = torch.zeros(1, num_joints, 2)
+        self.body_data.qpos_limits[..., 0] = -3.14
+        self.body_data.qpos_limits[..., 1] = 3.14
+
+    def get_qpos(self, *args, **kwargs):
+        return self._qpos
+
+    def get_qvel(self, *args, **kwargs):
+        return self._qvel
+
+    def compute_fk(self, qpos=None, name=None, to_matrix=True):
+        # Return identity poses
+        pose = torch.eye(4).unsqueeze(0).repeat(self.num_envs, 1, 1)
+        if to_matrix:
+            return pose
+        return pose[:, :3, 3]
+
+    def get_joint_ids(self, part_name=None):
+        return list(range(self.num_joints))
+
+    def get_user_ids(self):
+        return torch.tensor([1], device=self.device)
+
+
+class MockRigidObject:
+    """Mock rigid object for observation functor tests."""
+
+    def __init__(self, uid: str = "test_object", num_envs: int = 4):
+        self.uid = uid
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        # Default pose at origin
+        self._pose = torch.eye(4).unsqueeze(0).repeat(num_envs, 1, 1)
+        # Default velocity (6D)
+        self._vel = torch.zeros(num_envs, 6)
+
+        # Mock body_data with vel attribute
+        self.body_data = Mock()
+        self.body_data.vel = self._vel
+
+    def get_local_pose(self, to_matrix=True):
+        if to_matrix:
+            return self._pose
+        # Return as (position, quaternion)
+        pos = self._pose[:, :3, 3]
+        # Simple quaternion from identity rotation
+        quat = torch.zeros(self.num_envs, 4)
+        quat[:, 0] = 1.0  # w=1 (identity)
+        return torch.cat([pos, quat], dim=-1)
+
+    @property
+    def body(self):
+        return self
+
+
+class MockSensor:
+    """Mock sensor for observation functor tests."""
+
+    def __init__(self, uid: str = "camera", num_envs: int = 1):
+        self.uid = uid
+        self.num_envs = num_envs
+        self.cfg = Mock()
+        self.cfg.height = 480
+        self.cfg.width = 640
+        self.cfg.enable_mask = True
+
+    def get_left_right_arena_pose(self):
+        pose = torch.eye(4).unsqueeze(0).repeat(self.num_envs, 1, 1)
+        return pose, pose
+
+    def get_arena_pose(self, to_matrix=True):
+        pose = torch.eye(4).unsqueeze(0).repeat(self.num_envs, 1, 1)
+        return pose
+
+    def get_intrinsics(self):
+        # Return mock intrinsic matrix
+        intrinsics = torch.zeros(self.num_envs, 3, 3)
+        intrinsics[:, 0, 0] = 500.0  # fx
+        intrinsics[:, 1, 1] = 500.0  # fy
+        intrinsics[:, 0, 2] = 320.0  # cx
+        intrinsics[:, 1, 2] = 240.0  # cy
+        intrinsics[:, 2, 2] = 1.0
+        return intrinsics
+
+
+class MockSim:
+    """Mock simulation for observation functor tests."""
+
+    def __init__(self, num_envs: int = 4):
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        self._rigid_objects = {}
+        self._robots = {}
+        self._sensors = {}
+        self.asset_uids = []
+
+    def get_rigid_object(self, uid: str):
+        return self._rigid_objects.get(uid)
+
+    def get_rigid_object_uid_list(self):
+        return list(self._rigid_objects.keys())
+
+    def get_robot(self, uid: str = None):
+        if uid is None:
+            return list(self._robots.values())[0] if self._robots else None
+        return self._robots.get(uid)
+
+    def get_sensor(self, uid: str):
+        return self._sensors.get(uid)
+
+    def add_rigid_object(self, obj):
+        self._rigid_objects[obj.uid] = obj
+        self.asset_uids.append(obj.uid)
+
+    def add_robot(self, robot):
+        self._robots["robot"] = robot
+
+
+class MockEnv:
+    """Mock environment for observation functor tests."""
+
+    def __init__(self, num_envs: int = 4, num_joints: int = 6):
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        self.active_joint_ids = list(range(num_joints))
+
+        self.sim = MockSim(num_envs)
+        self.robot = MockRobot(num_envs, num_joints)
+        self.sim.add_robot(self.robot)
+
+        # Add test rigid objects
+        self.test_object = MockRigidObject("test_cube", num_envs)
+        self.sim.add_rigid_object(self.test_object)
+
+        self.target_object = MockRigidObject("target", num_envs)
+        self.target_object._pose[:, :3, 3] = torch.tensor([0.5, 0.0, 0.0])
+        self.sim.add_rigid_object(self.target_object)
+
+        # Add sensor
+        self.test_camera = MockSensor("camera", num_envs)
+        self.sim._sensors["camera"] = self.test_camera
+
+
+# Import functors to test
+from embodichain.lab.gym.envs.managers.observations import (
+    get_rigid_object_pose,
+    get_rigid_object_velocity,
+    normalize_robot_joint_data,
+    get_sensor_pose_in_robot_frame,
+    get_sensor_intrinsics,
+    compute_semantic_mask,
+    get_robot_eef_pose,
+    target_position,
+)
+
+
+class TestGetRigidObjectPose:
+    """Tests for get_rigid_object_pose functor."""
+
+    def test_returns_matrix_pose(self):
+        """Test that get_rigid_object_pose returns 4x4 matrix by default."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_rigid_object_pose(
+            env, obs, entity_cfg=MagicMock(uid="test_cube"), to_matrix=True
+        )
+
+        assert result.shape == (4, 4, 4)
+        # Identity matrix for default pose
+        torch.testing.assert_close(result[0], torch.eye(4))
+
+    def test_returns_position_quaternion(self):
+        """Test that get_rigid_object_pose returns position+quaternion when to_matrix=False."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_rigid_object_pose(
+            env, obs, entity_cfg=MagicMock(uid="test_cube"), to_matrix=False
+        )
+
+        assert result.shape == (4, 7)
+
+    def test_returns_zero_for_nonexistent_object(self):
+        """Test that get_rigid_object_pose returns zeros for non-existent object."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_rigid_object_pose(
+            env, obs, entity_cfg=MagicMock(uid="nonexistent"), to_matrix=True
+        )
+
+        assert result.shape == (4, 4, 4)
+        assert torch.all(result == 0)
+
+
+class TestGetRigidObjectVelocity:
+    """Tests for get_rigid_object_velocity functor."""
+
+    def test_returns_velocity_shape(self):
+        """Test that get_rigid_object_velocity returns correct shape."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_rigid_object_velocity(
+            env, obs, entity_cfg=MagicMock(uid="test_cube")
+        )
+
+        assert result.shape == (4, 6)  # 6D velocity
+
+    def test_returns_zero_for_nonexistent_object(self):
+        """Test that get_rigid_object_velocity returns zeros for non-existent object."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_rigid_object_velocity(
+            env, obs, entity_cfg=MagicMock(uid="nonexistent")
+        )
+
+        assert result.shape == (4, 6)
+        assert torch.all(result == 0)
+
+
+class TestNormalizeRobotJointData:
+    """Tests for normalize_robot_joint_data functor."""
+
+    def test_normalizes_to_0_1_range(self):
+        """Test that joint data is normalized to [0, 1] range."""
+        env = MockEnv(num_envs=4, num_joints=6)
+
+        # Create data at limits (-3.14 and 3.14)
+        data = torch.zeros(4, 6)
+        data[:, 0] = -3.14  # at lower limit
+        data[:, 1] = 0.0  # at middle
+        data[:, 2] = 3.14  # at upper limit
+        joint_ids = [0, 1, 2]
+
+        result = normalize_robot_joint_data(
+            env, data.clone(), joint_ids, limit="qpos_limits"
+        )
+
+        # Check normalization
+        assert result[0, 0] == pytest.approx(0.0, abs=0.01)
+        assert result[0, 1] == pytest.approx(0.5, abs=0.01)
+        assert result[0, 2] == pytest.approx(1.0, abs=0.01)
+
+
+class TestGetSensorIntrinsics:
+    """Tests for get_sensor_intrinsics functor."""
+
+    def test_returns_intrinsics_matrix(self):
+        """Test that get_sensor_intrinsics returns correct shape."""
+        env = MockEnv(num_envs=1)
+        obs = {}
+
+        # Replace the mock sensor with a proper one that will pass isinstance check
+        # by using patch to mock the Camera import
+        with patch("embodichain.lab.gym.envs.managers.observations.Camera", MockSensor):
+            result = get_sensor_intrinsics(env, obs, entity_cfg=MagicMock(uid="camera"))
+
+        assert result.shape == (1, 3, 3)
+        # Check fx, fy are set
+        assert result[0, 0, 0] == 500.0
+        assert result[0, 1, 1] == 500.0
+
+
+class TestGetRobotEefPose:
+    """Tests for get_robot_eef_pose functor."""
+
+    def test_returns_matrix_pose_by_default(self):
+        """Test that get_robot_eef_pose returns 4x4 matrix by default."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_robot_eef_pose(env, obs)
+
+        assert result.shape == (4, 4, 4)
+
+    def test_returns_position_only(self):
+        """Test that get_robot_eef_pose returns only position when position_only=True."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_robot_eef_pose(env, obs, position_only=True)
+
+        assert result.shape == (4, 3)
+
+    def test_with_part_name(self):
+        """Test that get_robot_eef_pose works with part_name."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_robot_eef_pose(env, obs, part_name="arm")
+
+        assert result.shape == (4, 4, 4)
+
+
+class TestTargetPosition:
+    """Tests for target_position functor."""
+
+    def test_returns_zeros_when_not_initialized(self):
+        """Test that target_position returns zeros before initialization."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        # Without target_pose_key attribute set
+        result = target_position(env, obs, target_pose_key="goal_pose")
+
+        assert result.shape == (4, 3)
+        assert torch.all(result == 0)
+
+    def test_returns_position_from_env_attribute(self):
+        """Test that target_position reads from env attribute."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        # Set the target pose
+        env.goal_pose = torch.tensor([[0.5, 0.0, 0.0]]).repeat(4, 1)
+
+        result = target_position(env, obs, target_pose_key="goal_pose")
+
+        assert result.shape == (4, 3)
+        torch.testing.assert_close(result[0], torch.tensor([0.5, 0.0, 0.0]))
+
+    def test_handles_matrix_pose(self):
+        """Test that target_position handles 4x4 matrix poses."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        # Set as 4x4 matrix
+        pose = torch.eye(4).unsqueeze(0).repeat(4, 1, 1)
+        pose[:, :3, 3] = torch.tensor([0.5, 0.3, 0.1])
+        env.goal_pose = pose
+
+        result = target_position(env, obs, target_pose_key="goal_pose")
+
+        assert result.shape == (4, 3)
+        torch.testing.assert_close(result[0], torch.tensor([0.5, 0.3, 0.1]))

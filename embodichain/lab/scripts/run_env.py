@@ -123,6 +123,9 @@ def main(args, env, gym_config):
             regenerate=getattr(args, "regenerate", False),
         )
 
+    # Final reset.
+    _, _ = env.reset()
+
 
 def preview(env: gymnasium.Env) -> None:
     """
