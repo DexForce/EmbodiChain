@@ -484,7 +484,7 @@ class MotionGenerator:
             out_qpos_tensor = out_qpos_tensor.unsqueeze(0)
 
         out_xpos_tensor = self.robot.compute_batch_fk(
-            qpos=out_qpos_tensor.unsqueeze_(0),
+            qpos=out_qpos_tensor.unsqueeze(0),
             name=self.uid,
             to_matrix=True,
         ).squeeze_(0)

@@ -108,8 +108,9 @@ def main():
     motion_generator = MotionGenerator(cfg=motion_cfg)
 
     # Joint space trajectory
+    qpos_list = torch.vstack(qpos_list)
     out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        qpos_list=[q.numpy() for q in qpos_list],
+        qpos_list=qpos_list,
         is_linear=False,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_num=20,
@@ -117,8 +118,9 @@ def main():
     move_robot_along_trajectory(robot, arm_name, out_qpos_list)
 
     # Cartesian space trajectory
+    xpos_list = torch.concatenate([xpos.unsqueeze(0) for xpos in xpos_list])
     out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        xpos_list=[x.numpy() for x in xpos_list],
+        xpos_list=xpos_list,
         is_linear=True,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_num=20,
