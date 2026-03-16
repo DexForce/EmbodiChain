@@ -112,7 +112,13 @@ class GRPO(BaseAlgorithm):
         return advantages.view(n_envs, t_steps) * seq_mask
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
+        raw_obs = getattr(rollout, "raw_obs", None)
+        chunk_step = getattr(rollout, "chunk_step", None)
         rollout = rollout.clone()
+        if raw_obs is not None:
+            rollout.raw_obs = raw_obs
+        if chunk_step is not None:
+            rollout.chunk_step = chunk_step
         num_envs = rollout.batch_size[0]
         if num_envs % self.cfg.group_size != 0:
             raise ValueError(
@@ -147,7 +153,9 @@ class GRPO(BaseAlgorithm):
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
 
-                eval_batch = self.policy.evaluate_actions(batch)
+                eval_batch = self.policy.evaluate_actions(
+                    batch, rollout=rollout, num_envs=num_envs
+                )
                 logprobs = eval_batch["sample_log_prob"]
                 entropy = eval_batch["entropy"]
                 ratio = (logprobs - old_logprobs).exp()
@@ -166,7 +174,9 @@ class GRPO(BaseAlgorithm):
 
                 if self.ref_policy is not None:
                     with torch.no_grad():
-                        ref_batch = self.ref_policy.evaluate_actions(batch)
+                        ref_batch = self.ref_policy.evaluate_actions(
+                            batch, rollout=rollout, num_envs=num_envs
+                        )
                         ref_logprobs = ref_batch["sample_log_prob"]
                     log_ref_over_pi = ref_logprobs - logprobs
                     kl_per = torch.exp(log_ref_over_pi) - log_ref_over_pi - 1.0

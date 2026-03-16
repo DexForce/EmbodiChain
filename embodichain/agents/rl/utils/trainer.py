@@ -27,6 +27,7 @@ from tensordict import TensorDict
 
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.agents.rl.collector import SyncCollector
+from embodichain.agents.rl.utils import dict_to_tensordict
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from .helper import flatten_dict_observation
 
@@ -84,13 +85,23 @@ class Trainer:
         action_dim = getattr(self.policy, "action_dim", None)
         if obs_dim is None or action_dim is None:
             raise RuntimeError("Policy must expose obs_dim and action_dim.")
+        use_raw_obs = getattr(self.policy, "use_raw_obs", False)
+        action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
+        use_action_chunk = getattr(self.policy, "use_action_chunk", False)
+        if use_action_chunk and action_chunk_size > 0:
+            self.buffer_size = (
+                (self.buffer_size + action_chunk_size - 1)
+                // action_chunk_size
+                * action_chunk_size
+            )
 
         self.buffer = RolloutBuffer(
             num_envs=num_envs,
             rollout_len=self.buffer_size,
-            obs_dim=obs_dim,
+            obs_dim=max(1, obs_dim) if use_raw_obs else obs_dim,
             action_dim=action_dim,
             device=self.device,
+            use_raw_obs=use_raw_obs,
         )
         self.collector = SyncCollector(
             env=self.env,
@@ -245,28 +256,49 @@ class Trainer:
         episode_returns = []
         episode_lengths = []
 
+        use_raw_obs = getattr(self.policy, "use_raw_obs", False)
+        use_action_chunk = getattr(self.policy, "use_action_chunk", False)
+        action_chunk_size = getattr(self.policy, "action_chunk_size", 1)
+
         for _ in range(num_episodes):
-            # Reset and initialize episode tracking
             obs, _ = self.eval_env.reset()
-            obs = flatten_dict_observation(obs)
-            num_envs = obs.shape[0] if obs.ndim == 2 else 1
+            if use_raw_obs:
+                obs_td = dict_to_tensordict(obs, self.device)
+            else:
+                obs_td = flatten_dict_observation(obs)
+            num_envs = obs_td.batch_size[0] if hasattr(obs_td, "batch_size") else (obs_td.shape[0] if hasattr(obs_td, "shape") else 1)
 
             done_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
             cumulative_reward = torch.zeros(
                 num_envs, dtype=torch.float32, device=self.device
             )
             step_count = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
+            cached_chunk = None
+            step_in_chunk = 0
 
-            # Run episode until all environments complete
             while not done_mask.all():
-                # Get deterministic actions from policy
-                action_td = TensorDict(
-                    {"obs": obs},
-                    batch_size=[num_envs],
-                    device=self.device,
-                )
-                action_td = self.policy.get_action(action_td, deterministic=True)
-                actions = action_td["action"]
+                if use_action_chunk and (cached_chunk is None or step_in_chunk == 0):
+                    action_td = TensorDict(
+                        {"obs": obs_td},
+                        batch_size=[num_envs],
+                        device=self.device,
+                    )
+                    action_td = self.policy.get_action(action_td, deterministic=True)
+                    cached_chunk = action_td.get("action_chunk")
+                    actions = action_td["action"]
+                    step_in_chunk = 0
+                elif use_action_chunk and cached_chunk is not None:
+                    actions = cached_chunk[:, step_in_chunk]
+                else:
+                    action_td = TensorDict(
+                        {"obs": obs_td},
+                        batch_size=[num_envs],
+                        device=self.device,
+                    )
+                    action_td = self.policy.get_action(action_td, deterministic=True)
+                    actions = action_td["action"]
+
+                step_in_chunk = (step_in_chunk + 1) % action_chunk_size if use_action_chunk else 0
                 am = getattr(self.eval_env, "action_manager", None)
                 action_type = (
                     am.action_type
@@ -275,15 +307,17 @@ class Trainer:
                 )
                 action_dict = {action_type: actions}
 
-                # Environment step
                 obs, reward, terminated, truncated, info = self.eval_env.step(
                     action_dict
                 )
-                obs = (
-                    flatten_dict_observation(obs)
-                    if isinstance(obs, TensorDict)
-                    else obs
-                )
+                if use_raw_obs:
+                    obs_td = dict_to_tensordict(obs, self.device)
+                else:
+                    obs_td = (
+                        flatten_dict_observation(obs)
+                        if isinstance(obs, TensorDict)
+                        else obs
+                    )
 
                 # Update statistics only for still-running environments
                 done = terminated | truncated
@@ -291,6 +325,10 @@ class Trainer:
                 cumulative_reward[still_running] += reward[still_running].float()
                 step_count[still_running] += 1
                 done_mask |= done
+
+                # Invalidate cached_chunk on any env reset
+                if use_action_chunk and done.any():
+                    cached_chunk = None
 
                 # Trigger evaluation events (e.g., video recording)
                 if hasattr(self, "eval_event_manager"):

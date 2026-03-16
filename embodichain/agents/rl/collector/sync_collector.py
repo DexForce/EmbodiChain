@@ -68,20 +68,92 @@ class SyncCollector(BaseCollector):
         if self._supports_shared_rollout:
             self.env.set_rollout_buffer(rollout)
 
-        initial_obs = flatten_dict_observation(self.obs_td)
-        rollout["obs"][:, 0] = initial_obs
-        for step_idx in range(num_steps):
-            step_td = TensorDict(
-                {"obs": rollout["obs"][:, step_idx]},
-                batch_size=[rollout.batch_size[0]],
-                device=self.device,
+        use_raw_obs = getattr(self.policy, "use_raw_obs", False)
+        raw_obs_list = getattr(rollout, "raw_obs", None) if use_raw_obs else None
+
+        action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
+        use_action_chunk = (
+            getattr(self.policy, "use_action_chunk", False) and action_chunk_size > 0
+        )
+        cached_chunk = None
+
+        if use_action_chunk:
+            rollout.chunk_step = torch.zeros(
+                self.env.num_envs, num_steps,
+                dtype=torch.long, device=self.device,
             )
-            step_td = self.policy.get_action(step_td)
+
+        if use_raw_obs and raw_obs_list is not None:
+            raw_obs_list[0] = self.obs_td
+        else:
+            rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
+
+        for step_idx in range(num_steps):
+            step_in_chunk = step_idx % action_chunk_size if use_action_chunk else 0
+
+            # At chunk boundary, or cached invalidated by env reset, we need a new chunk
+            need_new_chunk = use_action_chunk and (
+                step_in_chunk == 0 or cached_chunk is None
+            )
+
+            if need_new_chunk:
+                if use_raw_obs and raw_obs_list is not None:
+                    step_td = TensorDict(
+                        {"obs": raw_obs_list[step_idx]},
+                        batch_size=[rollout.batch_size[0]],
+                        device=self.device,
+                    )
+                else:
+                    step_td = TensorDict(
+                        {"obs": rollout["obs"][:, step_idx]},
+                        batch_size=[rollout.batch_size[0]],
+                        device=self.device,
+                    )
+                step_td = self.policy.get_action(step_td)
+                cached_chunk = step_td["action_chunk"]
+                action = step_td["action"]
+                effective_step_in_chunk = 0
+            elif use_action_chunk and cached_chunk is not None:
+                action = cached_chunk[:, step_in_chunk]
+                effective_step_in_chunk = step_in_chunk
+                step_td = TensorDict(
+                    {
+                        "action": action,
+                        "sample_log_prob": torch.zeros(
+                            action.shape[0], device=self.device, dtype=torch.float32
+                        ),
+                        "value": torch.zeros(
+                            action.shape[0], device=self.device, dtype=torch.float32
+                        ),
+                    },
+                    batch_size=[rollout.batch_size[0]],
+                    device=self.device,
+                )
+            else:
+                if use_raw_obs and raw_obs_list is not None:
+                    step_td = TensorDict(
+                        {"obs": raw_obs_list[step_idx]},
+                        batch_size=[rollout.batch_size[0]],
+                        device=self.device,
+                    )
+                else:
+                    step_td = TensorDict(
+                        {"obs": rollout["obs"][:, step_idx]},
+                        batch_size=[rollout.batch_size[0]],
+                        device=self.device,
+                    )
+                step_td = self.policy.get_action(step_td)
+                action = step_td["action"]
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(
-                self._to_action_dict(step_td["action"])
+                self._to_action_dict(action)
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
+            if use_action_chunk:
+                rollout.chunk_step[:, step_idx] = effective_step_in_chunk
+                # Invalidate cached_chunk on any env reset to avoid using old chunk for new episode
+                if (terminated | truncated).any():
+                    cached_chunk = None
             self._write_step(
                 rollout=rollout,
                 step_idx=step_idx,
@@ -95,7 +167,10 @@ class SyncCollector(BaseCollector):
                     terminated=terminated,
                     truncated=truncated,
                 )
-            rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
+            if use_raw_obs and raw_obs_list is not None:
+                raw_obs_list[step_idx + 1] = next_obs_td
+            else:
+                rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
 
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
@@ -107,7 +182,12 @@ class SyncCollector(BaseCollector):
 
     def _attach_final_value(self, rollout: TensorDict) -> None:
         """Populate the bootstrap value for the final observed state."""
-        final_obs = rollout["obs"][:, -1]
+        use_raw_obs = getattr(self.policy, "use_raw_obs", False)
+        raw_obs_list = getattr(rollout, "raw_obs", None) if use_raw_obs else None
+        if use_raw_obs and raw_obs_list is not None:
+            final_obs = raw_obs_list[-1]
+        else:
+            final_obs = rollout["obs"][:, -1]
         last_next_td = TensorDict(
             {"obs": final_obs},
             batch_size=[rollout.batch_size[0]],
@@ -155,8 +235,10 @@ class SyncCollector(BaseCollector):
 
     def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
         """Validate rollout layout expected by the collector."""
+        use_raw_obs = getattr(self.policy, "use_raw_obs", False)
+        obs_dim = 1 if use_raw_obs else self.policy.obs_dim
         expected_shapes = {
-            "obs": (self.env.num_envs, num_steps + 1, self.policy.obs_dim),
+            "obs": (self.env.num_envs, num_steps + 1, obs_dim),
             "action": (self.env.num_envs, num_steps + 1, self.policy.action_dim),
             "sample_log_prob": (self.env.num_envs, num_steps + 1),
             "value": (self.env.num_envs, num_steps + 1),

@@ -62,6 +62,9 @@ def transition_view(rollout: TensorDict, flatten: bool = False) -> TensorDict:
         if key in rollout.keys():
             td[key] = rollout[key][:, :-1]
 
+    if hasattr(rollout, "chunk_step") and rollout.chunk_step is not None:
+        td["chunk_step"] = rollout.chunk_step
+
     if flatten:
         return td.reshape(num_envs * time_dim)
     return td
@@ -74,4 +77,7 @@ def iterate_minibatches(
     total = rollout.batch_size[0]
     indices = torch.randperm(total, device=device)
     for start in range(0, total, batch_size):
-        yield rollout[indices[start : start + batch_size]]
+        batch_indices = indices[start : start + batch_size]
+        batch = rollout[batch_indices].clone()
+        batch["_indices"] = batch_indices
+        yield batch

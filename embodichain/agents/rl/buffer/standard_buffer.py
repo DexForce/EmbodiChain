@@ -40,12 +40,14 @@ class RolloutBuffer:
         obs_dim: int,
         action_dim: int,
         device: torch.device,
+        use_raw_obs: bool = False,
     ) -> None:
         self.num_envs = num_envs
         self.rollout_len = rollout_len
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.device = device
+        self.use_raw_obs = use_raw_obs
         self._rollout = self._allocate_rollout()
         self._is_full = False
 
@@ -54,6 +56,8 @@ class RolloutBuffer:
         if self._is_full:
             raise RuntimeError("RolloutBuffer already contains a rollout.")
         self._clear_dynamic_fields()
+        if self.use_raw_obs:
+            self._rollout.raw_obs = [None] * (self.rollout_len + 1)
         return self._rollout
 
     def add(self, rollout: TensorDict) -> None:
@@ -93,7 +97,7 @@ class RolloutBuffer:
 
     def _allocate_rollout(self) -> TensorDict:
         """Preallocate rollout storage with uniform `[num_envs, time + 1]` shape."""
-        return TensorDict(
+        td = TensorDict(
             {
                 "obs": torch.empty(
                     self.num_envs,
@@ -149,12 +153,15 @@ class RolloutBuffer:
             batch_size=[self.num_envs, self.rollout_len + 1],
             device=self.device,
         )
+        return td
 
     def _clear_dynamic_fields(self) -> None:
         """Drop algorithm-added fields before reusing the shared rollout."""
         for key in ("advantage", "return", "seq_mask", "seq_return", "entropy"):
             if key in self._rollout.keys():
                 del self._rollout[key]
+        if self.use_raw_obs and hasattr(self._rollout, "raw_obs"):
+            delattr(self._rollout, "raw_obs")
         self._reset_padding_slot()
 
     def _reset_padding_slot(self) -> None:
