@@ -44,7 +44,6 @@ def _discover_entry_points() -> None:
 
 
 def get_vla_backend(name: str) -> Callable[..., Any] | None:
-    """Get registered backend factory (discovered from entry_points)."""
     name = str(name).lower()
     if name in _VLA_BACKENDS:
         return _VLA_BACKENDS[name]
@@ -53,13 +52,11 @@ def get_vla_backend(name: str) -> Callable[..., Any] | None:
 
 
 def get_registered_vla_backend_names() -> list[str]:
-    """Return registered VLA backend names."""
     _discover_entry_points()
     return list(_VLA_BACKENDS.keys())
 
 
 def create_vla_backend(name: str, **kwargs) -> Any:
-    """Create VLA backend: returns (model, action_indices, prepare_batch_fn)."""
     factory = get_vla_backend(name)
     if factory is None:
         available = get_registered_vla_backend_names()
