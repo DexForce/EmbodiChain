@@ -75,9 +75,9 @@ def iterate_minibatches(
 ) -> Iterator[TensorDict]:
     """Yield shuffled minibatches from a flattened rollout."""
     total = rollout.batch_size[0]
-    indices = torch.randperm(total, device=device)
+    indices = torch.randperm(total)
     for start in range(0, total, batch_size):
         batch_indices = indices[start : start + batch_size]
-        batch = rollout[batch_indices]
+        batch = rollout[batch_indices].clone()
         batch["_indices"] = batch_indices
         yield batch

@@ -89,17 +89,30 @@ class Trainer:
         action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
         use_action_chunk = getattr(self.policy, "use_action_chunk", False)
         if use_action_chunk and action_chunk_size > 0:
-            if self.buffer_size % action_chunk_size != 0:
-                raise ValueError(
-                    "Trainer buffer_size must be a multiple of policy.action_chunk_size "
-                    f"when use_action_chunk is True (buffer_size={self.buffer_size}, "
-                    f"action_chunk_size={action_chunk_size})."
+            self.buffer_size = (
+                (self.buffer_size + action_chunk_size - 1)
+                // action_chunk_size
+                * action_chunk_size
+            )
+
+        if use_raw_obs:
+            try:
+                reset_out = self.env.reset()
+                sample_obs = reset_out[0] if isinstance(reset_out, tuple) else reset_out
+                obs_td = dict_to_tensordict(sample_obs, self.device)
+                flat_obs = flatten_dict_observation(obs_td)
+                obs_dim = int(
+                    flat_obs.shape[-1]
+                    if isinstance(flat_obs, torch.Tensor)
+                    else np.asarray(flat_obs).shape[-1]
                 )
+            except Exception:
+                obs_dim = max(1, obs_dim)
 
         self.buffer = RolloutBuffer(
             num_envs=num_envs,
             rollout_len=self.buffer_size,
-            obs_dim=max(1, obs_dim) if use_raw_obs else obs_dim,
+            obs_dim=obs_dim,
             action_dim=action_dim,
             device=self.device,
             use_raw_obs=use_raw_obs,
@@ -260,6 +273,7 @@ class Trainer:
         use_raw_obs = getattr(self.policy, "use_raw_obs", False)
         use_action_chunk = getattr(self.policy, "use_action_chunk", False)
         action_chunk_size = getattr(self.policy, "action_chunk_size", 1)
+        effective_use_action_chunk = use_action_chunk and action_chunk_size > 0
 
         for _ in range(num_episodes):
             obs, _ = self.eval_env.reset()
@@ -282,7 +296,9 @@ class Trainer:
             step_in_chunk = 0
 
             while not done_mask.all():
-                if use_action_chunk and (cached_chunk is None or step_in_chunk == 0):
+                if effective_use_action_chunk and (
+                    cached_chunk is None or step_in_chunk == 0
+                ):
                     action_td = TensorDict(
                         {"obs": obs_td},
                         batch_size=[num_envs],
@@ -292,7 +308,7 @@ class Trainer:
                     cached_chunk = action_td.get("action_chunk")
                     actions = action_td["action"]
                     step_in_chunk = 0
-                elif use_action_chunk and cached_chunk is not None:
+                elif effective_use_action_chunk and cached_chunk is not None:
                     actions = cached_chunk[:, step_in_chunk]
                 else:
                     action_td = TensorDict(
@@ -304,7 +320,9 @@ class Trainer:
                     actions = action_td["action"]
 
                 step_in_chunk = (
-                    (step_in_chunk + 1) % action_chunk_size if use_action_chunk else 0
+                    (step_in_chunk + 1) % action_chunk_size
+                    if effective_use_action_chunk
+                    else 0
                 )
                 am = getattr(self.eval_env, "action_manager", None)
                 action_type = (
@@ -334,7 +352,7 @@ class Trainer:
                 done_mask |= done
 
                 # Invalidate cached_chunk on any env reset
-                if use_action_chunk and done.any():
+                if effective_use_action_chunk and done.any():
                     cached_chunk = None
 
                 # Trigger evaluation events (e.g., video recording)

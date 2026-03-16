@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from importlib.metadata import entry_points
 from typing import Any, Callable
-import logging
 
 __all__ = [
     "get_vla_backend",
@@ -29,7 +28,6 @@ __all__ = [
 
 _VLA_BACKENDS: dict[str, Callable[..., Any]] = {}
 _ENTRY_POINTS_DISCOVERED = False
-_LOGGER = logging.getLogger(__name__)
 
 
 def _discover_entry_points() -> None:
@@ -37,6 +35,7 @@ def _discover_entry_points() -> None:
     global _ENTRY_POINTS_DISCOVERED
     if _ENTRY_POINTS_DISCOVERED:
         return
+    _ENTRY_POINTS_DISCOVERED = True
     try:
         eps = entry_points(group="embodichain.vla_backends")
         for ep in eps:
@@ -46,10 +45,9 @@ def _discover_entry_points() -> None:
                 if name not in _VLA_BACKENDS:
                     _VLA_BACKENDS[name] = factory
             except Exception:
-                _LOGGER.exception("Failed to load VLA backend entry point %r", ep)
-        _ENTRY_POINTS_DISCOVERED = True
+                pass
     except Exception:
-        _LOGGER.exception("Failed to discover VLA backend entry points")
+        pass
 
 
 def get_vla_backend(name: str) -> Callable[..., Any] | None:
@@ -71,6 +69,7 @@ def create_vla_backend(name: str, **kwargs) -> Any:
         available = get_registered_vla_backend_names()
         raise ValueError(
             f"Unknown VLA backend '{name}'. Available: {available}. "
-            "Ensure dexechain is installed."
+            "Ensure a package providing the 'embodichain.vla_backends' entry point "
+            "group is installed."
         )
     return factory(**kwargs)

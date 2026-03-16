@@ -230,7 +230,11 @@ def train_from_config(config_path: str):
         )
     else:
         policy = build_policy(
-            policy_block, env.observation_space, env.action_space, device
+            policy_block,
+            env.observation_space,
+            env.action_space,
+            device,
+            env=env,
         )
 
     # Build Algorithm via factory

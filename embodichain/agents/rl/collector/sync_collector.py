@@ -71,6 +71,30 @@ class SyncCollector(BaseCollector):
         use_raw_obs = getattr(self.policy, "use_raw_obs", False)
         raw_obs_list = getattr(rollout, "raw_obs", None) if use_raw_obs else None
 
+        if use_raw_obs:
+            if raw_obs_list is None:
+                raise ValueError(
+                    "Policy requires raw observations, "
+                    "but the provided rollout TensorDict has no 'raw_obs' buffer. "
+                    "Create the rollout via RolloutBuffer or "
+                    "start_rollout so that 'raw_obs' is allocated."
+                )
+            try:
+                raw_obs_len = len(raw_obs_list)
+            except TypeError:
+                raise ValueError(
+                    "Rollout field 'raw_obs' must be an indexable sequence of length "
+                    f"{num_steps + 1} when policy.use_raw_obs=True."
+                )
+            expected_len = num_steps + 1
+            if raw_obs_len != expected_len:
+                raise ValueError(
+                    "Rollout 'raw_obs' length mismatch: "
+                    f"expected {expected_len} (num_steps + 1), got {raw_obs_len}. "
+                    "Ensure the rollout was created with use_raw_obs=True and "
+                    "its time dimension matches the requested num_steps."
+                )
+
         action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
         use_action_chunk = (
             getattr(self.policy, "use_action_chunk", False) and action_chunk_size > 0
@@ -87,7 +111,6 @@ class SyncCollector(BaseCollector):
 
         if use_raw_obs and raw_obs_list is not None:
             raw_obs_list[0] = self.obs_td
-            # Keep flattened obs populated even when using raw observations.
             rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
         else:
             rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
@@ -173,7 +196,6 @@ class SyncCollector(BaseCollector):
                 )
             if use_raw_obs and raw_obs_list is not None:
                 raw_obs_list[step_idx + 1] = next_obs_td
-                # Also keep flattened obs buffer up to date
                 rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
             else:
                 rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
@@ -241,8 +263,7 @@ class SyncCollector(BaseCollector):
 
     def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
         """Validate rollout layout expected by the collector."""
-        use_raw_obs = getattr(self.policy, "use_raw_obs", False)
-        obs_dim = 1 if use_raw_obs else self.policy.obs_dim
+        obs_dim = rollout["obs"].shape[-1]
         expected_shapes = {
             "obs": (self.env.num_envs, num_steps + 1, obs_dim),
             "action": (self.env.num_envs, num_steps + 1, self.policy.action_dim),

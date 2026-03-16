@@ -162,6 +162,8 @@ class RolloutBuffer:
                 del self._rollout[key]
         if self.use_raw_obs and hasattr(self._rollout, "raw_obs"):
             delattr(self._rollout, "raw_obs")
+        if hasattr(self._rollout, "chunk_step"):
+            delattr(self._rollout, "chunk_step")
         self._reset_padding_slot()
 
     def _reset_padding_slot(self) -> None:
