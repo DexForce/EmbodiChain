@@ -77,7 +77,7 @@ class ActorOnly(Policy):
         )
         return tensordict
 
-    def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
+    def evaluate_actions(self, tensordict: TensorDict, **kwargs) -> TensorDict:
         obs = tensordict["obs"]
         action = tensordict["action"]
         dist = self._distribution(obs)
