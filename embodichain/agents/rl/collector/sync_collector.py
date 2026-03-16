@@ -87,6 +87,8 @@ class SyncCollector(BaseCollector):
 
         if use_raw_obs and raw_obs_list is not None:
             raw_obs_list[0] = self.obs_td
+            # Keep flattened obs populated even when using raw observations.
+            rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
         else:
             rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
 
@@ -171,6 +173,8 @@ class SyncCollector(BaseCollector):
                 )
             if use_raw_obs and raw_obs_list is not None:
                 raw_obs_list[step_idx + 1] = next_obs_td
+                # Also keep flattened obs buffer up to date
+                rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
             else:
                 rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
 

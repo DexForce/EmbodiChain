@@ -78,6 +78,6 @@ def iterate_minibatches(
     indices = torch.randperm(total, device=device)
     for start in range(0, total, batch_size):
         batch_indices = indices[start : start + batch_size]
-        batch = rollout[batch_indices].clone()
+        batch = rollout[batch_indices]
         batch["_indices"] = batch_indices
         yield batch

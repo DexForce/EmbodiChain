@@ -89,11 +89,12 @@ class Trainer:
         action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
         use_action_chunk = getattr(self.policy, "use_action_chunk", False)
         if use_action_chunk and action_chunk_size > 0:
-            self.buffer_size = (
-                (self.buffer_size + action_chunk_size - 1)
-                // action_chunk_size
-                * action_chunk_size
-            )
+            if self.buffer_size % action_chunk_size != 0:
+                raise ValueError(
+                    "Trainer buffer_size must be a multiple of policy.action_chunk_size "
+                    f"when use_action_chunk is True (buffer_size={self.buffer_size}, "
+                    f"action_chunk_size={action_chunk_size})."
+                )
 
         self.buffer = RolloutBuffer(
             num_envs=num_envs,

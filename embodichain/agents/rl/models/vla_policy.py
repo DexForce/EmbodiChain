@@ -75,8 +75,9 @@ class VLAPolicy(Policy):
     def _load_vla(self) -> None:
         if self._vla_model is not None:
             return
+        backend_name = self.vla_cfg.get("backend", "dexforce_vla")
         backend = create_vla_backend(
-            "dexforce_vla",
+            backend_name,
             model_path=self.model_path,
             device=self.device,
             action_horizon=self.action_horizon,
@@ -147,8 +148,25 @@ class VLAPolicy(Policy):
             action_chunk_env = self._vla_chunk_to_env_chunk(vla_chunk, env=env)
         else:
             chunks_env = []
+
+            def _index_obs_dict(obs_dict: dict, idx: int) -> dict:
+                indexed: dict[str, Any] = {}
+                for key, value in obs_dict.items():
+                    if isinstance(value, dict):
+                        indexed[key] = _index_obs_dict(value, idx)
+                    elif hasattr(value, "__getitem__"):
+                        indexed[key] = value[idx]
+                    else:
+                        indexed[key] = value
+                return indexed
+
             for i in range(batch_size):
-                obs_i = obs[i] if hasattr(obs, "__getitem__") else obs
+                if isinstance(obs, dict):
+                    obs_i = _index_obs_dict(obs, i)
+                elif hasattr(obs, "__getitem__"):
+                    obs_i = obs[i]
+                else:
+                    obs_i = obs
                 batch_i = self._prepare_batch_fn(obs_i, env)
                 vla_chunk = self._vla_model.predict_action(
                     batch_i,
