@@ -143,7 +143,9 @@ class URDFMeshManager:
 
         # Handle OBJ's mtl dependency
         if mesh_file_name.lower().endswith(".obj"):
-            mtl_filename = os.path.splitext(mesh_file_name)[0] + ".mtl"
+            mtl_filename = (
+                os.path.splitext(os.path.basename(mesh_file_name))[0] + ".mtl"
+            )
             original_mtl_path = os.path.join(
                 os.path.dirname(original_mesh_path), mtl_filename
             )
