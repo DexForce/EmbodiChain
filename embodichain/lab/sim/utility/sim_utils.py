@@ -20,7 +20,15 @@ import open3d as o3d
 
 from typing import List, Union
 
-from dexsim.types import DriveType, ArticulationFlag, LoadOption, RigidBodyShape
+from dexsim.types import (
+    DriveType,
+    ArticulationFlag,
+    LoadOption,
+    RigidBodyShape,
+    ACDConfig,
+    SDFConfig,
+    PhysicalAttr,
+)
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
 from dexsim.models import MeshObject
@@ -253,6 +261,16 @@ def load_mesh_objects_from_cfg(
                     cache_path=cache_dir,
                     actor_type=body_type,
                     max_convex_hull_num=max_convex_hull_num,
+                )
+            elif cfg.sdf_resolution > 0:
+                obj = env.load_actor(
+                    fpath, duplicate=True, attach_scene=True, option=option
+                )
+                obj.add_physical_body(
+                    body_type,
+                    RigidBodyShape.SDF,
+                    sdf_config=SDFConfig(resolution=cfg.sdf_resolution),
+                    attr=PhysicalAttr(),
                 )
             else:
                 obj = env.load_actor(

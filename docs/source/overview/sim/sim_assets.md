@@ -80,6 +80,7 @@ Configured via {class}`~cfg.RigidObjectCfg`.
 | `attrs` | `RigidBodyAttributesCfg` | `RigidBodyAttributesCfg()` | Physical attributes. |
 | `body_type` | `Literal` | `"dynamic"` | "dynamic", "kinematic", or "static". |
 | `max_convex_hull_num` | `int` | `1` | Max convex hulls for decomposition (CoACD). |
+| `sdf_resolution` | `int` | `0` | Resolution for signed distance field. |
 | `body_scale` | `tuple` | `(1.0, 1.0, 1.0)` | Scale of the rigid body. |
 
 ### Rigid Body Attributes
