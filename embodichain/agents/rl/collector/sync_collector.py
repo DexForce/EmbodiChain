@@ -79,8 +79,10 @@ class SyncCollector(BaseCollector):
 
         if use_action_chunk:
             rollout.chunk_step = torch.zeros(
-                self.env.num_envs, num_steps,
-                dtype=torch.long, device=self.device,
+                self.env.num_envs,
+                num_steps,
+                dtype=torch.long,
+                device=self.device,
             )
 
         if use_raw_obs and raw_obs_list is not None:

@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Dict, Type
+from typing import Any, Dict, Optional, Type
 
 from gymnasium import spaces
 import torch
@@ -26,6 +26,7 @@ from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
 from .mlp import MLP
+from .vla_policy import VLAPolicy
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -63,13 +64,16 @@ def build_policy(
     device: torch.device,
     actor: torch.nn.Module | None = None,
     critic: torch.nn.Module | None = None,
+    env: Optional[Any] = None,
 ) -> Policy:
     """Build a policy from config using spaces for extensibility.
 
     Built-in MLP policies still resolve flattened `obs_dim` / `action_dim`, while
     custom policies may accept richer `obs_space` / `action_space` inputs.
+    For vla_policy, pass env to enable set_env and _load_vla initialization.
     """
     name = policy_block["name"].lower()
+
     if name not in _POLICY_REGISTRY:
         available = ", ".join(get_registered_policy_names())
         raise ValueError(
@@ -119,7 +123,13 @@ def build_policy(
         build_kwargs["actor"] = actor
     if "critic" in init_params and critic is not None:
         build_kwargs["critic"] = critic
-    return policy_cls(**build_kwargs)
+    if "policy_cfg" in init_params:
+        build_kwargs["policy_cfg"] = policy_block
+    policy = policy_cls(**build_kwargs)
+    if name == "vla_policy" and env is not None:
+        policy.set_env(env)
+        policy._load_vla()
+    return policy
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
@@ -143,10 +153,12 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
 # default registrations
 register_policy("actor_critic", ActorCritic)
 register_policy("actor_only", ActorOnly)
+register_policy("vla_policy", VLAPolicy)
 
 __all__ = [
     "ActorCritic",
     "ActorOnly",
+    "VLAPolicy",
     "register_policy",
     "get_registered_policy_names",
     "build_policy",

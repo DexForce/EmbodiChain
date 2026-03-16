@@ -266,7 +266,11 @@ class Trainer:
                 obs_td = dict_to_tensordict(obs, self.device)
             else:
                 obs_td = flatten_dict_observation(obs)
-            num_envs = obs_td.batch_size[0] if hasattr(obs_td, "batch_size") else (obs_td.shape[0] if hasattr(obs_td, "shape") else 1)
+            num_envs = (
+                obs_td.batch_size[0]
+                if hasattr(obs_td, "batch_size")
+                else (obs_td.shape[0] if hasattr(obs_td, "shape") else 1)
+            )
 
             done_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
             cumulative_reward = torch.zeros(
@@ -298,7 +302,9 @@ class Trainer:
                     action_td = self.policy.get_action(action_td, deterministic=True)
                     actions = action_td["action"]
 
-                step_in_chunk = (step_in_chunk + 1) % action_chunk_size if use_action_chunk else 0
+                step_in_chunk = (
+                    (step_in_chunk + 1) % action_chunk_size if use_action_chunk else 0
+                )
                 am = getattr(self.eval_env, "action_manager", None)
                 action_type = (
                     am.action_type
