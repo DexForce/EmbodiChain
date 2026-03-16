@@ -266,10 +266,12 @@ def load_mesh_objects_from_cfg(
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
+                sdf_cfg = SDFConfig()
+                sdf_cfg.resolution = cfg.sdf_resolution
                 obj.add_physical_body(
                     body_type,
                     RigidBodyShape.SDF,
-                    sdf_config=SDFConfig(resolution=cfg.sdf_resolution),
+                    config=sdf_cfg,
                     attr=PhysicalAttr(),
                 )
             else:
