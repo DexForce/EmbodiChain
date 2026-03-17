@@ -543,6 +543,12 @@ class RigidObjectCfg(ObjectBaseCfg):
     Reference: https://github.com/SarahWeiii/CoACD
     """
 
+    sdf_resolution: int = 0
+    """Resolution for the signed distance field (SDF) of the rigid body.
+    The spacing of the uniformly sampled SDF is equal to the largest AABB extent of the mesh, divided by the resolution.
+    if `sdf_resolution` is set to larger than 0, a SDF will be generated for collision detection.
+    SDF will increase the accuracy of collision, but also take more time to initialize and simulate."""
+
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
