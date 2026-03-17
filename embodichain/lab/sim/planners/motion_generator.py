@@ -145,9 +145,7 @@ class MotionGenerator:
         Args:
             current_state: PlanState
             target_states: List of PlanState
-            sample_method: Sampling method (TIME or QUANTITY)
-            sample_interval: Sampling interval (time in seconds for TIME method, or number of points for QUANTITY)
-            **kwargs: Additional arguments
+            cfg:  Planner runtime configuration.
 
         Returns:
             PlanResult containing the planned trajectory details.
@@ -173,12 +171,7 @@ class MotionGenerator:
         Args:
             xpos_list: Waypoints as a tensor of 4x4 transformation matrices [N, 4, 4] (optional)
             qpos_list: Joint configurations as a tensor [N, dof] (optional)
-            is_use_current_qpos: Whether to use current joint angles as starting point
-            is_linear: If True, use cartesian linear interpolation, else joint space
-            sample_method: Sampling method (QUANTITY or TIME)
-            sample_num: Number of interpolated points for final trajectory
-            qpos_seed: Initial joint configuration for IK solving
-            **kwargs: Additional arguments
+            cfg:  Planner runtime configuration.
 
         Returns:
             A tuple containing:
