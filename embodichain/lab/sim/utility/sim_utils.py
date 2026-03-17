@@ -25,7 +25,6 @@ from dexsim.types import (
     ArticulationFlag,
     LoadOption,
     RigidBodyShape,
-    ACDConfig,
     SDFConfig,
     PhysicalAttr,
 )
