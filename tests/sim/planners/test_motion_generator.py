@@ -93,7 +93,6 @@ class BaseTestMotionGenerator(object):
         cls.motion_cfg = MotionGenCfg(
             planner_cfg=ToppraPlannerCfg(
                 robot_uid=cls.robot.uid,
-                control_part=cls.arm_name,
                 constraints={
                     "velocity": 0.2,
                     "acceleration": 0.5,
@@ -190,15 +189,16 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.2)
 
-        cfg = ToppraPlannerRuntimeCfg(
+        runtime_cfg = ToppraPlannerRuntimeCfg(
             is_linear=is_linear,
-            qpos_seed=self.qpos_list[0],
+            start_qpos=self.qpos_list[0],
+            control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=20,
         )
         out_qpos_list, out_xpos_list = self.motion_gen.create_discrete_trajectory(
             xpos_list=self.xpos_list,
-            cfg=cfg,
+            runtime_cfg=runtime_cfg,
         )
         out_qpos_list = to_numpy(out_qpos_list)
         assert (
@@ -218,15 +218,16 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.05)
         qpos_list_in = [qpos.to("cpu").numpy() for qpos in self.qpos_list]
-        cfg = ToppraPlannerRuntimeCfg(
+        runtime_cfg = ToppraPlannerRuntimeCfg(
             is_linear=is_linear,
-            qpos_seed=self.qpos_list[0],
+            start_qpos=self.qpos_list[0],
+            control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=20,
         )
         out_qpos_list, out_xpos_list = self.motion_gen.create_discrete_trajectory(
             qpos_list=qpos_list_in,
-            cfg=cfg,
+            runtime_cfg=runtime_cfg,
         )
         out_qpos_list = to_numpy(out_qpos_list)
         assert (
@@ -248,12 +249,14 @@ class TestMotionGenerator(BaseTestMotionGenerator):
                 xpos_list=torch.as_tensor(np.array(self.xpos_list)),
                 step_size=0.01,
                 angle_step=np.pi / 90,
+                control_part=self.arm_name,
             )
         else:
             estimated_num = self.motion_gen.estimate_trajectory_sample_count(
                 qpos_list=torch.as_tensor(np.array(self.qpos_list)),
                 step_size=0.01,
                 angle_step=np.pi / 90,
+                control_part=self.arm_name,
             )
         assert (estimated_num - 30) < 2, "Estimated sample count failed"
 

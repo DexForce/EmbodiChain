@@ -78,8 +78,6 @@ class MotionGenerator:
         self.planner: BasePlanner = self._create_planner(cfg.planner_cfg)
 
         self.robot = self.planner.robot
-        self.uid = self.planner.cfg.control_part
-        self.dof = self.planner.dofs
 
     def _create_planner(
         self,
@@ -102,40 +100,10 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
-    def _create_state_dict(
-        self, position: np.ndarray, velocity: np.ndarray | None = None
-    ) -> Dict:
-        r"""Create a state dictionary for trajectory planning.
-
-        Args:
-            position: Joint positions
-            velocity: Joint velocities (optional, defaults to zeros)
-            acceleration: Joint accelerations (optional, defaults to zeros)
-
-        Returns:
-            State dictionary with 'position', 'velocity', 'acceleration'
-        """
-        if velocity is None:
-            velocity = np.zeros(self.dof)
-
-        if isinstance(position, torch.Tensor) | isinstance(position, np.ndarray):
-            position = position.squeeze()
-
-        return {
-            "position": (
-                position.tolist() if isinstance(position, np.ndarray) else position
-            ),
-            "velocity": (
-                velocity.tolist() if isinstance(velocity, np.ndarray) else velocity
-            ),
-            "acceleration": [0.0] * self.dof,
-        }
-
     def plan(
         self,
-        current_state: PlanState,
         target_states: List[PlanState],
-        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
     ) -> PlanResult:
         r"""Plan trajectory without collision checking.
 
@@ -150,17 +118,18 @@ class MotionGenerator:
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        # Plan trajectory using selected planner
-        result = self.planner.plan(
-            current_state=current_state, target_states=target_states, cfg=cfg
-        )
+        # if cfg.is_pre_interpolate:
+        #     # if
+        #     pass
+
+        result = self.planner.plan(target_states=target_states, runtime_cfg=runtime_cfg)
         return result
 
     def create_discrete_trajectory(
         self,
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
-        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
     ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Generate a discrete trajectory between waypoints using cartesian or joint space interpolation.
 
@@ -171,7 +140,7 @@ class MotionGenerator:
         Args:
             xpos_list: Waypoints as a tensor of 4x4 transformation matrices [N, 4, 4] (optional)
             qpos_list: Joint configurations as a tensor [N, dof] (optional)
-            cfg:  Planner runtime configuration.
+            runtime_cfg:  Planner runtime configuration.
 
         Returns:
             A tuple containing:
@@ -179,7 +148,10 @@ class MotionGenerator:
             - torch.Tensor: Cartesian space trajectory tensor [N, 4, 4]
         """
         init_plan_state, target_plan_states = self.planner.interpolate_trajectory(
-            control_part=self.uid, xpos_list=xpos_list, qpos_list=qpos_list, cfg=cfg
+            control_part=runtime_cfg.control_part,
+            xpos_list=xpos_list,
+            qpos_list=qpos_list,
+            cfg=runtime_cfg,
         )
 
         if init_plan_state is None or target_plan_states is None:
@@ -189,7 +161,7 @@ class MotionGenerator:
 
         # Plan trajectory using internal plan method
         plan_result = self.plan(
-            current_state=init_plan_state, target_states=target_plan_states, cfg=cfg
+            target_states=target_plan_states, runtime_cfg=runtime_cfg
         )
 
         if not plan_result.success or plan_result.positions is None:
@@ -208,7 +180,7 @@ class MotionGenerator:
 
         out_xpos_tensor = self.robot.compute_batch_fk(
             qpos=out_qpos_tensor.unsqueeze(0),
-            name=self.uid,
+            name=runtime_cfg.control_part,
             to_matrix=True,
         ).squeeze_(0)
 
@@ -220,6 +192,7 @@ class MotionGenerator:
         qpos_list: torch.Tensor | list[torch.Tensor] | None = None,
         step_size: float | torch.Tensor = 0.01,
         angle_step: float | torch.Tensor = np.pi / 90,
+        control_part: str | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """Estimate the number of trajectory sampling points required.
@@ -281,7 +254,7 @@ class MotionGenerator:
 
             xpos_list = self.robot.compute_batch_fk(
                 qpos=qpos_list,
-                name=self.uid,
+                name=control_part,
                 to_matrix=True,
             )
         else:

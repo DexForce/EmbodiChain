@@ -36,16 +36,19 @@ class BasePlannerCfg:
     robot_uid: str = MISSING
     """UID of the robot to control. Must correspond to a robot added to the simulation with this UID."""
 
-    control_part: str | None = None
-    """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
-
     planner_type: str = "Base"
 
 
 @configclass
 class BasePlannerRuntimeCfg:
-    qpos_seed: torch.Tensor | None = None
-    """Optional seed joint configuration for IK initialization during interpolation. Should be a 1D tensor of shape (DOF,). If None, the first point in qpos_list will be used as the seed."""
+    start_qpos: torch.Tensor | None = None
+    """Optional starting joint configuration for the trajectory. If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
+
+    control_part: str | None = None
+    """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
+
+    is_pre_interpolate: bool = False
+    """Whether to perform interpolation before planning. If True, the planner will first interpolate the trajectory based on the provided waypoints and then plan a trajectory through the interpolated points. If False, the planner will directly plan through the provided waypoints without interpolation."""
 
     is_linear: bool = True
     """If True, use cartesian linear interpolation, else joint space"""
@@ -68,7 +71,7 @@ class BasePlanner(ABC):
     """
 
     def __init__(self, cfg: BasePlannerCfg):
-        self.cfg = cfg
+        self.cfg: BasePlannerCfg = cfg
 
         if cfg.robot_uid is MISSING:
             logger.log_error("robot_uid is required in planner config", ValueError)
@@ -77,16 +80,13 @@ class BasePlanner(ABC):
         if self.robot is None:
             logger.log_error(f"Robot with uid {cfg.robot_uid} not found", ValueError)
 
-        joint_ids = self.robot.get_joint_ids(cfg.control_part, remove_mimic=True)
-        self.dofs = len(joint_ids)
         self.device = self.robot.device
 
     @abstractmethod
     def plan(
         self,
-        current_state: PlanState,
         target_states: list[PlanState],
-        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
@@ -94,7 +94,6 @@ class BasePlanner(ABC):
         planning algorithm.
 
         Args:
-            current_state: Dictionary containing 'position', 'velocity', 'acceleration' for current state
             target_states: List of dictionaries containing target states
 
         Returns:
@@ -334,45 +333,16 @@ class BasePlanner(ABC):
         else:
             xpos_list = xpos_list.to(dtype=torch.float32, device=self.robot.device)
 
-        # # TODO: Interpolate from current robot state. Not used currently.
-        # if is_use_current_qpos:
-        #     joint_ids = self.robot.get_joint_ids(control_part)
-        #     qpos_tensor = self.robot.get_qpos()
-        #     # qpos_tensor shape: (batch, dof), usually batch=1
-        #     current_qpos = qpos_tensor[0, joint_ids]
-
-        #     current_xpos = self.robot.compute_fk(
-        #         qpos=current_qpos, name=control_part, to_matrix=True
-        #     ).squeeze(0)
-
-        #     if not isinstance(xpos_list, torch.Tensor):
-        #         xpos_tensor = torch.as_tensor(
-        #             np.asarray(xpos_list),
-        #             dtype=torch.float32,
-        #             device=self.robot.device,
-        #         )
-        #     else:
-        #         xpos_tensor = xpos_list.to(
-        #             dtype=torch.float32, device=self.robot.device
-        #         )
-
-        #     # Check if current position is significantly different from first waypoint
-        #     pos_diff = torch.norm(current_xpos[:3, 3] - xpos_tensor[0, :3, 3]).item()
-        #     rot_diff = torch.norm(current_xpos[:3, :3] - xpos_tensor[0, :3, :3]).item()
-
-        #     if pos_diff > 0.001 or rot_diff > 0.01:
-        #         xpos_list = torch.cat([current_xpos.unsqueeze(0), xpos_tensor], dim=0)
-        #         if qpos_list is not None:
-        #             if not isinstance(qpos_list, torch.Tensor):
-        #                 qpos_list = np.asarray(qpos_list)
-        #             qpos_tensor = torch.as_tensor(
-        #                 qpos_list, dtype=torch.float32, device=self.robot.device
-        #             )
-        #             qpos_list = torch.cat(
-        #                 [current_qpos.unsqueeze(0), qpos_tensor], dim=0
-        #             )
-        #     else:
-        #         xpos_list = xpos_tensor
+        if cfg.start_qpos is not None:
+            start_xpos = self.robot.compute_fk(
+                qpos=cfg.start_qpos.unsqueeze(0), name=control_part, to_matrix=True
+            )
+            qpos_list = (
+                torch.cat([cfg.start_qpos.unsqueeze(0), qpos_list], dim=0)
+                if qpos_list is not None
+                else None
+            )
+            xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
         # Input validation
         if len(xpos_list) < 2:
             logger.log_warning("xpos_list must contain at least 2 points")
@@ -394,7 +364,8 @@ class BasePlanner(ABC):
             xpos_list, step_size=0.002, angle_step=np.pi / 90
         )
 
-        qpos_seed = cfg.qpos_seed
+        # currently we use
+        qpos_seed = cfg.start_qpos
         if qpos_seed is None and qpos_list is not None:
             qpos_seed = qpos_list[0]
         # Generate trajectory

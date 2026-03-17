@@ -134,7 +134,6 @@ def main(interactive=False):
     motion_cfg = MotionGenCfg(
         planner_cfg=ToppraPlannerCfg(
             robot_uid=robot.uid,
-            control_part=arm_name,
             constraints={
                 "velocity": 0.2,
                 "acceleration": 0.5,
@@ -143,27 +142,32 @@ def main(interactive=False):
     )
     motion_generator = MotionGenerator(cfg=motion_cfg)
 
+    current_qpos = robot.get_qpos(name=arm_name)[0]
     plan_runtime_cfg = ToppraPlannerRuntimeCfg(
+        start_qpos=current_qpos,
         is_linear=False,
+        control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
     )
     # Joint space trajectory
     qpos_list = torch.vstack(qpos_list)
     out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        qpos_list=qpos_list, cfg=plan_runtime_cfg
+        qpos_list=qpos_list, runtime_cfg=plan_runtime_cfg
     )
     move_robot_along_trajectory(robot, arm_name, out_qpos_list)
 
     # Cartesian space trajectory
     plan_runtime_cfg = ToppraPlannerRuntimeCfg(
+        start_qpos=current_qpos,
         is_linear=True,
+        control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
     )
     xpos_list = torch.concatenate([xpos.unsqueeze(0) for xpos in xpos_list])
     out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        xpos_list=xpos_list, cfg=plan_runtime_cfg
+        xpos_list=xpos_list, runtime_cfg=plan_runtime_cfg
     )
     sim.reset()
     move_robot_along_trajectory(robot, arm_name, out_qpos_list)

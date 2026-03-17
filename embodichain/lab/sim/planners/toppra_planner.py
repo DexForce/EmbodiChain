@@ -71,46 +71,54 @@ class ToppraPlanner(BasePlanner):
         """
         super().__init__(cfg)
 
-        # Create TOPPRA-specific constraint arrays (symmetric format)
-        # This format is required by TOPPRA library
-        if isinstance(cfg.constraints["velocity"], float):
-            self.vlims = np.array(
-                [
-                    [-cfg.constraints["velocity"], cfg.constraints["velocity"]]
-                    for _ in range(self.dofs)
-                ]
-            )
-        else:
-            self.vlims = np.array(cfg.constraints["velocity"])
-
-        if isinstance(cfg.constraints["acceleration"], float):
-            self.alims = np.array(
-                [
-                    [-cfg.constraints["acceleration"], cfg.constraints["acceleration"]]
-                    for _ in range(self.dofs)
-                ]
-            )
-        else:
-            self.alims = np.array(cfg.constraints["acceleration"])
-
     def plan(
         self,
-        current_state: PlanState,
         target_states: list[PlanState],
-        cfg: ToppraPlannerRuntimeCfg = ToppraPlannerRuntimeCfg(),
+        runtime_cfg: ToppraPlannerRuntimeCfg = ToppraPlannerRuntimeCfg(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
-            current_state: Dictionary containing 'position', 'velocity', 'acceleration' for current state
             target_states: List of dictionaries containing target states
             cfg: ToppraPlannerRuntimeCfg
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        sample_method = cfg.sample_method
-        sample_interval = cfg.sample_interval
+        joint_ids = self.robot.get_joint_ids(
+            runtime_cfg.control_part, remove_mimic=True
+        )
+        dofs = len(joint_ids)
+
+        # set constraints
+        if isinstance(self.cfg.constraints["velocity"], float):
+            self.vlims = np.array(
+                [
+                    [
+                        -self.cfg.constraints["velocity"],
+                        self.cfg.constraints["velocity"],
+                    ]
+                    for _ in range(dofs)
+                ]
+            )
+        else:
+            self.vlims = np.array(self.cfg.constraints["velocity"])
+
+        if isinstance(self.cfg.constraints["acceleration"], float):
+            self.alims = np.array(
+                [
+                    [
+                        -self.cfg.constraints["acceleration"],
+                        self.cfg.constraints["acceleration"],
+                    ]
+                    for _ in range(dofs)
+                ]
+            )
+        else:
+            self.alims = np.array(self.cfg.constraints["acceleration"])
+
+        sample_method = runtime_cfg.sample_method
+        sample_interval = runtime_cfg.sample_interval
         if not isinstance(sample_interval, (float, int)):
             logger.log_error(
                 f"sample_interval must be float/int, got {type(sample_interval)}",
@@ -122,34 +130,37 @@ class ToppraPlanner(BasePlanner):
             logger.log_error("At least 2 sample points required", ValueError)
 
         # Check waypoints
-        if len(current_state.qpos) != self.dofs:
+        start_qpos = (
+            runtime_cfg.start_qpos
+            if runtime_cfg.start_qpos is not None
+            else target_states[0].qpos
+        )
+        if len(start_qpos) != dofs:
             logger.log_error("Current waypoint does not align")
         for target in target_states:
-            if len(target.qpos) != self.dofs:
+            if len(target.qpos) != dofs:
                 logger.log_error("Target waypoints do not align")
 
         if (
             len(target_states) == 1
-            and np.sum(
-                np.abs(np.array(target_states[0].qpos) - np.array(current_state.qpos))
-            )
+            and np.sum(np.abs(np.array(target_states[0].qpos) - np.array(start_qpos)))
             < 1e-3
         ):
             logger.log_warning("Only two same waypoints, returning trivial trajectory.")
             return PlanResult(
                 success=True,
                 positions=torch.as_tensor(
-                    np.array([current_state.qpos, target_states[0].qpos]),
+                    np.array([start_qpos, target_states[0].qpos]),
                     dtype=torch.float32,
                     device=self.device,
                 ),
                 velocities=torch.as_tensor(
-                    np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
+                    np.array([[0.0] * dofs, [0.0] * dofs]),
                     dtype=torch.float32,
                     device=self.device,
                 ),
                 accelerations=torch.as_tensor(
-                    np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
+                    np.array([[0.0] * dofs, [0.0] * dofs]),
                     dtype=torch.float32,
                     device=self.device,
                 ),
@@ -158,7 +169,7 @@ class ToppraPlanner(BasePlanner):
             )
 
         # Build waypoints
-        waypoints = [np.array(current_state.qpos)]
+        waypoints = [np.array(start_qpos)]
         for target in target_states:
             waypoints.append(np.array(target.qpos))
         waypoints = np.array(waypoints)
