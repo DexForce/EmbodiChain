@@ -47,7 +47,7 @@ class ToppraPlannerCfg(BasePlannerCfg):
     dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
     """
 
-    planner_type: str = "Toppra"
+    planner_type: str = "toppra"
 
 
 class ToppraPlanner(BasePlanner):
@@ -202,6 +202,9 @@ class ToppraPlanner(BasePlanner):
             velocities.append(jnt_traj.evald(t))
             accelerations.append(jnt_traj.evaldd(t))
 
+        dt = torch.as_tensor(ts, dtype=torch.float32, device=self.device)
+        dt = torch.diff(dt, prepend=torch.tensor([0.0], device=self.device))
+
         return PlanResult(
             success=True,
             positions=torch.as_tensor(
@@ -213,6 +216,6 @@ class ToppraPlanner(BasePlanner):
             accelerations=torch.as_tensor(
                 np.array(accelerations), dtype=torch.float32, device=self.device
             ),
-            dt=torch.as_tensor(ts, dtype=torch.float32, device=self.device),
+            dt=dt,
             duration=duration,
         )

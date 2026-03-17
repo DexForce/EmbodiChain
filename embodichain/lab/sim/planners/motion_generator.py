@@ -92,12 +92,13 @@ class MotionGenerator:
         Returns:
             Planner instance
         """
-        from embodichain.utils.utility import get_class_instance
-
-        cls = get_class_instance(
-            "embodichain.lab.sim.planners", f"{planner_cfg.planner_type}Planner"
-        )(cfg=planner_cfg)
-
+        planner_type = planner_cfg.planner_type
+        if planner_type not in self._support_planner_dict.keys():
+            logger.log_error(
+                f"Unsupported planner type: {planner_type}. "
+                f"Supported types: {list(self._support_planner_dict.keys())}"
+            )
+        cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
     def _create_state_dict(
