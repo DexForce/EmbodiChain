@@ -24,10 +24,10 @@ import matplotlib.pyplot as plt
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
-from .utils import PlanState, PlanResult
+from .utils import PlanState, PlanResult, calculate_point_allocations, interpolate_xpos
+from .utils import MovePart, MoveType
 
-
-__all__ = ["BasePlannerCfg", "BasePlanner"]
+__all__ = ["BasePlannerCfg", "BasePlannerRuntimeCfg", "BasePlanner"]
 
 
 @configclass
@@ -40,6 +40,21 @@ class BasePlannerCfg:
     """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
 
     planner_type: str = "Base"
+
+
+@configclass
+class BasePlannerRuntimeCfg:
+    qpos_seed: torch.Tensor | None = None
+    """Optional seed joint configuration for IK initialization during interpolation. Should be a 1D tensor of shape (DOF,). If None, the first point in qpos_list will be used as the seed."""
+
+    is_linear: bool = True
+    """If True, use cartesian linear interpolation, else joint space"""
+
+    interpolate_position_step: float = 0.002
+    """Step size for interpolation. If is_linear is True, this is the step size in Cartesian space (meters). If is_linear is False, this is the step size in joint space (radians)."""
+
+    interpolate_angle_step: float = np.pi / 90
+    """Angular step size for interpolation in joint space (radians). Only used if is_linear is False."""
 
 
 class BasePlanner(ABC):
@@ -71,7 +86,7 @@ class BasePlanner(ABC):
         self,
         current_state: PlanState,
         target_states: list[PlanState],
-        **kwargs,
+        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
@@ -278,3 +293,211 @@ class BasePlanner(ABC):
 
         plt.tight_layout()
         plt.show()
+
+    def interpolate_trajectory(
+        self,
+        control_part: str | None = None,
+        xpos_list: torch.Tensor | None = None,
+        qpos_list: torch.Tensor | None = None,
+        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+    ) -> tuple[PlanState, list[PlanState]]:
+        if qpos_list is not None:
+            if not isinstance(qpos_list, torch.Tensor):
+                qpos_list = np.asarray(qpos_list)
+            qpos_tensor = torch.as_tensor(
+                qpos_list, dtype=torch.float32, device=self.robot.device
+            )
+            if qpos_tensor.dim() == 1:
+                qpos_tensor = qpos_tensor.unsqueeze(0)
+
+            qpos_batch = qpos_tensor.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
+            xpos_batch = self.robot.compute_batch_fk(
+                qpos=qpos_batch,
+                name=control_part,
+                to_matrix=True,
+            )
+            xpos_list = xpos_batch.squeeze(0)
+            qpos_list = qpos_tensor
+
+        if xpos_list is None:
+            logger.log_warning("Either xpos_list or qpos_list must be provided")
+            empty_qpos = torch.empty((0, self.dof), dtype=torch.float32)
+            empty_xpos = torch.empty((0, 4, 4), dtype=torch.float32)
+            return empty_qpos, empty_xpos
+
+        if not isinstance(xpos_list, torch.Tensor):
+            xpos_list = torch.as_tensor(
+                np.asarray(xpos_list),
+                dtype=torch.float32,
+                device=self.robot.device,
+            )
+        else:
+            xpos_list = xpos_list.to(dtype=torch.float32, device=self.robot.device)
+
+        # # TODO: Interpolate from current robot state. Not used currently.
+        # if is_use_current_qpos:
+        #     joint_ids = self.robot.get_joint_ids(control_part)
+        #     qpos_tensor = self.robot.get_qpos()
+        #     # qpos_tensor shape: (batch, dof), usually batch=1
+        #     current_qpos = qpos_tensor[0, joint_ids]
+
+        #     current_xpos = self.robot.compute_fk(
+        #         qpos=current_qpos, name=control_part, to_matrix=True
+        #     ).squeeze(0)
+
+        #     if not isinstance(xpos_list, torch.Tensor):
+        #         xpos_tensor = torch.as_tensor(
+        #             np.asarray(xpos_list),
+        #             dtype=torch.float32,
+        #             device=self.robot.device,
+        #         )
+        #     else:
+        #         xpos_tensor = xpos_list.to(
+        #             dtype=torch.float32, device=self.robot.device
+        #         )
+
+        #     # Check if current position is significantly different from first waypoint
+        #     pos_diff = torch.norm(current_xpos[:3, 3] - xpos_tensor[0, :3, 3]).item()
+        #     rot_diff = torch.norm(current_xpos[:3, :3] - xpos_tensor[0, :3, :3]).item()
+
+        #     if pos_diff > 0.001 or rot_diff > 0.01:
+        #         xpos_list = torch.cat([current_xpos.unsqueeze(0), xpos_tensor], dim=0)
+        #         if qpos_list is not None:
+        #             if not isinstance(qpos_list, torch.Tensor):
+        #                 qpos_list = np.asarray(qpos_list)
+        #             qpos_tensor = torch.as_tensor(
+        #                 qpos_list, dtype=torch.float32, device=self.robot.device
+        #             )
+        #             qpos_list = torch.cat(
+        #                 [current_qpos.unsqueeze(0), qpos_tensor], dim=0
+        #             )
+        #     else:
+        #         xpos_list = xpos_tensor
+        # Input validation
+        if len(xpos_list) < 2:
+            logger.log_warning("xpos_list must contain at least 2 points")
+            return None, None
+
+        # Calculate point allocations for interpolation
+        interpolated_point_allocations = calculate_point_allocations(
+            xpos_list, step_size=0.002, angle_step=np.pi / 90, device=self.device
+        )
+        # Input validation
+        if len(xpos_list) < 2:
+            logger.log_warning("xpos_list must contain at least 2 points")
+            empty_qpos = torch.empty((0, self.dof), dtype=torch.float32)
+            empty_xpos = torch.empty((0, 4, 4), dtype=torch.float32)
+            return empty_qpos, empty_xpos
+
+        # Calculate point allocations for interpolation
+        interpolated_point_allocations = calculate_point_allocations(
+            xpos_list, step_size=0.002, angle_step=np.pi / 90
+        )
+
+        qpos_seed = cfg.qpos_seed
+        if qpos_seed is None and qpos_list is not None:
+            qpos_seed = qpos_list[0]
+        # Generate trajectory
+        interpolate_qpos_list = []
+        if cfg.is_linear or qpos_list is None:
+            # Linear cartesian interpolation
+            feasible_pose_targets = []
+            for i in range(len(xpos_list) - 1):
+                interpolated_poses = interpolate_xpos(
+                    (
+                        xpos_list[i].detach().cpu().numpy()
+                        if isinstance(xpos_list, torch.Tensor)
+                        else xpos_list[i]
+                    ),
+                    (
+                        xpos_list[i + 1].detach().cpu().numpy()
+                        if isinstance(xpos_list, torch.Tensor)
+                        else xpos_list[i + 1]
+                    ),
+                    interpolated_point_allocations[i],
+                )
+                for xpos in interpolated_poses:
+                    success, qpos = self.robot.compute_ik(
+                        pose=xpos, joint_seed=qpos_seed, name=control_part
+                    )
+
+                    if isinstance(success, torch.Tensor):
+                        is_success = bool(success.all())
+                    elif isinstance(success, np.ndarray):
+                        is_success = bool(np.all(success))
+                    elif isinstance(success, (list, tuple)):
+                        is_success = all(success)
+                    else:
+                        is_success = bool(success)
+
+                    if isinstance(qpos, torch.Tensor):
+                        has_nan = torch.isnan(qpos).any().item()
+                    else:
+                        has_nan = np.isnan(qpos).any()
+
+                    if not is_success or qpos is None or has_nan:
+                        logger.log_debug(
+                            f"IK failed or returned nan at pose, skipping this point."
+                        )
+                        continue
+
+                    q_entry = qpos[0] if isinstance(qpos, (np.ndarray, list)) else qpos
+                    if isinstance(q_entry, torch.Tensor) and q_entry.dim() > 1:
+                        q_entry = q_entry.squeeze(0)
+                    interpolate_qpos_list.append(q_entry)
+                    feasible_pose_targets.append(xpos)
+                    qpos_seed = q_entry
+
+            # Vectorized FK feasibility check to keep only physically consistent IK outputs.
+            if len(interpolate_qpos_list) > 0:
+                qpos_tensor = torch.stack(
+                    [
+                        (
+                            q.to(dtype=torch.float32, device=self.robot.device)
+                            if isinstance(q, torch.Tensor)
+                            else torch.as_tensor(
+                                q, dtype=torch.float32, device=self.robot.device
+                            )
+                        )
+                        for q in interpolate_qpos_list
+                    ]
+                )
+                fk_batch = self.robot.compute_batch_fk(
+                    qpos=qpos_tensor.unsqueeze(0),
+                    name=control_part,
+                    to_matrix=True,
+                ).squeeze(0)
+                target_pose_tensor = torch.as_tensor(
+                    np.asarray(feasible_pose_targets),
+                    dtype=torch.float32,
+                    device=self.robot.device,
+                )
+                pos_err = torch.norm(
+                    fk_batch[:, :3, 3] - target_pose_tensor[:, :3, 3], dim=-1
+                )
+                rot_err = torch.norm(
+                    fk_batch[:, :3, :3] - target_pose_tensor[:, :3, :3],
+                    dim=(-2, -1),
+                )
+                valid_mask = (pos_err < 0.02) & (rot_err < 0.2)
+                interpolate_qpos_list = [
+                    q
+                    for q, is_valid in zip(interpolate_qpos_list, valid_mask)
+                    if bool(is_valid.item())
+                ]
+        else:
+            # Joint space interpolation
+            interpolate_qpos_list = [q for q in qpos_list]
+
+        if len(interpolate_qpos_list) < 2:
+            logger.log_error("Need at least 2 waypoints for trajectory planning")
+            return None, None
+
+        init_state = PlanState(
+            move_type=MoveType.JOINT_MOVE, qpos=interpolate_qpos_list[0]
+        )
+        target_states = []
+        for qpos in interpolate_qpos_list:
+            target_states.append(PlanState(move_type=MoveType.JOINT_MOVE, qpos=qpos))
+
+        return init_state, target_states

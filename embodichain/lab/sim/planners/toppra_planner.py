@@ -19,7 +19,11 @@ import numpy as np
 
 from embodichain.utils import logger, configclass
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.base_planner import BasePlanner, BasePlannerCfg
+from embodichain.lab.sim.planners.base_planner import (
+    BasePlanner,
+    BasePlannerCfg,
+    BasePlannerRuntimeCfg,
+)
 from .utils import PlanState, PlanResult
 
 try:
@@ -33,7 +37,7 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
-__all__ = ["ToppraPlannerCfg", "ToppraPlanner"]
+__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlannerRuntimeCfg"]
 
 
 @configclass
@@ -48,6 +52,14 @@ class ToppraPlannerCfg(BasePlannerCfg):
     """
 
     planner_type: str = "toppra"
+
+
+@configclass
+class ToppraPlannerRuntimeCfg(BasePlannerRuntimeCfg):
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
+    """Method for sampling the trajectory. Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples."""
+    sample_interval: float | int = 0.01
+    """Interval for sampling the trajectory. If sample_method is 'time', this is the time interval in seconds. If sample_method is 'quantity', this is the total number of samples."""
 
 
 class ToppraPlanner(BasePlanner):
@@ -85,19 +97,20 @@ class ToppraPlanner(BasePlanner):
         self,
         current_state: PlanState,
         target_states: list[PlanState],
-        **kwargs,
+        cfg: ToppraPlannerRuntimeCfg = ToppraPlannerRuntimeCfg(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
             current_state: Dictionary containing 'position', 'velocity', 'acceleration' for current state
             target_states: List of dictionaries containing target states
+            cfg: ToppraPlannerRuntimeCfg
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        sample_method = kwargs.get("sample_method", TrajectorySampleMethod.TIME)
-        sample_interval = kwargs.get("sample_interval", 0.01)
+        sample_method = cfg.sample_method
+        sample_interval = cfg.sample_interval
         if not isinstance(sample_interval, (float, int)):
             logger.log_error(
                 f"sample_interval must be float/int, got {type(sample_interval)}",

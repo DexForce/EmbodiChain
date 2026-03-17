@@ -23,7 +23,12 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import CobotMagicCfg
 
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.lab.sim.planners import (
+    MotionGenerator,
+    MotionGenCfg,
+    ToppraPlannerCfg,
+    ToppraPlannerRuntimeCfg,
+)
 
 
 def to_numpy(tensor):
@@ -184,13 +189,16 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         """Test trajectory generation with cartesian positions"""
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.2)
+
+        cfg = ToppraPlannerRuntimeCfg(
+            is_linear=is_linear,
+            qpos_seed=self.qpos_list[0],
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=20,
+        )
         out_qpos_list, out_xpos_list = self.motion_gen.create_discrete_trajectory(
             xpos_list=self.xpos_list,
-            is_use_current_qpos=True,
-            sample_num=self.sample_num,
-            is_linear=is_linear,
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            qpos_seed=self.qpos_list[0],
+            cfg=cfg,
         )
         out_qpos_list = to_numpy(out_qpos_list)
         assert (
@@ -210,12 +218,15 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.05)
         qpos_list_in = [qpos.to("cpu").numpy() for qpos in self.qpos_list]
+        cfg = ToppraPlannerRuntimeCfg(
+            is_linear=is_linear,
+            qpos_seed=self.qpos_list[0],
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=20,
+        )
         out_qpos_list, out_xpos_list = self.motion_gen.create_discrete_trajectory(
             qpos_list=qpos_list_in,
-            sample_num=self.sample_num,
-            is_linear=False,
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            qpos_seed=self.qpos_list[0],
+            cfg=cfg,
         )
         out_qpos_list = to_numpy(out_qpos_list)
         assert (

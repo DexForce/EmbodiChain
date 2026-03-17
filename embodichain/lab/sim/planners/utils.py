@@ -15,15 +15,24 @@
 # ----------------------------------------------------------------------------
 
 import torch
-
+import numpy as np
 from dataclasses import dataclass
+from scipy.spatial.transform import Rotation, Slerp
 from enum import Enum
-from typing import Union, __all__
+from typing import Union, List
 
 from embodichain.utils import logger
 
 
-__all__ = ["TrajectorySampleMethod", "MovePart", "MoveType", "PlanState", "PlanResult"]
+__all__ = [
+    "TrajectorySampleMethod",
+    "MovePart",
+    "MoveType",
+    "PlanState",
+    "PlanResult",
+    "calculate_point_allocations",
+    "interpolate_xpos",
+]
 
 
 class TrajectorySampleMethod(Enum):
@@ -140,3 +149,59 @@ class PlanState:
 
     pause_seconds: float = 0.0
     """Duration of a pause when `move_type` is `MoveType.PAUSE`."""
+
+
+def interpolate_xpos(
+    current_xpos: np.ndarray, target_xpos: np.ndarray, num_samples: int
+) -> np.ndarray:
+    """Interpolate between two poses using vectorized Slerp + linear translation."""
+    num_samples = max(2, int(num_samples))
+
+    interp_ratios = np.linspace(0.0, 1.0, num_samples)
+    slerp = Slerp(
+        [0.0, 1.0],
+        Rotation.from_matrix([current_xpos[:3, :3], target_xpos[:3, :3]]),
+    )
+    interp_rots = slerp(interp_ratios).as_matrix()
+    interp_trans = (1.0 - interp_ratios[:, None]) * current_xpos[:3, 3] + interp_ratios[
+        :, None
+    ] * target_xpos[:3, 3]
+
+    interp_poses = np.repeat(np.eye(4)[None, :, :], num_samples, axis=0)
+    interp_poses[:, :3, :3] = interp_rots
+    interp_poses[:, :3, 3] = interp_trans
+    return interp_poses
+
+
+def calculate_point_allocations(
+    xpos_list: torch.Tensor | np.ndarray,
+    step_size: float = 0.002,
+    angle_step: float = np.pi / 90,
+    device: torch.device = torch.device("cpu"),
+) -> List[int]:
+    """Calculate interpolation points for each segment with vectorized tensor ops."""
+    if not isinstance(xpos_list, torch.Tensor):
+        xpos_tensor = torch.as_tensor(
+            np.asarray(xpos_list), dtype=torch.float32, device=device
+        )
+    else:
+        xpos_tensor = xpos_list.to(dtype=torch.float32, device=device)
+
+    if xpos_tensor.dim() != 3 or xpos_tensor.shape[0] < 2:
+        return []
+
+    start_poses = xpos_tensor[:-1]  # [N-1, 4, 4]
+    end_poses = xpos_tensor[1:]  # [N-1, 4, 4]
+
+    pos_dists = torch.norm(end_poses[:, :3, 3] - start_poses[:, :3, 3], dim=-1)
+    pos_points = torch.clamp((pos_dists / step_size).int(), min=1)
+
+    rel_rot = torch.matmul(
+        start_poses[:, :3, :3].transpose(-1, -2), end_poses[:, :3, :3]
+    )
+    trace = rel_rot[:, 0, 0] + rel_rot[:, 1, 1] + rel_rot[:, 2, 2]
+    cos_angle = torch.clamp((trace - 1.0) / 2.0, -1.0 + 1e-6, 1.0 - 1e-6)
+    angles = torch.acos(cos_angle)
+    rot_points = torch.clamp((angles / angle_step).int(), min=1)
+
+    return torch.maximum(pos_points, rot_points).tolist()
