@@ -93,6 +93,9 @@ def main():
         MotionGenCfg,
         ToppraPlannerCfg,
         ToppraPlannerRuntimeCfg,
+        PlanState,
+        MoveType,
+        MovePart,
     )
 
     # Initialize motion generator
@@ -111,32 +114,49 @@ def main():
     qpos_list = torch.vstack(qpos_list)
     plan_runtime_cfg = ToppraPlannerRuntimeCfg(
         start_qpos=qpos_list[0],
+        is_pre_interpolate=True,
         is_linear=False,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
     )
-    out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        qpos_list=qpos_list,
-        runtime_cfg=plan_runtime_cfg,
+    target_states = []
+    for qpos in qpos_list:
+        target_states.append(
+            PlanState(
+                move_type=MoveType.JOINT_MOVE,
+                move_part=MovePart.LEFT,
+                qpos=qpos,
+            )
+        )
+    plan_result = motion_generator.plan(
+        target_states=target_states, runtime_cfg=plan_runtime_cfg
     )
-    move_robot_along_trajectory(robot, arm_name, out_qpos_list)
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
     cfg = ToppraPlannerRuntimeCfg(
         start_qpos=qpos_list[0],
+        is_pre_interpolate=True,
         is_linear=True,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
     )
-    xpos_list = torch.concatenate([xpos.unsqueeze(0) for xpos in xpos_list])
-    out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        xpos_list=xpos_list,
-        runtime_cfg=plan_runtime_cfg,
+    target_states = []
+    for xpos in xpos_list:
+        target_states.append(
+            PlanState(
+                move_type=MoveType.TCP_MOVE,
+                move_part=MovePart.LEFT,
+                xpos=xpos,
+            )
+        )
+    plan_result = motion_generator.plan(
+        target_states=target_states, runtime_cfg=plan_runtime_cfg
     )
     sim.reset()
-    move_robot_along_trajectory(robot, arm_name, out_qpos_list)
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
 
 if __name__ == "__main__":

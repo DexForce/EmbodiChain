@@ -28,6 +28,9 @@ from embodichain.lab.sim.planners import (
     MotionGenCfg,
     ToppraPlannerCfg,
     ToppraPlannerRuntimeCfg,
+    PlanState,
+    MoveType,
+    MovePart,
 )
 
 
@@ -191,22 +194,35 @@ class TestMotionGenerator(BaseTestMotionGenerator):
 
         runtime_cfg = ToppraPlannerRuntimeCfg(
             is_linear=is_linear,
+            is_pre_interpolate=True,
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=20,
         )
-        out_qpos_list, out_xpos_list = self.motion_gen.create_discrete_trajectory(
-            xpos_list=self.xpos_list,
-            runtime_cfg=runtime_cfg,
+        target_states = []
+        for xpos in self.xpos_list:
+            target_states.append(
+                PlanState(
+                    move_type=MoveType.TCP_MOVE,
+                    move_part=MovePart.LEFT,
+                    xpos=xpos,
+                )
+            )
+
+        plan_result = self.motion_gen.plan(
+            target_states=target_states, runtime_cfg=runtime_cfg
         )
-        out_qpos_list = to_numpy(out_qpos_list)
+        out_qpos_list = to_numpy(plan_result.positions)
         assert (
             len(out_qpos_list) == self.sample_num
         ), f"Sample number mismatch: {len(out_qpos_list)} != {self.sample_num}"
-        np.testing.assert_array_almost_equal(
-            out_xpos_list[-1], self.xpos_list[-1], decimal=3
-        )
+        test_xpos = self.robot.compute_fk(
+            qpos=plan_result.positions[-1].unsqueeze(0),
+            name=self.arm_name,
+            to_matrix=True,
+        )[0]
+        np.testing.assert_array_almost_equal(test_xpos, self.xpos_list[-1], decimal=3)
         self._execute_trajectory(out_qpos_list, forward=True)
         self.verify_final_xpos(self.xpos_list[-1])
         self._execute_trajectory(out_qpos_list, forward=False)
@@ -220,16 +236,25 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         qpos_list_in = [qpos.to("cpu").numpy() for qpos in self.qpos_list]
         runtime_cfg = ToppraPlannerRuntimeCfg(
             is_linear=is_linear,
+            is_pre_interpolate=True,
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=20,
         )
-        out_qpos_list, out_xpos_list = self.motion_gen.create_discrete_trajectory(
-            qpos_list=qpos_list_in,
-            runtime_cfg=runtime_cfg,
+        target_states = []
+        for qpos in self.qpos_list:
+            target_states.append(
+                PlanState(
+                    move_type=MoveType.JOINT_MOVE,
+                    move_part=MovePart.LEFT,
+                    qpos=qpos,
+                )
+            )
+        plan_result = self.motion_gen.plan(
+            target_states=target_states, runtime_cfg=runtime_cfg
         )
-        out_qpos_list = to_numpy(out_qpos_list)
+        out_qpos_list = to_numpy(plan_result.positions)
         assert (
             len(out_qpos_list) == self.sample_num
         ), f"Sample number mismatch: {len(out_qpos_list)} != {self.sample_num}"

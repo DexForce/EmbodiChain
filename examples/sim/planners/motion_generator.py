@@ -22,7 +22,6 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import CobotMagicCfg
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
 
 
 def move_robot_along_trajectory(
@@ -128,6 +127,9 @@ def main(interactive=False):
         MotionGenCfg,
         ToppraPlannerCfg,
         ToppraPlannerRuntimeCfg,
+        PlanState,
+        MoveType,
+        MovePart,
     )
 
     # Initialize motion generator
@@ -145,6 +147,7 @@ def main(interactive=False):
     current_qpos = robot.get_qpos(name=arm_name)[0]
     plan_runtime_cfg = ToppraPlannerRuntimeCfg(
         start_qpos=current_qpos,
+        is_pre_interpolate=True,
         is_linear=False,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
@@ -152,25 +155,44 @@ def main(interactive=False):
     )
     # Joint space trajectory
     qpos_list = torch.vstack(qpos_list)
-    out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        qpos_list=qpos_list, runtime_cfg=plan_runtime_cfg
+    target_states = []
+    for qpos in qpos_list:
+        target_states.append(
+            PlanState(
+                move_type=MoveType.JOINT_MOVE,
+                move_part=MovePart.LEFT,
+                qpos=qpos,
+            )
+        )
+    plan_result = motion_generator.plan(
+        target_states=target_states, runtime_cfg=plan_runtime_cfg
     )
-    move_robot_along_trajectory(robot, arm_name, out_qpos_list)
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
     plan_runtime_cfg = ToppraPlannerRuntimeCfg(
         start_qpos=current_qpos,
+        is_pre_interpolate=True,
         is_linear=True,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
     )
     xpos_list = torch.concatenate([xpos.unsqueeze(0) for xpos in xpos_list])
-    out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        xpos_list=xpos_list, runtime_cfg=plan_runtime_cfg
+    target_states = []
+    for xpos in xpos_list:
+        target_states.append(
+            PlanState(
+                move_type=MoveType.TCP_MOVE,
+                move_part=MovePart.LEFT,
+                xpos=xpos,
+            )
+        )
+    plan_result = motion_generator.plan(
+        target_states=target_states, runtime_cfg=plan_runtime_cfg
     )
     sim.reset()
-    move_robot_along_trajectory(robot, arm_name, out_qpos_list)
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     if interactive:
         # Enter IPython interactive shell if needed

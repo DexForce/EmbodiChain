@@ -118,73 +118,43 @@ class MotionGenerator:
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        # if cfg.is_pre_interpolate:
-        #     # if
-        #     pass
+        if runtime_cfg.is_pre_interpolate:
+            # interpolate trajectory to generate more waypoints for smoother motion and better constraint handling
+            if target_states[0].move_type == MoveType.TCP_MOVE:
+                xpos_list = []
+                for state in target_states:
+                    if state.move_type != MoveType.TCP_MOVE:
+                        logger.log_error(
+                            f"All states must be the same. First state is {target_states[0].move_type}, but got {state.move_type}"
+                        )
+                    xpos_list.append(state.xpos)
+                    qpos_list = None
+            elif target_states[0].move_type == MoveType.JOINT_MOVE:
+                qpos_list = []
+                for state in target_states:
+                    if state.move_type != MoveType.JOINT_MOVE:
+                        logger.log_error(
+                            f"All states must be the same. First state is {target_states[0].move_type}, but got {state.move_type}"
+                        )
+                    qpos_list.append(state.qpos)
+                    xpos_list = None
+            else:
+                logger.log_error(
+                    f"Unsupported move type for pre-interpolation: {target_states[0].move_type}"
+                )
+            init_plan_state, target_plan_states = self.planner.interpolate_trajectory(
+                control_part=runtime_cfg.control_part,
+                xpos_list=xpos_list,
+                qpos_list=qpos_list,
+                cfg=runtime_cfg,
+            )
+        else:
+            target_plan_states = target_states
 
-        result = self.planner.plan(target_states=target_states, runtime_cfg=runtime_cfg)
-        return result
-
-    def create_discrete_trajectory(
-        self,
-        xpos_list: torch.Tensor | None = None,
-        qpos_list: torch.Tensor | None = None,
-        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        r"""Generate a discrete trajectory between waypoints using cartesian or joint space interpolation.
-
-        This method supports two trajectory planning approaches:
-        1. Linear interpolation: Fast, uniform spacing, no dynamics constraints
-        2. Planner-based: Smooth, considers velocity/acceleration limits, realistic motion
-
-        Args:
-            xpos_list: Waypoints as a tensor of 4x4 transformation matrices [N, 4, 4] (optional)
-            qpos_list: Joint configurations as a tensor [N, dof] (optional)
-            runtime_cfg:  Planner runtime configuration.
-
-        Returns:
-            A tuple containing:
-            - torch.Tensor: Joint space trajectory tensor [N, dof]
-            - torch.Tensor: Cartesian space trajectory tensor [N, 4, 4]
-        """
-        init_plan_state, target_plan_states = self.planner.interpolate_trajectory(
-            control_part=runtime_cfg.control_part,
-            xpos_list=xpos_list,
-            qpos_list=qpos_list,
-            cfg=runtime_cfg,
-        )
-
-        if init_plan_state is None or target_plan_states is None:
-            empty_qpos = torch.empty((0, self.dof), dtype=torch.float32)
-            empty_xpos = torch.empty((0, 4, 4), dtype=torch.float32)
-            return empty_qpos, empty_xpos
-
-        # Plan trajectory using internal plan method
-        plan_result = self.plan(
+        result = self.planner.plan(
             target_states=target_plan_states, runtime_cfg=runtime_cfg
         )
-
-        if not plan_result.success or plan_result.positions is None:
-            logger.log_error("Failed to plan trajectory")
-
-        # Convert outputs to tensor format
-        out_qpos_tensor = (
-            plan_result.positions.to(dtype=torch.float32, device=self.robot.device)
-            if isinstance(plan_result.positions, torch.Tensor)
-            else torch.as_tensor(
-                plan_result.positions, dtype=torch.float32, device=self.robot.device
-            )
-        )
-        if out_qpos_tensor.dim() == 1:
-            out_qpos_tensor = out_qpos_tensor.unsqueeze(0)
-
-        out_xpos_tensor = self.robot.compute_batch_fk(
-            qpos=out_qpos_tensor.unsqueeze(0),
-            name=runtime_cfg.control_part,
-            to_matrix=True,
-        ).squeeze_(0)
-
-        return out_qpos_tensor, out_xpos_tensor
+        return result
 
     def estimate_trajectory_sample_count(
         self,
