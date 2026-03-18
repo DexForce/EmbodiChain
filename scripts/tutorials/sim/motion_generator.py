@@ -92,7 +92,7 @@ def main():
         MotionGenerator,
         MotionGenCfg,
         ToppraPlannerCfg,
-        ToppraPlannerRuntimeCfg,
+        ToppraPlanOptions,
         PlanState,
         MoveType,
         MovePart,
@@ -112,7 +112,7 @@ def main():
 
     # Joint space trajectory
     qpos_list = torch.vstack(qpos_list)
-    plan_runtime_cfg = ToppraPlannerRuntimeCfg(
+    plan_runtime_cfg = ToppraPlanOptions(
         start_qpos=qpos_list[0],
         is_pre_interpolate=True,
         is_linear=False,
@@ -135,7 +135,7 @@ def main():
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
-    cfg = ToppraPlannerRuntimeCfg(
+    cfg = ToppraPlanOptions(
         start_qpos=qpos_list[0],
         is_pre_interpolate=True,
         is_linear=True,
@@ -147,7 +147,7 @@ def main():
     for xpos in xpos_list:
         target_states.append(
             PlanState(
-                move_type=MoveType.TCP_MOVE,
+                move_type=MoveType.EEF_MOVE,
                 move_part=MovePart.LEFT,
                 xpos=xpos,
             )

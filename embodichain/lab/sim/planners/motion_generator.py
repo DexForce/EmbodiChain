@@ -19,16 +19,14 @@ import numpy as np
 
 from dataclasses import MISSING
 from typing import Dict, List, Tuple, Union, Any
-from scipy.spatial.transform import Rotation, Slerp
 
 from embodichain.lab.sim.planners import (
     BasePlannerCfg,
-    BasePlannerRuntimeCfg,
+    PlanOptions,
     BasePlanner,
     ToppraPlanner,
     ToppraPlannerCfg,
 )
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.utils import logger, configclass
 from .utils import MovePart, MoveType, PlanState, PlanResult
@@ -47,18 +45,10 @@ class MotionGenerator:
     r"""Unified motion generator for robot trajectory planning.
 
     This class provides a unified interface for trajectory planning with and without
-    collision checking. It supports V3 environment interfaces and can use different
-    types of planners (ToppraPlanner, RRT, PRM, etc.) for trajectory generation.
+    collision checking.
 
     Args:
-        robot: Robot agent object (must support compute_fk, compute_ik, dof, get_joint_ids)
-        uid: Unique identifier for the robot (optional)
-        sim: Simulation environment object (optional, reserved for future collision checking)
-        planner_type: Type of planner to use (default: "toppra")
-        default_velocity: Default velocity limits for each joint (rad/s)
-        default_acceleration: Default acceleration limits for each joint (rad/s²)
-        collision_margin: Safety margin for collision checking (meters, reserved for future use)
-        **kwargs: Additional arguments passed to planner initialization
+        cfg: Configuration object for motion generation, must include 'planner_cfg' attribute
     """
 
     _support_planner_dict = {
@@ -66,13 +56,13 @@ class MotionGenerator:
     }
 
     @classmethod
-    def register_planner_type(cls, name: str, planner_class, planner_cfg_class):
+    def register_planner_type(cls, name: str, planner_class, planner_cfg_class) -> None:
         """
         Register a new planner type.
         """
         cls._support_planner_dict[name] = (planner_class, planner_cfg_class)
 
-    def __init__(self, cfg: MotionGenCfg):
+    def __init__(self, cfg: MotionGenCfg) -> None:
 
         # Create planner based on planner_type
         self.planner: BasePlanner = self._create_planner(cfg.planner_cfg)
@@ -103,27 +93,26 @@ class MotionGenerator:
     def plan(
         self,
         target_states: List[PlanState],
-        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        plan_opts: PlanOptions = PlanOptions(),
     ) -> PlanResult:
-        r"""Plan trajectory without collision checking.
+        r"""Plan trajectory with given options.
 
         This method generates a smooth trajectory using the selected planner that satisfies
-        velocity and acceleration constraints, but does not check for collisions.
+        constraints and perform pre-interpolation if specified in the options.
 
         Args:
-            current_state: PlanState
-            target_states: List of PlanState
-            cfg:  Planner runtime configuration.
+            target_states: List[PlanState]
+            plan_opts: PlanOptions
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        if runtime_cfg.is_pre_interpolate:
+        if plan_opts.is_pre_interpolate:
             # interpolate trajectory to generate more waypoints for smoother motion and better constraint handling
-            if target_states[0].move_type == MoveType.TCP_MOVE:
+            if target_states[0].move_type == MoveType.EEF_MOVE:
                 xpos_list = []
                 for state in target_states:
-                    if state.move_type != MoveType.TCP_MOVE:
+                    if state.move_type != MoveType.EEF_MOVE:
                         logger.log_error(
                             f"All states must be the same. First state is {target_states[0].move_type}, but got {state.move_type}"
                         )
@@ -142,17 +131,17 @@ class MotionGenerator:
                 logger.log_error(
                     f"Unsupported move type for pre-interpolation: {target_states[0].move_type}"
                 )
-            init_plan_state, target_plan_states = self.planner.interpolate_trajectory(
-                control_part=runtime_cfg.control_part,
+            target_plan_states = self.planner.interpolate_trajectory(
+                control_part=plan_opts.control_part,
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
-                cfg=runtime_cfg,
+                cfg=plan_opts,
             )
         else:
             target_plan_states = target_states
 
         result = self.planner.plan(
-            target_states=target_plan_states, runtime_cfg=runtime_cfg
+            target_states=target_plan_states, plan_opts=plan_opts
         )
         return result
 
@@ -163,7 +152,6 @@ class MotionGenerator:
         step_size: float | torch.Tensor = 0.01,
         angle_step: float | torch.Tensor = np.pi / 90,
         control_part: str | None = None,
-        **kwargs,
     ) -> torch.Tensor:
         """Estimate the number of trajectory sampling points required.
 
@@ -176,7 +164,6 @@ class MotionGenerator:
             qpos_list: Tensor of joint positions, shape [B, N, D] or [N, D] (optional)
             step_size: Maximum allowed distance between points (meters). Float or Tensor [B]
             angle_step: Maximum allowed angular difference between points (radians). Float or Tensor [B]
-            **kwargs: Additional parameters for further customization
 
         Returns:
             torch.Tensor: Estimated number of sampling points per trajectory, shape [B]

@@ -17,6 +17,7 @@
 import torch
 import numpy as np
 
+import functools
 from abc import ABC, abstractmethod
 from dataclasses import MISSING
 import matplotlib.pyplot as plt
@@ -27,7 +28,7 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 from .utils import PlanState, PlanResult, calculate_point_allocations, interpolate_xpos
 from .utils import MovePart, MoveType
 
-__all__ = ["BasePlannerCfg", "BasePlannerRuntimeCfg", "BasePlanner"]
+__all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
 
 
 @configclass
@@ -36,11 +37,11 @@ class BasePlannerCfg:
     robot_uid: str = MISSING
     """UID of the robot to control. Must correspond to a robot added to the simulation with this UID."""
 
-    planner_type: str = "Base"
+    planner_type: str = "base"
 
 
 @configclass
-class BasePlannerRuntimeCfg:
+class PlanOptions:
     start_qpos: torch.Tensor | None = None
     """Optional starting joint configuration for the trajectory. If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
 
@@ -58,6 +59,52 @@ class BasePlannerRuntimeCfg:
 
     interpolate_angle_step: float = np.pi / 90
     """Angular step size for interpolation in joint space (radians). Only used if is_linear is False."""
+
+
+def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
+    """Decorator (factory) that validates the ``options`` argument is a ``PlanOptions`` instance.
+
+    Supports three usage styles:
+
+    .. code-block:: python
+
+        # 1. Bare decorator — validates against PlanOptions (default)
+        @validate_plan_options
+        def plan(self, target_states, options=PlanOptions()): ...
+
+        # 2. Called with no arguments — same as above
+        @validate_plan_options()
+        def plan(self, target_states, options=PlanOptions()): ...
+
+        # 3. Custom options class — useful in BasePlanner subclasses
+        @validate_plan_options(options_cls=MyPlanOptions)
+        def plan(self, target_states, options=MyPlanOptions()): ...
+
+    Args:
+        _func: Populated automatically when used as a bare decorator (no parentheses).
+        options_cls: The expected type for the ``options`` argument. Subclasses of
+            this type are also accepted. Defaults to :class:`PlanOptions`.
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            options = kwargs.get("options", args[1] if len(args) > 1 else None)
+            if options is not None and not isinstance(options, options_cls):
+                logger.log_error(
+                    f"Expected 'options' to be of type {options_cls.__name__} "
+                    f"(or a subclass), but got {type(options).__name__}.",
+                    TypeError,
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    if _func is not None:
+        # Used as @validate_plan_options (no parentheses) — decorate immediately.
+        return decorator(_func)
+    # Used as @validate_plan_options() or @validate_plan_options(options_cls=...).
+    return decorator
 
 
 class BasePlanner(ABC):
@@ -78,15 +125,16 @@ class BasePlanner(ABC):
 
         self.robot = SimulationManager.get_instance().get_robot(cfg.robot_uid)
         if self.robot is None:
-            logger.log_error(f"Robot with uid {cfg.robot_uid} not found", ValueError)
+            logger.log_error(f"Robot {cfg.robot_uid} not found", ValueError)
 
         self.device = self.robot.device
 
+    @validate_plan_options
     @abstractmethod
     def plan(
         self,
         target_states: list[PlanState],
-        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        options: PlanOptions = PlanOptions(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
@@ -250,33 +298,6 @@ class BasePlanner(ABC):
                         label=label,
                     )
 
-        # Plot constraints (only for first joint to avoid clutter)
-        has_constraints = (
-            hasattr(self.cfg, "constraints") and self.cfg.constraints is not None
-        )
-        if self.dofs > 0 and has_constraints:
-            plot_idx = 1
-            if vels is not None:
-                max_vel = self.cfg.constraints["velocity"][0]
-                axs[plot_idx].plot(
-                    time_steps,
-                    [-max_vel] * len(time_steps),
-                    "k--",
-                    label="Max Velocity",
-                )
-                axs[plot_idx].plot(time_steps, [max_vel] * len(time_steps), "k--")
-                plot_idx += 1
-
-            if accs is not None:
-                max_acc = self.cfg.constraints["acceleration"][0]
-                axs[plot_idx].plot(
-                    time_steps,
-                    [-max_acc] * len(time_steps),
-                    "k--",
-                    label="Max Acceleration",
-                )
-                axs[plot_idx].plot(time_steps, [max_acc] * len(time_steps), "k--")
-
         axs[0].set_title("Position")
         plot_idx = 1
         if vels is not None:
@@ -298,18 +319,28 @@ class BasePlanner(ABC):
         control_part: str | None = None,
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
-        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        cfg: PlanOptions = PlanOptions(),
     ) -> tuple[PlanState, list[PlanState]]:
-        if qpos_list is not None:
-            if not isinstance(qpos_list, torch.Tensor):
-                qpos_list = np.asarray(qpos_list)
-            qpos_tensor = torch.as_tensor(
-                qpos_list, dtype=torch.float32, device=self.robot.device
-            )
-            if qpos_tensor.dim() == 1:
-                qpos_tensor = qpos_tensor.unsqueeze(0)
+        r"""Interpolate trajectory based on provided waypoints.
+            This method performs interpolation on the provided waypoints to generate a smoother trajectory.
+            It supports both Cartesian (end-effector) and joint space interpolation based on the control part and options specified.
 
-            qpos_batch = qpos_tensor.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
+        Args:
+            control_part: Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration.
+            xpos_list: List of end-effector poses (torch.Tensor of shape [N, 4, 4]) to interpolate through. Required if control_part is an end-effector control part.
+            qpos_list: List of joint positions (torch.Tensor of shape [N, DOF]) to interpolate through. Required if control_part is a joint control part.
+            cfg: PlanOptions containing interpolation settings such as step size and whether to use linear interpolation.
+
+        Returns:
+            init_state: PlanState representing the initial state of the trajectory (first waypoint).
+            target_states: List of PlanState representing the interpolated waypoints for the trajectory.
+        """
+
+        if qpos_list is not None:
+            if qpos_list.dim() == 1:
+                qpos_list = qpos_list.unsqueeze(0)
+
+            qpos_batch = qpos_list.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
             xpos_batch = self.robot.compute_batch_fk(
                 qpos=qpos_batch,
                 name=control_part,
@@ -319,10 +350,7 @@ class BasePlanner(ABC):
             qpos_list = qpos_tensor
 
         if xpos_list is None:
-            logger.log_warning("Either xpos_list or qpos_list must be provided")
-            empty_qpos = torch.empty((0, self.dof), dtype=torch.float32)
-            empty_xpos = torch.empty((0, 4, 4), dtype=torch.float32)
-            return empty_qpos, empty_xpos
+            logger.log_error("Either xpos_list or qpos_list must be provided")
 
         if not isinstance(xpos_list, torch.Tensor):
             xpos_list = torch.as_tensor(
@@ -343,6 +371,7 @@ class BasePlanner(ABC):
                 else None
             )
             xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
+
         # Input validation
         if len(xpos_list) < 2:
             logger.log_warning("xpos_list must contain at least 2 points")
@@ -350,24 +379,17 @@ class BasePlanner(ABC):
 
         # Calculate point allocations for interpolation
         interpolated_point_allocations = calculate_point_allocations(
-            xpos_list, step_size=0.002, angle_step=np.pi / 90, device=self.device
-        )
-        # Input validation
-        if len(xpos_list) < 2:
-            logger.log_warning("xpos_list must contain at least 2 points")
-            empty_qpos = torch.empty((0, self.dof), dtype=torch.float32)
-            empty_xpos = torch.empty((0, 4, 4), dtype=torch.float32)
-            return empty_qpos, empty_xpos
-
-        # Calculate point allocations for interpolation
-        interpolated_point_allocations = calculate_point_allocations(
-            xpos_list, step_size=0.002, angle_step=np.pi / 90
+            xpos_list,
+            step_size=cfg.interpolate_position_step,
+            angle_step=cfg.interpolate_angle_step,
+            device=self.device,
         )
 
         # currently we use
         qpos_seed = cfg.start_qpos
         if qpos_seed is None and qpos_list is not None:
             qpos_seed = qpos_list[0]
+
         # Generate trajectory
         interpolate_qpos_list = []
         if cfg.is_linear or qpos_list is None:
@@ -462,13 +484,9 @@ class BasePlanner(ABC):
 
         if len(interpolate_qpos_list) < 2:
             logger.log_error("Need at least 2 waypoints for trajectory planning")
-            return None, None
 
-        init_state = PlanState(
-            move_type=MoveType.JOINT_MOVE, qpos=interpolate_qpos_list[0]
-        )
         target_states = []
         for qpos in interpolate_qpos_list:
             target_states.append(PlanState(move_type=MoveType.JOINT_MOVE, qpos=qpos))
 
-        return init_state, target_states
+        return target_states

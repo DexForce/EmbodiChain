@@ -27,7 +27,7 @@ from embodichain.lab.sim.planners import (
     MotionGenerator,
     MotionGenCfg,
     ToppraPlannerCfg,
-    ToppraPlannerRuntimeCfg,
+    ToppraPlanOptions,
     PlanState,
     MoveType,
     MovePart,
@@ -192,7 +192,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.2)
 
-        runtime_cfg = ToppraPlannerRuntimeCfg(
+        runtime_cfg = ToppraPlanOptions(
             is_linear=is_linear,
             is_pre_interpolate=True,
             start_qpos=self.qpos_list[0],
@@ -204,7 +204,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         for xpos in self.xpos_list:
             target_states.append(
                 PlanState(
-                    move_type=MoveType.TCP_MOVE,
+                    move_type=MoveType.EEF_MOVE,
                     move_part=MovePart.LEFT,
                     xpos=xpos,
                 )
@@ -234,7 +234,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.05)
         qpos_list_in = [qpos.to("cpu").numpy() for qpos in self.qpos_list]
-        runtime_cfg = ToppraPlannerRuntimeCfg(
+        runtime_cfg = ToppraPlanOptions(
             is_linear=is_linear,
             is_pre_interpolate=True,
             start_qpos=self.qpos_list[0],

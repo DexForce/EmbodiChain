@@ -72,7 +72,17 @@ class TrajectorySampleMethod(Enum):
 
 
 class MovePart(Enum):
-    """Enumeration for different robot parts to move."""
+    r"""Enumeration for different robot parts to move.
+
+    Defines robot part selection for motion planning.
+
+    Attributes:
+        LEFT (int): left arm or end-effector.
+        RIGHT (int): right arm or end-effector.
+        BOTH (int): both arms or end-effectors.
+        TORSO (int): torso for humanoid robot.
+        ALL (int): all joints of the robot (joint control only).
+    """
 
     LEFT = 0  # left arm|eef
     RIGHT = 1  # right arm|eef
@@ -82,10 +92,20 @@ class MovePart(Enum):
 
 
 class MoveType(Enum):
-    """Enumeration for different types of movements."""
+    r"""Enumeration for different types of movements.
+
+    Defines movement types for robot planning.
+
+    Attributes:
+        TOOL (int): Tool open or close.
+        EEF_MOVE (int): Move end-effector to target pose (IK + trajectory).
+        JOINT_MOVE (int): Move joints to target angles (trajectory planning).
+        SYNC (int): Synchronized left/right arm movement (dual-arm robots).
+        PAUSE (int): Pause for specified duration (see PlanState.pause_seconds).
+    """
 
     TOOL = 0  # Tool open or close
-    TCP_MOVE = 1  # Move the end-effector to a target pose (xpos) using IK and trajectory planning
+    EEF_MOVE = 1  # Move the end-effector to a target pose (xpos) using IK and trajectory planning
     JOINT_MOVE = (
         2  # Directly move joints to target angles (qpos) using trajectory planning
     )
@@ -130,7 +150,7 @@ class PlanState:
     """Robot part that should move."""
 
     xpos: torch.Tensor | None = None
-    """Target TCP pose (4x4 matrix) for `MoveType.TCP_MOVE`."""
+    """Target TCP pose (4x4 matrix) for `MoveType.EEF_MOVE`."""
 
     qpos: torch.Tensor | None = None
     """Target joint angles for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""

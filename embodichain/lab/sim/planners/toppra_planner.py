@@ -20,9 +20,10 @@ import numpy as np
 from embodichain.utils import logger, configclass
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import (
+    validate_plan_options,
     BasePlanner,
     BasePlannerCfg,
-    BasePlannerRuntimeCfg,
+    PlanOptions,
 )
 from .utils import PlanState, PlanResult
 
@@ -37,113 +38,143 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
-__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlannerRuntimeCfg"]
+__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
 
 
 @configclass
 class ToppraPlannerCfg(BasePlannerCfg):
 
-    constraints: dict = {
-        "velocity": 0.2,
-        "acceleration": 0.5,
-    }
-    """Constraints for the planner, including velocity and acceleration limits. Should be a 
-    dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
-    """
-
     planner_type: str = "toppra"
 
 
 @configclass
-class ToppraPlannerRuntimeCfg(BasePlannerRuntimeCfg):
+class ToppraPlanOptions(PlanOptions):
+
+    constraints: dict = {
+        "velocity": 0.2,
+        "acceleration": 0.5,
+    }
+    """Constraints for the planner, including velocity and acceleration limits. 
+
+    Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    """
+
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
-    """Method for sampling the trajectory. Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples."""
+    """Method for sampling the trajectory. 
+    
+    Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
+    """
+
     sample_interval: float | int = 0.01
-    """Interval for sampling the trajectory. If sample_method is 'time', this is the time interval in seconds. If sample_method is 'quantity', this is the total number of samples."""
+    """Interval for sampling the trajectory. 
+    
+    If sample_method is 'time', this is the time interval in seconds. 
+    If sample_method is 'quantity', this is the total number of samples.
+    """
 
 
 class ToppraPlanner(BasePlanner):
     def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 
+        References:
+            - TOPPRA: Time-Optimal Path Parameterization for Robotic Systems (https://github.com/hungpham2511/toppra)
+
         Args:
             cfg: Configuration object containing ToppraPlanner settings
         """
         super().__init__(cfg)
 
+        if self.robot.num_instances > 1:
+            logger.log_error(
+                "ToppraPlanner does not support multiple robot instances",
+                NotImplementedError,
+            )
+
+    @validate_plan_options(options_cls=ToppraPlanOptions)
     def plan(
         self,
         target_states: list[PlanState],
-        runtime_cfg: ToppraPlannerRuntimeCfg = ToppraPlannerRuntimeCfg(),
+        options: ToppraPlanOptions = ToppraPlanOptions(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
             target_states: List of dictionaries containing target states
-            cfg: ToppraPlannerRuntimeCfg
+            cfg: ToppraPlanOptions
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        joint_ids = self.robot.get_joint_ids(
-            runtime_cfg.control_part, remove_mimic=True
-        )
+        joint_ids = self.robot.get_joint_ids(options.control_part, remove_mimic=True)
         dofs = len(joint_ids)
 
         # set constraints
-        if isinstance(self.cfg.constraints["velocity"], float):
-            self.vlims = np.array(
+        if isinstance(options.constraints["velocity"], float):
+            vlims = np.array(
                 [
                     [
-                        -self.cfg.constraints["velocity"],
-                        self.cfg.constraints["velocity"],
+                        -options.constraints["velocity"],
+                        options.constraints["velocity"],
                     ]
                     for _ in range(dofs)
                 ]
             )
         else:
-            self.vlims = np.array(self.cfg.constraints["velocity"])
+            vlims = np.array(options.constraints["velocity"])
 
-        if isinstance(self.cfg.constraints["acceleration"], float):
-            self.alims = np.array(
+        if isinstance(options.constraints["acceleration"], float):
+            alims = np.array(
                 [
                     [
-                        -self.cfg.constraints["acceleration"],
-                        self.cfg.constraints["acceleration"],
+                        -options.constraints["acceleration"],
+                        options.constraints["acceleration"],
                     ]
                     for _ in range(dofs)
                 ]
             )
         else:
-            self.alims = np.array(self.cfg.constraints["acceleration"])
+            alims = np.array(options.constraints["acceleration"])
 
-        sample_method = runtime_cfg.sample_method
-        sample_interval = runtime_cfg.sample_interval
-        if not isinstance(sample_interval, (float, int)):
-            logger.log_error(
-                f"sample_interval must be float/int, got {type(sample_interval)}",
-                TypeError,
-            )
+        sample_method = options.sample_method
+        sample_interval = options.sample_interval
         if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
             logger.log_error("Time interval must be positive", ValueError)
-        elif sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
+        if sample_method == TrajectorySampleMethod.TIME and isinstance(
+            sample_interval, int
+        ):
+            logger.log_error(
+                "Time interval must be a float when sample_method is TIME", TypeError
+            )
+        if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
             logger.log_error("At least 2 sample points required", ValueError)
+        if sample_method == TrajectorySampleMethod.QUANTITY and isinstance(
+            sample_interval, float
+        ):
+            logger.log_error(
+                "Number of samples must be an integer when sample_method is QUANTITY",
+                TypeError,
+            )
 
         # Check waypoints
-        start_qpos = (
-            runtime_cfg.start_qpos
-            if runtime_cfg.start_qpos is not None
-            else target_states[0].qpos
-        )
+        if options.start_qpos:
+            start_qpos = options.start_qpos
+        else:
+            start_qpos = self.robot.get_qpos(name=options.control_part)[0]
+
         if len(start_qpos) != dofs:
-            logger.log_error("Current waypoint does not align")
-        for target in target_states:
+            logger.log_error("Start waypoints do not align")
+        for i, target in enumerate(target_states):
+            if target.qpos is None:
+                logger.log_error(f"Target state at index {i} missing qpos")
             if len(target.qpos) != dofs:
-                logger.log_error("Target waypoints do not align")
+                logger.log_error(f"Target waypoints do not align at index {i}")
 
         if (
             len(target_states) == 1
-            and np.sum(np.abs(np.array(target_states[0].qpos) - np.array(start_qpos)))
+            and np.sum(
+                np.abs(target_states[0].qpos.cpu().numpy() - start_qpos.cpu().numpy())
+            )
             < 1e-3
         ):
             logger.log_warning("Only two same waypoints, returning trivial trajectory.")
@@ -188,8 +219,8 @@ class ToppraPlanner(BasePlanner):
         path = ta.SplineInterpolator(ss, waypoints)
 
         # Set constraints
-        pc_vel = constraint.JointVelocityConstraint(self.vlims)
-        pc_acc = constraint.JointAccelerationConstraint(self.alims)
+        pc_vel = constraint.JointVelocityConstraint(vlims)
+        pc_acc = constraint.JointAccelerationConstraint(alims)
 
         # Create TOPPRA instance
         instance = ta.algorithm.TOPPRA(

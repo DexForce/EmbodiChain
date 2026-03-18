@@ -126,7 +126,7 @@ def main(interactive=False):
         MotionGenerator,
         MotionGenCfg,
         ToppraPlannerCfg,
-        ToppraPlannerRuntimeCfg,
+        ToppraPlanOptions,
         PlanState,
         MoveType,
         MovePart,
@@ -145,7 +145,7 @@ def main(interactive=False):
     motion_generator = MotionGenerator(cfg=motion_cfg)
 
     current_qpos = robot.get_qpos(name=arm_name)[0]
-    plan_runtime_cfg = ToppraPlannerRuntimeCfg(
+    plan_runtime_cfg = ToppraPlanOptions(
         start_qpos=current_qpos,
         is_pre_interpolate=True,
         is_linear=False,
@@ -170,7 +170,7 @@ def main(interactive=False):
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
-    plan_runtime_cfg = ToppraPlannerRuntimeCfg(
+    plan_runtime_cfg = ToppraPlanOptions(
         start_qpos=current_qpos,
         is_pre_interpolate=True,
         is_linear=True,
@@ -183,7 +183,7 @@ def main(interactive=False):
     for xpos in xpos_list:
         target_states.append(
             PlanState(
-                move_type=MoveType.TCP_MOVE,
+                move_type=MoveType.EEF_MOVE,
                 move_part=MovePart.LEFT,
                 xpos=xpos,
             )
