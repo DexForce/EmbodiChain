@@ -59,15 +59,20 @@ def _create_minimal_distributed_config():
     reason="torch.distributed is not available",
 )
 def test_distributed_training_via_torchrun():
-    """Run distributed training via torchrun (subprocess) to exercise the distributed path."""
+    """Run distributed training via torchrun (subprocess) to exercise the distributed path.
+
+    Uses 2 processes when 2+ GPUs are available to validate multi-rank behavior
+    (all_reduce, all_gather). Falls back to 1 process otherwise.
+    """
     config_path = _create_minimal_distributed_config()
+    nproc = 2 if torch.cuda.device_count() >= 2 else 1
     try:
         result = subprocess.run(
             [
                 sys.executable,
                 "-m",
                 "torch.distributed.run",
-                "--nproc_per_node=1",
+                f"--nproc_per_node={nproc}",
                 "--standalone",
                 "-m",
                 "embodichain.agents.rl.train",

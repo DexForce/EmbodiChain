@@ -46,8 +46,9 @@ def parse_args():
     parser.add_argument("--config", type=str, required=True, help="Path to JSON config")
     parser.add_argument(
         "--distributed",
-        action="store_true",
-        help="Enable multi-GPU distributed training",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable multi-GPU distributed training",
     )
     return parser.parse_args()
 
@@ -160,7 +161,13 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         torch.cuda.manual_seed_all(effective_seed)
 
     # Outputs
-    run_stamp = time.strftime("%Y%m%d_%H%M%S")
+    if distributed:
+        run_stamp = time.strftime("%Y%m%d_%H%M%S") if rank == 0 else None
+        run_stamp_list = [run_stamp]
+        torch.distributed.broadcast_object_list(run_stamp_list, src=0)
+        run_stamp = run_stamp_list[0]
+    else:
+        run_stamp = time.strftime("%Y%m%d_%H%M%S")
     run_base = os.path.join("outputs", f"{exp_name}_{run_stamp}")
     log_dir = os.path.join(run_base, "logs")
     checkpoint_dir = os.path.join(run_base, "checkpoints")
@@ -399,8 +406,7 @@ def train_from_config(config_path: str, distributed: bool | None = None):
 def main():
     """Main entry point for command-line training."""
     args = parse_args()
-    distributed_arg = args.distributed if args.distributed else None
-    train_from_config(args.config, distributed=distributed_arg)
+    train_from_config(args.config, distributed=args.distributed)
 
 
 if __name__ == "__main__":
