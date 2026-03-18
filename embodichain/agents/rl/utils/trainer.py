@@ -51,8 +51,14 @@ class Trainer:
         event_cfg=None,
         eval_event_cfg=None,
         num_eval_episodes: int = 5,
+        distributed: bool = False,
+        rank: int = 0,
+        world_size: int = 1,
     ):
         self.policy = policy
+        self.distributed = distributed
+        self.rank = rank
+        self.world_size = world_size
         self.env = env
         self.eval_env = eval_env
         self.algorithm = algorithm
@@ -139,7 +145,8 @@ class Trainer:
         return out
 
     def train(self, total_timesteps: int):
-        print(f"Start training, total steps: {total_timesteps}")
+        if self.rank == 0:
+            print(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
@@ -174,9 +181,10 @@ class Trainer:
                 self.curr_ret[done_idx] = 0
                 self.curr_len[done_idx] = 0
 
-            self.global_step += tensordict.batch_size[0]
+            if not self.distributed:
+                self.global_step += tensordict.batch_size[0]
 
-            if isinstance(info, dict):
+            if self.rank == 0 and isinstance(info, dict):
                 rewards_dict = info.get("rewards")
                 metrics_dict = info.get("metrics")
                 self._log_scalar_dict("rewards", rewards_dict)
@@ -194,7 +202,68 @@ class Trainer:
         )
         self.buffer.add(rollout)
 
+        # Sync global_step and episode stats across ranks in distributed mode
+        if self.distributed:
+            local_delta = self.env.num_envs * self.buffer_size
+            delta_tensor = torch.tensor(
+                [local_delta], dtype=torch.int64, device=self.device
+            )
+            torch.distributed.all_reduce(
+                delta_tensor, op=torch.distributed.ReduceOp.SUM
+            )
+            self.global_step += int(delta_tensor.item())
+            self._sync_episode_stats()
+
+    def _sync_episode_stats(self) -> None:
+        """Sync ret_window and len_window across ranks; rank 0 gets merged stats."""
+        if not self.distributed or not torch.distributed.is_initialized():
+            return
+        maxlen = 100
+        ret_list = list(self.ret_window)
+        len_list = list(self.len_window)
+        n = min(len(ret_list), maxlen)
+        if n > 0:
+            ret_list = ret_list[-n:]
+            len_list = len_list[-n:]
+
+        ret_tensor = torch.zeros(maxlen, dtype=torch.float32, device=self.device)
+        len_tensor = torch.zeros(maxlen, dtype=torch.float32, device=self.device)
+        if n > 0:
+            ret_tensor[:n] = torch.tensor(
+                ret_list, dtype=torch.float32, device=self.device
+            )
+            len_tensor[:n] = torch.tensor(
+                len_list, dtype=torch.float32, device=self.device
+            )
+        count_tensor = torch.tensor([n], dtype=torch.int64, device=self.device)
+
+        ret_list_all = [torch.zeros_like(ret_tensor) for _ in range(self.world_size)]
+        len_list_all = [torch.zeros_like(len_tensor) for _ in range(self.world_size)]
+        count_list_all = [
+            torch.zeros_like(count_tensor) for _ in range(self.world_size)
+        ]
+        torch.distributed.all_gather(ret_list_all, ret_tensor)
+        torch.distributed.all_gather(len_list_all, len_tensor)
+        torch.distributed.all_gather(count_list_all, count_tensor)
+
+        if self.rank == 0:
+            all_ret = []
+            all_len = []
+            for r in range(self.world_size):
+                c = int(count_list_all[r].item())
+                if c > 0:
+                    all_ret.extend(ret_list_all[r][:c].cpu().tolist())
+                    all_len.extend(len_list_all[r][:c].cpu().tolist())
+            self.ret_window.clear()
+            self.len_window.clear()
+            n_total = len(all_ret)
+            start = max(0, n_total - maxlen)
+            self.ret_window.extend(all_ret[start:])
+            self.len_window.extend(all_len[start:])
+
     def _log_train(self, losses: Dict[str, float]):
+        if self.rank != 0:
+            return
         if self.writer:
             for k, v in losses.items():
                 self.writer.add_scalar(f"train/{k}", v, self.global_step)
@@ -324,12 +393,19 @@ class Trainer:
             )
 
     def save_checkpoint(self):
+        if self.rank != 0:
+            return
         # minimal model-only checkpoint; trainer/algorithm states can be added
         path = f"{self.checkpoint_dir}/{self.exp_name}_step_{self.global_step}.pt"
+        policy_state = (
+            self.policy.module.state_dict()
+            if hasattr(self.policy, "module")
+            else self.policy.state_dict()
+        )
         torch.save(
             {
                 "global_step": self.global_step,
-                "policy": self.policy.state_dict(),
+                "policy": policy_state,
             },
             path,
         )
