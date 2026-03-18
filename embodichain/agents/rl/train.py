@@ -80,16 +80,22 @@ def train_from_config(config_path: str, distributed: bool | None = None):
             raise RuntimeError(
                 "Distributed training requested but torch.distributed is not available."
             )
-        if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl")
-        rank = torch.distributed.get_rank()
-        world_size = torch.distributed.get_world_size()
-        local_rank = int(os.environ.get("LOCAL_RANK", rank))
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "Distributed training with NCCL backend requires CUDA, "
+                "but torch.cuda.is_available() is False."
+            )
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
         if local_rank < 0 or local_rank >= torch.cuda.device_count():
             raise ValueError(
                 f"LOCAL_RANK {local_rank} is out of range "
                 f"(available GPUs: {torch.cuda.device_count()})."
             )
+        torch.cuda.set_device(local_rank)
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl")
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
 
     # Runtime
     exp_name = trainer_cfg.get("exp_name", "generic_exp")

@@ -204,6 +204,20 @@ class Trainer:
 
         # Sync global_step and episode stats across ranks in distributed mode
         if self.distributed:
+            if not torch.distributed.is_available():
+                raise RuntimeError(
+                    "Distributed training was requested (distributed=True), "
+                    "but torch.distributed is not available. "
+                    "Please ensure PyTorch was built with distributed support or "
+                    "set distributed=False."
+                )
+            if not torch.distributed.is_initialized():
+                raise RuntimeError(
+                    "Distributed training was requested (distributed=True), "
+                    "but the torch.distributed process group is not initialized. "
+                    "Call torch.distributed.init_process_group(...) before creating "
+                    "or using Trainer(distributed=True, ...)."
+                )
             local_delta = self.env.num_envs * self.buffer_size
             delta_tensor = torch.tensor(
                 [local_delta], dtype=torch.int64, device=self.device

@@ -52,6 +52,15 @@ def build_algo(
     CfgCls, AlgoCls = _ALGO_REGISTRY[key]
     cfg = CfgCls(device=str(device), **cfg_kwargs)
     if distributed:
+        if not (
+            torch.distributed.is_available() and torch.distributed.is_initialized()
+        ):
+            raise RuntimeError(
+                "Distributed training requested (distributed=True), but "
+                "torch.distributed is not initialized. Please call "
+                "torch.distributed.init_process_group() before building the "
+                "algorithm, or set distributed=False."
+            )
         policy = DDP(
             policy, device_ids=[device.index] if device.index is not None else None
         )
