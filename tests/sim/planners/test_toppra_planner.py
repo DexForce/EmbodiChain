@@ -9,8 +9,12 @@ import torch
 import pytest
 import numpy as np
 
-from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner, ToppraPlannerCfg
-from embodichain.lab.sim.planners.utils import PlanState
+from embodichain.lab.sim.planners.toppra_planner import (
+    ToppraPlanner,
+    ToppraPlannerCfg,
+    ToppraPlannerRuntimeCfg,
+)
+from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
 
@@ -35,22 +39,28 @@ class TestToppraPlanner:
     def setup_method(self):
         cfg = ToppraPlannerCfg(
             robot_uid="CobotMagic_toppra",
-            control_part="left_arm",
             constraints={"velocity": 1.0, "acceleration": 2.0},
         )
         self.planner = ToppraPlanner(cfg=cfg)
 
     def test_initialization(self):
-        assert self.planner.dofs == 6
-        assert len(self.planner.vlims) == 6
-        assert len(self.planner.alims) == 6
         assert self.planner.device == torch.device("cpu")
 
     def test_plan_basic(self):
         current_state = PlanState(qpos=np.zeros(6))
         target_states = [PlanState(qpos=np.ones(6))]
 
-        result = self.planner.plan(current_state, target_states, sample_interval=0.1)
+        runtime_cfg = ToppraPlannerRuntimeCfg(
+            start_qpos=torch.zeros(
+                size=(6,), dtype=torch.float32, device=self.planner.device
+            ),
+            is_linear=False,
+            is_pre_interpolate=True,
+            control_part="left_arm",
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.1,
+        )
+        result = self.planner.plan(target_states, runtime_cfg=runtime_cfg)
         assert result.success is True
         assert result.positions is not None
         assert result.velocities is not None
@@ -63,10 +73,19 @@ class TestToppraPlanner:
         assert is_satisfied is True
 
     def test_trivial_trajectory(self):
-        current_state = PlanState(qpos=np.zeros(6))
         target_states = [PlanState(qpos=np.zeros(6))]
 
-        result = self.planner.plan(current_state, target_states)
+        runtime_cfg = ToppraPlannerRuntimeCfg(
+            start_qpos=torch.zeros(
+                size=(6,), dtype=torch.float32, device=self.planner.device
+            ),
+            is_linear=False,
+            is_pre_interpolate=True,
+            control_part="left_arm",
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.1,
+        )
+        result = self.planner.plan(target_states, runtime_cfg=runtime_cfg)
         assert result.success is True
         assert len(result.positions) == 2
         assert result.duration == 0.0
