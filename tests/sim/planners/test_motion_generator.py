@@ -233,7 +233,6 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         """Test trajectory generation with joint positions"""
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.05)
-        qpos_list_in = [qpos.to("cpu").numpy() for qpos in self.qpos_list]
         runtime_cfg = ToppraPlannerRuntimeCfg(
             is_linear=is_linear,
             is_pre_interpolate=True,
