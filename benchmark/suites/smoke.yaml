@@ -1,0 +1,18 @@
+tasks:
+  - cart_pole
+  - push_cube
+algorithms:
+  - ppo
+  - grpo
+seeds:
+  - 0
+protocol:
+  device: cpu
+  headless: true
+  iterations: 10
+  buffer_size: 128
+  num_envs: 32
+  num_eval_envs: 8
+  evaluation_interval: 2
+  evaluation_episodes: 10
+  save_interval: 1000

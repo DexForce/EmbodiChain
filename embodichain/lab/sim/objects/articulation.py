@@ -56,7 +56,11 @@ class ArticulationData:
     """GPU data manager for articulation."""
 
     def __init__(
-        self, entities: List[_Articulation], ps: PhysicsScene, device: torch.device
+        self,
+        entities: List[_Articulation],
+        ps: PhysicsScene,
+        device: torch.device,
+        arenas: Sequence[object] | None = None,
     ) -> None:
         """Initialize the ArticulationData.
 
@@ -69,6 +73,7 @@ class ArticulationData:
         self.ps = ps
         self.num_instances = len(entities)
         self.device = device
+        self.arenas = list(arenas) if arenas is not None else []
 
         # get gpu indices for the entities.
         # only meaningful when using GPU physics.
@@ -381,16 +386,15 @@ class ArticulationData:
             torch.Tensor: The poses of the links in the articulation with shape (N, num_links, 7).
         """
         if self.device.type == "cpu":
-            from embodichain.lab.sim.utility import get_dexsim_arenas
-
-            arenas = get_dexsim_arenas()
+            arenas = self.arenas
             for j, entity in enumerate(self.entities):
 
                 link_pose = np.zeros((self.num_links, 4, 4), dtype=np.float32)
                 for i, link_name in enumerate(self.link_names):
                     pose = entity.get_link_pose(link_name)
-                    arena_pose = arenas[j].get_root_node().get_local_pose()
-                    pose[:2, 3] -= arena_pose[:2, 3]
+                    if j < len(arenas):
+                        arena_pose = arenas[j].get_root_node().get_local_pose()
+                        pose[:2, 3] -= arena_pose[:2, 3]
                     link_pose[i] = pose
 
                 link_pose = torch.from_numpy(link_pose)
@@ -572,11 +576,20 @@ class Articulation(BatchEntity):
 
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
+        env = self._world.get_env()
+        arenas = env.get_all_arenas()
+        if len(arenas) == 0:
+            arenas = [env]
 
         if device.type == "cuda":
             self._world.update(0.001)
 
-        self._data = ArticulationData(entities=entities, ps=self._ps, device=device)
+        self._data = ArticulationData(
+            entities=entities,
+            ps=self._ps,
+            device=device,
+            arenas=arenas,
+        )
 
         self.cfg: ArticulationCfg
         if self.cfg.init_qpos is None:
