@@ -88,32 +88,73 @@ def main():
     # # Generate trajectory points
     qpos_list, xpos_list = create_demo_trajectory(robot, arm_name)
 
-    # Initialize motion generator
-    motion_generator = MotionGenerator(
-        robot=robot,
-        uid=arm_name,
-        planner_type="toppra",
-        default_velocity=0.2,
-        default_acceleration=0.5,
+    from embodichain.lab.sim.planners import (
+        MotionGenerator,
+        MotionGenCfg,
+        MotionGenOptions,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+        PlanState,
+        MoveType,
+        MovePart,
     )
+
+    # Initialize motion generator
+    motion_cfg = MotionGenCfg(
+        planner_cfg=ToppraPlannerCfg(
+            robot_uid=robot.uid,
+        )
+    )
+    motion_generator = MotionGenerator(cfg=motion_cfg)
 
     # Joint space trajectory
-    out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        qpos_list=[q.numpy() for q in qpos_list],
+    qpos_list = torch.vstack(qpos_list)
+    options = MotionGenOptions(
+        control_part=arm_name,
+        start_qpos=qpos_list[0],
+        is_interpolate=True,
         is_linear=False,
-        sample_method=TrajectorySampleMethod.QUANTITY,
-        sample_num=20,
+        plan_opts=ToppraPlanOptions(
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=20,
+        ),
     )
-    move_robot_along_trajectory(robot, arm_name, out_qpos_list)
+
+    target_states = []
+    for qpos in qpos_list:
+        target_states.append(
+            PlanState(
+                move_type=MoveType.JOINT_MOVE,
+                move_part=MovePart.LEFT,
+                qpos=qpos,
+            )
+        )
+    plan_result = motion_generator.generate(
+        target_states=target_states, options=options
+    )
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
-    out_qpos_list, _ = motion_generator.create_discrete_trajectory(
-        xpos_list=[x.numpy() for x in xpos_list],
-        is_linear=True,
-        sample_method=TrajectorySampleMethod.QUANTITY,
-        sample_num=20,
+    options.is_linear = True
+
+    target_states = []
+    for xpos in xpos_list:
+        target_states.append(
+            PlanState(
+                move_type=MoveType.EEF_MOVE,
+                move_part=MovePart.LEFT,
+                xpos=xpos,
+            )
+        )
+    plan_result = motion_generator.generate(
+        target_states=target_states, options=options
     )
-    move_robot_along_trajectory(robot, arm_name, out_qpos_list)
+    sim.reset()
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
 
 if __name__ == "__main__":

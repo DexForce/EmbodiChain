@@ -23,10 +23,12 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners.motion_generator import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.lab.sim.solvers.pink_solver import PinkSolverCfg
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod, PlanState, MoveType
+from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 
 # Configure the simulation
 sim_cfg = SimulationManagerCfg(
@@ -66,14 +68,14 @@ robot_cfg = RobotCfg(
 )
 robot = sim.add_robot(cfg=robot_cfg)
 
+# Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
 motion_gen = MotionGenerator(
-    robot=robot,
-    uid="arm",
-    planner_type="toppra",
-    default_velocity=0.2,
-    default_acceleration=0.5
+    cfg=MotionGenCfg(
+        planner_cfg=ToppraPlannerCfg(
+            robot_uid="UR10_test",
+        )
+    )
 )
-
 ```
 
 ### Trajectory Planning
@@ -81,37 +83,78 @@ motion_gen = MotionGenerator(
 #### Joint Space Planning
 
 ```python
-current_state = {
-    "position": [0, 0, 0, 0, 0, 0],
-    "velocity": [0, 0, 0, 0, 0, 0],
-    "acceleration": [0, 0, 0, 0, 0, 0]
-}
-target_states = [
-    {"position": [1, 1, 1, 1, 1, 1]}
-]
-success, positions, velocities, accelerations, times, duration = motion_gen.plan(
-    current_state=current_state,
-    target_states=target_states,
+# Create options with constraints and planning parameters
+plan_opts = ToppraPlanOptions(
+    constraints={
+        "velocity": 0.2,
+        "acceleration": 0.5,
+    },
     sample_method=TrajectorySampleMethod.TIME,
     sample_interval=0.01
 )
-```
 
-#### Cartesian or Joint Interpolation
+# Create motion generation options
+motion_opts = MotionGenOptions(
+    plan_opts=plan_opts,
+    control_part="arm",
+    is_interpolate=False,
+)
 
-```python
-# Using joint configurations (qpos_list)
-qpos_list = [
-    [0, 0, 0, 0, 0, 0],
-    [1, 1, 1, 1, 1, 1]
+# Use generate() method instead of plan()
+target_states = [
+    PlanState(move_type=MoveType.JOINT_MOVE, qpos=torch.tensor([1, 1, 1, 1, 1, 1]))
 ]
-out_qpos_list, out_xpos_list = motion_gen.create_discrete_trajectory(
-    qpos_list=qpos_list,
-    is_linear=False,
-    sample_method=TrajectorySampleMethod.QUANTITY,
-    sample_num=20
+result = motion_gen.generate(
+    target_states=target_states,
+    options=motion_opts
 )
 ```
+
+#### Cartesian Space Planning
+
+```python
+import torch
+import numpy as np
+
+# Create options with constraints
+plan_opts = ToppraPlanOptions(
+    constraints={
+        "velocity": 0.2,
+        "acceleration": 0.5,
+    },
+    sample_method=TrajectorySampleMethod.TIME,
+    sample_interval=0.01
+)
+
+# Create motion generation options with interpolation for smoother Cartesian motion
+motion_opts = MotionGenOptions(
+    plan_opts=plan_opts,
+    control_part="arm",
+    is_interpolate=True,  # Enable pre-interpolation for Cartesian moves
+    interpolate_nums=10,   # Number of points between each waypoint
+    is_linear=True,        # Linear interpolation in Cartesian space
+)
+
+# Define target poses as 4x4 transformation matrices
+# Each matrix is [position(3), orientation(3x3)] in row-major order
+target_pose_1 = torch.eye(4)
+target_pose_1[:3, 3] = torch.tensor([0.5, 0.3, 0.4])  # position
+
+target_pose_2 = torch.eye(4)
+target_pose_2[:3, 3] = torch.tensor([0.6, 0.4, 0.3])  # another position
+
+# Use EEF_MOVE for Cartesian space planning
+target_states = [
+    PlanState(move_type=MoveType.EEF_MOVE, xpos=target_pose_1),
+    PlanState(move_type=MoveType.EEF_MOVE, xpos=target_pose_2),
+]
+
+result = motion_gen.generate(
+    target_states=target_states,
+    options=motion_opts
+)
+```
+
 
 ### Estimating Trajectory Sample Count
 
@@ -119,15 +162,16 @@ You can estimate the number of sampling points required for a trajectory before 
 
 ```python
 # Estimate based on joint configurations (qpos_list)
-qpos_list = [
+qpos_list = torch.as_tensor([
     [0, 0, 0, 0, 0, 0],
     [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
     [1, 1, 1, 1, 1, 1]
-]
+])
 sample_count = motion_gen.estimate_trajectory_sample_count(
     qpos_list=qpos_list,  # List of joint positions
     step_size=0.01, # unit: m
     angle_step=0.05, # unit: rad
+    control_part="arm",
 )
 print(f"Estimated sample count: {sample_count}")
 ```

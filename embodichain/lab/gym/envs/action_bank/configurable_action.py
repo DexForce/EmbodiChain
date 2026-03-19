@@ -1267,7 +1267,15 @@ class GeneralActionBank(ActionBank):
         vis: bool = False,
         **kwargs,
     ) -> np.ndarray:
-        from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+        from embodichain.lab.sim.planners import (
+            MoveType,
+            PlanState,
+            MotionGenerator,
+            MotionGenCfg,
+            MotionGenOptions,
+            ToppraPlanOptions,
+            ToppraPlannerCfg,
+        )
 
         # Retrieve the start and end positions
         start_qpos = env.affordance_datas[keypose_names[0]]
@@ -1318,26 +1326,56 @@ class GeneralActionBank(ActionBank):
 
             ret = np.array([filtered_keyposes[0]] * duration)
         else:
-            mo_gen = MotionGenerator(robot=env.robot, uid=agent_uid)
+            mo_gen = MotionGenerator(
+                cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+            )
 
             if len(ref_poses) == 0:
-                ret, _ = mo_gen.create_discrete_trajectory(
-                    qpos_list=filtered_keyposes,
-                    sample_num=duration,
-                    qpos_seed=filtered_keyposes[0],
-                    is_use_current_qpos=False,
-                    **getattr(env, "planning_config", {}),
+                plan_state = [
+                    PlanState(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
+                    for qpos in filtered_keyposes
+                ]
+
+                ret = mo_gen.generate(
+                    target_states=plan_state,
+                    options=MotionGenOptions(
+                        control_part=agent_uid,
+                        plan_opts=ToppraPlanOptions(
+                            sample_interval=duration,
+                        ),
+                    ),
                 )
+
             else:
-                ret, _ = mo_gen.create_discrete_trajectory(
-                    xpos_list=[start_xpos] + ref_poses + [end_xpos],
-                    sample_num=duration,
-                    is_use_current_qpos=False,
-                    **getattr(env, "planning_config", {}),
+                plan_state = [
+                    PlanState(
+                        xpos=torch.as_tensor(start_xpos), move_type=MoveType.EEF_MOVE
+                    )
+                ]
+                plan_state += [
+                    PlanState(
+                        xpos=torch.as_tensor(ref_pose), move_type=MoveType.EEF_MOVE
+                    )
+                    for ref_pose in ref_poses
+                ]
+                plan_state += [
+                    PlanState(
+                        xpos=torch.as_tensor(end_xpos), move_type=MoveType.EEF_MOVE
+                    )
+                ]
+
+                ret = mo_gen.generate(
+                    target_states=plan_state,
+                    options=MotionGenOptions(
+                        control_part=agent_uid,
+                        is_interpolate=True,
+                        plan_opts=ToppraPlanOptions(
+                            sample_interval=duration,
+                        ),
+                    ),
                 )
-        if isinstance(ret, list):
-            print(ret)
-        return ret.T
+
+        return ret.positions.numpy().T
 
     @staticmethod
     @tag_edge
