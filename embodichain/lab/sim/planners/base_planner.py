@@ -27,7 +27,7 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 from .utils import PlanState, PlanResult, calculate_point_allocations, interpolate_xpos
 from .utils import MovePart, MoveType
 
-__all__ = ["BasePlannerCfg", "BasePlannerRuntimeCfg", "BasePlanner"]
+__all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner"]
 
 
 @configclass
@@ -40,7 +40,7 @@ class BasePlannerCfg:
 
 
 @configclass
-class BasePlannerRuntimeCfg:
+class PlanOptions:
     start_qpos: torch.Tensor | None = None
     """Optional starting joint configuration for the trajectory. If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
 
@@ -50,7 +50,7 @@ class BasePlannerRuntimeCfg:
     is_pre_interpolate: bool = False
     """Whether to perform interpolation before planning. If True, the planner will first interpolate the trajectory based on the provided waypoints and then plan a trajectory through the interpolated points. If False, the planner will directly plan through the provided waypoints without interpolation."""
 
-    is_linear: bool = True
+    is_linear: bool = False
     """If True, use cartesian linear interpolation, else joint space"""
 
     interpolate_position_step: float = 0.002
@@ -86,7 +86,7 @@ class BasePlanner(ABC):
     def plan(
         self,
         target_states: list[PlanState],
-        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        plan_option: PlanOptions = PlanOptions(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
@@ -298,7 +298,7 @@ class BasePlanner(ABC):
         control_part: str | None = None,
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
-        cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        cfg: PlanOptions = PlanOptions(),
     ) -> tuple[PlanState, list[PlanState]]:
         if qpos_list is not None:
             if not isinstance(qpos_list, torch.Tensor):

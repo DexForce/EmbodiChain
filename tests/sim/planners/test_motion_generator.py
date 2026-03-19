@@ -27,7 +27,7 @@ from embodichain.lab.sim.planners import (
     MotionGenerator,
     MotionGenCfg,
     ToppraPlannerCfg,
-    ToppraPlannerRuntimeCfg,
+    ToppraOptions,
     PlanState,
     MoveType,
     MovePart,
@@ -96,10 +96,6 @@ class BaseTestMotionGenerator(object):
         cls.motion_cfg = MotionGenCfg(
             planner_cfg=ToppraPlannerCfg(
                 robot_uid=cls.robot.uid,
-                constraints={
-                    "velocity": 0.2,
-                    "acceleration": 0.5,
-                },
             )
         )
         cls.motion_gen = MotionGenerator(cfg=cls.motion_cfg)
@@ -192,13 +188,17 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.2)
 
-        runtime_cfg = ToppraPlannerRuntimeCfg(
+        plan_option = ToppraOptions(
             is_linear=is_linear,
             is_pre_interpolate=True,
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=20,
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
         )
         target_states = []
         for xpos in self.xpos_list:
@@ -211,7 +211,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
             )
 
         plan_result = self.motion_gen.plan(
-            target_states=target_states, runtime_cfg=runtime_cfg
+            target_states=target_states, plan_option=plan_option
         )
         out_qpos_list = to_numpy(plan_result.positions)
         assert (
@@ -233,13 +233,17 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         """Test trajectory generation with joint positions"""
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.05)
-        runtime_cfg = ToppraPlannerRuntimeCfg(
+        plan_option = ToppraOptions(
             is_linear=is_linear,
             is_pre_interpolate=True,
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=20,
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
         )
         target_states = []
         for qpos in self.qpos_list:
@@ -251,7 +255,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
                 )
             )
         plan_result = self.motion_gen.plan(
-            target_states=target_states, runtime_cfg=runtime_cfg
+            target_states=target_states, plan_option=plan_option
         )
         out_qpos_list = to_numpy(plan_result.positions)
         assert (

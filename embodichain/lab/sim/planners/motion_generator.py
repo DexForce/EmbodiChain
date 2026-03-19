@@ -23,7 +23,7 @@ from scipy.spatial.transform import Rotation, Slerp
 
 from embodichain.lab.sim.planners import (
     BasePlannerCfg,
-    BasePlannerRuntimeCfg,
+    PlanOptions,
     BasePlanner,
     ToppraPlanner,
     ToppraPlannerCfg,
@@ -103,7 +103,7 @@ class MotionGenerator:
     def plan(
         self,
         target_states: List[PlanState],
-        runtime_cfg: BasePlannerRuntimeCfg = BasePlannerRuntimeCfg(),
+        plan_option: PlanOptions = PlanOptions(),
     ) -> PlanResult:
         r"""Plan trajectory without collision checking.
 
@@ -118,7 +118,7 @@ class MotionGenerator:
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        if runtime_cfg.is_pre_interpolate:
+        if plan_option.is_pre_interpolate:
             # interpolate trajectory to generate more waypoints for smoother motion and better constraint handling
             if target_states[0].move_type == MoveType.TCP_MOVE:
                 xpos_list = []
@@ -143,16 +143,16 @@ class MotionGenerator:
                     f"Unsupported move type for pre-interpolation: {target_states[0].move_type}"
                 )
             init_plan_state, target_plan_states = self.planner.interpolate_trajectory(
-                control_part=runtime_cfg.control_part,
+                control_part=plan_option.control_part,
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
-                cfg=runtime_cfg,
+                cfg=plan_option,
             )
         else:
             target_plan_states = target_states
 
         result = self.planner.plan(
-            target_states=target_plan_states, runtime_cfg=runtime_cfg
+            target_states=target_plan_states, plan_option=plan_option
         )
         return result
 

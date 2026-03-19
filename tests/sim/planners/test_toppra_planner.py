@@ -12,7 +12,7 @@ import numpy as np
 from embodichain.lab.sim.planners.toppra_planner import (
     ToppraPlanner,
     ToppraPlannerCfg,
-    ToppraPlannerRuntimeCfg,
+    ToppraOptions,
 )
 from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -50,7 +50,7 @@ class TestToppraPlanner:
         current_state = PlanState(qpos=np.zeros(6))
         target_states = [PlanState(qpos=np.ones(6))]
 
-        runtime_cfg = ToppraPlannerRuntimeCfg(
+        plan_option = ToppraOptions(
             start_qpos=torch.zeros(
                 size=(6,), dtype=torch.float32, device=self.planner.device
             ),
@@ -60,7 +60,7 @@ class TestToppraPlanner:
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
         )
-        result = self.planner.plan(target_states, runtime_cfg=runtime_cfg)
+        result = self.planner.plan(target_states, plan_option=plan_option)
         assert result.success is True
         assert result.positions is not None
         assert result.velocities is not None
@@ -75,7 +75,7 @@ class TestToppraPlanner:
     def test_trivial_trajectory(self):
         target_states = [PlanState(qpos=np.zeros(6))]
 
-        runtime_cfg = ToppraPlannerRuntimeCfg(
+        plan_option = ToppraOptions(
             start_qpos=torch.zeros(
                 size=(6,), dtype=torch.float32, device=self.planner.device
             ),
@@ -85,7 +85,7 @@ class TestToppraPlanner:
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
         )
-        result = self.planner.plan(target_states, runtime_cfg=runtime_cfg)
+        result = self.planner.plan(target_states, plan_option=plan_option)
         assert result.success is True
         assert len(result.positions) == 2
         assert result.duration == 0.0

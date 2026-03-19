@@ -92,7 +92,7 @@ def main():
         MotionGenerator,
         MotionGenCfg,
         ToppraPlannerCfg,
-        ToppraPlannerRuntimeCfg,
+        ToppraOptions,
         PlanState,
         MoveType,
         MovePart,
@@ -102,23 +102,23 @@ def main():
     motion_cfg = MotionGenCfg(
         planner_cfg=ToppraPlannerCfg(
             robot_uid=robot.uid,
-            constraints={
-                "velocity": 0.2,
-                "acceleration": 0.5,
-            },
         )
     )
     motion_generator = MotionGenerator(cfg=motion_cfg)
 
     # Joint space trajectory
     qpos_list = torch.vstack(qpos_list)
-    plan_runtime_cfg = ToppraPlannerRuntimeCfg(
+    plan_option = ToppraOptions(
         start_qpos=qpos_list[0],
         is_pre_interpolate=True,
         is_linear=False,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
+        constraints={
+            "velocity": 0.2,
+            "acceleration": 0.5,
+        },
     )
     target_states = []
     for qpos in qpos_list:
@@ -130,18 +130,22 @@ def main():
             )
         )
     plan_result = motion_generator.plan(
-        target_states=target_states, runtime_cfg=plan_runtime_cfg
+        target_states=target_states, plan_option=plan_option
     )
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
-    cfg = ToppraPlannerRuntimeCfg(
+    plan_option = ToppraOptions(
         start_qpos=qpos_list[0],
         is_pre_interpolate=True,
         is_linear=True,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
         sample_interval=20,
+        constraints={
+            "velocity": 0.2,
+            "acceleration": 0.5,
+        },
     )
     target_states = []
     for xpos in xpos_list:
@@ -153,7 +157,7 @@ def main():
             )
         )
     plan_result = motion_generator.plan(
-        target_states=target_states, runtime_cfg=plan_runtime_cfg
+        target_states=target_states, plan_option=plan_option
     )
     sim.reset()
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)

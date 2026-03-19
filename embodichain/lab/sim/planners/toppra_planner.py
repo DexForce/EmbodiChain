@@ -22,7 +22,7 @@ from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
-    BasePlannerRuntimeCfg,
+    PlanOptions,
 )
 from .utils import PlanState, PlanResult
 
@@ -37,12 +37,17 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
-__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlannerRuntimeCfg"]
+__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraOptions"]
 
 
 @configclass
 class ToppraPlannerCfg(BasePlannerCfg):
 
+    planner_type: str = "toppra"
+
+
+@configclass
+class ToppraOptions(PlanOptions):
     constraints: dict = {
         "velocity": 0.2,
         "acceleration": 0.5,
@@ -50,12 +55,6 @@ class ToppraPlannerCfg(BasePlannerCfg):
     """Constraints for the planner, including velocity and acceleration limits. Should be a 
     dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
     """
-
-    planner_type: str = "toppra"
-
-
-@configclass
-class ToppraPlannerRuntimeCfg(BasePlannerRuntimeCfg):
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
     """Method for sampling the trajectory. Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples."""
     sample_interval: float | int = 0.01
@@ -74,51 +73,51 @@ class ToppraPlanner(BasePlanner):
     def plan(
         self,
         target_states: list[PlanState],
-        runtime_cfg: ToppraPlannerRuntimeCfg = ToppraPlannerRuntimeCfg(),
+        plan_option: ToppraOptions = ToppraOptions(),
     ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
             target_states: List of dictionaries containing target states
-            cfg: ToppraPlannerRuntimeCfg
+            cfg: ToppraOptions
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
         joint_ids = self.robot.get_joint_ids(
-            runtime_cfg.control_part, remove_mimic=True
+            plan_option.control_part, remove_mimic=True
         )
         dofs = len(joint_ids)
 
         # set constraints
-        if isinstance(self.cfg.constraints["velocity"], float):
+        if isinstance(plan_option.constraints["velocity"], float):
             self.vlims = np.array(
                 [
                     [
-                        -self.cfg.constraints["velocity"],
-                        self.cfg.constraints["velocity"],
+                        -plan_option.constraints["velocity"],
+                        plan_option.constraints["velocity"],
                     ]
                     for _ in range(dofs)
                 ]
             )
         else:
-            self.vlims = np.array(self.cfg.constraints["velocity"])
+            self.vlims = np.array(plan_option.constraints["velocity"])
 
-        if isinstance(self.cfg.constraints["acceleration"], float):
+        if isinstance(plan_option.constraints["acceleration"], float):
             self.alims = np.array(
                 [
                     [
-                        -self.cfg.constraints["acceleration"],
-                        self.cfg.constraints["acceleration"],
+                        -plan_option.constraints["acceleration"],
+                        plan_option.constraints["acceleration"],
                     ]
                     for _ in range(dofs)
                 ]
             )
         else:
-            self.alims = np.array(self.cfg.constraints["acceleration"])
+            self.alims = np.array(plan_option.constraints["acceleration"])
 
-        sample_method = runtime_cfg.sample_method
-        sample_interval = runtime_cfg.sample_interval
+        sample_method = plan_option.sample_method
+        sample_interval = plan_option.sample_interval
         if not isinstance(sample_interval, (float, int)):
             logger.log_error(
                 f"sample_interval must be float/int, got {type(sample_interval)}",
@@ -131,8 +130,8 @@ class ToppraPlanner(BasePlanner):
 
         # Check waypoints
         start_qpos = (
-            runtime_cfg.start_qpos
-            if runtime_cfg.start_qpos is not None
+            plan_option.start_qpos
+            if plan_option.start_qpos is not None
             else target_states[0].qpos
         )
         if len(start_qpos) != dofs:
