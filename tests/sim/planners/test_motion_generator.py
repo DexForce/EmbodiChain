@@ -26,6 +26,7 @@ from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.planners import (
     MotionGenerator,
     MotionGenCfg,
+    MotionGenOptions,
     ToppraPlannerCfg,
     ToppraPlanOptions,
     PlanState,
@@ -96,10 +97,6 @@ class BaseTestMotionGenerator(object):
         cls.motion_cfg = MotionGenCfg(
             planner_cfg=ToppraPlannerCfg(
                 robot_uid=cls.robot.uid,
-                constraints={
-                    "velocity": 0.2,
-                    "acceleration": 0.5,
-                },
             )
         )
         cls.motion_gen = MotionGenerator(cfg=cls.motion_cfg)
@@ -122,9 +119,9 @@ class BaseTestMotionGenerator(object):
 
         cls.qpos_list = [qpos_begin, qpos_mid, qpos_final]
         cls.xpos_list = [
-            xpos_begin[0].numpy(),
-            xpos_mid[0].numpy(),
-            xpos_final[0].numpy(),
+            xpos_begin[0],
+            xpos_mid[0],
+            xpos_final[0],
         ]
 
         cls.sample_num = 20
@@ -192,13 +189,19 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.2)
 
-        runtime_cfg = ToppraPlanOptions(
-            is_linear=is_linear,
-            is_interpolate=True,
+        options = MotionGenOptions(
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=20,
+            is_linear=is_linear,
+            is_interpolate=True,
+            plan_opts=ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=20,
+                constraints={
+                    "velocity": 0.2,
+                    "acceleration": 0.5,
+                },
+            ),
         )
         target_states = []
         for xpos in self.xpos_list:
@@ -210,8 +213,8 @@ class TestMotionGenerator(BaseTestMotionGenerator):
                 )
             )
 
-        plan_result = self.motion_gen.plan(
-            target_states=target_states, runtime_cfg=runtime_cfg
+        plan_result = self.motion_gen.generate(
+            target_states=target_states, options=options
         )
         out_qpos_list = to_numpy(plan_result.positions)
         assert (
@@ -233,14 +236,22 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         """Test trajectory generation with joint positions"""
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
         time.sleep(0.05)
-        runtime_cfg = ToppraPlanOptions(
-            is_linear=is_linear,
-            is_interpolate=True,
+
+        options = MotionGenOptions(
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=20,
+            is_linear=is_linear,
+            is_interpolate=True,
+            plan_opts=ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=20,
+                constraints={
+                    "velocity": 0.2,
+                    "acceleration": 0.5,
+                },
+            ),
         )
+
         target_states = []
         for qpos in self.qpos_list:
             target_states.append(
@@ -250,8 +261,8 @@ class TestMotionGenerator(BaseTestMotionGenerator):
                     qpos=qpos,
                 )
             )
-        plan_result = self.motion_gen.plan(
-            target_states=target_states, runtime_cfg=runtime_cfg
+        plan_result = self.motion_gen.generate(
+            target_states=target_states, options=options
         )
         out_qpos_list = to_numpy(plan_result.positions)
         assert (

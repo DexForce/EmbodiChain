@@ -41,11 +41,7 @@ class BasePlannerCfg:
 
 @configclass
 class PlanOptions:
-    start_qpos: torch.Tensor | None = None
-    """Optional starting joint configuration for the trajectory. If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
-
-    control_part: str | None = None
-    """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
+    pass
 
 
 def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
@@ -143,7 +139,9 @@ class BasePlanner(ABC):
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 
-    def is_satisfied_constraint(self, vels: torch.Tensor, accs: torch.Tensor) -> bool:
+    def is_satisfied_constraint(
+        self, vels: torch.Tensor, accs: torch.Tensor, constraints: dict
+    ) -> bool:
         r"""Check if the trajectory satisfies velocity and acceleration constraints.
 
         This method checks whether the given velocities and accelerations satisfy
@@ -153,6 +151,7 @@ class BasePlanner(ABC):
         Args:
             vels: Velocity tensor (..., DOF) where the last dimension is DOF
             accs: Acceleration tensor (..., DOF) where the last dimension is DOF
+            constraints: Dictionary containing 'velocity' and 'acceleration' limits
 
         Returns:
             bool: True if all constraints are satisfied, False otherwise
@@ -166,16 +165,9 @@ class BasePlanner(ABC):
         """
         device = vels.device
 
-        # Convert constraints to tensors for vectorized constraint checking
-        if not hasattr(self.cfg, "constraints") or self.cfg.constraints is None:
-            logger.log_error("constraints not found in planner config")
-            return True
-
-        max_vel = torch.tensor(
-            self.cfg.constraints["velocity"], dtype=vels.dtype, device=device
-        )
+        max_vel = torch.tensor(constraints["velocity"], dtype=vels.dtype, device=device)
         max_acc = torch.tensor(
-            self.cfg.constraints["acceleration"], dtype=accs.dtype, device=device
+            constraints["acceleration"], dtype=accs.dtype, device=device
         )
 
         # To support batching, we compute along all dimensions except the last one (DOF)

@@ -34,7 +34,7 @@ from .utils import MovePart, MoveType, PlanState, PlanResult
 from .utils import calculate_point_allocations, interpolate_xpos
 
 
-__all__ = ["MotionGenerator", "MotionGenCfg"]
+__all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
 
 
 @configclass
@@ -51,6 +51,12 @@ class MotionGenCfg:
 @configclass
 class MotionGenOptions:
 
+    start_qpos: torch.Tensor | None = None
+    """Optional starting joint configuration for the trajectory. If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
+
+    control_part: str | None = None
+    """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
+
     plan_opts: PlanOptions | None = None
     """Options to pass to the underlying planner during the planning phase."""
 
@@ -66,7 +72,7 @@ class MotionGenOptions:
     
     Can be an integer (same for all segments) or a list of integers with len(PlanState) specifying the number of points for each segment."""
 
-    is_linear: bool = True
+    is_linear: bool = False
     """If True, use cartesian linear interpolation, else joint space"""
 
     interpolate_position_step: float = 0.002
@@ -129,7 +135,7 @@ class MotionGenerator:
     def generate(
         self,
         target_states: List[PlanState],
-        opts: MotionGenOptions = MotionGenOptions(),
+        options: MotionGenOptions = MotionGenOptions(),
     ) -> PlanResult:
         r"""Generate motion with given options.
 
@@ -138,12 +144,12 @@ class MotionGenerator:
 
         Args:
             target_states: List[PlanState].
-            opts: MotionGenOptions.
+            options: MotionGenOptions.
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        if opts.is_interpolate:
+        if options.is_interpolate:
             # interpolate trajectory to generate more waypoints for smoother motion and better constraint handling
             if target_states[0].move_type == MoveType.EEF_MOVE:
                 xpos_list = []
@@ -167,14 +173,33 @@ class MotionGenerator:
                 logger.log_error(
                     f"Unsupported move type for pre-interpolation: {target_states[0].move_type}"
                 )
+
+            if qpos_list is not None:
+                qpos_list = torch.stack(qpos_list)
+            if xpos_list is not None:
+                xpos_list = torch.stack(xpos_list)
+
+            if options.start_qpos is not None:
+                if qpos_list is not None:
+                    qpos_list = torch.cat(
+                        [options.start_qpos.unsqueeze(0), qpos_list], dim=0
+                    )
+                if xpos_list is not None:
+                    start_xpos = self.robot.compute_fk(
+                        qpos=options.start_qpos.unsqueeze(0),
+                        name=options.control_part,
+                        to_matrix=True,
+                    )
+                    xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
+
             qpos_interpolated, xpos_interpolated = self.interpolate_trajectory(
-                control_part=opts.control_part,
+                control_part=options.control_part,
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
-                opts=opts,
+                options=options,
             )
 
-            if not opts.plan_opts:
+            if not options.plan_opts:
                 # Directly return the interpolated trajectory if no further planning is needed
                 return PlanResult(
                     success=True,
@@ -193,8 +218,9 @@ class MotionGenerator:
         else:
             target_plan_states = target_states
 
+        options.plan_opts.control_part = options.control_part
         result = self.planner.plan(
-            target_states=target_plan_states, plan_opts=opts.plan_opts
+            target_states=target_plan_states, options=options.plan_opts
         )
         return result
 
@@ -430,7 +456,7 @@ class MotionGenerator:
         control_part: str | None = None,
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
-        opts: MotionGenOptions = MotionGenOptions(),
+        options: MotionGenOptions = MotionGenOptions(),
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         r"""Interpolate trajectory based on provided waypoints.
             This method performs interpolation on the provided waypoints to generate a smoother trajectory.
@@ -440,7 +466,7 @@ class MotionGenerator:
             control_part: Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration.
             xpos_list: List of end-effector poses (torch.Tensor of shape [N, 4, 4]) to interpolate through. Required if control_part is an end-effector control part.
             qpos_list: List of joint positions (torch.Tensor of shape [N, DOF]) to interpolate through. Required if control_part is a joint control part.
-            opts: MotionGenOptions containing interpolation settings such as step size and whether to use linear interpolation.
+            options: MotionGenOptions containing interpolation settings such as step size and whether to use linear interpolation.
 
         Returns:
             Tuple containing:
@@ -448,7 +474,7 @@ class MotionGenerator:
                 - feasible_pose_targets: Tensor of corresponding end-effector poses for the interpolated joint positions, shape [M, 4, 4]. This is useful for verifying the interpolation results and can be None if not applicable.
         """
 
-        if qpos_list is not None and xpos_list is None and opts.is_linear:
+        if qpos_list is not None and xpos_list is None and options.is_linear:
             qpos_batch = qpos_list.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
             xpos_batch = self.robot.compute_batch_fk(
                 qpos=qpos_batch,
@@ -460,16 +486,17 @@ class MotionGenerator:
         if xpos_list is None and qpos_list is None:
             logger.log_error("Either xpos_list or qpos_list must be provided")
 
-        if opts.start_qpos is not None:
-            start_xpos = self.robot.compute_fk(
-                qpos=opts.start_qpos.unsqueeze(0), name=control_part, to_matrix=True
-            )
-            qpos_list = (
-                torch.cat([opts.start_qpos.unsqueeze(0), qpos_list], dim=0)
-                if qpos_list is not None
-                else None
-            )
-            xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
+        # if options.start_qpos is not None:
+        #     start_xpos = self.robot.compute_fk(
+        #         qpos=options.start_qpos.unsqueeze(0), name=control_part, to_matrix=True
+        #     )
+        #     qpos_list = (
+        #         torch.cat([options.start_qpos.unsqueeze(0), qpos_list], dim=0)
+        #         if qpos_list is not None
+        #         else None
+        #     )
+        #     if xpos_list is not None:
+        #         xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
 
         # Input validation
         if (xpos_list is not None and len(xpos_list) < 2) or (
@@ -479,26 +506,18 @@ class MotionGenerator:
                 "xpos_list and qpos_list must contain at least 2 way points"
             )
 
-        qpos_seed = opts.start_qpos
+        qpos_seed = options.start_qpos
         if qpos_seed is None and qpos_list is not None:
             qpos_seed = qpos_list[0]
 
         # Generate trajectory
         interpolate_qpos_list = []
-        if opts.is_linear or qpos_list is None:
-            qpos_batch = qpos_list.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
-            xpos_batch = self.robot.compute_batch_fk(
-                qpos=qpos_batch,
-                name=control_part,
-                to_matrix=True,
-            )
-            xpos_list = xpos_batch.squeeze_(0)
-
+        if options.is_linear or qpos_list is None:
             # Calculate point allocations for interpolation
             interpolated_point_allocations = calculate_point_allocations(
                 xpos_list,
-                step_size=opts.interpolate_position_step,
-                angle_step=opts.interpolate_angle_step,
+                step_size=options.interpolate_position_step,
+                angle_step=options.interpolate_angle_step,
                 device=self.device,
             )
 
@@ -570,16 +589,16 @@ class MotionGenerator:
             # Perform joint space interpolation directly if not linear or if end-effector poses are not provided
             qpos_interpolated = qpos_list.unsqueeze_(0).permute(1, 0, 2)  # [N, 1, DOF]
 
-            if isinstance(opts.interpolate_nums, int):
-                interp_nums = [opts.interpolate_nums] * (len(qpos_list) - 1)
+            if isinstance(options.interpolate_nums, int):
+                interp_nums = [options.interpolate_nums] * (len(qpos_list) - 1)
             else:
-                if len(opts.interpolate_nums) != len(qpos_list) - 1:
+                if len(options.interpolate_nums) != len(qpos_list) - 1:
                     logger.log_error(
                         "Length of interpolate_nums list must be equal to number of segments (len(qpos_list) - 1)"
                     )
-                interp_nums = opts.interpolate_nums
+                interp_nums = options.interpolate_nums
 
-            qpos_interpolated = (
+            interpolate_qpos_list = (
                 interpolate_with_nums(
                     qpos_interpolated,
                     interp_nums=interp_nums,

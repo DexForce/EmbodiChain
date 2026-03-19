@@ -59,7 +59,7 @@ class ToppraPlanOptions(PlanOptions):
     Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
     """
 
-    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
     """Method for sampling the trajectory. 
     
     Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
@@ -106,8 +106,12 @@ class ToppraPlanner(BasePlanner):
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        joint_ids = self.robot.get_joint_ids(options.control_part, remove_mimic=True)
-        dofs = len(joint_ids)
+
+        for i, target in enumerate(target_states):
+            if target.qpos is None:
+                logger.log_error(f"Target state at index {i} missing qpos")
+
+        dofs = len(target_states[0].qpos)
 
         # set constraints
         if isinstance(options.constraints["velocity"], float):
@@ -157,13 +161,6 @@ class ToppraPlanner(BasePlanner):
             )
 
         # Check waypoints
-        if options.start_qpos:
-            start_qpos = options.start_qpos
-        else:
-            start_qpos = self.robot.get_qpos(name=options.control_part)[0]
-
-        if len(start_qpos) != dofs:
-            logger.log_error("Start waypoints do not align")
         for i, target in enumerate(target_states):
             if target.qpos is None:
                 logger.log_error(f"Target state at index {i} missing qpos")
@@ -171,38 +168,18 @@ class ToppraPlanner(BasePlanner):
                 logger.log_error(f"Target waypoints do not align at index {i}")
 
         if (
-            len(target_states) == 1
-            and np.sum(
-                np.abs(target_states[0].qpos.cpu().numpy() - start_qpos.cpu().numpy())
-            )
+            len(target_states) == 2
+            and torch.sum(torch.abs(target_states[1].qpos - target_states[0].qpos))
             < 1e-3
         ):
             logger.log_warning("Only two same waypoints, returning trivial trajectory.")
-            return PlanResult(
-                success=True,
-                positions=torch.as_tensor(
-                    np.array([start_qpos, target_states[0].qpos]),
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                velocities=torch.as_tensor(
-                    np.array([[0.0] * dofs, [0.0] * dofs]),
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                accelerations=torch.as_tensor(
-                    np.array([[0.0] * dofs, [0.0] * dofs]),
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                dt=torch.as_tensor([0.0, 0.0], dtype=torch.float32, device=self.device),
-                duration=0.0,
-            )
+            return target_states
 
         # Build waypoints
-        waypoints = [np.array(start_qpos)]
+        waypoints = []
         for target in target_states:
             waypoints.append(np.array(target.qpos))
+
         waypoints = np.array(waypoints)
         # Create spline interpolation
         # NOTE: Suitable for dense waypoints

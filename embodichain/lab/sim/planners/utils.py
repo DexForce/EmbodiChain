@@ -143,7 +143,7 @@ class PlanResult:
 class PlanState:
     r"""Data class representing the state for a motion plan."""
 
-    move_type: MoveType = MoveType.PAUSE
+    move_type: MoveType = MoveType.JOINT_MOVE
     """Type of movement used by the plan."""
 
     move_part: MovePart = MovePart.LEFT

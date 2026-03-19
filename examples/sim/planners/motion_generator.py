@@ -125,6 +125,7 @@ def main(interactive=False):
     from embodichain.lab.sim.planners import (
         MotionGenerator,
         MotionGenCfg,
+        MotionGenOptions,
         ToppraPlannerCfg,
         ToppraPlanOptions,
         PlanState,
@@ -136,22 +137,24 @@ def main(interactive=False):
     motion_cfg = MotionGenCfg(
         planner_cfg=ToppraPlannerCfg(
             robot_uid=robot.uid,
-            constraints={
-                "velocity": 0.2,
-                "acceleration": 0.5,
-            },
         )
     )
     motion_generator = MotionGenerator(cfg=motion_cfg)
 
     current_qpos = robot.get_qpos(name=arm_name)[0]
-    plan_runtime_cfg = ToppraPlanOptions(
+    options = MotionGenOptions(
+        control_part=arm_name,
         start_qpos=current_qpos,
         is_interpolate=True,
         is_linear=False,
-        control_part=arm_name,
-        sample_method=TrajectorySampleMethod.QUANTITY,
-        sample_interval=20,
+        plan_opts=ToppraPlanOptions(
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=20,
+        ),
     )
     # Joint space trajectory
     qpos_list = torch.vstack(qpos_list)
@@ -160,36 +163,28 @@ def main(interactive=False):
         target_states.append(
             PlanState(
                 move_type=MoveType.JOINT_MOVE,
-                move_part=MovePart.LEFT,
                 qpos=qpos,
             )
         )
-    plan_result = motion_generator.plan(
-        target_states=target_states, runtime_cfg=plan_runtime_cfg
+    plan_result = motion_generator.generate(
+        target_states=target_states, options=options
     )
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
-    plan_runtime_cfg = ToppraPlanOptions(
-        start_qpos=current_qpos,
-        is_interpolate=True,
-        is_linear=True,
-        control_part=arm_name,
-        sample_method=TrajectorySampleMethod.QUANTITY,
-        sample_interval=20,
-    )
+    options.is_linear = True
+
     xpos_list = torch.concatenate([xpos.unsqueeze(0) for xpos in xpos_list])
     target_states = []
     for xpos in xpos_list:
         target_states.append(
             PlanState(
                 move_type=MoveType.EEF_MOVE,
-                move_part=MovePart.LEFT,
                 xpos=xpos,
             )
         )
-    plan_result = motion_generator.plan(
-        target_states=target_states, runtime_cfg=plan_runtime_cfg
+    plan_result = motion_generator.generate(
+        target_states=target_states, options=options
     )
     sim.reset()
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)

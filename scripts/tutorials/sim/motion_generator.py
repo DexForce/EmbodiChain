@@ -91,6 +91,7 @@ def main():
     from embodichain.lab.sim.planners import (
         MotionGenerator,
         MotionGenCfg,
+        MotionGenOptions,
         ToppraPlannerCfg,
         ToppraPlanOptions,
         PlanState,
@@ -102,24 +103,27 @@ def main():
     motion_cfg = MotionGenCfg(
         planner_cfg=ToppraPlannerCfg(
             robot_uid=robot.uid,
-            constraints={
-                "velocity": 0.2,
-                "acceleration": 0.5,
-            },
         )
     )
     motion_generator = MotionGenerator(cfg=motion_cfg)
 
     # Joint space trajectory
     qpos_list = torch.vstack(qpos_list)
-    plan_runtime_cfg = ToppraPlanOptions(
+    options = MotionGenOptions(
+        control_part=arm_name,
         start_qpos=qpos_list[0],
         is_interpolate=True,
         is_linear=False,
-        control_part=arm_name,
-        sample_method=TrajectorySampleMethod.QUANTITY,
-        sample_interval=20,
+        plan_opts=ToppraPlanOptions(
+            constraints={
+                "velocity": 0.2,
+                "acceleration": 0.5,
+            },
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=20,
+        ),
     )
+
     target_states = []
     for qpos in qpos_list:
         target_states.append(
@@ -129,20 +133,14 @@ def main():
                 qpos=qpos,
             )
         )
-    plan_result = motion_generator.plan(
-        target_states=target_states, runtime_cfg=plan_runtime_cfg
+    plan_result = motion_generator.generate(
+        target_states=target_states, options=options
     )
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)
 
     # Cartesian space trajectory
-    cfg = ToppraPlanOptions(
-        start_qpos=qpos_list[0],
-        is_interpolate=True,
-        is_linear=True,
-        control_part=arm_name,
-        sample_method=TrajectorySampleMethod.QUANTITY,
-        sample_interval=20,
-    )
+    options.is_linear = True
+
     target_states = []
     for xpos in xpos_list:
         target_states.append(
@@ -152,8 +150,8 @@ def main():
                 xpos=xpos,
             )
         )
-    plan_result = motion_generator.plan(
-        target_states=target_states, runtime_cfg=plan_runtime_cfg
+    plan_result = motion_generator.generate(
+        target_states=target_states, options=options
     )
     sim.reset()
     move_robot_along_trajectory(robot, arm_name, plan_result.positions)
