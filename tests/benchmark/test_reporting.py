@@ -27,6 +27,7 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
             "seed": 0,
             "final_reward": 1.5,
             "final_success_rate": 0.8,
+            "final_success_rate_stable": 0.75,
             "steps_to_success_threshold": 256,
             "steps_to_success_threshold_first_hit": 128,
             "checkpoint_path": "outputs/checkpoint.pt",
@@ -39,6 +40,7 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
             "num_runs": 1,
             "final_reward_mean": 1.5,
             "final_success_rate_mean": 0.8,
+            "final_success_rate_stable_mean": 0.75,
             "final_success_rate_std": 0.1,
             "training_fps_mean": 100.0,
             "environment_fps_mean": 500.0,
@@ -55,6 +57,7 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
             "steps_to_success_threshold": 256.0,
             "success_rate_std": 0.1,
             "avg_success_rate": 0.8,
+            "avg_success_rate_stable": 0.75,
             "avg_final_reward": 1.5,
             "tasks_covered": 1,
         }
@@ -81,4 +84,5 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
     assert "System Performance" in report
     assert "Aggregate Results" in report
     assert "Per-Run Results" in report
+    assert "Final Stable Success Rate" in report
     assert "cart_pole" in report

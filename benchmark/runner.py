@@ -24,6 +24,7 @@ from .config import deep_update, load_algorithm_spec, load_suite_spec, load_task
 from .leaderboard import build_leaderboard
 from .metrics import (
     aggregate_runs,
+    compute_final_metric_stable,
     compute_steps_to_threshold_first_hit,
     compute_steps_to_threshold_sustained,
 )
@@ -152,6 +153,12 @@ class BenchmarkRunner:
             }
             threshold = task_spec.get("success_threshold", 0.8)
             sustain_count = int(self.protocol.get("threshold_sustain_count", 3))
+            stable_eval_window = int(self.protocol.get("final_eval_window", 3))
+            result["final_success_rate_stable"] = compute_final_metric_stable(
+                training_record.get("eval_history", []),
+                metric_key="eval/success_rate",
+                window_size=stable_eval_window,
+            )
             result["steps_to_success_threshold_first_hit"] = (
                 compute_steps_to_threshold_first_hit(
                     training_record.get("eval_history", []),

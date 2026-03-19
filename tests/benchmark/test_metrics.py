@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from benchmark.metrics import (
     aggregate_runs,
+    compute_final_metric_stable,
     compute_steps_to_threshold_first_hit,
     compute_steps_to_threshold_sustained,
 )
@@ -53,6 +54,17 @@ def test_compute_steps_to_threshold_sustained_requires_consecutive_hits():
     )
 
 
+def test_compute_final_metric_stable_uses_last_window():
+    eval_history = [
+        {"global_step": 100.0, "eval/success_rate": 0.2},
+        {"global_step": 200.0, "eval/success_rate": 0.4},
+        {"global_step": 300.0, "eval/success_rate": 0.6},
+        {"global_step": 400.0, "eval/success_rate": 0.8},
+    ]
+
+    assert compute_final_metric_stable(eval_history, "eval/success_rate", 2) == 0.7
+
+
 def test_aggregate_runs_groups_by_task_and_algorithm():
     run_results = [
         {
@@ -61,6 +73,7 @@ def test_aggregate_runs_groups_by_task_and_algorithm():
             "seed": 0,
             "final_reward": 1.0,
             "final_success_rate": 0.9,
+            "final_success_rate_stable": 0.85,
             "final_episode_length": 50.0,
             "training_fps": 100.0,
             "environment_fps": 500.0,
@@ -74,6 +87,7 @@ def test_aggregate_runs_groups_by_task_and_algorithm():
             "seed": 1,
             "final_reward": 3.0,
             "final_success_rate": 0.7,
+            "final_success_rate_stable": 0.75,
             "final_episode_length": 40.0,
             "training_fps": 200.0,
             "environment_fps": 700.0,
@@ -89,5 +103,6 @@ def test_aggregate_runs_groups_by_task_and_algorithm():
     assert summaries[0]["task"] == "cart_pole"
     assert summaries[0]["algorithm"] == "ppo"
     assert summaries[0]["final_reward_mean"] == 2.0
+    assert summaries[0]["final_success_rate_stable_mean"] == 0.8
     assert summaries[0]["steps_to_success_threshold_mean"] == 1500
     assert summaries[0]["steps_to_success_threshold_first_hit_mean"] == 1000

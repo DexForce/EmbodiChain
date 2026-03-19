@@ -41,6 +41,22 @@ def _iter_valid_threshold_points(
         yield int(step_value), float(metric_value)
 
 
+def compute_final_metric_stable(
+    eval_history: list[dict[str, float]],
+    metric_key: str,
+    window_size: int = 3,
+) -> float | None:
+    """Return the mean of the last `window_size` valid metric values."""
+    valid_values = [
+        metric_value
+        for _, metric_value in _iter_valid_threshold_points(eval_history, metric_key)
+    ]
+    if not valid_values:
+        return None
+    effective_window = max(1, window_size)
+    return mean(valid_values[-effective_window:])
+
+
 def compute_steps_to_threshold_first_hit(
     eval_history: list[dict[str, float]],
     metric_key: str,
@@ -96,6 +112,7 @@ def aggregate_runs(run_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         scalar_keys = {
             "final_reward",
             "final_success_rate",
+            "final_success_rate_stable",
             "final_episode_length",
             "training_fps",
             "environment_fps",
@@ -126,6 +143,7 @@ def aggregate_runs(run_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 __all__ = [
     "aggregate_runs",
+    "compute_final_metric_stable",
     "compute_steps_to_threshold_first_hit",
     "compute_steps_to_threshold_sustained",
 ]

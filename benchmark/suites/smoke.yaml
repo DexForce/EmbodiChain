@@ -16,4 +16,5 @@ protocol:
   evaluation_interval: 2
   evaluation_episodes: 10
   threshold_sustain_count: 3
+  final_eval_window: 3
   save_interval: 1000

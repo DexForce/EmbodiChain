@@ -25,6 +25,7 @@ def test_build_leaderboard_ranks_higher_success_first():
             "algorithm": "ppo",
             "task": "cart_pole",
             "final_success_rate_mean": 0.8,
+            "final_success_rate_stable_mean": 0.7,
             "final_reward_mean": 10.0,
             "steps_to_success_threshold_mean": 100.0,
         },
@@ -32,6 +33,7 @@ def test_build_leaderboard_ranks_higher_success_first():
             "algorithm": "ppo",
             "task": "push_cube",
             "final_success_rate_mean": 0.6,
+            "final_success_rate_stable_mean": 0.5,
             "final_reward_mean": 5.0,
             "steps_to_success_threshold_mean": 200.0,
         },
@@ -39,6 +41,7 @@ def test_build_leaderboard_ranks_higher_success_first():
             "algorithm": "grpo",
             "task": "cart_pole",
             "final_success_rate_mean": 0.7,
+            "final_success_rate_stable_mean": 0.8,
             "final_reward_mean": 8.0,
             "steps_to_success_threshold_mean": 150.0,
         },
@@ -46,6 +49,7 @@ def test_build_leaderboard_ranks_higher_success_first():
             "algorithm": "grpo",
             "task": "push_cube",
             "final_success_rate_mean": 0.5,
+            "final_success_rate_stable_mean": 0.7,
             "final_reward_mean": 4.0,
             "steps_to_success_threshold_mean": 250.0,
         },
@@ -59,9 +63,10 @@ def test_build_leaderboard_ranks_higher_success_first():
 
     leaderboard = build_leaderboard(aggregate_results, run_results=run_results)
 
-    assert leaderboard[0]["algorithm"] == "ppo"
+    assert leaderboard[0]["algorithm"] == "grpo"
     assert leaderboard[0]["rank"] == 1
+    assert "avg_success_rate_stable" in leaderboard[0]
     assert "steps_to_success_threshold" in leaderboard[0]
     assert "success_rate_std" in leaderboard[0]
     assert "tasks" in leaderboard[0]
-    assert leaderboard[1]["algorithm"] == "grpo"
+    assert leaderboard[1]["algorithm"] == "ppo"

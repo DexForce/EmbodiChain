@@ -56,6 +56,7 @@ def generate_markdown_report(
                 f"- evaluation_interval: `{protocol.get('evaluation_interval')}`",
                 f"- evaluation_episodes: `{protocol.get('evaluation_episodes')}`",
                 f"- threshold_sustain_count: `{protocol.get('threshold_sustain_count', 3)}`",
+                f"- final_eval_window: `{protocol.get('final_eval_window', 3)}`",
                 "",
             ]
         )
@@ -63,19 +64,22 @@ def generate_markdown_report(
         [
             "## Leaderboard",
             "",
-            "| Rank | Algorithm | Score | Steps To Threshold (Sustained) | Success Rate Std | Avg Success Rate | Avg Final Reward | Tasks |",
-            "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Rank | Algorithm | Score | Steps To Threshold (Sustained) | Success Rate Std | Avg Success Rate | Avg Stable Success Rate | Avg Final Reward | Tasks |",
+            "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for item in leaderboard:
         lines.append(
-            "| {rank} | {algorithm} | {score} | {steps} | {std} | {success} | {reward} | {tasks} |".format(
+            "| {rank} | {algorithm} | {score} | {steps} | {std} | {success} | {stable_success} | {reward} | {tasks} |".format(
                 rank=item["rank"],
                 algorithm=item["algorithm"],
                 score=_fmt(item.get("score", float("nan"))),
                 steps=_fmt(item.get("steps_to_success_threshold", float("nan"))),
                 std=_fmt(item.get("success_rate_std", float("nan"))),
                 success=_fmt(item.get("avg_success_rate", float("nan"))),
+                stable_success=_fmt(
+                    item.get("avg_success_rate_stable", float("nan"))
+                ),
                 reward=_fmt(item.get("avg_final_reward", float("nan"))),
                 tasks=item.get("tasks_covered", 0),
             )
@@ -86,18 +90,21 @@ def generate_markdown_report(
             "",
             "## Aggregate Results",
             "",
-            "| Task | Algorithm | Runs | Final Reward | Final Success Rate | Training FPS | Env FPS |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            "| Task | Algorithm | Runs | Final Reward | Final Success Rate | Final Stable Success Rate | Training FPS | Env FPS |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for item in aggregate_results:
         lines.append(
-            "| {task} | {algorithm} | {num_runs} | {reward} | {success} | {train_fps} | {env_fps} |".format(
+            "| {task} | {algorithm} | {num_runs} | {reward} | {success} | {stable_success} | {train_fps} | {env_fps} |".format(
                 task=item["task"],
                 algorithm=item["algorithm"],
                 num_runs=item["num_runs"],
                 reward=_fmt(item.get("final_reward_mean", float("nan"))),
                 success=_fmt(item.get("final_success_rate_mean", float("nan"))),
+                stable_success=_fmt(
+                    item.get("final_success_rate_stable_mean", float("nan"))
+                ),
                 train_fps=_fmt(item.get("training_fps_mean", float("nan"))),
                 env_fps=_fmt(item.get("environment_fps_mean", float("nan"))),
             )
@@ -120,16 +127,19 @@ def generate_markdown_report(
         [
             "## Stability Analysis",
             "",
-            "| Task | Algorithm | Success Rate Mean | Success Rate Std | Steps To Threshold Mean | First Hit Mean |",
-            "| --- | --- | ---: | ---: | ---: | ---: |",
+            "| Task | Algorithm | Success Rate Mean | Stable Success Rate Mean | Success Rate Std | Steps To Threshold Mean | First Hit Mean |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for item in aggregate_results:
         lines.append(
-            "| {task} | {algorithm} | {mean_value} | {std_value} | {steps} | {first_hit} |".format(
+            "| {task} | {algorithm} | {mean_value} | {stable_mean} | {std_value} | {steps} | {first_hit} |".format(
                 task=item["task"],
                 algorithm=item["algorithm"],
                 mean_value=_fmt(item.get("final_success_rate_mean", float("nan"))),
+                stable_mean=_fmt(
+                    item.get("final_success_rate_stable_mean", float("nan"))
+                ),
                 std_value=_fmt(item.get("final_success_rate_std", float("nan"))),
                 steps=_fmt(item.get("steps_to_success_threshold_mean", float("nan"))),
                 first_hit=_fmt(
@@ -161,20 +171,23 @@ def generate_markdown_report(
             "",
             "## Per-Run Results",
             "",
-            "| Task | Algorithm | Seed | Final Reward | Final Success Rate | Steps To Threshold | First Hit | Checkpoint |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| Task | Algorithm | Seed | Final Reward | Final Success Rate | Final Stable Success Rate | Steps To Threshold | First Hit | Checkpoint |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
     for result in sorted(
         run_results, key=lambda item: (item["task"], item["algorithm"], item["seed"])
     ):
         lines.append(
-            "| {task} | {algorithm} | {seed} | {reward} | {success} | {steps} | {first_hit} | `{checkpoint}` |".format(
+            "| {task} | {algorithm} | {seed} | {reward} | {success} | {stable_success} | {steps} | {first_hit} | `{checkpoint}` |".format(
                 task=result["task"],
                 algorithm=result["algorithm"],
                 seed=result["seed"],
                 reward=_fmt(result.get("final_reward", float("nan"))),
                 success=_fmt(result.get("final_success_rate", float("nan"))),
+                stable_success=_fmt(
+                    result.get("final_success_rate_stable", float("nan"))
+                ),
                 steps=result.get("steps_to_success_threshold", "n/a"),
                 first_hit=result.get("steps_to_success_threshold_first_hit", "n/a"),
                 checkpoint=result.get("checkpoint_path", ""),
@@ -195,18 +208,21 @@ def generate_leaderboard_markdown(
     lines = [
         "# Benchmark Leaderboard",
         "",
-        "| Rank | Algorithm | Score | Steps To Threshold (Sustained) | Success Rate Std | Avg Success Rate | Avg Final Reward | Tasks |",
-        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Rank | Algorithm | Score | Steps To Threshold (Sustained) | Success Rate Std | Avg Success Rate | Avg Stable Success Rate | Avg Final Reward | Tasks |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in leaderboard:
         lines.append(
-            "| {rank} | {algorithm} | {score} | {steps} | {std} | {success} | {reward} | {tasks} |".format(
+            "| {rank} | {algorithm} | {score} | {steps} | {std} | {success} | {stable_success} | {reward} | {tasks} |".format(
                 rank=item["rank"],
                 algorithm=item["algorithm"],
                 score=_fmt(item.get("score", float("nan"))),
                 steps=_fmt(item.get("steps_to_success_threshold", float("nan"))),
                 std=_fmt(item.get("success_rate_std", float("nan"))),
                 success=_fmt(item.get("avg_success_rate", float("nan"))),
+                stable_success=_fmt(
+                    item.get("avg_success_rate_stable", float("nan"))
+                ),
                 reward=_fmt(item.get("avg_final_reward", float("nan"))),
                 tasks=item.get("tasks_covered", 0),
             )

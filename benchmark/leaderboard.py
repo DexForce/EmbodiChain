@@ -43,6 +43,12 @@ def build_leaderboard(
 
     leaderboard: list[dict[str, Any]] = []
     for algorithm, items in grouped_summary.items():
+        stable_success_values = [
+            float(item["final_success_rate_stable_mean"])
+            for item in items
+            if isinstance(item.get("final_success_rate_stable_mean"), (int, float))
+            and not isnan(item["final_success_rate_stable_mean"])
+        ]
         success_values = [
             float(item["final_success_rate_mean"])
             for item in items
@@ -55,7 +61,7 @@ def build_leaderboard(
             if isinstance(item.get("final_reward_mean"), (int, float))
             and not isnan(item["final_reward_mean"])
         ]
-        score = mean(success_values) if success_values else float("nan")
+        score = mean(stable_success_values) if stable_success_values else float("nan")
         steps_values = [
             float(item["steps_to_success_threshold_mean"])
             for item in items
@@ -68,6 +74,11 @@ def build_leaderboard(
             if _valid_float(run.get("final_success_rate")) is not None
         ]
         task_scores = {
+            item["task"]: float(item["final_success_rate_stable_mean"])
+            for item in items
+            if _valid_float(item.get("final_success_rate_stable_mean")) is not None
+        }
+        raw_task_scores = {
             item["task"]: float(item["final_success_rate_mean"])
             for item in items
             if _valid_float(item.get("final_success_rate_mean")) is not None
@@ -82,12 +93,16 @@ def build_leaderboard(
                 "success_rate_std": pstdev(run_success_values)
                 if len(run_success_values) > 1
                 else 0.0,
-                "avg_success_rate": score,
+                "avg_success_rate": mean(success_values)
+                if success_values
+                else float("nan"),
+                "avg_success_rate_stable": score,
                 "avg_final_reward": mean(reward_values)
                 if reward_values
                 else float("nan"),
                 "tasks_covered": len(items),
                 "tasks": task_scores,
+                "tasks_raw": raw_task_scores,
             }
         )
 
