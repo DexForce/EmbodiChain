@@ -173,7 +173,22 @@ class ToppraPlanner(BasePlanner):
             < 1e-3
         ):
             logger.log_warning("Only two same waypoints, returning trivial trajectory.")
-            return target_states
+            return PlanResult(
+                success=False,
+                positions=torch.as_tensor(
+                    np.stack([target_states[0].qpos, target_states[1].qpos]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                velocities=torch.zeros(
+                    (2, dofs), dtype=torch.float32, device=self.device
+                ),
+                accelerations=torch.zeros(
+                    (2, dofs), dtype=torch.float32, device=self.device
+                ),
+                dt=torch.tensor([0.0, 0.0], dtype=torch.float32, device=self.device),
+                duration=0.0,
+            )
 
         # Build waypoints
         waypoints = []
