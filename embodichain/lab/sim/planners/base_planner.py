@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 import torch
-import numpy as np
 
 import functools
 from abc import ABC, abstractmethod
@@ -25,7 +24,6 @@ from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
 from .utils import PlanState, PlanResult
-from .utils import MovePart, MoveType
 
 __all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
 
