@@ -114,7 +114,7 @@ def main():
     qpos_list = torch.vstack(qpos_list)
     plan_runtime_cfg = ToppraPlanOptions(
         start_qpos=qpos_list[0],
-        is_pre_interpolate=True,
+        is_interpolate=True,
         is_linear=False,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
@@ -137,7 +137,7 @@ def main():
     # Cartesian space trajectory
     cfg = ToppraPlanOptions(
         start_qpos=qpos_list[0],
-        is_pre_interpolate=True,
+        is_interpolate=True,
         is_linear=True,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,

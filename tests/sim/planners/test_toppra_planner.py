@@ -55,7 +55,7 @@ class TestToppraPlanner:
                 size=(6,), dtype=torch.float32, device=self.planner.device
             ),
             is_linear=False,
-            is_pre_interpolate=True,
+            is_interpolate=True,
             control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
@@ -80,7 +80,7 @@ class TestToppraPlanner:
                 size=(6,), dtype=torch.float32, device=self.planner.device
             ),
             is_linear=False,
-            is_pre_interpolate=True,
+            is_interpolate=True,
             control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,

@@ -28,6 +28,7 @@ from embodichain.lab.sim.planners import (
     ToppraPlanner,
     ToppraPlannerCfg,
 )
+from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 from embodichain.utils import logger, configclass
 from .utils import MovePart, MoveType, PlanState, PlanResult
 from .utils import calculate_point_allocations, interpolate_xpos
@@ -50,17 +51,20 @@ class MotionGenCfg:
 @configclass
 class MotionGenOptions:
 
-    plan_opts: PlanOptions = PlanOptions()
+    plan_opts: PlanOptions | None = None
+    """Options to pass to the underlying planner during the planning phase."""
 
-    is_pre_interpolate: bool = False
+    is_interpolate: bool = False
     """Whether to perform interpolation before planning. 
-    
-    If True, the planner will first interpolate the trajectory based on the provided waypoints and then plan a trajectory through the interpolated points. 
-    If False, the planner will directly plan through the provided waypoints without interpolation.
     
     Note:
         - The pre-interpolation only works for PlanState with MoveType.EEF_MOVE or MoveType.JOINT_MOVE.
     """
+
+    interpolate_nums: int | list[int] = 10
+    """Number of interpolation points to generate between each pair of waypoints. 
+    
+    Can be an integer (same for all segments) or a list of integers with len(PlanState) specifying the number of points for each segment."""
 
     is_linear: bool = True
     """If True, use cartesian linear interpolation, else joint space"""
@@ -122,24 +126,24 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
-    def plan(
+    def generate(
         self,
         target_states: List[PlanState],
         opts: MotionGenOptions = MotionGenOptions(),
     ) -> PlanResult:
-        r"""Plan trajectory with given options.
+        r"""Generate motion with given options.
 
         This method generates a smooth trajectory using the selected planner that satisfies
         constraints and perform pre-interpolation if specified in the options.
 
         Args:
-            target_states: List[PlanState]
-            opts: MotionGenOptions
+            target_states: List[PlanState].
+            opts: MotionGenOptions.
 
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        if opts.is_pre_interpolate:
+        if opts.is_interpolate:
             # interpolate trajectory to generate more waypoints for smoother motion and better constraint handling
             if target_states[0].move_type == MoveType.EEF_MOVE:
                 xpos_list = []
@@ -163,12 +167,29 @@ class MotionGenerator:
                 logger.log_error(
                     f"Unsupported move type for pre-interpolation: {target_states[0].move_type}"
                 )
-            target_plan_states = self.interpolate_trajectory(
+            qpos_interpolated, xpos_interpolated = self.interpolate_trajectory(
                 control_part=opts.control_part,
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
-                cfg=opts,
+                opts=opts,
             )
+
+            if not opts.plan_opts:
+                # Directly return the interpolated trajectory if no further planning is needed
+                return PlanResult(
+                    success=True,
+                    positions=qpos_interpolated,
+                    xpos_list=xpos_interpolated,
+                )
+
+            target_plan_states = []
+            for qpos in qpos_interpolated:
+                target_plan_states.append(
+                    PlanState(
+                        move_type=MoveType.JOINT_MOVE,
+                        qpos=qpos,
+                    )
+                )
         else:
             target_plan_states = target_states
 
@@ -409,8 +430,8 @@ class MotionGenerator:
         control_part: str | None = None,
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
-        cfg: PlanOptions = PlanOptions(),
-    ) -> tuple[PlanState, list[PlanState]]:
+        opts: MotionGenOptions = MotionGenOptions(),
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         r"""Interpolate trajectory based on provided waypoints.
             This method performs interpolation on the provided waypoints to generate a smoother trajectory.
             It supports both Cartesian (end-effector) and joint space interpolation based on the control part and options specified.
@@ -419,72 +440,72 @@ class MotionGenerator:
             control_part: Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration.
             xpos_list: List of end-effector poses (torch.Tensor of shape [N, 4, 4]) to interpolate through. Required if control_part is an end-effector control part.
             qpos_list: List of joint positions (torch.Tensor of shape [N, DOF]) to interpolate through. Required if control_part is a joint control part.
-            cfg: PlanOptions containing interpolation settings such as step size and whether to use linear interpolation.
+            opts: MotionGenOptions containing interpolation settings such as step size and whether to use linear interpolation.
 
         Returns:
-            init_state: PlanState representing the initial state of the trajectory (first waypoint).
-            target_states: List of PlanState representing the interpolated waypoints for the trajectory.
+            Tuple containing:
+                - interpolate_qpos_list: Tensor of interpolated joint positions along the trajectory, shape [M, DOF]
+                - feasible_pose_targets: Tensor of corresponding end-effector poses for the interpolated joint positions, shape [M, 4, 4]. This is useful for verifying the interpolation results and can be None if not applicable.
         """
 
-        if qpos_list is not None:
-            if qpos_list.dim() == 1:
-                qpos_list = qpos_list.unsqueeze(0)
-
+        if qpos_list is not None and xpos_list is None and opts.is_linear:
             qpos_batch = qpos_list.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
             xpos_batch = self.robot.compute_batch_fk(
                 qpos=qpos_batch,
                 name=control_part,
                 to_matrix=True,
             )
-            xpos_list = xpos_batch.squeeze(0)
-            qpos_list = qpos_tensor
+            xpos_list = xpos_batch.squeeze_(0)
 
-        if xpos_list is None:
+        if xpos_list is None and qpos_list is None:
             logger.log_error("Either xpos_list or qpos_list must be provided")
 
-        if not isinstance(xpos_list, torch.Tensor):
-            xpos_list = torch.as_tensor(
-                np.asarray(xpos_list),
-                dtype=torch.float32,
-                device=self.robot.device,
-            )
-        else:
-            xpos_list = xpos_list.to(dtype=torch.float32, device=self.robot.device)
-
-        if cfg.start_qpos is not None:
+        if opts.start_qpos is not None:
             start_xpos = self.robot.compute_fk(
-                qpos=cfg.start_qpos.unsqueeze(0), name=control_part, to_matrix=True
+                qpos=opts.start_qpos.unsqueeze(0), name=control_part, to_matrix=True
             )
             qpos_list = (
-                torch.cat([cfg.start_qpos.unsqueeze(0), qpos_list], dim=0)
+                torch.cat([opts.start_qpos.unsqueeze(0), qpos_list], dim=0)
                 if qpos_list is not None
                 else None
             )
             xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
 
         # Input validation
-        if len(xpos_list) < 2:
-            logger.log_warning("xpos_list must contain at least 2 points")
-            return None, None
+        if (xpos_list is not None and len(xpos_list) < 2) or (
+            qpos_list is not None and len(qpos_list) < 2
+        ):
+            logger.log_error(
+                "xpos_list and qpos_list must contain at least 2 way points"
+            )
 
-        # currently we use
-        qpos_seed = cfg.start_qpos
+        qpos_seed = opts.start_qpos
         if qpos_seed is None and qpos_list is not None:
             qpos_seed = qpos_list[0]
 
         # Generate trajectory
         interpolate_qpos_list = []
-        if cfg.is_linear or qpos_list is None:
+        if opts.is_linear or qpos_list is None:
+            qpos_batch = qpos_list.unsqueeze(0)  # [n_env=1, n_batch=N, dof]
+            xpos_batch = self.robot.compute_batch_fk(
+                qpos=qpos_batch,
+                name=control_part,
+                to_matrix=True,
+            )
+            xpos_list = xpos_batch.squeeze_(0)
+
             # Calculate point allocations for interpolation
             interpolated_point_allocations = calculate_point_allocations(
                 xpos_list,
-                step_size=cfg.interpolate_position_step,
-                angle_step=cfg.interpolate_angle_step,
+                step_size=opts.interpolate_position_step,
+                angle_step=opts.interpolate_angle_step,
                 device=self.device,
             )
 
             # Linear cartesian interpolation
-            feasible_pose_targets = []
+            total_interpolated_poses = []
+
+            # TODO: We may improve the computation efficiency using warp for parallel interpolation of all segments if necessary.
             for i in range(len(xpos_list) - 1):
                 interpolated_poses = interpolate_xpos(
                     (
@@ -499,84 +520,75 @@ class MotionGenerator:
                     ),
                     interpolated_point_allocations[i],
                 )
-                for xpos in interpolated_poses:
-                    success, qpos = self.robot.compute_ik(
-                        pose=xpos, joint_seed=qpos_seed, name=control_part
-                    )
+                total_interpolated_poses.extend(interpolated_poses)
 
-                    if isinstance(success, torch.Tensor):
-                        is_success = bool(success.all())
-                    elif isinstance(success, np.ndarray):
-                        is_success = bool(np.all(success))
-                    elif isinstance(success, (list, tuple)):
-                        is_success = all(success)
-                    else:
-                        is_success = bool(success)
+            total_interpolated_poses = torch.as_tensor(
+                np.asarray(total_interpolated_poses),
+                dtype=torch.float32,
+                device=self.device,
+            )
 
-                    if isinstance(qpos, torch.Tensor):
-                        has_nan = torch.isnan(qpos).any().item()
-                    else:
-                        has_nan = np.isnan(qpos).any()
+            # Use batch IK for performance
+            # compute_batch_ik expects (n_envs, n_batch, 7) or (n_envs, n_batch, 4, 4)
+            # Here we assume n_envs = 1 or we want to apply this to all envs if available.
+            # Since MotionGenerator usually works with self.robot.device, we use its batching capabilities.
+            success_batch, qpos_batch = self.robot.compute_batch_ik(
+                pose=total_interpolated_poses.unsqueeze(0),
+                joint_seed=None,  # Or use qpos_seed if properly shaped
+                name=control_part,
+            )
 
-                    if not is_success or qpos is None or has_nan:
-                        logger.log_debug(
-                            f"IK failed or returned nan at pose, skipping this point."
-                        )
-                        continue
+            # success_batch: (n_envs, n_batch), qpos_batch: (n_envs, n_batch, dof)
+            success_mask = success_batch[0]  # Take first env
+            qpos_results = qpos_batch[0]
+            has_nan_mask = torch.isnan(qpos_results).any(dim=-1)
 
-                    q_entry = qpos[0] if isinstance(qpos, (np.ndarray, list)) else qpos
-                    if isinstance(q_entry, torch.Tensor) and q_entry.dim() > 1:
-                        q_entry = q_entry.squeeze(0)
-                    interpolate_qpos_list.append(q_entry)
-                    feasible_pose_targets.append(xpos)
-                    qpos_seed = q_entry
+            valid_mask = success_mask & (~has_nan_mask)
+            valid_indices = torch.where(valid_mask)[0]
+
+            interpolate_qpos_list = qpos_results[valid_indices]
+            feasible_pose_targets = total_interpolated_poses[valid_indices]
 
             # Vectorized FK feasibility check to keep only physically consistent IK outputs.
             if len(interpolate_qpos_list) > 0:
-                qpos_tensor = torch.stack(
-                    [
-                        (
-                            q.to(dtype=torch.float32, device=self.robot.device)
-                            if isinstance(q, torch.Tensor)
-                            else torch.as_tensor(
-                                q, dtype=torch.float32, device=self.robot.device
-                            )
-                        )
-                        for q in interpolate_qpos_list
-                    ]
-                )
                 fk_batch = self.robot.compute_batch_fk(
-                    qpos=qpos_tensor.unsqueeze(0),
+                    qpos=interpolate_qpos_list.unsqueeze(0),
                     name=control_part,
                     to_matrix=True,
-                ).squeeze(0)
-                target_pose_tensor = torch.as_tensor(
-                    np.asarray(feasible_pose_targets),
-                    dtype=torch.float32,
-                    device=self.robot.device,
-                )
+                ).squeeze_(0)
                 pos_err = torch.norm(
-                    fk_batch[:, :3, 3] - target_pose_tensor[:, :3, 3], dim=-1
+                    fk_batch[:, :3, 3] - feasible_pose_targets[:, :3, 3], dim=-1
                 )
                 rot_err = torch.norm(
-                    fk_batch[:, :3, :3] - target_pose_tensor[:, :3, :3],
+                    fk_batch[:, :3, :3] - feasible_pose_targets[:, :3, :3],
                     dim=(-2, -1),
                 )
                 valid_mask = (pos_err < 0.02) & (rot_err < 0.2)
-                interpolate_qpos_list = [
-                    q
-                    for q, is_valid in zip(interpolate_qpos_list, valid_mask)
-                    if bool(is_valid.item())
-                ]
+                interpolate_qpos_list = interpolate_qpos_list[valid_mask]
+                feasible_pose_targets = feasible_pose_targets[valid_mask]
         else:
-            # Joint space interpolation
-            interpolate_qpos_list = [q for q in qpos_list]
+            # Perform joint space interpolation directly if not linear or if end-effector poses are not provided
+            qpos_interpolated = qpos_list.unsqueeze_(0).permute(1, 0, 2)  # [N, 1, DOF]
 
-        if len(interpolate_qpos_list) < 2:
-            logger.log_error("Need at least 2 waypoints for trajectory planning")
+            if isinstance(opts.interpolate_nums, int):
+                interp_nums = [opts.interpolate_nums] * (len(qpos_list) - 1)
+            else:
+                if len(opts.interpolate_nums) != len(qpos_list) - 1:
+                    logger.log_error(
+                        "Length of interpolate_nums list must be equal to number of segments (len(qpos_list) - 1)"
+                    )
+                interp_nums = opts.interpolate_nums
 
-        target_states = []
-        for qpos in interpolate_qpos_list:
-            target_states.append(PlanState(move_type=MoveType.JOINT_MOVE, qpos=qpos))
+            qpos_interpolated = (
+                interpolate_with_nums(
+                    qpos_interpolated,
+                    interp_nums=interp_nums,
+                    device=self.device,
+                )
+                .permute(1, 0, 2)
+                .squeeze_(0)
+            )  # [M, DOF]
 
-        return target_states
+            feasible_pose_targets = None
+
+        return interpolate_qpos_list, feasible_pose_targets

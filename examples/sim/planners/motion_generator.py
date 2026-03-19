@@ -147,7 +147,7 @@ def main(interactive=False):
     current_qpos = robot.get_qpos(name=arm_name)[0]
     plan_runtime_cfg = ToppraPlanOptions(
         start_qpos=current_qpos,
-        is_pre_interpolate=True,
+        is_interpolate=True,
         is_linear=False,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,
@@ -172,7 +172,7 @@ def main(interactive=False):
     # Cartesian space trajectory
     plan_runtime_cfg = ToppraPlanOptions(
         start_qpos=current_qpos,
-        is_pre_interpolate=True,
+        is_interpolate=True,
         is_linear=True,
         control_part=arm_name,
         sample_method=TrajectorySampleMethod.QUANTITY,

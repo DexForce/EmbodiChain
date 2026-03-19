@@ -194,7 +194,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
 
         runtime_cfg = ToppraPlanOptions(
             is_linear=is_linear,
-            is_pre_interpolate=True,
+            is_interpolate=True,
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
@@ -235,7 +235,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         time.sleep(0.05)
         runtime_cfg = ToppraPlanOptions(
             is_linear=is_linear,
-            is_pre_interpolate=True,
+            is_interpolate=True,
             start_qpos=self.qpos_list[0],
             control_part=self.arm_name,
             sample_method=TrajectorySampleMethod.QUANTITY,
