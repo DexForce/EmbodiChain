@@ -46,13 +46,9 @@ class TestToppraPlanner:
         assert self.planner.device == torch.device("cpu")
 
     def test_plan_basic(self):
-        target_states = [PlanState(qpos=torch.zeros(6))]
+        target_states = [PlanState(qpos=torch.zeros(6)), PlanState(qpos=torch.zeros(6))]
 
         opts = ToppraPlanOptions(
-            start_qpos=torch.zeros(
-                size=(6,), dtype=torch.float32, device=self.planner.device
-            ),
-            control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
             constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -70,13 +66,9 @@ class TestToppraPlanner:
         assert is_satisfied is True
 
     def test_trivial_trajectory(self):
-        target_states = [PlanState(qpos=torch.zeros(6))]
+        target_states = [PlanState(qpos=torch.zeros(6)), PlanState(qpos=torch.zeros(6))]
 
         opts = ToppraPlanOptions(
-            start_qpos=torch.zeros(
-                size=(6,), dtype=torch.float32, device=self.planner.device
-            ),
-            control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
             constraints={"velocity": 1.0, "acceleration": 2.0},
