@@ -16,17 +16,41 @@
 
 from __future__ import annotations
 
-from benchmark.metrics import aggregate_runs, compute_steps_to_threshold
+from benchmark.metrics import (
+    aggregate_runs,
+    compute_steps_to_threshold_first_hit,
+    compute_steps_to_threshold_sustained,
+)
 
 
-def test_compute_steps_to_threshold_returns_first_matching_step():
+def test_compute_steps_to_threshold_first_hit_returns_first_matching_step():
     eval_history = [
         {"global_step": 128.0, "eval/success_rate": 0.2},
         {"global_step": 256.0, "eval/success_rate": 0.75},
         {"global_step": 384.0, "eval/success_rate": 0.81},
     ]
 
-    assert compute_steps_to_threshold(eval_history, "eval/success_rate", 0.8) == 384
+    assert (
+        compute_steps_to_threshold_first_hit(eval_history, "eval/success_rate", 0.8)
+        == 384
+    )
+
+
+def test_compute_steps_to_threshold_sustained_requires_consecutive_hits():
+    eval_history = [
+        {"global_step": 100.0, "eval/success_rate": 0.81},
+        {"global_step": 200.0, "eval/success_rate": 0.70},
+        {"global_step": 300.0, "eval/success_rate": 0.82},
+        {"global_step": 400.0, "eval/success_rate": 0.84},
+        {"global_step": 500.0, "eval/success_rate": 0.83},
+    ]
+
+    assert (
+        compute_steps_to_threshold_sustained(
+            eval_history, "eval/success_rate", 0.8, sustain_count=3
+        )
+        == 300
+    )
 
 
 def test_aggregate_runs_groups_by_task_and_algorithm():
@@ -42,6 +66,7 @@ def test_aggregate_runs_groups_by_task_and_algorithm():
             "environment_fps": 500.0,
             "peak_gpu_memory_mb": 0.0,
             "steps_to_success_threshold": 1000,
+            "steps_to_success_threshold_first_hit": 800,
         },
         {
             "task": "cart_pole",
@@ -54,6 +79,7 @@ def test_aggregate_runs_groups_by_task_and_algorithm():
             "environment_fps": 700.0,
             "peak_gpu_memory_mb": 0.0,
             "steps_to_success_threshold": 2000,
+            "steps_to_success_threshold_first_hit": 1200,
         },
     ]
 
@@ -64,3 +90,4 @@ def test_aggregate_runs_groups_by_task_and_algorithm():
     assert summaries[0]["algorithm"] == "ppo"
     assert summaries[0]["final_reward_mean"] == 2.0
     assert summaries[0]["steps_to_success_threshold_mean"] == 1500
+    assert summaries[0]["steps_to_success_threshold_first_hit_mean"] == 1000

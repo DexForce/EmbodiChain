@@ -22,7 +22,11 @@ from typing import Any
 
 from .config import deep_update, load_algorithm_spec, load_suite_spec, load_task_spec
 from .leaderboard import build_leaderboard
-from .metrics import aggregate_runs, compute_steps_to_threshold
+from .metrics import (
+    aggregate_runs,
+    compute_steps_to_threshold_first_hit,
+    compute_steps_to_threshold_sustained,
+)
 from .plots import build_plot_artifacts
 from .reporting import generate_leaderboard_markdown, generate_markdown_report
 from .runtime import dump_json, evaluate_checkpoint, train_with_config
@@ -147,10 +151,19 @@ class BenchmarkRunner:
                 "train_history": training_record.get("train_history", []),
             }
             threshold = task_spec.get("success_threshold", 0.8)
-            result["steps_to_success_threshold"] = compute_steps_to_threshold(
+            sustain_count = int(self.protocol.get("threshold_sustain_count", 3))
+            result["steps_to_success_threshold_first_hit"] = (
+                compute_steps_to_threshold_first_hit(
+                    training_record.get("eval_history", []),
+                    metric_key="eval/success_rate",
+                    threshold=float(threshold),
+                )
+            )
+            result["steps_to_success_threshold"] = compute_steps_to_threshold_sustained(
                 training_record.get("eval_history", []),
                 metric_key="eval/success_rate",
                 threshold=float(threshold),
+                sustain_count=sustain_count,
             )
             result["final_metrics"] = eval_summary["metrics"]
             dump_json(result, run_dir / "result.json")

@@ -8,7 +8,6 @@ seeds:
   - 0
   - 1
   - 2
-  - 3
 protocol:
   device: cuda:0
   headless: true
@@ -18,4 +17,5 @@ protocol:
   num_eval_envs: 16
   evaluation_interval: 200
   evaluation_episodes: 20
+  threshold_sustain_count: 3
   save_interval: 200

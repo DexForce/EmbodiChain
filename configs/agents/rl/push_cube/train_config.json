@@ -13,9 +13,9 @@
         "enable_eval": true,
         "num_eval_envs": 16,
         "num_eval_episodes": 3,
-        "eval_freq": 200,
-        "save_freq": 200,
-        "use_wandb": false,
+        "eval_freq": 100,
+        "save_freq": 100,
+        "use_wandb": true,
         "wandb_project_name": "embodichain-push_cube",
         "events": {
             "eval": {
@@ -30,7 +30,7 @@
                         "target": [0, 0, 0],
                         "up": [0, 0, 1],
                         "intrinsics": [600, 600, 320, 240],
-                        "save_path": "./outputs/videos/eval"
+                        "save_path": "./outputs/videos_ppo1/eval"
                     }
                 }
             }

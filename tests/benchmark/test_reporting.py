@@ -28,6 +28,7 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
             "final_reward": 1.5,
             "final_success_rate": 0.8,
             "steps_to_success_threshold": 256,
+            "steps_to_success_threshold_first_hit": 128,
             "checkpoint_path": "outputs/checkpoint.pt",
         }
     ]
@@ -38,8 +39,12 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
             "num_runs": 1,
             "final_reward_mean": 1.5,
             "final_success_rate_mean": 0.8,
+            "final_success_rate_std": 0.1,
             "training_fps_mean": 100.0,
             "environment_fps_mean": 500.0,
+            "peak_gpu_memory_mb_mean": 0.0,
+            "steps_to_success_threshold_mean": 256.0,
+            "steps_to_success_threshold_first_hit_mean": 128.0,
         }
     ]
     leaderboard = [

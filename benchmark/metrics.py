@@ -22,12 +22,11 @@ from statistics import mean, pstdev
 from typing import Any
 
 
-def compute_steps_to_threshold(
+def _iter_valid_threshold_points(
     eval_history: list[dict[str, float]],
     metric_key: str,
-    threshold: float,
-) -> int | None:
-    """Return the first step where `metric_key` reaches `threshold`."""
+):
+    """Yield `(step, metric)` pairs with valid numeric values."""
     for item in eval_history:
         metric_value = item.get(metric_key)
         step_value = item.get("global_step")
@@ -39,8 +38,45 @@ def compute_steps_to_threshold(
             continue
         if isnan(metric_value):
             continue
+        yield int(step_value), float(metric_value)
+
+
+def compute_steps_to_threshold_first_hit(
+    eval_history: list[dict[str, float]],
+    metric_key: str,
+    threshold: float,
+) -> int | None:
+    """Return the first step where `metric_key` reaches `threshold`."""
+    for step_value, metric_value in _iter_valid_threshold_points(
+        eval_history, metric_key
+    ):
         if metric_value >= threshold:
-            return int(step_value)
+            return step_value
+    return None
+
+
+def compute_steps_to_threshold_sustained(
+    eval_history: list[dict[str, float]],
+    metric_key: str,
+    threshold: float,
+    sustain_count: int = 3,
+) -> int | None:
+    """Return the first step where the threshold is met for `sustain_count` evals."""
+    if sustain_count <= 1:
+        return compute_steps_to_threshold_first_hit(eval_history, metric_key, threshold)
+
+    consecutive_hits = 0
+    first_step_in_window: int | None = None
+    for step_value, metric_value in _iter_valid_threshold_points(eval_history, metric_key):
+        if metric_value >= threshold:
+            consecutive_hits += 1
+            if first_step_in_window is None:
+                first_step_in_window = step_value
+            if consecutive_hits >= sustain_count:
+                return first_step_in_window
+        else:
+            consecutive_hits = 0
+            first_step_in_window = None
     return None
 
 
@@ -74,18 +110,22 @@ def aggregate_runs(run_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if values:
                 summary[f"{key}_mean"] = mean(values)
                 summary[f"{key}_std"] = pstdev(values) if len(values) > 1 else 0.0
-        step_key = "steps_to_success_threshold"
-        steps = [
-            int(run[step_key])
-            for run in runs
-            if isinstance(run.get(step_key), int)
-        ]
-        if steps:
-            summary[f"{step_key}_mean"] = mean(steps)
-            summary[f"{step_key}_std"] = pstdev(steps) if len(steps) > 1 else 0.0
+        step_keys = {
+            "steps_to_success_threshold",
+            "steps_to_success_threshold_first_hit",
+        }
+        for step_key in step_keys:
+            steps = [int(run[step_key]) for run in runs if isinstance(run.get(step_key), int)]
+            if steps:
+                summary[f"{step_key}_mean"] = mean(steps)
+                summary[f"{step_key}_std"] = pstdev(steps) if len(steps) > 1 else 0.0
         summaries.append(summary)
 
     return summaries
 
 
-__all__ = ["aggregate_runs", "compute_steps_to_threshold"]
+__all__ = [
+    "aggregate_runs",
+    "compute_steps_to_threshold_first_hit",
+    "compute_steps_to_threshold_sustained",
+]
