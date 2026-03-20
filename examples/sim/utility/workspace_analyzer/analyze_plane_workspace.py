@@ -30,7 +30,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config
     VisualizationConfig,
 )
 
-
 if __name__ == "__main__":
     # Example usage
     np.set_printoptions(precision=5, suppress=True)

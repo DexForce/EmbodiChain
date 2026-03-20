@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -23,6 +21,7 @@ from copy import deepcopy
 import torch
 from tensordict import TensorDict
 
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.agents.rl.collector import SyncCollector
 from embodichain.agents.rl.utils import flatten_dict_observation

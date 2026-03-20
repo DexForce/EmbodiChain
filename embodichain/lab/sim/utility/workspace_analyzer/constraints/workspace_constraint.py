@@ -24,7 +24,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint
     DimensionConstraint,
 )
 
-
 __all__ = [
     "WorkspaceConstraintChecker",
 ]

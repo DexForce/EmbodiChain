@@ -26,7 +26,6 @@ from embodichain.toolkits.urdf_assembly.logging_utils import (
 )
 from embodichain.toolkits.urdf_assembly.mesh import URDFMeshManager
 
-
 __all__ = ["ComponentRegistry", "URDFComponent", "URDFComponentManager"]
 
 
