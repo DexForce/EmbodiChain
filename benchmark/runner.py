@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ class BenchmarkRunner:
         overrides: dict[str, Any] | None = None,
     ) -> None:
         suite_spec = load_suite_spec(suite)
+        self.suite = suite
         self.tasks = tasks or list(suite_spec["tasks"])
         self.algorithms = algorithms or list(suite_spec["algorithms"])
         self.seeds = seeds or list(suite_spec["seeds"])
@@ -87,14 +89,161 @@ class BenchmarkRunner:
                     jobs.append((task_name, algorithm_name, seed))
         return jobs
 
-    def run_training(self) -> list[dict[str, Any]]:
+    def _run_dir(self, task_name: str, algorithm_name: str, seed: int) -> Path:
+        return self.output_root / "runs" / task_name / algorithm_name / f"seed_{seed}"
+
+    @staticmethod
+    def _job_key(task_name: str, algorithm_name: str, seed: int) -> tuple[str, str, int]:
+        return (task_name, algorithm_name, int(seed))
+
+    @staticmethod
+    def _load_json_artifact(path: str | Path) -> dict[str, Any] | None:
+        artifact_path = Path(path)
+        if not artifact_path.exists():
+            return None
+        data = json.loads(artifact_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise TypeError(
+                f"Expected JSON object at {artifact_path}, got {type(data)!r}."
+            )
+        return data
+
+    @staticmethod
+    def _record_matches_job(
+        record: dict[str, Any],
+        task_name: str,
+        algorithm_name: str,
+        seed: int,
+    ) -> bool:
+        return (
+            record.get("task") == task_name
+            and record.get("algorithm") == algorithm_name
+            and int(record.get("seed", -1)) == int(seed)
+        )
+
+    @staticmethod
+    def _protocol_from_run_config(run_config: dict[str, Any]) -> dict[str, Any]:
+        trainer = run_config.get("trainer", {})
+        return {
+            "device": trainer.get("device"),
+            "headless": trainer.get("headless"),
+            "iterations": trainer.get("iterations"),
+            "buffer_size": trainer.get("buffer_size"),
+            "num_envs": trainer.get("num_envs"),
+            "num_eval_envs": trainer.get("num_eval_envs"),
+            "evaluation_interval": trainer.get("eval_freq"),
+            "evaluation_episodes": trainer.get("num_eval_episodes"),
+        }
+
+    def _expected_protocol_for_job(
+        self,
+        task_name: str,
+        algorithm_name: str,
+        seed: int,
+    ) -> dict[str, Any]:
+        return self._protocol_from_run_config(
+            self.build_run_config(task_name, algorithm_name, seed)
+        )
+
+    def _artifact_is_compatible(
+        self,
+        artifact: dict[str, Any],
+        task_name: str,
+        algorithm_name: str,
+        seed: int,
+        run_dir: Path,
+    ) -> bool:
+        artifact_protocol = artifact.get("protocol")
+        if isinstance(artifact_protocol, dict):
+            return artifact_protocol == self.protocol
+        run_config = self._load_json_artifact(run_dir / "run_config.json")
+        if run_config is None:
+            return False
+        return self._protocol_from_run_config(run_config) == self._expected_protocol_for_job(
+            task_name, algorithm_name, seed
+        )
+
+    def _load_existing_training_record(
+        self,
+        task_name: str,
+        algorithm_name: str,
+        seed: int,
+    ) -> dict[str, Any] | None:
+        run_dir = self._run_dir(task_name, algorithm_name, seed)
+        record = self._load_json_artifact(run_dir / "train_result.json")
+        if record is None:
+            return None
+        if not self._record_matches_job(record, task_name, algorithm_name, seed):
+            return None
+        if not self._artifact_is_compatible(
+            record, task_name, algorithm_name, seed, run_dir
+        ):
+            return None
+        checkpoint_path = record.get("checkpoint_path")
+        if not checkpoint_path or not Path(checkpoint_path).exists():
+            return None
+        return record
+
+    def collect_existing_run_results(self) -> list[dict[str, Any]]:
+        """Load compatible existing result artifacts for the requested jobs."""
+        results: list[dict[str, Any]] = []
+        for task_name, algorithm_name, seed in self._iter_jobs():
+            run_dir = self._run_dir(task_name, algorithm_name, seed)
+            record = self._load_json_artifact(run_dir / "result.json")
+            if record is None:
+                continue
+            if not self._record_matches_job(record, task_name, algorithm_name, seed):
+                continue
+            if not self._artifact_is_compatible(
+                record, task_name, algorithm_name, seed, run_dir
+            ):
+                continue
+            results.append(record)
+        return results
+
+    def merge_run_results(
+        self,
+        *result_sets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge multiple run result lists, preferring later duplicates."""
+        merged: dict[tuple[str, str, int], dict[str, Any]] = {}
+        for result_set in result_sets:
+            for record in result_set:
+                key = self._job_key(
+                    str(record["task"]),
+                    str(record["algorithm"]),
+                    int(record["seed"]),
+                )
+                merged[key] = record
+        return [
+            merged[key]
+            for key in sorted(merged.keys(), key=lambda item: (item[0], item[1], item[2]))
+        ]
+
+    def run_training(self, skip_existing: bool = False) -> list[dict[str, Any]]:
         """Run benchmark training and store per-run training artifacts."""
         training_runs: list[dict[str, Any]] = []
+        existing_result_keys = set()
+        if skip_existing:
+            existing_result_keys = {
+                self._job_key(item["task"], item["algorithm"], item["seed"])
+                for item in self.collect_existing_run_results()
+            }
         for task_name, algorithm_name, seed in self._iter_jobs():
+            run_dir = self._run_dir(task_name, algorithm_name, seed)
+            if skip_existing and self._job_key(
+                task_name, algorithm_name, seed
+            ) in existing_result_keys:
+                continue
+            if skip_existing:
+                existing_training = self._load_existing_training_record(
+                    task_name, algorithm_name, seed
+                )
+                if existing_training is not None:
+                    training_runs.append(existing_training)
+                    continue
+
             task_spec = load_task_spec(task_name)
-            run_dir = (
-                self.output_root / "runs" / task_name / algorithm_name / f"seed_{seed}"
-            )
             run_config = self.build_run_config(task_name, algorithm_name, seed)
             dump_json(run_config, run_dir / "run_config.json")
             train_summary = train_with_config(run_config, run_dir)
@@ -103,6 +252,8 @@ class BenchmarkRunner:
                 "env_id": task_spec["env_id"],
                 "algorithm": algorithm_name,
                 "seed": seed,
+                "suite": self.suite,
+                "protocol": deepcopy(self.protocol),
                 "train_steps": int(train_summary["global_step"]),
                 "training_fps": train_summary["training_fps"],
                 "peak_gpu_memory_mb": train_summary["peak_gpu_memory_mb"],
@@ -139,6 +290,8 @@ class BenchmarkRunner:
                 "env_id": task_spec["env_id"],
                 "algorithm": algorithm_name,
                 "seed": seed,
+                "suite": self.suite,
+                "protocol": deepcopy(self.protocol),
                 "train_steps": training_record["train_steps"],
                 "final_reward": eval_summary["avg_reward"],
                 "final_success_rate": eval_summary["success_rate"],
@@ -217,6 +370,16 @@ class BenchmarkRunner:
         dump_json(
             {"aggregate": aggregate_result},
             self.output_root / "benchmark_summary.json",
+        )
+        dump_json(
+            {
+                "suite": self.suite,
+                "tasks": self.tasks,
+                "algorithms": self.algorithms,
+                "seeds": self.seeds,
+                "protocol": self.protocol,
+            },
+            self.output_root / "benchmark_protocol.json",
         )
         return generate_markdown_report(
             run_results=run_results,

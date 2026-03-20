@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-envs", type=int, default=None)
     parser.add_argument("--num-eval-envs", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--skip-existing", action="store_true")
+    parser.add_argument("--rebuild-report-only", action="store_true")
     return parser.parse_args()
 
 
@@ -65,8 +67,21 @@ def main() -> None:
         output_root=args.output_root,
         overrides=overrides,
     )
-    training_runs = runner.run_training()
-    run_results = runner.run_evaluation(training_runs)
+
+    if args.rebuild_report_only:
+        run_results = runner.collect_existing_run_results()
+        if not run_results:
+            raise SystemExit(
+                "No compatible existing benchmark results were found for the requested jobs."
+            )
+    else:
+        existing_results = (
+            runner.collect_existing_run_results() if args.skip_existing else []
+        )
+        training_runs = runner.run_training(skip_existing=args.skip_existing)
+        new_results = runner.run_evaluation(training_runs)
+        run_results = runner.merge_run_results(existing_results, new_results)
+
     aggregate_result = runner.aggregate_results(run_results)
     leaderboard = runner.update_leaderboard(aggregate_result, run_results)
     report_path = runner.generate_report(run_results, aggregate_result, leaderboard)
