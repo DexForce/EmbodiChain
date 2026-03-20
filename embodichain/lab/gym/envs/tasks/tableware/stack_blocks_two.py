@@ -19,7 +19,16 @@ import numpy as np
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners import (
+    MotionGenerator,
+    MotionGenCfg,
+    MotionGenOptions,
+    ToppraPlannerCfg,
+    ToppraPlanOptions,
+    PlanState,
+    MoveType,
+    MovePart,
+)
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.utils import logger
 
@@ -139,13 +148,12 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             current_qpos = qpos
 
         # Create motion generator for smooth trajectory
-        motion_gen = MotionGenerator(
-            robot=self.robot,
-            uid="right_arm",
-            planner_type="toppra",
-            default_velocity=0.2,
-            default_acceleration=0.5,
+        motion_cfg = MotionGenCfg(
+            planner_cfg=ToppraPlannerCfg(
+                robot_uid=self.robot.uid,
+            )
         )
+        self.motion_generator = MotionGenerator(cfg=motion_cfg)
 
         action_list = []
 
@@ -185,16 +193,34 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                 # Generate smooth trajectory between waypoints
                 qpos_list = [qpos_waypoints_np[start_idx], qpos_waypoints_np[end_idx]]
 
-                out_qpos_list, _ = motion_gen.create_discrete_trajectory(
-                    qpos_list=qpos_list,
-                    is_linear=False,
-                    sample_method=TrajectorySampleMethod.QUANTITY,
-                    sample_num=num_steps,
-                    is_use_current_qpos=False,
+                options = MotionGenOptions(
+                    control_part="right_arm",
+                    plan_opts=ToppraPlanOptions(
+                        constraints={
+                            "velocity": 0.2,
+                            "acceleration": 0.5,
+                        },
+                        sample_method=TrajectorySampleMethod.QUANTITY,
+                        sample_interval=num_steps,
+                    ),
+                )
+                # Joint space trajectory
+                target_states = [
+                    PlanState(
+                        qpos=torch.as_tensor(qpos_waypoints_np[start_idx]),
+                        move_type=MoveType.JOINT_MOVE,
+                    ),
+                    PlanState(
+                        qpos=torch.as_tensor(qpos_waypoints_np[end_idx]),
+                        move_type=MoveType.JOINT_MOVE,
+                    ),
+                ]
+                plan_result = self.motion_generator.generate(
+                    target_states=target_states, options=options
                 )
 
                 # Convert to torch and add to action list
-                for qpos_item in out_qpos_list:
+                for qpos_item in plan_result.positions:
                     qpos = torch.as_tensor(
                         qpos_item, dtype=torch.float32, device=self.device
                     )

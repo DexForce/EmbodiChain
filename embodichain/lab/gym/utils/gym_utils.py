@@ -777,6 +777,12 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         help="Renderer backend to use for the simulation.",
     )
     parser.add_argument(
+        "--arena_space",
+        help="The size of the arena space.",
+        default=5.0,
+        type=float,
+    )
+    parser.add_argument(
         "--gpu_id",
         help="The GPU ID to use for the simulation.",
         default=0,
@@ -830,6 +836,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config["headless"] = args.headless
     merged_config["renderer"] = args.renderer
     merged_config["gpu_id"] = args.gpu_id
+    merged_config["arena_space"] = args.arena_space
     return merged_config
 
 
@@ -872,6 +879,7 @@ def build_env_cfg_from_args(
         sim_device=gym_config["device"],
         render_cfg=RenderCfg(renderer=gym_config["renderer"]),
         gpu_id=gym_config["gpu_id"],
+        arena_space=gym_config["arena_space"],
     )
 
     return cfg, gym_config, action_config
