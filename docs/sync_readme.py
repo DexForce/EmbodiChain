@@ -3,6 +3,7 @@
 
 Idempotent copy. Exit code 0 on success.
 """
+
 import shutil
 from pathlib import Path
 import sys

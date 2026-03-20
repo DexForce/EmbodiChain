@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -25,9 +23,8 @@ from tensordict import TensorDict
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, SensorCfg, CameraCfg
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
 from embodichain.data import get_data_path
-
 
 NUM_ENVS = 4
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"

@@ -39,7 +39,6 @@ from embodichain.lab.sim.utility.atom_action_utils import (
     extract_drive_calls,
 )
 
-
 """
 --------------------------------------------Atom action functions----------------------------------------------------
 --------------------------------------------Atom action functions----------------------------------------------------

@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -25,6 +23,7 @@ from embodichain.lab.sim import (
 )
 from embodichain.lab.sim.objects import Articulation, RigidObject
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     ArticulationCfg,
     RigidObjectCfg,
     JointDrivePropertiesCfg,

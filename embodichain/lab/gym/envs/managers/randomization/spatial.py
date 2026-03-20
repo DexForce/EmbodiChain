@@ -25,7 +25,6 @@ from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils.math import sample_uniform, matrix_from_euler, matrix_from_quat
 from embodichain.utils import logger
 
-
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 

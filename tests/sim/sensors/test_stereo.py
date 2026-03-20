@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -18,9 +16,10 @@ from embodiedichain.lab.sim.cfg import RenderCfg
 
 import pytest
 import torch
+
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import StereoCamera, SensorCfg
-
 
 NUM_ENVS = 4
 

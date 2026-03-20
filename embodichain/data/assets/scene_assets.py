@@ -23,7 +23,6 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
-
 scene_assets = "scene_assets"
 
 

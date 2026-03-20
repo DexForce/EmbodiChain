@@ -1,5 +1,3 @@
-from embodiedichain.lab.sim.cfg import RenderCfg
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -22,6 +20,7 @@ import pytest
 import numpy as np
 import gymnasium as gym
 
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
