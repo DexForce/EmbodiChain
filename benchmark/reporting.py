@@ -26,6 +26,24 @@ def _fmt(value: Any, digits: int = 3) -> str:
     return str(value)
 
 
+def _group_aggregate_results_by_task(
+    aggregate_results: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in aggregate_results:
+        grouped.setdefault(item["task"], []).append(item)
+    for task_results in grouped.values():
+        task_results.sort(
+            key=lambda item: (
+                -float(item.get("final_success_rate_stable_mean", float("-inf"))),
+                -float(item.get("final_success_rate_mean", float("-inf"))),
+                float(item.get("steps_to_success_threshold_mean", float("inf"))),
+                item["algorithm"],
+            )
+        )
+    return dict(sorted(grouped.items()))
+
+
 def generate_markdown_report(
     run_results: list[dict[str, Any]],
     aggregate_results: list[dict[str, Any]],
@@ -109,6 +127,44 @@ def generate_markdown_report(
                 env_fps=_fmt(item.get("environment_fps_mean", float("nan"))),
             )
         )
+
+    lines.extend(
+        [
+            "",
+            "## Per-Task Comparison",
+            "",
+            "Each table compares different algorithms on the same task.",
+            "",
+        ]
+    )
+    for task, task_results in _group_aggregate_results_by_task(aggregate_results).items():
+        lines.extend(
+            [
+                f"### {task}",
+                "",
+                "| Algorithm | Runs | Final Stable Success Rate | Final Success Rate | Steps To Threshold (Sustained) | Success Rate Std | Final Reward | Training FPS | Env FPS |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for item in task_results:
+            lines.append(
+                "| {algorithm} | {num_runs} | {stable_success} | {success} | {steps} | {std} | {reward} | {train_fps} | {env_fps} |".format(
+                    algorithm=item["algorithm"],
+                    num_runs=item["num_runs"],
+                    stable_success=_fmt(
+                        item.get("final_success_rate_stable_mean", float("nan"))
+                    ),
+                    success=_fmt(item.get("final_success_rate_mean", float("nan"))),
+                    steps=_fmt(
+                        item.get("steps_to_success_threshold_mean", float("nan"))
+                    ),
+                    std=_fmt(item.get("final_success_rate_std", float("nan"))),
+                    reward=_fmt(item.get("final_reward_mean", float("nan"))),
+                    train_fps=_fmt(item.get("training_fps_mean", float("nan"))),
+                    env_fps=_fmt(item.get("environment_fps_mean", float("nan"))),
+                )
+            )
+        lines.append("")
 
     lines.extend(
         [

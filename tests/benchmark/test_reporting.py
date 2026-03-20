@@ -47,7 +47,21 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
             "peak_gpu_memory_mb_mean": 0.0,
             "steps_to_success_threshold_mean": 256.0,
             "steps_to_success_threshold_first_hit_mean": 128.0,
-        }
+        },
+        {
+            "task": "cart_pole",
+            "algorithm": "grpo",
+            "num_runs": 1,
+            "final_reward_mean": 1.7,
+            "final_success_rate_mean": 0.85,
+            "final_success_rate_stable_mean": 0.8,
+            "final_success_rate_std": 0.05,
+            "training_fps_mean": 90.0,
+            "environment_fps_mean": 480.0,
+            "peak_gpu_memory_mb_mean": 0.0,
+            "steps_to_success_threshold_mean": 200.0,
+            "steps_to_success_threshold_first_hit_mean": 160.0,
+        },
     ]
     leaderboard = [
         {
@@ -83,6 +97,9 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
     assert "Stability Analysis" in report
     assert "System Performance" in report
     assert "Aggregate Results" in report
+    assert "Per-Task Comparison" in report
     assert "Per-Run Results" in report
     assert "Final Stable Success Rate" in report
+    assert "Each table compares different algorithms on the same task." in report
     assert "cart_pole" in report
+    assert "grpo" in report
