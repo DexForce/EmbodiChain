@@ -286,6 +286,17 @@ class BaseRigidObjectTest:
             cfg=RigidObjectCfg.from_dict(cfg_dict),
         )
 
+    def test_add_sdf_mesh(self):
+        duck_path = get_data_path(DUCK_PATH)
+        sdf = self.sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="duck_sdf",
+                shape=MeshCfg(fpath=duck_path),
+                sdf_resolution=128,
+                body_type="dynamic",
+            )
+        )
+
     def test_remove(self):
         self.sim.remove_asset(self.duck.uid)
 
