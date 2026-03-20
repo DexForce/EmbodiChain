@@ -1,11 +1,11 @@
 # EmbodiChain — Developer Reference
 
-EmbodiChain is an **end-to-end, GPU-accelerated, modular platform** for building generalized Embodied Intelligence, developed by DexForce Technology Co., Ltd. It provides a simulation lab, gym environments, RL training infrastructure, and agentic frameworks for robot learning research.
+## Package Name
 
-- **License**: Apache 2.0
-- **Repository**: https://github.com/DexForce/EmbodiChain
-
----
+**IMPORTANT**: The Python package name is `embodichain` (all lowercase, one word).
+- Repository folder: `EmbodiChain` (PascalCase)
+- Python package: `embodichain` (lowercase)
+- NEVER use: `embodiedchain`, `embodyichain`, or any other variant
 
 ## Project Structure
 
@@ -13,6 +13,8 @@ EmbodiChain is an **end-to-end, GPU-accelerated, modular platform** for building
 EmbodiChain/
 ├── embodichain/                  # Main Python package
 │   ├── agents/                   # AI agents
+│   │   ├── datasets/             # Datasets and data loaders for model training
+│   │   ├── engine/               # Online Data Streaming Engine
 │   │   ├── hierarchy/            # LLM-based hierarchical agents (task, code, validation)
 │   │   ├── mllm/                 # Multimodal LLM prompt scaffolding
 │   │   └── rl/                   # RL agents: PPO algo, rollout buffer, actor-critic models
@@ -71,7 +73,16 @@ Every source file begins with the Apache 2.0 copyright header:
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# ...
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ----------------------------------------------------------------------------
 ```
 

@@ -14,44 +14,52 @@
 ### Initialization
 
 ```python
-from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
-planner = ToppraPlanner(
-    dofs=6,
-    max_constraints={
-        "velocity": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        "acceleration": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
-    }
+from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner, ToppraPlannerCfg
+
+# Configuration - constraints are now specified in ToppraPlanOptions, not here
+cfg = ToppraPlannerCfg(
+    robot_uid="UR5"
 )
+planner = ToppraPlanner(cfg=cfg)
 ```
 
 ### Planning
 
 ```python
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
-success, positions, velocities, accelerations, times, duration = planner.plan(
-    current_state={
-        "position": [0, 0, 0, 0, 0, 0],
-        "velocity": [0, 0, 0, 0, 0, 0],
-        "acceleration": [0, 0, 0, 0, 0, 0]
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod, PlanState
+from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+
+# Create options with constraints and sampling parameters
+options = ToppraPlanOptions(
+    constraints={
+        "velocity": 0.2,          # Joint velocity limit (rad/s) - can also be a list per joint
+        "acceleration": 0.5,      # Joint acceleration limit (rad/s²) - can also be a list per joint
     },
+    sample_method=TrajectorySampleMethod.TIME,  # Or TrajectorySampleMethod.QUANTITY
+    sample_interval=0.01  # Time interval in seconds (if TIME) or number of samples (if QUANTITY)
+)
+
+# Plan trajectory - only target_states needed now (current_state is handled internally)
+result = planner.plan(
     target_states=[
-        {"position": [1, 1, 1, 1, 1, 1]}
+        PlanState(qpos=[1, 1, 1, 1, 1, 1])
     ],
-    sample_method=TrajectorySampleMethod.TIME,
-    sample_interval=0.01
+    options=options
 )
 ```
 
-- `positions`, `velocities`, `accelerations` are arrays of sampled trajectory points.
-- `times` is the array of time stamps.
-- `duration` is the total trajectory time.
+- `result.positions`, `result.velocities`, `result.accelerations` are arrays of sampled trajectory points.
+- `result.dt` is the array of time intervals between each point.
+- `result.duration` is the total trajectory time.
+- `result.success` indicates whether planning succeeded.
 
 ## Notes
 
 - The planner requires the `toppra` library (`pip install toppra==0.6.3`).
 - For dense waypoints, the default spline interpolation is used. For sparse waypoints, you may need to adjust the interpolation method.
 - The number of grid points (`gridpt_min_nb_points`) is important for accurate acceleration constraint handling.
+- Constraints can be specified as a single float (applied to all joints) or as a list of values for each joint.
+- The `sample_method` can be `TrajectorySampleMethod.TIME` for uniform time intervals or `TrajectorySampleMethod.QUANTITY` for a fixed number of samples.
 
 ## References
 

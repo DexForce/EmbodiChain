@@ -31,7 +31,15 @@ from embodichain.lab.gym.utils.misc import (
     get_changed_pose,
 )
 
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners import (
+    MoveType,
+    PlanState,
+    MotionGenerator,
+    MotionGenCfg,
+    MotionGenOptions,
+    ToppraPlanOptions,
+    ToppraPlannerCfg,
+)
 from embodichain.utils import logger
 
 
@@ -174,15 +182,26 @@ class PourWaterActionBank(ActionBank):
             return ret_transposed
 
         else:
-            mo_gen = MotionGenerator(robot=env.robot, uid=agent_uid)
-            ret, _ = mo_gen.create_discrete_trajectory(
-                qpos_list=keyposes,
-                sample_num=duration,
-                qpos_seed=keyposes[0],
-                is_use_current_qpos=False,
+            motion_generator = MotionGenerator(
+                cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
             )
 
-            return ret.T
+            plan_state = [
+                PlanState(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
+                for qpos in keyposes
+            ]
+
+            ret = motion_generator.generate(
+                target_states=plan_state,
+                options=MotionGenOptions(
+                    control_part=agent_uid,
+                    plan_opts=ToppraPlanOptions(
+                        sample_interval=duration,
+                    ),
+                ),
+            )
+
+            return ret.positions.numpy().T
 
     @staticmethod
     @tag_edge

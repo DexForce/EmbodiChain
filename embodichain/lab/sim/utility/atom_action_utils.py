@@ -21,7 +21,15 @@ from typing import List
 
 from embodichain.utils.logger import log_error, log_warning
 from embodichain.lab.gym.utils.misc import mul_linear_expand
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners import (
+    MoveType,
+    PlanState,
+    MotionGenerator,
+    MotionGenCfg,
+    MotionGenOptions,
+    ToppraPlanOptions,
+    ToppraPlannerCfg,
+)
 
 
 def draw_axis(env, pose):
@@ -188,20 +196,26 @@ def plan_trajectory(
         ee_state_list_select: List to append gripper states to (modified in-place).
     """
     motion_generator = MotionGenerator(
-        robot=env.robot,
-        uid=select_arm,
-        **getattr(env, "planning_config", {}),
-    )
-    traj_list, _ = motion_generator.create_discrete_trajectory(
-        qpos_list=qpos_list,
-        sample_num=sample_num,
-        qpos_seed=qpos_list[0],
-        is_use_current_qpos=False,
-        **getattr(env, "planning_config", {}),
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
     )
 
-    select_qpos_traj.extend(traj_list)
-    ee_state_list_select.extend([select_arm_current_gripper_state] * len(traj_list))
+    plan_state = [
+        PlanState(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
+        for qpos in qpos_list
+    ]
+
+    ret = motion_generator.generate(
+        target_states=plan_state,
+        options=MotionGenOptions(
+            control_part=select_arm,
+            plan_opts=ToppraPlanOptions(
+                sample_interval=sample_num,
+            ),
+        ),
+    )
+
+    select_qpos_traj.extend(ret.positions.numpy())
+    ee_state_list_select.extend([select_arm_current_gripper_state] * len(ret.positions))
 
 
 def plan_gripper_trajectory(

@@ -14,12 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import torch
 import numpy as np
-from embodichain.utils import logger
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.planners.base_planner import BasePlanner
 
-from typing import TYPE_CHECKING, Union, Tuple
+from embodichain.utils import logger, configclass
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.planners.base_planner import (
+    validate_plan_options,
+    BasePlanner,
+    BasePlannerCfg,
+    PlanOptions,
+)
+from .utils import PlanState, PlanResult
 
 try:
     import toppra as ta
@@ -32,83 +38,164 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
+__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
+
+
+@configclass
+class ToppraPlannerCfg(BasePlannerCfg):
+
+    planner_type: str = "toppra"
+
+
+@configclass
+class ToppraPlanOptions(PlanOptions):
+
+    constraints: dict = {
+        "velocity": 0.2,
+        "acceleration": 0.5,
+    }
+    """Constraints for the planner, including velocity and acceleration limits. 
+
+    Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    """
+
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
+    """Method for sampling the trajectory. 
+    
+    Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
+    """
+
+    sample_interval: float | int = 0.01
+    """Interval for sampling the trajectory. 
+    
+    If sample_method is 'time', this is the time interval in seconds. 
+    If sample_method is 'quantity', this is the total number of samples.
+    """
+
+
 class ToppraPlanner(BasePlanner):
-    def __init__(self, dofs, max_constraints):
+    def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 
+        References:
+            - TOPPRA: Time-Optimal Path Parameterization for Robotic Systems (https://github.com/hungpham2511/toppra)
+
         Args:
-            dofs: Number of degrees of freedom
-            max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
+            cfg: Configuration object containing ToppraPlanner settings
         """
-        super().__init__(dofs, max_constraints)
+        super().__init__(cfg)
 
-        # Create TOPPRA-specific constraint arrays (symmetric format)
-        # This format is required by TOPPRA library
-        self.vlims = np.array([[-v, v] for v in max_constraints["velocity"]])
-        self.alims = np.array([[-a, a] for a in max_constraints["acceleration"]])
+        if self.robot.num_instances > 1:
+            logger.log_error(
+                "ToppraPlanner does not support multiple robot instances",
+                NotImplementedError,
+            )
 
+    @validate_plan_options(options_cls=ToppraPlanOptions)
     def plan(
         self,
-        current_state: dict,
-        target_states: list[dict],
-        **kwargs,
-    ):
+        target_states: list[PlanState],
+        options: ToppraPlanOptions = ToppraPlanOptions(),
+    ) -> PlanResult:
         r"""Execute trajectory planning.
 
         Args:
-            current_state: Dictionary containing 'position', 'velocity', 'acceleration' for current state
             target_states: List of dictionaries containing target states
+            cfg: ToppraPlanOptions
 
         Returns:
-            Tuple of (success, positions, velocities, accelerations, times, duration)
+            PlanResult containing the planned trajectory details.
         """
-        sample_method = kwargs.get("sample_method", TrajectorySampleMethod.TIME)
-        sample_interval = kwargs.get("sample_interval", 0.01)
-        if not isinstance(sample_interval, (float, int)):
-            logger.log_error(
-                f"sample_interval must be float/int, got {type(sample_interval)}",
-                TypeError,
+
+        for i, target in enumerate(target_states):
+            if target.qpos is None:
+                logger.log_error(f"Target state at index {i} missing qpos")
+
+        dofs = len(target_states[0].qpos)
+
+        # set constraints
+        if isinstance(options.constraints["velocity"], float):
+            vlims = np.array(
+                [
+                    [
+                        -options.constraints["velocity"],
+                        options.constraints["velocity"],
+                    ]
+                    for _ in range(dofs)
+                ]
             )
+        else:
+            vlims = np.array(options.constraints["velocity"])
+
+        if isinstance(options.constraints["acceleration"], float):
+            alims = np.array(
+                [
+                    [
+                        -options.constraints["acceleration"],
+                        options.constraints["acceleration"],
+                    ]
+                    for _ in range(dofs)
+                ]
+            )
+        else:
+            alims = np.array(options.constraints["acceleration"])
+
+        sample_method = options.sample_method
+        sample_interval = options.sample_interval
         if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
             logger.log_error("Time interval must be positive", ValueError)
-        elif sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
+        if sample_method == TrajectorySampleMethod.TIME and isinstance(
+            sample_interval, int
+        ):
+            logger.log_error(
+                "Time interval must be a float when sample_method is TIME", TypeError
+            )
+        if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
             logger.log_error("At least 2 sample points required", ValueError)
+        if sample_method == TrajectorySampleMethod.QUANTITY and isinstance(
+            sample_interval, float
+        ):
+            logger.log_error(
+                "Number of samples must be an integer when sample_method is QUANTITY",
+                TypeError,
+            )
 
         # Check waypoints
-        if len(current_state["position"]) != self.dofs:
-            logger.log_info("Current wayponit does not align")
-            return False, None, None, None, None, None
-        for target in target_states:
-            if len(target["position"]) != self.dofs:
-                logger.log_info("Target Wayponits does not align")
-                return False, None, None, None, None, None
+        for i, target in enumerate(target_states):
+            if target.qpos is None:
+                logger.log_error(f"Target state at index {i} missing qpos")
+            if len(target.qpos) != dofs:
+                logger.log_error(f"Target waypoints do not align at index {i}")
 
         if (
-            len(target_states) == 1
-            and np.sum(
-                np.abs(
-                    np.array(target_states[0]["position"])
-                    - np.array(current_state["position"])
-                )
-            )
+            len(target_states) == 2
+            and torch.sum(torch.abs(target_states[1].qpos - target_states[0].qpos))
             < 1e-3
         ):
-            logger.log_info("Only two same waypoints, do not plan")
-            return (
-                True,
-                np.array([current_state["position"], target_states[0]["position"]]),
-                np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
-                np.array([[0.0] * self.dofs, [0.0] * self.dofs]),
-                0,
-                0,
+            logger.log_warning("Only two same waypoints, returning trivial trajectory.")
+            return PlanResult(
+                success=True,
+                positions=torch.as_tensor(
+                    np.stack([target_states[0].qpos, target_states[1].qpos]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                velocities=torch.zeros(
+                    (2, dofs), dtype=torch.float32, device=self.device
+                ),
+                accelerations=torch.zeros(
+                    (2, dofs), dtype=torch.float32, device=self.device
+                ),
+                dt=torch.tensor([0.0, 0.0], dtype=torch.float32, device=self.device),
+                duration=0.0,
             )
 
         # Build waypoints
-        waypoints = [np.array(current_state["position"])]
+        waypoints = []
         for target in target_states:
-            waypoints.append(np.array(target["position"]))
-        waypoints = np.array(waypoints)
+            waypoints.append(np.array(target.qpos))
 
+        waypoints = np.array(waypoints)
         # Create spline interpolation
         # NOTE: Suitable for dense waypoints
         ss = np.linspace(0, 1, len(waypoints))
@@ -124,8 +211,8 @@ class ToppraPlanner(BasePlanner):
         path = ta.SplineInterpolator(ss, waypoints)
 
         # Set constraints
-        pc_vel = constraint.JointVelocityConstraint(self.vlims)
-        pc_acc = constraint.JointAccelerationConstraint(self.alims)
+        pc_vel = constraint.JointVelocityConstraint(vlims)
+        pc_acc = constraint.JointAccelerationConstraint(alims)
 
         # Create TOPPRA instance
         instance = ta.algorithm.TOPPRA(
@@ -134,14 +221,14 @@ class ToppraPlanner(BasePlanner):
             parametrizer="ParametrizeConstAccel",
             gridpt_min_nb_points=max(100, 10 * len(waypoints)),
         )
-        # NOTES:合理设置gridpt_min_nb_points对加速度约束很重要
+        # NOTES: Important to set a large number of grid points for better performance in dense waypoint scenarios.
 
         # Compute parameterized trajectory
         jnt_traj = instance.compute_trajectory()
         if jnt_traj is None:
             # raise RuntimeError("Unable to find feasible trajectory")
-            logger.log_info("Unable to find feasible trajectory")
-            return False, None, None, None, None, None
+            logger.log_warning("Unable to find feasible trajectory")
+            return PlanResult(success=False)
 
         duration = jnt_traj.duration
         # Sample trajectory points
@@ -162,11 +249,20 @@ class ToppraPlanner(BasePlanner):
             velocities.append(jnt_traj.evald(t))
             accelerations.append(jnt_traj.evaldd(t))
 
-        return (
-            True,
-            np.array(positions),
-            np.array(velocities),
-            np.array(accelerations),
-            ts,
-            duration,
+        dt = torch.as_tensor(ts, dtype=torch.float32, device=self.device)
+        dt = torch.diff(dt, prepend=torch.tensor([0.0], device=self.device))
+
+        return PlanResult(
+            success=True,
+            positions=torch.as_tensor(
+                np.array(positions), dtype=torch.float32, device=self.device
+            ),
+            velocities=torch.as_tensor(
+                np.array(velocities), dtype=torch.float32, device=self.device
+            ),
+            accelerations=torch.as_tensor(
+                np.array(accelerations), dtype=torch.float32, device=self.device
+            ),
+            dt=dt,
+            duration=duration,
         )
