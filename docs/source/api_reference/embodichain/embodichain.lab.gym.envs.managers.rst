@@ -26,7 +26,7 @@ embodichain.lab.gym.envs.managers
       ActionTerm
       DeltaQposTerm
       QposTerm
-      QposNormalizedTerm
+      QposDenormalizedTerm
       EefPoseTerm
       QvelTerm
       QfTerm
@@ -120,7 +120,7 @@ Managers
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: QposNormalizedTerm
+.. autoclass:: QposDenormalizedTerm
     :members:
     :inherited-members:
     :show-inheritance:

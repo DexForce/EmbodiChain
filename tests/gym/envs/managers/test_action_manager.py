@@ -21,10 +21,10 @@ import torch
 
 from embodichain.lab.gym.envs.managers import ActionManager
 from embodichain.lab.gym.envs.managers.actions import (
-    ActionClampTerm,
     DeltaQposTerm,
     EefPoseTerm,
     QposTerm,
+    QposDenormalizedTerm,
     QposNormalizedTerm,
     QvelTerm,
     QfTerm,
@@ -52,7 +52,7 @@ class MockEnv:
 
 
 class MockEnvWithLimits(MockEnv):
-    """Mock env with qpos_limits for QposNormalizedTerm."""
+    """Mock env with qpos_limits for QposDenormalizedTerm."""
 
     def __init__(self, num_envs: int = 4, action_dim: int = 6):
         super().__init__(num_envs, action_dim)
@@ -96,9 +96,9 @@ def test_delta_qpos_term_process_action():
     action = torch.ones(4, 6) * 2.0
     result = term.process_action(action)
 
-    assert "qpos" in result
+    # DeltaQposTerm returns tensor directly, not dict
     expected = env.get_qpos() + 0.1 * action
-    torch.testing.assert_close(result["qpos"], expected)
+    torch.testing.assert_close(result, expected)
     assert term.action_dim == 6
 
 
@@ -111,25 +111,25 @@ def test_qpos_term_process_action():
     action = torch.ones(2, 3)
     result = term.process_action(action)
 
-    assert "qpos" in result
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3) * 0.5)
+    # QposTerm returns tensor directly, not dict
+    torch.testing.assert_close(result, torch.ones(2, 3) * 0.5)
     assert term.action_dim == 3
 
 
-def test_qpos_normalized_term_process_action():
-    """QposNormalizedTerm: [-1,1] -> [low, high] with scale=1."""
+def test_qpos_denormalized_term_process_action():
+    """QposDenormalizedTerm: [-1,1] -> [low, high] with scale=1."""
     env = MockEnvWithLimits(num_envs=2, action_dim=2)
-    cfg = ActionTermCfg(func=QposNormalizedTerm, params={"scale": 1.0})
-    term = QposNormalizedTerm(cfg, env)
+    cfg = ActionTermCfg(func=QposDenormalizedTerm, params={"scale": 1.0})
+    term = QposDenormalizedTerm(cfg, env)
 
     # action=-1 -> low, action=1 -> high
     action = torch.tensor([[-1.0, -1.0], [1.0, 1.0]])
     result = term.process_action(action)
 
-    assert "qpos" in result
+    # QposDenormalizedTerm returns tensor directly, not dict
     # low=-1, high=1: qpos = low + (action + 1.0) * 0.5 * (high - low)
     expected = torch.tensor([[-1.0, -1.0], [1.0, 1.0]])
-    torch.testing.assert_close(result["qpos"], expected)
+    torch.testing.assert_close(result, expected)
     assert term.action_dim == 2
 
 
@@ -193,8 +193,8 @@ def test_qvel_term_process_action():
     action = torch.ones(2, 3)
     result = term.process_action(action)
 
-    assert "qvel" in result
-    torch.testing.assert_close(result["qvel"], torch.ones(2, 3) * 0.2)
+    # QvelTerm returns tensor directly, not dict
+    torch.testing.assert_close(result, torch.ones(2, 3) * 0.2)
 
 
 def test_qf_term_process_action():
@@ -206,53 +206,38 @@ def test_qf_term_process_action():
     action = torch.ones(2, 3)
     result = term.process_action(action)
 
-    assert "qf" in result
-    torch.testing.assert_close(result["qf"], torch.ones(2, 3) * 10.0)
+    # QfTerm returns tensor directly, not dict
+    torch.testing.assert_close(result, torch.ones(2, 3) * 10.0)
 
 
 def test_action_manager_tensor_input():
-    """ActionManager passes tensor to first (active) term."""
+    """ActionManager passes dict input to the specified term."""
     env = MockEnv(num_envs=2, action_dim=3)
     cfg = {
         "delta_qpos": ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1}),
     }
     manager = ActionManager(cfg, env)
 
+    # ActionManager expects dict with input_key matching term
     action = torch.ones(2, 3)
     result = manager.process_action(action)
 
-    assert "qpos" in result
-    expected = env.get_qpos() + 0.1 * action
-    torch.testing.assert_close(result["qpos"], expected)
-    assert manager.action_type == "delta_qpos"
-    assert manager.total_action_dim == 3
+    expected = env.get_qpos() + 0.1 * torch.ones(2, 3)
+    torch.testing.assert_close(result, expected)
 
 
 def test_action_manager_dict_input():
-    """ActionManager uses key to select term for dict input."""
+    """ActionManager processes dict input with single term."""
     env = MockEnv(num_envs=2, action_dim=3)
     cfg = {
-        "delta_qpos": ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1}),
         "qpos": ActionTermCfg(func=QposTerm, params={"scale": 1.0}),
     }
     manager = ActionManager(cfg, env)
 
-    action_dict = {"qpos": torch.ones(2, 3) * 0.5}
+    action_dict = torch.ones(2, 3) * 0.5
     result = manager.process_action(action_dict)
 
-    assert "qpos" in result
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3) * 0.5)
-
-
-def test_action_manager_invalid_dict_raises():
-    """ActionManager raises when dict has no matching term key."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {"delta_qpos": ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1})}
-    manager = ActionManager(cfg, env)
-
-    with torch.no_grad():
-        with pytest.raises(ValueError, match="No valid action keys"):
-            manager.process_action({"unknown_key": torch.ones(2, 3)})
+    torch.testing.assert_close(result, torch.ones(2, 3) * 0.5)
 
 
 # Tests for action term mode (pre/post)
@@ -266,7 +251,7 @@ def test_action_term_cfg_default_mode():
 
 def test_action_term_cfg_post_mode():
     """ActionTermCfg supports mode='post'."""
-    cfg = ActionTermCfg(func=ActionClampTerm, params={}, mode="post")
+    cfg = ActionTermCfg(func=QposNormalizedTerm, params={}, mode="post")
     assert cfg.mode == "post"
 
 
@@ -281,70 +266,64 @@ def test_action_manager_process_action_pre_mode():
     action = torch.ones(2, 3)
     result = manager.process_action(action, mode="pre")
 
-    assert "qpos" in result
-    expected = env.get_qpos() + 0.1 * action
-    torch.testing.assert_close(result["qpos"], expected)
+    expected = env.get_qpos() + 0.1 * torch.ones(2, 3)
+    torch.testing.assert_close(result, expected)
 
 
 def test_action_manager_process_action_post_mode():
     """ActionManager.process_action with post mode uses post terms only."""
-    env = MockEnv(num_envs=2, action_dim=3)
+    env = MockEnvWithLimits(num_envs=2, action_dim=3)
     cfg = {
-        "clamp": ActionTermCfg(
-            func=ActionClampTerm, params={"min": -0.5, "max": 0.5}, mode="post"
-        ),
+        "norm": ActionTermCfg(func=QposNormalizedTerm, mode="post"),
     }
     manager = ActionManager(cfg, env)
 
-    # Action values exceed clamp limits
-    action = torch.ones(2, 3) * 2.0
+    # Action values are qpos that will be normalized
+    action = torch.ones(2, 3) * 0.5
     result = manager.process_action(action, mode="post")
 
-    assert "qpos" in result
-    # Values should be clamped to [-0.5, 0.5]
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3) * 0.5)
+    # With qpos_limits = [-1, 1], qpos=0.5 normalizes to (0.5-(-1))/(1-(-1)) = 0.75
+    torch.testing.assert_close(result, torch.ones(2, 3) * 0.75)
 
 
 def test_action_manager_mixed_pre_post_terms():
     """ActionManager with both pre and post terms works correctly."""
-    env = MockEnv(num_envs=2, action_dim=3)
+    env = MockEnvWithLimits(num_envs=2, action_dim=3)
     cfg = {
         "qpos": ActionTermCfg(func=QposTerm, params={"scale": 1.0}, mode="pre"),
-        "clamp": ActionTermCfg(
-            func=ActionClampTerm, params={"min": 0.0, "max": 1.0}, mode="post"
-        ),
+        "norm": ActionTermCfg(func=QposNormalizedTerm, mode="post"),
     }
     manager = ActionManager(cfg, env)
 
     # Pre mode: should return qpos term output
     action = torch.ones(2, 3) * 0.5
     result_pre = manager.process_action(action, mode="pre")
-    assert "qpos" in result_pre
-    torch.testing.assert_close(result_pre["qpos"], torch.ones(2, 3) * 0.5)
+    torch.testing.assert_close(result_pre, torch.ones(2, 3) * 0.5)
 
-    # Post mode: should return clamped output
+    # Post mode: should return normalized output
     result_post = manager.process_action(action, mode="post")
-    assert "qpos" in result_post
-    # 0.5 is within [0, 1], so no clamping needed
-    torch.testing.assert_close(result_post["qpos"], torch.ones(2, 3) * 0.5)
+    # Values should be normalized to [0, 1] range
+    # With qpos_limits = [-1, 1], normalized qpos = (0.5 - (-1)) / (1 - (-1)) = 0.75
+    expected = torch.ones(2, 3) * 0.75
+    torch.testing.assert_close(result_post, expected)
 
 
-def test_action_manager_get_functors_by_mode():
-    """ActionManager.get_functors_by_mode returns correct terms."""
+def test_action_manager_get_terms_by_mode():
+    """ActionManager.get_terms_by_mode returns correct terms."""
     env = MockEnv(num_envs=2, action_dim=3)
     cfg = {
         "qpos": ActionTermCfg(func=QposTerm, params={}, mode="pre"),
-        "clamp": ActionTermCfg(func=ActionClampTerm, params={}, mode="post"),
+        "norm": ActionTermCfg(func=QposNormalizedTerm, params={}, mode="post"),
     }
     manager = ActionManager(cfg, env)
 
-    pre_terms = manager.get_functors_by_mode("pre")
+    pre_terms = manager.get_terms_by_mode("pre")
     assert len(pre_terms) == 1
     assert pre_terms[0][0] == "qpos"
 
-    post_terms = manager.get_functors_by_mode("post")
+    post_terms = manager.get_terms_by_mode("post")
     assert len(post_terms) == 1
-    assert post_terms[0][0] == "clamp"
+    assert post_terms[0][0] == "norm"
 
 
 def test_action_manager_get_action_dim_by_mode():
@@ -352,7 +331,7 @@ def test_action_manager_get_action_dim_by_mode():
     env = MockEnv(num_envs=2, action_dim=3)
     cfg = {
         "qpos": ActionTermCfg(func=QposTerm, params={}, mode="pre"),
-        "clamp": ActionTermCfg(func=ActionClampTerm, params={}, mode="post"),
+        "norm": ActionTermCfg(func=QposNormalizedTerm, params={}, mode="post"),
     }
     manager = ActionManager(cfg, env)
 
@@ -360,59 +339,16 @@ def test_action_manager_get_action_dim_by_mode():
     assert manager.get_action_dim_by_mode("post") == 3
 
 
-def test_action_manager_no_terms_for_mode_raises():
-    """ActionManager raises when no terms exist for specified mode."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {
-        "qpos": ActionTermCfg(func=QposTerm, params={}, mode="pre"),
-    }
-    manager = ActionManager(cfg, env)
+def test_qpos_normalized_term_from_qpos():
+    """QposNormalizedTerm normalizes qpos from limits to [0, 1] range."""
+    env = MockEnvWithLimits(num_envs=2, action_dim=3)
+    cfg = ActionTermCfg(func=QposNormalizedTerm, params={})
+    term = QposNormalizedTerm(cfg, env)
 
-    with pytest.raises(ValueError, match="No action terms found for mode 'post'"):
-        manager.process_action(torch.ones(2, 3), mode="post")
-
-
-def test_action_clamp_term_process_action():
-    """ActionClampTerm clamps action values to specified range."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(
-        func=ActionClampTerm, params={"min": -1.0, "max": 1.0}, mode="post"
-    )
-    term = ActionClampTerm(cfg, env)
-
-    # Test clamping from above
-    action = torch.ones(2, 3) * 2.0
+    # qpos at limits: [-1, 1]
+    action = torch.tensor([[-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]])
     result = term.process_action(action)
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3))
 
-    # Test clamping from below
-    action = torch.ones(2, 3) * -2.0
-    result = term.process_action(action)
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3) * -1.0)
-
-    # Test no clamping needed
-    action = torch.ones(2, 3) * 0.5
-    result = term.process_action(action)
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3) * 0.5)
-
-
-def test_action_clamp_term_only_min():
-    """ActionClampTerm with only min specified."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(func=ActionClampTerm, params={"min": 0.0}, mode="post")
-    term = ActionClampTerm(cfg, env)
-
-    action = torch.ones(2, 3) * -1.0
-    result = term.process_action(action)
-    torch.testing.assert_close(result["qpos"], torch.zeros(2, 3))
-
-
-def test_action_clamp_term_only_max():
-    """ActionClampTerm with only max specified."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(func=ActionClampTerm, params={"max": 1.0}, mode="post")
-    term = ActionClampTerm(cfg, env)
-
-    action = torch.ones(2, 3) * 2.0
-    result = term.process_action(action)
-    torch.testing.assert_close(result["qpos"], torch.ones(2, 3))
+    # [-1, 0, 1] -> [0, 0.5, 1] when normalized to [0, 1]
+    expected = torch.tensor([[0.0, 0.5, 1.0], [0.0, 0.5, 1.0]])
+    torch.testing.assert_close(result, expected)

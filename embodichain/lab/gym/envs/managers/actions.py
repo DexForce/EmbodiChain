@@ -23,32 +23,14 @@ forces, or end-effector poses).
 The action terms are typically used in conjunction with :class:`ActionManager` which
 handles calling the appropriate term based on configuration.
 
-Example usage in environment config::
-
-    action_terms:
-        # Pre-processing: raw action -> joint position
-        joint_pos:
-            func: QposTerm
-            mode: pre
-            params:
-                scale: 1.0
-        # Post-processing: clamp the output
-        clamp:
-            func: ActionClampTerm
-            mode: post
-            params:
-                min: -1.0
-                max: 1.0
-
 Available action terms:
 
 - :class:`DeltaQposTerm`: Delta joint position (current + scale * action)
 - :class:`QposTerm`: Absolute joint position (scale * action)
-- :class:`QposNormalizedTerm`: Normalized action [-1,1] -> joint limits
+- :class:`QposDenormalizedTerm`: Normalized action [-1,1] -> joint limits
 - :class:`EefPoseTerm`: End-effector pose -> IK -> joint position
 - :class:`QvelTerm`: Joint velocity (scale * action)
 - :class:`QfTerm`: Joint force/torque (scale * action)
-- :class:`ActionClampTerm`: Post-processing clamp to min/max limits
 """
 
 from __future__ import annotations
@@ -72,11 +54,11 @@ if TYPE_CHECKING:
 __all__ = [
     "DeltaQposTerm",
     "QposTerm",
+    "QposDenormalizedTerm",
     "QposNormalizedTerm",
     "EefPoseTerm",
     "QvelTerm",
     "QfTerm",
-    "ActionClampTerm",
 ]
 
 
@@ -107,15 +89,15 @@ class DeltaQposTerm(ActionTerm):
         self._scale = cfg.params.get("scale", 1.0)
 
     @property
+    def input_key(self) -> str:
+        return "qpos"
+
+    @property
     def action_dim(self) -> int:
         return len(self._env.active_joint_ids)
 
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        scaled = action * self._scale
-        current_qpos = self._env.robot.get_qpos()
-        qpos = current_qpos + scaled
-        batch_size = qpos.shape[0]
-        return TensorDict({"qpos": qpos}, batch_size=[batch_size], device=self.device)
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
+        return action * self._scale + self._env.robot.get_qpos()
 
 
 class QposTerm(ActionTerm):
@@ -140,32 +122,37 @@ class QposTerm(ActionTerm):
         self._scale = cfg.params.get("scale", 1.0)
 
     @property
+    def input_key(self) -> str:
+        return "qpos"
+
+    @property
     def action_dim(self) -> int:
         return len(self._env.active_joint_ids)
 
-    def process_action(self, action: torch.Tensor) -> EnvAction:
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
         qpos = action * self._scale
-        batch_size = qpos.shape[0]
-        return TensorDict({"qpos": qpos}, batch_size=[batch_size], device=self.device)
+        return qpos
 
 
-class QposNormalizedTerm(ActionTerm):
-    """Normalized action in [-1, 1] -> denormalize to joint limits -> qpos.
+class QposDenormalizedTerm(ActionTerm):
+    """Normalized action in [range[0], range[1]] -> denormalize to joint limits -> qpos.
 
-    The policy outputs normalized actions in the range [-1, 1] which are then
+    The policy outputs normalized actions in the range [range[0], range[1]] which are then
     mapped to the joint's position limits.
 
     The policy output is scaled by ``params.scale`` before denormalization.
-    With scale=1.0 (default), action in [-1, 1] maps to [low, high].
+    With scale=1.0 (default), action in [range[0], range[1]] maps to [low, high].
     With scale<1.0, the effective range shrinks toward the center (e.g. scale=0.5
     maps to 25%-75% of joint range). Use scale=1.0 for standard normalized control.
 
     Args:
         scale: Scaling factor applied before denormalization. Defaults to 1.0.
+        joint_ids: List of joint IDs to apply the action to. Defaults to all active joints.
+        range: The range of the normalized action. Defaults to [-1.0, 1.0].
 
     Example:
-        >>> cfg = ActionTermCfg(func=QposNormalizedTerm, params={"scale": 1.0})
-        >>> term = QposNormalizedTerm(cfg, env)
+        >>> cfg = ActionTermCfg(func=QposDenormalizedTerm, params={"scale": 1.0})
+        >>> term = QposDenormalizedTerm(cfg, env)
         >>> action = torch.tensor([[-1.0, 1.0], [0.0, 0.0]])  # min/max per joint
         >>> result = term.process_action(action)
         >>> # Maps [-1, 1] to [qpos_limits_low, qpos_limits_high]
@@ -174,21 +161,67 @@ class QposNormalizedTerm(ActionTerm):
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
         self._scale = cfg.params.get("scale", 1.0)
+        self._joint_ids = cfg.params.get("joint_ids", self._env.active_joint_ids)
+        self._range = cfg.params.get("range", [-1.0, 1.0])
+
+    @property
+    def input_key(self) -> str:
+        return "qpos"
 
     @property
     def action_dim(self) -> int:
         return len(self._env.active_joint_ids)
 
-    def process_action(self, action: torch.Tensor) -> EnvAction:
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
         scaled = action * self._scale
-        qpos_limits = self._env.robot.body_data.qpos_limits[
-            0, self._env.active_joint_ids
-        ]
+        qpos_limits = self._env.robot.body_data.qpos_limits[0, self._joint_ids]
         low = qpos_limits[:, 0]
         high = qpos_limits[:, 1]
-        qpos = low + (scaled + 1.0) * 0.5 * (high - low)
-        batch_size = qpos.shape[0]
-        return TensorDict({"qpos": qpos}, batch_size=[batch_size], device=self.device)
+        scaled[:, self._joint_ids] = low + (
+            scaled[:, self._joint_ids] - self._range[0]
+        ) / (self._range[1] - self._range[0]) * (high - low)
+        return scaled
+
+
+class QposNormalizedTerm(ActionTerm):
+    """Normalize action from qpos limits -> [range[0], range[1]].
+
+    Map joint positions to a normalized range [range[0], range[1]] based on the joint limits.
+    This is the usually used for post processing the output of action.
+
+    Args:
+        joint_ids: List of joint IDs to apply the action to. Defaults to all active joints.
+        range: The range of the normalized action. Defaults to [0.0, 1.0].
+
+    Example:
+        >>> cfg = ActionTermCfg(func=QposNormalizedTerm)
+        >>> term = QposNormalizedTerm(cfg, env)
+        >>> action = torch.tensor([[-1.0, 1.0], [0.0, 0.0]])  # min/max per joint
+        >>> result = term.process_action(action)
+        >>> # Maps [-1, 1] to [0, 1] based on joint limits
+    """
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
+        super().__init__(cfg, env)
+        self._joint_ids = cfg.params.get("joint_ids", self._env.active_joint_ids)
+        self._range = cfg.params.get("range", [0.0, 1.0])
+
+    @property
+    def input_key(self) -> str:
+        return "qpos"
+
+    @property
+    def action_dim(self) -> int:
+        return len(self._env.active_joint_ids)
+
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
+        qpos_limits = self._env.robot.body_data.qpos_limits[0, self._joint_ids]
+        low = qpos_limits[:, 0]
+        high = qpos_limits[:, 1]
+        action[:, self._joint_ids] = (action[:, self._joint_ids] - low) / (
+            high - low
+        ) * (self._range[1] - self._range[0]) + self._range[0]
+        return action
 
 
 class EefPoseTerm(ActionTerm):
@@ -225,6 +258,10 @@ class EefPoseTerm(ActionTerm):
         super().__init__(cfg, env)
         self._scale = cfg.params.get("scale", 1.0)
         self._pose_dim = cfg.params.get("pose_dim", 7)  # 6 for euler, 7 for quat
+
+    @property
+    def input_key(self) -> str:
+        return "eef_pose"
 
     @property
     def action_dim(self) -> int:
@@ -285,13 +322,15 @@ class QvelTerm(ActionTerm):
         self._scale = cfg.params.get("scale", 1.0)
 
     @property
+    def input_key(self) -> str:
+        return "qvel"
+
+    @property
     def action_dim(self) -> int:
         return len(self._env.active_joint_ids)
 
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        qvel = action * self._scale
-        batch_size = qvel.shape[0]
-        return TensorDict({"qvel": qvel}, batch_size=[batch_size], device=self.device)
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
+        return action * self._scale
 
 
 class QfTerm(ActionTerm):
@@ -316,68 +355,12 @@ class QfTerm(ActionTerm):
         self._scale = cfg.params.get("scale", 1.0)
 
     @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        qf = action * self._scale
-        batch_size = qf.shape[0]
-        return TensorDict({"qf": qf}, batch_size=[batch_size], device=self.device)
-
-
-class ActionClampTerm(ActionTerm):
-    """Post-processing term that clamps action values to specified limits.
-
-    This term is typically used in "post" mode to clamp the output of another
-    action term (e.g., QposTerm) to valid ranges.
-
-    Args:
-        min: Minimum value for clamping. If None, no lower bound. Defaults to None.
-        max: Maximum value for clamping. If None, no upper bound. Defaults to None.
-
-    Example:
-        >>> # Config with both pre and post terms
-        >>> cfg = {
-        ...     "qpos": ActionTermCfg(func=QposTerm, params={"scale": 1.0}, mode="pre"),
-        ...     "clamp": ActionTermCfg(
-        ...         func=ActionClampTerm, params={"min": -1.0, "max": 1.0}, mode="post"
-        ...     ),
-        ... }
-
-    Example config (YAML):
-        .. code-block:: yaml
-
-            action_terms:
-                qpos:
-                    func: QposTerm
-                    mode: pre
-                    params:
-                        scale: 1.0
-                clamp:
-                    func: ActionClampTerm
-                    mode: post
-                    params:
-                        min: -1.0
-                        max: 1.0
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._min = cfg.params.get("min", None)
-        self._max = cfg.params.get("max", None)
+    def input_key(self) -> str:
+        return "qf"
 
     @property
     def action_dim(self) -> int:
-        # Post-processing term inherits dimension from input action
         return len(self._env.active_joint_ids)
 
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        clamped = action
-        if self._min is not None:
-            clamped = torch.clamp(clamped, min=self._min)
-        if self._max is not None:
-            clamped = torch.clamp(clamped, max=self._max)
-        batch_size = clamped.shape[0]
-        return TensorDict(
-            {"qpos": clamped}, batch_size=[batch_size], device=self.device
-        )
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
+        return action * self._scale

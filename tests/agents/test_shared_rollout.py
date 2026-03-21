@@ -64,7 +64,7 @@ class _FakeEnv:
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.device = device
-        self.action_type = "delta_qpos"
+        self.action_type = "qpos"
         self.rollout_buffer: TensorDict | None = None
         self.current_rollout_step = 0
         self._obs = self._make_obs(step=0)
@@ -213,7 +213,7 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
             dtype=torch.float32,
             device=env.device,
         )
-        next_obs, reward, terminated, truncated, _ = env.step({"delta_qpos": action})
+        next_obs, reward, terminated, truncated, _ = env.step({"qpos": action})
         done = (terminated | truncated).cpu()
 
         assert env.current_rollout_step == 1

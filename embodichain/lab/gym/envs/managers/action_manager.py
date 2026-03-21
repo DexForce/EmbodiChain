@@ -26,10 +26,13 @@ are available in :mod:`actions` module.
 from __future__ import annotations
 
 import inspect
+import torch
+import numpy as np
+import gymnasium as gym
+
+from functools import cached_property
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
-
-import torch
 from prettytable import PrettyTable
 from tensordict import TensorDict
 
@@ -53,6 +56,11 @@ class ActionTerm(Functor):
     and converting them to the format expected by the robot (e.g., qpos, qvel, qf).
     """
 
+    SUPPORTED_TYPES = ["qpos", "qvel", "qf", "eef_pose"]
+    """The supported action types. Each term must specify one of these as its output type, which
+    determines how the processed action is applied to the robot.
+    """
+
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         """Initialize the action term.
 
@@ -64,19 +72,28 @@ class ActionTerm(Functor):
 
     @property
     @abstractmethod
+    def input_key(self) -> str:
+        """The output type of the action term, which determines how the processed action is applied to the robot.
+
+        Must be one of the supported types defined in SUPPORTED_TYPES.
+        """
+        ...
+
+    @property
+    @abstractmethod
     def action_dim(self) -> int:
         """Dimension of the action term (policy output dimension)."""
         ...
 
     @abstractmethod
-    def process_action(self, action: torch.Tensor) -> EnvAction:
+    def process_action(self, action: torch.Tensor) -> EnvAction | torch.Tensor:
         """Process raw action from policy into robot control format.
 
         Args:
             action: Raw action tensor from policy, shape (num_envs, action_dim).
 
         Returns:
-            TensorDict with keys such as "qpos", "qvel", or "qf" ready for robot control.
+            Processed action tensor ready for robot control, shape depends on input_key.
         """
         ...
 
@@ -131,7 +148,7 @@ class ActionManager(ManagerBase):
         """Name of active action terms."""
         return self._term_names
 
-    def get_functors_by_mode(
+    def get_terms_by_mode(
         self, mode: Literal["pre", "post"]
     ) -> list[tuple[str, ActionTerm]]:
         """Get action terms filtered by mode.
@@ -144,15 +161,99 @@ class ActionManager(ManagerBase):
         """
         return [(name, self._terms[name]) for name in self._mode_term_names[mode]]
 
-    @property
-    def action_type(self) -> str:
-        """The active action type (term name) for backward compatibility."""
-        return self._term_names[0]
-
-    @property
+    @cached_property
     def total_action_dim(self) -> int:
         """Total dimension of actions (sum of all term dimensions)."""
-        return sum(t.action_dim for t in self._terms.values())
+        terms = self.get_terms_by_mode("pre")
+        return sum(term.action_dim for _, term in terms)
+
+    @cached_property
+    def single_action_space(self) -> torch.Tensor | gym.Space:
+        terms = self.get_terms_by_mode("pre")
+        if len(terms) == 0:
+            qpos_limits = (
+                self._env.robot.body_data.qpos_limits[0, self._env.active_joint_ids]
+                .cpu()
+                .numpy()
+            )
+            single_action_space = gym.spaces.Box(
+                low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32
+            )
+            return single_action_space
+        else:
+            # Create dict action space for multiple terms.
+            spaces = {}
+            for name, term in terms:
+                if term.input_key == "qpos":
+                    qpos_limits = (
+                        self._env.robot.body_data.qpos_limits[
+                            0, self._env.active_joint_ids
+                        ]
+                        .cpu()
+                        .numpy()
+                    )
+                    spaces[term.input_key] = gym.spaces.Box(
+                        low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32
+                    )
+                elif term.input_key == "qvel":
+                    qvel_limits = (
+                        self._env.robot.body_data.qvel_limits[
+                            0, self._env.active_joint_ids
+                        ]
+                        .cpu()
+                        .numpy()
+                    )
+                    spaces[term.input_key] = gym.spaces.Box(
+                        low=-qvel_limits, high=qvel_limits, dtype=np.float32
+                    )
+                elif term.input_key == "qf":
+                    qf_limits = (
+                        self._env.robot.body_data.qf_limits[
+                            0, self._env.active_joint_ids
+                        ]
+                        .cpu()
+                        .numpy()
+                    )
+                    spaces[term.input_key] = gym.spaces.Box(
+                        low=-qf_limits, high=qf_limits, dtype=np.float32
+                    )
+                else:
+                    spaces[term.input_key] = gym.spaces.Box(
+                        low=-np.inf,
+                        high=np.inf,
+                        shape=(term.action_dim,),
+                        dtype=np.float32,
+                    )
+            if len(spaces) == 1 and "qpos" in spaces:
+                return spaces["qpos"]
+            else:
+                return gym.spaces.Dict(spaces)
+
+    def convert_policy_action_to_env_action(self, action: torch.Tensor) -> EnvAction:
+        """Convert raw action from policy into robot control format.
+
+        This is a convenience method for processing a raw action tensor through the active terms.
+        It assumes the input action is ordered according to the active terms and concatenated into a single tensor.
+
+        Args:
+            action: Raw action tensor from policy, shape (num_envs, total_action_dim).
+
+        Returns:
+            Processed action tensor ready for robot control, shape depends on active terms.
+        """
+        terms = self.get_terms_by_mode("pre")
+        if len(terms) == 0 or len(terms) == 1:
+            return action
+        else:
+            action_dict = {}
+            current_dim = 0
+            for _, term in terms:
+                term_action = action[:, current_dim : current_dim + term.action_dim]
+                action_dict[term.input_key] = term_action
+                current_dim += term.action_dim
+            return TensorDict(
+                action_dict, batch_size=[action.shape[0]], device=action.device
+            )
 
     def get_action_dim_by_mode(self, mode: Literal["pre", "post"]) -> int:
         """Get total action dimension for terms of a specific mode.
@@ -163,7 +264,7 @@ class ActionManager(ManagerBase):
         Returns:
             Sum of action dimensions for terms with the specified mode.
         """
-        mode_terms = self.get_functors_by_mode(mode)
+        mode_terms = self.get_terms_by_mode(mode)
         return sum(term.action_dim for _, term in mode_terms)
 
     def process_action(
@@ -187,25 +288,17 @@ class ActionManager(ManagerBase):
         mode_terms = self._mode_term_names[mode]
 
         if not mode_terms:
-            logger.log_error(
-                f"No action terms found for mode '{mode}'. "
-                f"Available terms: {self._term_names}",
-                error_type=ValueError,
-            )
+            return action
 
-        # TODO: We should refactor the action manager to support multiple active terms.
-        if not isinstance(action, (dict, TensorDict)):
-            return self._terms[mode_terms[0]].process_action(action)
-
-        # Dict input: find matching term
-        for term_name in mode_terms:
-            if term_name in action:
-                return self._terms[term_name].process_action(action[term_name])
-
-        logger.log_error(
-            f"No valid action keys. Expected one of: {mode_terms}",
-            error_type=ValueError,
-        )
+        if len(mode_terms) == 1:
+            term_name = mode_terms[0]
+            term = self._terms[term_name]
+            return term.process_action(action)
+        else:
+            for name in mode_terms:
+                term = self._terms[name]
+                action[term.input_key] = term.process_action(action[term.input_key])
+            return action
 
     def get_term(self, name: str) -> ActionTerm:
         """Get action term by name."""
