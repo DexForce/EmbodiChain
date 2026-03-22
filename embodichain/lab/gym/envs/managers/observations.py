@@ -111,6 +111,37 @@ def get_rigid_object_pose(
     return obj.get_local_pose(to_matrix=to_matrix)
 
 
+def get_object_body_scale(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Get the body scale of the objects in the environment.
+
+    If the object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the scene entity.
+
+    Returns:
+        A tensor of shape (num_envs, 3) representing the body scale of the objects.
+    """
+
+    if entity_cfg.uid not in env.sim.asset_uids:
+        return torch.zeros((env.num_envs, 3), dtype=torch.float32, device=env.device)
+
+    obj = env.sim.get_asset(entity_cfg.uid)
+    if isinstance(obj, RigidObject) is False:
+        logger.log_error(
+            f"Object with UID '{entity_cfg.uid}' is not a RigidObject. Currently only support getting body scale for RigidObject, please check again."
+        )
+
+    return obj.get_body_scale()
+
+
 def get_rigid_object_velocity(
     env: EmbodiedEnv,
     obs: EnvObs,
@@ -887,8 +918,8 @@ class compute_exteroception(Functor):
 class get_rigid_object_physics_attributes(Functor):
     """Get the physics attributes of the rigid object in the environment with caching.
 
-    This functor retrieves and caches physics attributes (mass, friction, damping, inertia,
-    body_scale) for rigid objects. The cache is cleared when the environment resets,
+    This functor retrieves and caches physics attributes (mass, friction, damping, inertia)
+    for rigid objects. The cache is cleared when the environment resets,
     ensuring fresh values are fetched at the start of each episode.
 
     If the rigid object with the specified UID does not exist in the environment,
@@ -947,17 +978,7 @@ class get_rigid_object_physics_attributes(Functor):
         if uid in self._cache:
             cached_dict = self._cache[uid]
             # Return clones to prevent accidental modifications
-            return TensorDict(
-                {
-                    "mass": cached_dict["mass"].clone(),
-                    "friction": cached_dict["friction"].clone(),
-                    "damping": cached_dict["damping"].clone(),
-                    "inertia": cached_dict["inertia"].clone(),
-                    "body_scale": cached_dict["body_scale"].clone(),
-                },
-                batch_size=self.num_envs,
-                device=self.device,
-            )
+            return cached_dict.clone()
 
         # Fetch physics attributes from the rigid object
         if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
@@ -975,9 +996,6 @@ class get_rigid_object_physics_attributes(Functor):
                     "inertia": torch.zeros(
                         (env.num_envs, 3), dtype=torch.float32, device=env.device
                     ),
-                    "body_scale": torch.zeros(
-                        (env.num_envs, 3), dtype=torch.float32, device=env.device
-                    ),
                 },
                 batch_size=env.num_envs,
                 device=env.device,
@@ -991,23 +1009,12 @@ class get_rigid_object_physics_attributes(Functor):
                     "friction": obj.get_friction(),
                     "damping": obj.get_damping(),
                     "inertia": obj.get_inertia(),
-                    "body_scale": obj.get_body_scale(),
                 },
                 batch_size=env.num_envs,
                 device=env.device,
             )
 
         # Cache the result (store clones to avoid modifying cached data)
-        self._cache[uid] = TensorDict(
-            {
-                "mass": result["mass"].clone(),
-                "friction": result["friction"].clone(),
-                "damping": result["damping"].clone(),
-                "inertia": result["inertia"].clone(),
-                "body_scale": result["body_scale"].clone(),
-            },
-            batch_size=self.num_envs,
-            device=self.device,
-        )
+        self._cache[uid] = result.clone()
 
         return result

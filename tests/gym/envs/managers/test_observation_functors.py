@@ -417,7 +417,6 @@ class TestGetRigidObjectPhysicsAttributes:
         assert result["friction"].shape == (4, 1)
         assert result["damping"].shape == (4, 1)
         assert result["inertia"].shape == (4, 3)
-        assert result["body_scale"].shape == (4, 3)
 
     def test_returns_correct_values(self):
         """Test that functor returns correct physics values from object."""
@@ -440,9 +439,6 @@ class TestGetRigidObjectPhysicsAttributes:
         torch.testing.assert_close(
             result["inertia"], torch.tensor([[0.1, 0.2, 0.1]]).repeat(4, 1)
         )
-        torch.testing.assert_close(
-            result["body_scale"], torch.tensor([[1.0, 1.0, 1.0]]).repeat(4, 1)
-        )
 
     def test_returns_zeros_for_nonexistent_object(self):
         """Test that functor returns zero tensors for non-existent object."""
@@ -459,7 +455,6 @@ class TestGetRigidObjectPhysicsAttributes:
         assert torch.all(result["friction"] == 0)
         assert torch.all(result["damping"] == 0)
         assert torch.all(result["inertia"] == 0)
-        assert torch.all(result["body_scale"] == 0)
 
     def test_caches_data_across_calls(self):
         """Test that data is cached and reused on subsequent calls."""
@@ -481,7 +476,6 @@ class TestGetRigidObjectPhysicsAttributes:
         torch.testing.assert_close(result1["friction"], result2["friction"])
         torch.testing.assert_close(result1["damping"], result2["damping"])
         torch.testing.assert_close(result1["inertia"], result2["inertia"])
-        torch.testing.assert_close(result1["body_scale"], result2["body_scale"])
 
     def test_reset_clears_cache(self):
         """Test that reset() clears the internal cache."""
