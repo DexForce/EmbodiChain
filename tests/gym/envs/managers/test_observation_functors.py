@@ -108,7 +108,7 @@ class MockRigidObject:
 
     def get_damping(self):
         """Return mock damping for each environment."""
-        return torch.tensor([[0.1]]).repeat(self.num_envs, 1)
+        return torch.tensor([[0.1, 0.1]]).repeat(self.num_envs, 1)
 
     def get_inertia(self):
         """Return mock inertia tensor for each environment."""
@@ -435,7 +435,7 @@ class TestGetRigidObjectPhysicsAttributes:
         # Check shapes
         assert result["mass"].shape == (4, 1)
         assert result["friction"].shape == (4, 1)
-        assert result["damping"].shape == (4, 1)
+        assert result["damping"].shape == (4, 2)
         assert result["inertia"].shape == (4, 3)
 
     def test_returns_correct_values(self):
@@ -454,7 +454,7 @@ class TestGetRigidObjectPhysicsAttributes:
             result["friction"], torch.tensor([[0.5]]).repeat(4, 1)
         )
         torch.testing.assert_close(
-            result["damping"], torch.tensor([[0.1]]).repeat(4, 1)
+            result["damping"], torch.tensor([[0.1, 0.1]]).repeat(4, 1)
         )
         torch.testing.assert_close(
             result["inertia"], torch.tensor([[0.1, 0.2, 0.1]]).repeat(4, 1)

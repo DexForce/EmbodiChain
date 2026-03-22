@@ -997,7 +997,7 @@ class get_rigid_object_physics_attributes(Functor):
                         (env.num_envs, 3), dtype=torch.float32, device=env.device
                     ),
                 },
-                batch_size=env.num_envs,
+                batch_size=[env.num_envs],
                 device=env.device,
             )
         else:
@@ -1010,7 +1010,7 @@ class get_rigid_object_physics_attributes(Functor):
                     "damping": obj.get_damping(),
                     "inertia": obj.get_inertia(),
                 },
-                batch_size=env.num_envs,
+                batch_size=[env.num_envs],
                 device=env.device,
             )
 
@@ -1118,7 +1118,7 @@ class get_articulation_joint_drive(Functor):
                         (env.num_envs, 1), dtype=torch.float32, device=env.device
                     ),
                 },
-                batch_size=env.num_envs,
+                batch_size=[env.num_envs],
                 device=env.device,
             )
         else:
@@ -1133,7 +1133,7 @@ class get_articulation_joint_drive(Functor):
                     "max_velocity": max_velocity,
                     "friction": friction,
                 },
-                batch_size=env.num_envs,
+                batch_size=[env.num_envs],
                 device=env.device,
             )
 

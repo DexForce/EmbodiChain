@@ -722,7 +722,10 @@ class RigidObject(BatchEntity):
             linear_damping = (
                 self._entities[env_idx].get_physical_body().get_linear_damping()
             )
-            dampings.append([linear_damping])
+            angular_damping = (
+                self._entities[env_idx].get_physical_body().get_angular_damping()
+            )
+            dampings.append([linear_damping, angular_damping])
 
         return torch.as_tensor(dampings, dtype=torch.float32, device=self.device)
 

@@ -388,8 +388,6 @@ class BaseRigidObjectTest:
 
     def test_set_attrs(self):
         """Test setting physical attributes."""
-        from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-
         # Create new attributes
         new_attrs = RigidBodyAttributesCfg(mass=2.5, density=1000.0)
 
