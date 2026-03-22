@@ -531,6 +531,11 @@ class EmbodiedEnv(BaseEnv):
             if "reset" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="reset", env_ids=env_ids)
 
+        # reset observation manager for environments that need a reset
+        # This clears any cached data in observation functors (e.g., physics attributes)
+        if self.cfg.observations:
+            self.observation_manager.reset(env_ids=env_ids)
+
         # reset reward manager for environments that need a reset
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)

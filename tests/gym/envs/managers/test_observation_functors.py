@@ -88,6 +88,26 @@ class MockRigidObject:
         quat[:, 0] = 1.0  # w=1 (identity)
         return torch.cat([pos, quat], dim=-1)
 
+    def get_mass(self):
+        """Return mock mass for each environment."""
+        return torch.ones(self.num_envs, 1)
+
+    def get_friction(self):
+        """Return mock friction for each environment."""
+        return torch.tensor([[0.5]]).repeat(self.num_envs, 1)
+
+    def get_damping(self):
+        """Return mock damping for each environment."""
+        return torch.tensor([[0.1]]).repeat(self.num_envs, 1)
+
+    def get_inertia(self):
+        """Return mock inertia tensor for each environment."""
+        return torch.tensor([[0.1, 0.2, 0.1]]).repeat(self.num_envs, 1)
+
+    def get_body_scale(self):
+        """Return mock body scale for each environment."""
+        return torch.tensor([[1.0, 1.0, 1.0]]).repeat(self.num_envs, 1)
+
     @property
     def body(self):
         return self
@@ -191,6 +211,7 @@ from embodichain.lab.gym.envs.managers.observations import (
     compute_semantic_mask,
     get_robot_eef_pose,
     target_position,
+    get_rigid_object_physics_attributes,
 )
 
 
@@ -376,3 +397,170 @@ class TestTargetPosition:
 
         assert result.shape == (4, 3)
         torch.testing.assert_close(result[0], torch.tensor([0.5, 0.3, 0.1]))
+
+
+class TestGetRigidObjectPhysicsAttributes:
+    """Tests for get_rigid_object_physics_attributes class functor."""
+
+    def test_returns_correct_shapes(self):
+        """Test that functor returns correct tensor shapes."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        # Check shapes
+        assert result["mass"].shape == (4, 1)
+        assert result["friction"].shape == (4, 1)
+        assert result["damping"].shape == (4, 1)
+        assert result["inertia"].shape == (4, 3)
+        assert result["body_scale"].shape == (4, 3)
+
+    def test_returns_correct_values(self):
+        """Test that functor returns correct physics values from object."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        # Check values match mock object
+        torch.testing.assert_close(result["mass"], torch.ones(4, 1))
+        torch.testing.assert_close(
+            result["friction"], torch.tensor([[0.5]]).repeat(4, 1)
+        )
+        torch.testing.assert_close(
+            result["damping"], torch.tensor([[0.1]]).repeat(4, 1)
+        )
+        torch.testing.assert_close(
+            result["inertia"], torch.tensor([[0.1, 0.2, 0.1]]).repeat(4, 1)
+        )
+        torch.testing.assert_close(
+            result["body_scale"], torch.tensor([[1.0, 1.0, 1.0]]).repeat(4, 1)
+        )
+
+    def test_returns_zeros_for_nonexistent_object(self):
+        """Test that functor returns zero tensors for non-existent object."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="nonexistent"))
+
+        # Check all attributes are zero
+        assert torch.all(result["mass"] == 0)
+        assert torch.all(result["friction"] == 0)
+        assert torch.all(result["damping"] == 0)
+        assert torch.all(result["inertia"] == 0)
+        assert torch.all(result["body_scale"] == 0)
+
+    def test_caches_data_across_calls(self):
+        """Test that data is cached and reused on subsequent calls."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result1 = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+        assert len(functor._cache) == 1
+
+        # Call again - should use cache
+        result2 = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+        assert len(functor._cache) == 1  # Still just 1 entry
+
+        # Values should be identical
+        torch.testing.assert_close(result1["mass"], result2["mass"])
+        torch.testing.assert_close(result1["friction"], result2["friction"])
+        torch.testing.assert_close(result1["damping"], result2["damping"])
+        torch.testing.assert_close(result1["inertia"], result2["inertia"])
+        torch.testing.assert_close(result1["body_scale"], result2["body_scale"])
+
+    def test_reset_clears_cache(self):
+        """Test that reset() clears the internal cache."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        # Populate cache
+        functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+        assert len(functor._cache) == 1
+
+        # Reset should clear cache
+        functor.reset()
+        assert len(functor._cache) == 0
+
+    def test_reset_with_env_ids_clears_cache(self):
+        """Test that reset(env_ids=...) clears the internal cache."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        # Populate cache
+        functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+        assert len(functor._cache) == 1
+
+        # Reset with env_ids should still clear cache (current implementation clears all)
+        functor.reset(env_ids=[0, 1])
+        assert len(functor._cache) == 0
+
+    def test_caches_multiple_objects_separately(self):
+        """Test that different objects have separate cache entries."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result1 = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+        result2 = functor(env, obs, entity_cfg=MagicMock(uid="target"))
+
+        # Should have 2 separate cache entries
+        assert len(functor._cache) == 2
+        assert "test_cube" in functor._cache
+        assert "target" in functor._cache
+
+    def test_returns_clones_not_references(self):
+        """Test that returned tensors are clones, not references to cache."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        # Modify the returned result
+        result["mass"][:] = 999.0
+
+        # Get result again - should still have original value
+        result2 = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        # Cache should not be affected by modification
+        assert torch.allclose(result2["mass"], torch.ones(4, 1))
+        assert not torch.allclose(result["mass"], torch.ones(4, 1))
+
+    def test_different_num_envs(self):
+        """Test that functor works with different number of environments."""
+        env = MockEnv(num_envs=8)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_rigid_object_physics_attributes(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        # Check shapes match num_envs
+        assert result["mass"].shape == (8, 1)
+        assert result["inertia"].shape == (8, 3)

@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import torch
 import os
-import random
+
+from tensordict import TensorDict
 from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
 
 from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
@@ -34,6 +35,42 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
+def get_object_pose(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+    to_matrix: bool = True,
+) -> torch.Tensor:
+    """Get the arena poses of the objects in the environment.
+
+    If the object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the scene entity.
+        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
+
+    Returns:
+        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the objects.
+    """
+
+    if entity_cfg.uid not in env.sim.asset_uids:
+        if to_matrix:
+            return torch.zeros(
+                (env.num_envs, 4, 4), dtype=torch.float32, device=env.device
+            )
+        else:
+            return torch.zeros(
+                (env.num_envs, 7), dtype=torch.float32, device=env.device
+            )
+
+    obj = env.sim.get_asset(entity_cfg.uid)
+
+    return obj.get_local_pose(to_matrix=to_matrix)
+
+
 def get_rigid_object_pose(
     env: EmbodiedEnv,
     obs: EnvObs,
@@ -44,6 +81,10 @@ def get_rigid_object_pose(
 
     If the rigid object with the specified UID does not exist in the environment,
     a zero tensor will be returned.
+
+    Note:
+        This method will be deprecated in the future and replaced by `get_object_pose` as
+        the distinction between rigid objects and general objects is being removed. Please use `get_object_pose` instead when possible.
 
     Args:
         env: The environment instance.
@@ -837,3 +878,132 @@ class compute_exteroception(Functor):
                 exteroception[sensor_uid] = projected_kpnts
 
         return exteroception
+
+
+class get_rigid_object_physics_attributes(Functor):
+    """Get the physics attributes of the rigid object in the environment with caching.
+
+    This functor retrieves and caches physics attributes (mass, friction, damping, inertia,
+    body_scale) for rigid objects. The cache is cleared when the environment resets,
+    ensuring fresh values are fetched at the start of each episode.
+
+    If the rigid object with the specified UID does not exist in the environment,
+    a zero tensor will be returned for each attribute.
+
+    The cached data is stored per entity UID. When called, if data is cached,
+    it returns a clone of the cached tensor to prevent accidental modifications.
+
+    .. note::
+        Physics attributes are typically constant during an episode, so caching improves
+        performance by avoiding repeated queries to the physics engine.
+
+    Args:
+        cfg: The configuration object.
+        env: The environment instance.
+    """
+
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        """Initialize the physics attributes functor.
+
+        Args:
+            cfg: The configuration object.
+            env: The environment instance.
+        """
+        super().__init__(cfg, env)
+        self._cache: Dict[str, TensorDict] = {}
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Clear the cached physics attributes.
+
+        Args:
+            env_ids: The environment ids. Defaults to None, which clears all cache.
+        """
+        self._cache.clear()
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        obs: EnvObs,
+        entity_cfg: SceneEntityCfg,
+    ) -> TensorDict:
+        """Get the physics attributes of the rigid object.
+
+        Args:
+            env: The environment instance.
+            obs: The observation dictionary.
+            entity_cfg: The configuration of the scene entity.
+
+        Returns:
+            A TensorDict containing the physics attributes of the rigid object.
+            If the object does not exist, zero tensors are returned for each attribute.
+        """
+        uid = entity_cfg.uid
+
+        # Return cached data if available
+        if uid in self._cache:
+            cached_dict = self._cache[uid]
+            # Return clones to prevent accidental modifications
+            return TensorDict(
+                {
+                    "mass": cached_dict["mass"].clone(),
+                    "friction": cached_dict["friction"].clone(),
+                    "damping": cached_dict["damping"].clone(),
+                    "inertia": cached_dict["inertia"].clone(),
+                    "body_scale": cached_dict["body_scale"].clone(),
+                },
+                batch_size=self.num_envs,
+                device=self.device,
+            )
+
+        # Fetch physics attributes from the rigid object
+        if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
+            result = TensorDict(
+                {
+                    "mass": torch.zeros(
+                        (env.num_envs, 1), dtype=torch.float32, device=env.device
+                    ),
+                    "friction": torch.zeros(
+                        (env.num_envs, 1), dtype=torch.float32, device=env.device
+                    ),
+                    "damping": torch.zeros(
+                        (env.num_envs, 1), dtype=torch.float32, device=env.device
+                    ),
+                    "inertia": torch.zeros(
+                        (env.num_envs, 3), dtype=torch.float32, device=env.device
+                    ),
+                    "body_scale": torch.zeros(
+                        (env.num_envs, 3), dtype=torch.float32, device=env.device
+                    ),
+                },
+                batch_size=env.num_envs,
+                device=env.device,
+            )
+        else:
+            obj = env.sim.get_rigid_object(entity_cfg.uid)
+
+            result = TensorDict(
+                {
+                    "mass": obj.get_mass(),
+                    "friction": obj.get_friction(),
+                    "damping": obj.get_damping(),
+                    "inertia": obj.get_inertia(),
+                    "body_scale": obj.get_body_scale(),
+                },
+                batch_size=env.num_envs,
+                device=env.device,
+            )
+
+        # Cache the result (store clones to avoid modifying cached data)
+        self._cache[uid] = TensorDict(
+            {
+                "mass": result["mass"].clone(),
+                "friction": result["friction"].clone(),
+                "damping": result["damping"].clone(),
+                "inertia": result["inertia"].clone(),
+                "body_scale": result["body_scale"].clone(),
+            },
+            batch_size=self.num_envs,
+            device=self.device,
+        )
+
+        return result
