@@ -193,6 +193,58 @@ class BaseArticulationTest:
         self.art.set_self_collision(False)
         self.art.set_self_collision(True)
 
+    def test_get_joint_drive_with_joint_ids(self):
+        """Test get_joint_drive supports joint_ids and env_ids filtering."""
+        all_stiffness, all_damping, all_max_effort, all_max_velocity, all_friction = (
+            self.art.get_joint_drive()
+        )
+
+        assert all_stiffness.shape == (
+            NUM_ARENAS,
+            self.art.dof,
+        ), f"FAIL: Expected full stiffness shape {(NUM_ARENAS, self.art.dof)}, got {all_stiffness.shape}"
+
+        if self.art.dof >= 2:
+            joint_ids = [0, self.art.dof - 1]
+        else:
+            joint_ids = [0]
+
+        env_ids = [0, 2, 4] if NUM_ARENAS >= 5 else [0]
+
+        (
+            stiffness,
+            damping,
+            max_effort,
+            max_velocity,
+            friction,
+        ) = self.art.get_joint_drive(joint_ids=joint_ids, env_ids=env_ids)
+
+        expected_stiffness = all_stiffness[env_ids][:, joint_ids]
+        expected_damping = all_damping[env_ids][:, joint_ids]
+        expected_max_effort = all_max_effort[env_ids][:, joint_ids]
+        expected_max_velocity = all_max_velocity[env_ids][:, joint_ids]
+        expected_friction = all_friction[env_ids][:, joint_ids]
+
+        expected_shape = (len(env_ids), len(joint_ids))
+        assert (
+            stiffness.shape == expected_shape
+        ), f"FAIL: Expected stiffness shape {expected_shape}, got {stiffness.shape}"
+        assert torch.allclose(
+            stiffness, expected_stiffness, atol=1e-5
+        ), "FAIL: stiffness does not match expected filtered values"
+        assert torch.allclose(
+            damping, expected_damping, atol=1e-5
+        ), "FAIL: damping does not match expected filtered values"
+        assert torch.allclose(
+            max_effort, expected_max_effort, atol=1e-5
+        ), "FAIL: max_effort does not match expected filtered values"
+        assert torch.allclose(
+            max_velocity, expected_max_velocity, atol=1e-5
+        ), "FAIL: max_velocity does not match expected filtered values"
+        assert torch.allclose(
+            friction, expected_friction, atol=1e-5
+        ), "FAIL: friction does not match expected filtered values"
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

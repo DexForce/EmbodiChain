@@ -75,6 +75,8 @@ This page lists all available observation functors that can be used with the Obs
   - Get the world velocities (linear and angular) of rigid objects. Returns tensor of shape (num_envs, 6). Returns zero tensor if object doesn't exist.
 * - ``get_rigid_object_physics_attributes``
   - Get physics attributes (mass, friction, damping, inertia) of rigid objects with caching. Returns a ``TensorDict`` containing: ``mass`` (num_envs, 1), ``friction`` (num_envs, 1), ``damping`` (num_envs, 1), ``inertia`` (num_envs, 3). Cache is cleared on environment reset. Implemented as a Functor class.
+* - ``get_articulation_joint_drive``
+  - Get joint drive properties (stiffness, damping, max_effort, max_velocity, friction) of articulations (e.g. robots) with caching. Returns a ``TensorDict`` containing properties of shape ``(num_envs, num_joints)``. Cache is cleared on environment reset. Implemented as a Functor class.
 ```
 
 ## Target / Goal
@@ -149,6 +151,15 @@ observations = {
         name="object/cube/physics",
         params={
             "entity_cfg": SceneEntityCfg(uid="cube"),
+        },
+    ),
+    # Example: Get articulation joint drive properties
+    "robot_joint_drive": ObservationCfg(
+        func="get_articulation_joint_drive",
+        mode="add",
+        name="robot/joint_drive",
+        params={
+            "entity_cfg": SceneEntityCfg(uid="robot"),
         },
     ),
 }

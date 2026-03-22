@@ -61,6 +61,16 @@ class MockRobot:
     def get_user_ids(self):
         return torch.tensor([1], device=self.device)
 
+    def get_joint_drive(self, joint_ids=None, env_ids=None):
+        num_envs = len(env_ids) if env_ids is not None else self.num_envs
+        joints = len(joint_ids) if joint_ids is not None else self.num_joints
+        stiffness = torch.ones((num_envs, joints), device=self.device) * 100.0
+        damping = torch.ones((num_envs, joints), device=self.device) * 10.0
+        max_effort = torch.ones((num_envs, joints), device=self.device) * 50.0
+        max_velocity = torch.ones((num_envs, joints), device=self.device) * 5.0
+        friction = torch.ones((num_envs, joints), device=self.device) * 1.0
+        return stiffness, damping, max_effort, max_velocity, friction
+
 
 class MockRigidObject:
     """Mock rigid object for observation functor tests."""
@@ -165,6 +175,15 @@ class MockSim:
             return list(self._robots.values())[0] if self._robots else None
         return self._robots.get(uid)
 
+    def get_robot_uid_list(self):
+        return list(self._robots.keys())
+
+    def get_articulation(self, uid: str):
+        return self._robots.get(uid)
+
+    def get_articulation_uid_list(self):
+        return list(self._robots.keys())
+
     def get_sensor(self, uid: str):
         return self._sensors.get(uid)
 
@@ -212,6 +231,7 @@ from embodichain.lab.gym.envs.managers.observations import (
     get_robot_eef_pose,
     target_position,
     get_rigid_object_physics_attributes,
+    get_articulation_joint_drive,
 )
 
 
@@ -558,3 +578,115 @@ class TestGetRigidObjectPhysicsAttributes:
         # Check shapes match num_envs
         assert result["mass"].shape == (8, 1)
         assert result["inertia"].shape == (8, 3)
+
+
+class TestGetArticulationJointDrive:
+    """Tests for get_articulation_joint_drive class functor."""
+
+    def test_returns_correct_shapes(self):
+        """Test that the functor returns properties with correct shapes."""
+        env = MockEnv(num_envs=4, num_joints=6)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_articulation_joint_drive(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="robot"))
+
+        assert "stiffness" in result.keys()
+        assert "damping" in result.keys()
+        assert "max_effort" in result.keys()
+        assert "max_velocity" in result.keys()
+        assert "friction" in result.keys()
+
+        assert result["stiffness"].shape == (4, 6)
+        assert result["damping"].shape == (4, 6)
+        assert result["max_effort"].shape == (4, 6)
+        assert result["max_velocity"].shape == (4, 6)
+        assert result["friction"].shape == (4, 6)
+
+    def test_returns_correct_values(self):
+        """Test that the functor returns expected mock values."""
+        env = MockEnv(num_envs=4, num_joints=6)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_articulation_joint_drive(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="robot"))
+
+        assert torch.allclose(result["stiffness"], torch.ones(4, 6) * 100.0)
+        assert torch.allclose(result["damping"], torch.ones(4, 6) * 10.0)
+        assert torch.allclose(result["max_effort"], torch.ones(4, 6) * 50.0)
+        assert torch.allclose(result["max_velocity"], torch.ones(4, 6) * 5.0)
+        assert torch.allclose(result["friction"], torch.ones(4, 6) * 1.0)
+
+    def test_returns_zeros_for_nonexistent_object(self):
+        """Test that zeros are returned for non-existent objects."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_articulation_joint_drive(cfg=FunctorCfg(), env=env)
+
+        result = functor(env, obs, entity_cfg=MagicMock(uid="does_not_exist"))
+
+        assert torch.allclose(result["stiffness"], torch.zeros(4, 1))
+        assert torch.allclose(result["damping"], torch.zeros(4, 1))
+        assert torch.allclose(result["max_effort"], torch.zeros(4, 1))
+        assert torch.allclose(result["max_velocity"], torch.zeros(4, 1))
+        assert torch.allclose(result["friction"], torch.zeros(4, 1))
+
+    def test_caches_data_across_calls(self):
+        """Test that fetched data is cached for subsequent calls."""
+        env = MockEnv(num_envs=4)
+        # Verify the robot gets called
+        env.sim._robots["robot"].get_joint_drive = MagicMock(
+            return_value=(
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+            )
+        )
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_articulation_joint_drive(cfg=FunctorCfg(), env=env)
+
+        # First call should fetch
+        functor(env, obs, entity_cfg=MagicMock(uid="robot"))
+        assert env.sim._robots["robot"].get_joint_drive.call_count == 1
+
+        # Second call should use cache
+        functor(env, obs, entity_cfg=MagicMock(uid="robot"))
+        assert env.sim._robots["robot"].get_joint_drive.call_count == 1
+
+    def test_reset_clears_cache(self):
+        """Test that calling reset clears the cache."""
+        env = MockEnv(num_envs=4)
+        env.sim._robots["robot"].get_joint_drive = MagicMock(
+            return_value=(
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+                torch.ones(4, 6),
+            )
+        )
+        obs = {}
+        from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+        functor = get_articulation_joint_drive(cfg=FunctorCfg(), env=env)
+
+        # Populate cache
+        functor(env, obs, entity_cfg=MagicMock(uid="robot"))
+        assert env.sim._robots["robot"].get_joint_drive.call_count == 1
+
+        # Reset clears cache
+        functor.reset()
+
+        # Should fetch again
+        functor(env, obs, entity_cfg=MagicMock(uid="robot"))
+        assert env.sim._robots["robot"].get_joint_drive.call_count == 2
