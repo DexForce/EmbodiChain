@@ -327,12 +327,9 @@ class BaseRigidObjectTest:
         # Kinematic object should have body_data
         assert self.chair.body_data is not None, "Kinematic chair should have body_data"
 
-    def test_body_state(self):
-        """Test the body_state property."""
-        # Dynamic object should have non-zero velocities after update
-        pose_before = self.duck.get_local_pose()
-
-        # Give the duck some velocity
+    def test_physical_attributes(self):
+        """Test getting and setting physical attributes and body states."""
+        # 1. Body state
         lin_vel = (
             torch.tensor([1.0, 0.0, 0.0], device=self.sim.device)
             .unsqueeze(0)
@@ -345,16 +342,11 @@ class BaseRigidObjectTest:
         )
         self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
 
-        # Get body state
         body_state = self.duck.body_state
-
-        # Check shape: (N, 13) - 7 for pose, 3 for lin_vel, 3 for ang_vel
         assert body_state.shape == (
             NUM_ARENAS,
             13,
         ), f"Body state shape should be (NUM_ARENAS, 13), got {body_state.shape}"
-
-        # Check that velocities match what we set
         assert torch.allclose(
             body_state[:, 7:10], lin_vel, atol=1e-5
         ), "Linear velocity in body_state doesn't match"
@@ -362,127 +354,94 @@ class BaseRigidObjectTest:
             body_state[:, 10:13], ang_vel, atol=1e-5
         ), "Angular velocity in body_state doesn't match"
 
-        # Static object should have zero velocities
         table_state = self.table.body_state
         assert torch.allclose(
             table_state[:, 7:], torch.zeros_like(table_state[:, 7:])
         ), "Static object should have zero velocities in body_state"
 
-    def test_is_non_dynamic(self):
-        """Test the is_non_dynamic property."""
+        # 2. is_non_dynamic
         assert not self.duck.is_non_dynamic, "Dynamic duck should not be is_non_dynamic"
         assert self.table.is_non_dynamic, "Static table should be is_non_dynamic"
         assert self.chair.is_non_dynamic, "Kinematic chair should be is_non_dynamic"
 
-    def test_set_collision_filter(self):
-        """Test setting collision filter data."""
-        filter_data = torch.zeros((NUM_ARENAS, 4), dtype=torch.int32)
-        for i in range(NUM_ARENAS):
-            filter_data[i, 0] = i + 10  # Set arena id
-            filter_data[i, 1] = 1
+        # 3. body_type
+        assert self.duck.body_type == "dynamic"
+        self.duck.set_body_type("kinematic")
+        assert self.duck.body_type == "kinematic"
+        self.duck.set_body_type("dynamic")
+        assert self.duck.body_type == "dynamic"
 
-        self.duck.set_collision_filter(filter_data)
+        assert self.chair.body_type == "kinematic"
+        self.chair.set_body_type("dynamic")
+        assert self.chair.body_type == "dynamic"
+        self.chair.set_body_type("kinematic")
+        assert self.chair.body_type == "kinematic"
 
-        # Verify filter data was set (we can't easily read it back,
-        # but we can at least ensure it doesn't crash)
-
-    def test_set_attrs(self):
-        """Test setting physical attributes."""
-        # Create new attributes
+        # 4. attrs
         new_attrs = RigidBodyAttributesCfg(mass=2.5, density=1000.0)
-
-        # Set attributes for all instances
         self.duck.set_attrs(new_attrs)
-
-        # Verify mass was changed
         masses = self.duck.get_mass()
         assert torch.allclose(
             masses, torch.tensor([2.5] * NUM_ARENAS, device=self.sim.device)
         ), f"Mass not set correctly: {masses.tolist()}"
 
-        # Test setting attributes for specific env_ids
         partial_attrs = RigidBodyAttributesCfg(mass=3.0)
         self.duck.set_attrs(partial_attrs, env_ids=[0])
-
         masses = self.duck.get_mass()
         assert torch.allclose(
             masses[0], torch.tensor(3.0, device=self.sim.device)
         ), "Mass for env_id 0 should be 3.0"
 
-    def test_set_get_mass(self):
-        """Test setting and getting mass."""
+        # 5. mass, friction, damping, inertia, scale
         new_mass = (
             torch.tensor([1.5, 2.5], device=self.sim.device)
             if NUM_ARENAS == 2
             else torch.ones(NUM_ARENAS, device=self.sim.device) * 2.0
         )
         self.duck.set_mass(new_mass)
+        assert torch.allclose(self.duck.get_mass(), new_mass), f"Mass not set correctly"
 
-        masses = self.duck.get_mass()
-        assert torch.allclose(
-            masses, new_mass
-        ), f"Mass not set correctly: expected {new_mass.tolist()}, got {masses.tolist()}"
-
-    def test_set_get_friction(self):
-        """Test setting and getting friction."""
         new_friction = (
             torch.tensor([0.5, 0.7], device=self.sim.device)
             if NUM_ARENAS == 2
             else torch.ones(NUM_ARENAS, device=self.sim.device) * 0.6
         )
         self.duck.set_friction(new_friction)
-
-        frictions = self.duck.get_friction()
         assert torch.allclose(
-            frictions, new_friction, atol=1e-5
-        ), f"Friction not set correctly: expected {new_friction.tolist()}, got {frictions.tolist()}"
+            self.duck.get_friction(), new_friction, atol=1e-5
+        ), f"Friction not set correctly"
 
-    def test_set_get_damping(self):
-        """Test setting and getting linear and angular damping."""
         new_damping = (
             torch.tensor([[0.1, 0.2], [0.3, 0.4]], device=self.sim.device)
             if NUM_ARENAS == 2
             else torch.ones(NUM_ARENAS, 2, device=self.sim.device) * 0.15
         )
         self.duck.set_damping(new_damping)
-
-        dampings = self.duck.get_damping()
-        # Note: get_damping only returns linear damping currently
         assert torch.allclose(
-            dampings[:, 0], new_damping[:, 0], atol=1e-5
+            self.duck.get_damping()[:, 0], new_damping[:, 0], atol=1e-5
         ), "Linear damping not set correctly"
 
-    def test_set_get_inertia(self):
-        """Test setting and getting inertia tensor."""
         new_inertia = (
             torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=self.sim.device)
             if NUM_ARENAS == 2
             else torch.ones(NUM_ARENAS, 3, device=self.sim.device) * 1.0
         )
         self.duck.set_inertia(new_inertia)
-
-        inertias = self.duck.get_inertia()
         assert torch.allclose(
-            inertias, new_inertia, atol=1e-5
-        ), f"Inertia not set correctly: expected {new_inertia.tolist()}, got {inertias.tolist()}"
+            self.duck.get_inertia(), new_inertia, atol=1e-5
+        ), f"Inertia not set correctly"
 
-    def test_set_get_body_scale(self):
-        """Test setting and getting body scale."""
         new_scale = (
             torch.tensor([[2.0, 2.0, 2.0], [3.0, 3.0, 3.0]], device=self.sim.device)
             if NUM_ARENAS == 2
             else torch.ones(NUM_ARENAS, 3, device=self.sim.device) * 2.0
         )
         self.duck.set_body_scale(new_scale)
-
-        scales = self.duck.get_body_scale()
         assert torch.allclose(
-            scales, new_scale
-        ), f"Body scale not set correctly: expected {new_scale.tolist()}, got {scales.tolist()}"
+            self.duck.get_body_scale(), new_scale
+        ), f"Body scale not set correctly"
 
-    def test_set_com_pose(self):
-        """Test setting center of mass pose."""
-        # Dynamic objects should be able to set COM pose
+        # 6. COM pose
         com_pose = torch.zeros((NUM_ARENAS, 7), device=self.sim.device)
         com_pose[:, 3] = 1.0  # Unit quaternion
         com_pose[0, :3] = torch.tensor([0.1, 0.1, 0.1], device=self.sim.device)
@@ -492,25 +451,31 @@ class BaseRigidObjectTest:
         # Static object should not be able to set COM pose
         self.table.set_com_pose(com_pose)  # Should log warning but not crash
 
-    def test_set_body_type(self):
-        """Test setting body type."""
-        # Dynamic should be changeable to kinematic and back
-        assert self.duck.body_type == "dynamic"
-        self.duck.set_body_type("kinematic")
-        assert self.duck.body_type == "kinematic"
-        self.duck.set_body_type("dynamic")
-        assert self.duck.body_type == "dynamic"
+        assert self.duck.body_data is not None
+        assert self.duck.body_data.default_com_pose is not None
+        assert self.duck.body_data.default_com_pose.shape == (
+            NUM_ARENAS,
+            7,
+        ), f"Default COM pose should have shape (NUM_ARENAS, 7)"
 
-        # Kinematic should be changeable to dynamic and back
-        assert self.chair.body_type == "kinematic"
-        self.chair.set_body_type("dynamic")
-        assert self.chair.body_type == "dynamic"
-        self.chair.set_body_type("kinematic")
-        assert self.chair.body_type == "kinematic"
+        com_pose = self.duck.body_data.com_pose
+        assert isinstance(com_pose, torch.Tensor), "com_pose should be a torch.Tensor"
+        assert com_pose.shape == (
+            NUM_ARENAS,
+            7,
+        ), f"COM pose should have shape (NUM_ARENAS, 7), got {com_pose.shape}"
 
-    def test_get_vertices(self):
-        """Test getting vertices of the rigid objects."""
-        # Get vertices for all instances
+    def test_misc_properties(self):
+        """Test miscellaneous properties like collision filter, vertices, and visual materials."""
+        # 1. Collision filter
+        filter_data = torch.zeros((NUM_ARENAS, 4), dtype=torch.int32)
+        for i in range(NUM_ARENAS):
+            filter_data[i, 0] = i + 10  # Set arena id
+            filter_data[i, 1] = 1
+
+        self.duck.set_collision_filter(filter_data)
+
+        # 2. Vertices
         vertices = self.duck.get_vertices()
 
         assert isinstance(
@@ -526,12 +491,10 @@ class BaseRigidObjectTest:
             vertices.shape[2] == 3
         ), f"Last dimension should be 3, got {vertices.shape[2]}"
 
-        # Get vertices for specific env_ids
         partial_vertices = self.duck.get_vertices(env_ids=[0])
         assert partial_vertices.shape[0] == 1, "Should get vertices for 1 instance"
 
-    def test_get_user_ids(self):
-        """Test getting user IDs of the rigid bodies."""
+        # 3. User IDs
         user_ids = self.duck.get_user_ids()
 
         assert isinstance(
@@ -544,18 +507,14 @@ class BaseRigidObjectTest:
             user_ids.dtype == torch.int32
         ), f"User IDs should be int32, got {user_ids.dtype}"
 
-    def test_share_visual_material_inst(self):
-        """Test sharing visual material instances."""
-        # Create blue material for duck
+        # 4. Share material
         blue_mat = self.sim.create_visual_material(
             cfg=VisualMaterialCfg(base_color=[0.0, 0.0, 1.0, 1.0])
         )
         self.duck.set_visual_material(blue_mat)
 
-        # Get material instances from duck
         duck_materials = self.duck.get_visual_material_inst()
 
-        # Create a new rigid object (cube)
         cfg_dict = {
             "uid": "test_cube",
             "shape": {"shape_type": "Cube"},
@@ -565,10 +524,8 @@ class BaseRigidObjectTest:
             cfg=RigidObjectCfg.from_dict(cfg_dict),
         )
 
-        # Share the material instances from duck to cube
         cube.share_visual_material_inst(duck_materials)
 
-        # Verify the cube has the same material instances
         cube_materials = cube.get_visual_material_inst()
         assert (
             len(cube_materials) == NUM_ARENAS
@@ -580,29 +537,6 @@ class BaseRigidObjectTest:
                 1.0,
                 1.0,
             ], f"Material {i} base color incorrect"
-
-    def test_default_com_pose(self):
-        """Test the default_com_pose property."""
-        # For non-static bodies with body_data
-        assert self.duck.body_data is not None
-        assert self.duck.body_data.default_com_pose is not None
-
-        # default_com_pose should have shape (N, 7)
-        assert self.duck.body_data.default_com_pose.shape == (
-            NUM_ARENAS,
-            7,
-        ), f"Default COM pose should have shape (NUM_ARENAS, 7), got {self.duck.body_data.default_com_pose.shape}"
-
-    def test_com_pose(self):
-        """Test the com_pose property."""
-        # Get COM pose for dynamic objects
-        com_pose = self.duck.body_data.com_pose
-
-        assert isinstance(com_pose, torch.Tensor), "com_pose should be a torch.Tensor"
-        assert com_pose.shape == (
-            NUM_ARENAS,
-            7,
-        ), f"COM pose should have shape (NUM_ARENAS, 7), got {com_pose.shape}"
 
     def teardown_method(self):
         """Clean up resources after each test method."""
