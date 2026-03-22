@@ -143,6 +143,7 @@ def normalize_robot_joint_data(
     data: torch.Tensor,
     joint_ids: Sequence[int],
     limit: Literal["qpos_limits", "qvel_limits"] = "qpos_limits",
+    range: Sequence[float] = [0.0, 1.0],
 ) -> torch.Tensor:
     """Normalize the robot joint positions to the range of [0, 1] based on the joint limits.
 
@@ -153,6 +154,7 @@ def normalize_robot_joint_data(
         limit: The type of joint limits to be used for normalization. Options are:
             - `qpos_limits`: Use the joint position limits for normalization.
             - `qvel_limits`: Use the joint velocity limits for normalization.
+        range: The range to normalize the joint data to. Defaults to [0.0, 1.0].
     """
 
     robot = env.robot
@@ -160,11 +162,13 @@ def normalize_robot_joint_data(
     joint_ids_set = torch.as_tensor(env.active_joint_ids)[joint_ids]
     # shape of target_limits: (num_envs, len(joint_ids), 2)
     target_limits = getattr(robot.body_data, limit)[:, joint_ids_set, :]
+    low = target_limits[:, :, 0]
+    high = target_limits[:, :, 1]
 
-    # normalize the joint data to the range of [0, 1]
-    data[:, joint_ids] = (data[:, joint_ids] - target_limits[:, :, 0]) / (
-        target_limits[:, :, 1] - target_limits[:, :, 0]
-    )
+    # normalize the joint data to the specified range
+    data[:, joint_ids] = (data[:, joint_ids] - low) / (high - low) * (
+        range[1] - range[0]
+    ) + range[0]
 
     return data
 

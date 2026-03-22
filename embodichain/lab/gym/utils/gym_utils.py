@@ -33,7 +33,7 @@ from dexsim.utility import log_debug, log_error
 
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
-    "embodichain.lab.gym.envs.managers.action_manager",
+    "embodichain.lab.gym.envs.managers.actions",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.randomization",
     "embodichain.lab.gym.envs.managers.record",
