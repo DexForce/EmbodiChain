@@ -430,7 +430,7 @@ class LeRobotRecorder(Functor):
             action_data = action.cpu()
         elif isinstance(action, TensorDict):
             # Extract qpos from action dict
-            action_tensor = action.get("qpos", action.get("delta_qpos", None))
+            action_tensor = action.get("qpos", None)
             if action_tensor is None:
                 # Fallback to first tensor value
                 for v in action.values():

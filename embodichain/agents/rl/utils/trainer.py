@@ -16,15 +16,17 @@
 
 from __future__ import annotations
 
-from typing import Dict
 import time
 import numpy as np
 import torch
+import wandb
+
 from torch.utils.tensorboard import SummaryWriter
 from collections import deque
-import wandb
 from tensordict import TensorDict
+from typing import Dict
 
+from embodichain.lab.gym.envs.managers.action_manager import ActionManager
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.agents.rl.collector import SyncCollector
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
@@ -245,6 +247,7 @@ class Trainer:
         episode_returns = []
         episode_lengths = []
 
+        self.eval_env.set_rollout_buffer(self.buffer.buffer)
         for _ in range(num_episodes):
             # Reset and initialize episode tracking
             obs, _ = self.eval_env.reset()
@@ -267,18 +270,14 @@ class Trainer:
                 )
                 action_td = self.policy.get_action(action_td, deterministic=True)
                 actions = action_td["action"]
-                am = getattr(self.eval_env, "action_manager", None)
-                action_type = (
-                    am.action_type
-                    if am
-                    else getattr(self.eval_env, "action_type", "delta_qpos")
-                )
-                action_dict = {action_type: actions}
+                am: ActionManager = getattr(self.eval_env, "action_manager", None)
+                if am is None:
+                    action_in = actions
+                else:
+                    action_in = am.convert_policy_action_to_env_action(actions)
 
                 # Environment step
-                obs, reward, terminated, truncated, info = self.eval_env.step(
-                    action_dict
-                )
+                obs, reward, terminated, truncated, info = self.eval_env.step(action_in)
                 obs = (
                     flatten_dict_observation(obs)
                     if isinstance(obs, TensorDict)
