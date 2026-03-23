@@ -99,10 +99,12 @@ A `CLAUDE.md` file is present at the root of this repository. Claude Code reads 
 
 ## Contribute specific robots
 
-TODO: Add instructions for contributing new robot models and its configurations.
+To contribute a new robot, please check the documentation on [Adding a New Robot](https://dexforce.github.io/EmbodiChain/guides/add_robot.html).
 
 ## Contribute specific environments
 
-To contribute a new environment:
+To contribute a new environment, please check the documentation on [Embodied Environments](https://dexforce.github.io/EmbodiChain/overview/gym/env.html) and see the tutorial below:
+- [Creating a Basic Environment](https://dexforce.github.io/EmbodiChain/tutorial/basic_env.html) 
+- [Creating a Modular Environment](https://dexforce.github.io/EmbodiChain/tutorial/modular_env.html)
 
-TODO: Add instructions for contributing new environments.
+If you want to implement your tasks in a new repo and with some customized functors and utilities, you can also use the [Task Template Repo](https://github.com/DexForce/embodichain_task_template).

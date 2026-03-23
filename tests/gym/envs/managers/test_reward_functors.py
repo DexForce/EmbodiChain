@@ -121,8 +121,17 @@ class MockEnv:
         self.target_object._pose[:, :3, 3] = torch.tensor([0.5, 0.0, 0.0])
         self.sim.add_rigid_object(self.target_object)
 
-        # Episode action buffer for action_smoothness_penalty
-        self.episode_action_buffer = [[] for _ in range(num_envs)]
+        # Rollout state for action_smoothness_penalty
+        # rollout_buffer is 2D: (num_envs, rollout_steps)
+        self.current_rollout_step = 0
+        self.rollout_buffer = {
+            "action": torch.zeros(
+                num_envs, 100, 6
+            ),  # (num_envs, rollout_steps, action_dim)
+            "done": torch.zeros(
+                num_envs, 100, dtype=torch.bool
+            ),  # (num_envs, rollout_steps)
+        }
 
 
 # Import functors to test
@@ -238,7 +247,7 @@ class TestActionSmoothnessPenalty:
     def test_zero_on_first_step(self):
         """Test that penalty is zero on first step (no previous action)."""
         env = MockEnv(num_envs=4)
-        env.episode_action_buffer = [[] for _ in range(4)]
+        env.current_rollout_step = 0
         obs = {}
         action = torch.ones(4, 6)
         info = {}
@@ -251,13 +260,10 @@ class TestActionSmoothnessPenalty:
     def test_penalty_on_subsequent_steps(self):
         """Test that penalty is negative when there was a previous action."""
         env = MockEnv(num_envs=4)
-        # Set previous actions
-        env.episode_action_buffer = [
-            [torch.zeros(6)],  # env 0 had previous action
-            [torch.zeros(6)],
-            [torch.zeros(6)],
-            [torch.zeros(6)],
-        ]
+        # Set rollout state to step 1 with previous action of zeros
+        env.current_rollout_step = 1
+        env.rollout_buffer["action"][:4, 0, :] = torch.zeros(4, 6)
+        env.rollout_buffer["done"][:4, 0] = False
         obs = {}
         action = torch.ones(4, 6) * 2.0  # large action change
         info = {}
@@ -266,17 +272,17 @@ class TestActionSmoothnessPenalty:
 
         assert result.shape == (4,)
         # All have negative penalty from action difference of 2.0
+        # Norm of 2.0 across 6 dims = sqrt(6 * 4) = sqrt(24) ≈ 4.9
         assert torch.all(result < 0)
+        assert result[0] == pytest.approx(-4.9, abs=0.1)
 
     def test_handles_dict_action(self):
         """Test action smoothness with dict action."""
         env = MockEnv(num_envs=4)
-        env.episode_action_buffer = [
-            [{"qpos": torch.zeros(6)}],
-            [{"qpos": torch.zeros(6)}],
-            [{"qpos": torch.zeros(6)}],
-            [{"qpos": torch.zeros(6)}],
-        ]
+        # Set rollout state to step 1 with previous action
+        env.current_rollout_step = 1
+        env.rollout_buffer["action"][:4, 0, :] = torch.zeros(4, 6)
+        env.rollout_buffer["done"][:4, 0] = False
         obs = {}
         action = {"qpos": torch.ones(4, 6) * 2.0}
         info = {}
@@ -284,6 +290,8 @@ class TestActionSmoothnessPenalty:
         result = action_smoothness_penalty(env, obs, action, info)
 
         assert result.shape == (4,)
+        # All have negative penalty from action difference
+        assert torch.all(result < 0)
 
 
 class TestJointLimitPenalty:

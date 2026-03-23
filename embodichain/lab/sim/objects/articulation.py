@@ -1210,7 +1210,7 @@ class Articulation(BatchEntity):
                 data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
             )
 
-    def set_drive(
+    def set_joint_drive(
         self,
         stiffness: torch.Tensor | None = None,
         damping: torch.Tensor | None = None,
@@ -1252,6 +1252,83 @@ class Articulation(BatchEntity):
             if friction is not None:
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
+
+    def get_joint_drive(
+        self,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Get the drive properties for the articulation.
+
+        Args:
+            joint_ids (Sequence[int] | None, optional): The joint indices to get the drive properties for.
+                If None, gets for all joints. Defaults to None.
+            env_ids (Sequence[int] | None, optional): The environment indices to get the drive properties for.
+                If None, gets for all environments. Defaults to None.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the stiffness,
+                damping, max_effort, max_velocity, and friction tensors with shape (N, len(joint_ids))
+                for the specified environments.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        if joint_ids is None:
+            local_joint_ids = np.arange(self.dof, dtype=np.int32)
+        elif isinstance(joint_ids, torch.Tensor):
+            local_joint_ids = (
+                joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
+            )
+        else:
+            local_joint_ids = np.asarray(joint_ids, dtype=np.int32)
+
+        local_joint_ids_tensor = torch.as_tensor(
+            local_joint_ids, dtype=torch.long, device=self.device
+        )
+        stiffness = torch.zeros(
+            (len(local_env_ids), len(local_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        damping = torch.zeros(
+            (len(local_env_ids), len(local_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        max_effort = torch.zeros(
+            (len(local_env_ids), len(local_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        max_velocity = torch.zeros(
+            (len(local_env_ids), len(local_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        friction = torch.zeros(
+            (len(local_env_ids), len(local_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        for i, env_idx in enumerate(local_env_ids):
+            stiffness_i, damping_i, max_effort_i, max_velocity_i, friction_i, _ = (
+                self._entities[env_idx].get_drive()
+            )
+            stiffness[i] = torch.as_tensor(
+                stiffness_i, dtype=torch.float32, device=self.device
+            )[local_joint_ids_tensor]
+            damping[i] = torch.as_tensor(
+                damping_i, dtype=torch.float32, device=self.device
+            )[local_joint_ids_tensor]
+            max_effort[i] = torch.as_tensor(
+                max_effort_i, dtype=torch.float32, device=self.device
+            )[local_joint_ids_tensor]
+            max_velocity[i] = torch.as_tensor(
+                max_velocity_i, dtype=torch.float32, device=self.device
+            )[local_joint_ids_tensor]
+            friction[i] = torch.as_tensor(
+                friction_i, dtype=torch.float32, device=self.device
+            )[local_joint_ids_tensor]
+        return stiffness, damping, max_effort, max_velocity, friction
 
     def get_user_ids(self, link_name: str | None = None) -> torch.Tensor:
         """Get the user ids of the articulation.
@@ -1441,7 +1518,7 @@ class Articulation(BatchEntity):
             drive_type = getattr(drive_pros, "drive_type", "none")
 
         # Apply drive parameters to all articulations in the batch
-        self.set_drive(
+        self.set_joint_drive(
             stiffness=self.default_joint_stiffness,
             damping=self.default_joint_damping,
             max_effort=self.default_joint_max_effort,

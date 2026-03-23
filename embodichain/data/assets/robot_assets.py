@@ -553,8 +553,8 @@ class ARX5(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5.zip"),
-            "da207ba65e21577aa8e8f349af63e608",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5_2.zip"),
+            "6fc1d6a5a35b7926ba6325c0d20f5bc3",
         )
         prefix = "ARX5"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
