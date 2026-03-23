@@ -504,13 +504,40 @@ class ContactSensor(BaseSensor):
             env_ids = range(self.num_instances)
 
         if visible:
-            contact_position_arena = self._data_buffer["position"][
-                : self.total_current_contacts
+            # Convert env_ids to tensor if needed
+            env_ids_tensor = (
+                torch.tensor(env_ids, device=self.device)
+                if not isinstance(env_ids, torch.Tensor)
+                else env_ids
+            )
+
+            # Get number of contacts for each environment
+            num_contacts = self._num_contacts_per_env[env_ids_tensor]
+
+            # Create mask for valid contacts across all environments
+            # Shape: [num_envs, max_contacts_per_env]
+            contact_mask = torch.arange(
+                self.cfg.max_contacts_per_env, device=self.device
+            ).unsqueeze(0) < num_contacts.unsqueeze(1)
+
+            if not contact_mask.any():
+                # No contacts to visualize
+                if isinstance(self._visualizer, dexsim.models.PointCloud):
+                    self._visualizer.clear()
+                return
+
+            # Extract contact positions for all specified environments
+            # Shape: [num_envs, max_contacts_per_env, 3]
+            contact_position_arena = self._data_buffer["position"][env_ids_tensor]
+
+            # Get arena offsets and broadcast to match positions shape
+            # Shape: [num_envs, 1, 3] -> [num_envs, max_contacts_per_env, 3]
+            contact_offsets = self._sim.arena_offsets[env_ids_tensor].unsqueeze(1)
+
+            # Convert to world coordinates and apply mask in one go
+            contact_position_world = (contact_position_arena + contact_offsets)[
+                contact_mask
             ]
-            contact_offsets = self._sim.arena_offsets[
-                self._data_buffer["env_ids"][: self.total_current_contacts]
-            ]
-            contact_position_world = contact_position_arena + contact_offsets
 
             if self._visualizer is None:
                 # create new visualizer
