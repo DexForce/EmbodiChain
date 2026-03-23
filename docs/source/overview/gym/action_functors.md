@@ -17,8 +17,10 @@ This page lists all available action terms that can be used with the Action Mana
   - Delta joint position action: current_qpos + scale * action -> qpos. The policy outputs position deltas relative to the current joint positions.
 * - ``QposTerm``
   - Absolute joint position action: scale * action -> qpos. The policy outputs direct target joint positions.
-* - ``QposNormalizedTerm``
+* - ``QposDenormalizedTerm``
   - Normalized action in [-1, 1] -> denormalize to joint limits -> qpos. The policy outputs normalized values that are mapped to joint limits. With scale=1.0 (default), action in [-1, 1] maps to [low, high].
+* - ``QposNormalizedTerm``
+  - Normalize action from qpos limits -> [range[0], range[1]]. Maps joint positions to a normalized range based on joint limits. Typically used for post-processing action outputs.
 ```
 
 ## End-Effector Control
@@ -55,7 +57,7 @@ from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
 # Example: Delta joint position control
 actions = {
     "joint_position": ActionTermCfg(
-        func="embodichain.lab.gym.envs.managers.action_manager.DeltaQposTerm",
+        func="DeltaQposTerm",
         params={
             "scale": 0.1,  # Scale factor for action deltas
         },
@@ -65,9 +67,19 @@ actions = {
 # Example: Normalized joint position control
 actions = {
     "normalized_joint_position": ActionTermCfg(
-        func="embodichain.lab.gym.envs.managers.action_manager.QposNormalizedTerm",
+        func="QposDenormalizedTerm",
         params={
             "scale": 1.0,  # Full joint range utilization
+        },
+    ),
+}
+
+# Example: Normalize qpos to [0, 1] range (for post-processing)
+actions = {
+    "normalize_qpos": ActionTermCfg(
+        func="QposNormalizedTerm",
+        params={
+            "range": [0.0, 1.0],  # Normalize to [0, 1] range
         },
     ),
 }
@@ -75,7 +87,7 @@ actions = {
 # Example: End-effector pose control
 actions = {
     "eef_pose": ActionTermCfg(
-        func="embodichain.lab.gym.envs.managers.action_manager.EefPoseTerm",
+        func="EefPoseTerm",
         params={
             "scale": 0.1,
             "pose_dim": 7,  # 7D (position + quaternion)
@@ -90,8 +102,3 @@ All action terms provide the following properties:
 
 - ``action_dim``: The dimension of the action space (number of values the policy should output)
 - ``process_action(action)``: Method to convert raw policy output to robot control format
-
-The Action Manager also provides:
-
-- ``total_action_dim``: Total dimension of all action terms combined
-- ``action_type``: The active action type (term name) for backward compatibility
