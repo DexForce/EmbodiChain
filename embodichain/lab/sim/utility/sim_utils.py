@@ -25,7 +25,7 @@ from dexsim.types import (
     ArticulationFlag,
     LoadOption,
     RigidBodyShape,
-    SDFConfig,
+    # SDFConfig,
     PhysicalAttr,
 )
 from dexsim.engine import Articulation
@@ -147,7 +147,10 @@ def is_rt_enabled() -> bool:
     """
     config = dexsim.get_world_config()
 
-    return config.renderer == dexsim.types.Renderer.FASTRT
+    return (
+        config.renderer == dexsim.types.Renderer.FASTRT
+        or config.renderer == dexsim.types.Renderer.HYBRID
+    )
 
 
 def create_cube(
