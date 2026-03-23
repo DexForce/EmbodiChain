@@ -103,6 +103,8 @@ obj2 = sim.add_rigid_object(cfg=usd_cfg_override)
 
 Rigid objects are observed and controlled via single poses and linear/angular velocities. Key APIs include:
 
+### Pose & State
+
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
 | `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Get object local pose as (x, y, z, qw, qx, qy, qz) or 4x4 matrix per environment. |
@@ -110,12 +112,69 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 | `body_data.pose` | `(N, 7)` | Access object pose directly (for dynamic/kinematic bodies). |
 | `body_data.lin_vel` | `(N, 3)` | Access linear velocity of object root (for dynamic/kinematic bodies). |
 | `body_data.ang_vel` | `(N, 3)` | Access angular velocity of object root (for dynamic/kinematic bodies). |
+| `body_data.vel` | `(N, 6)` | Concatenated linear and angular velocities. |
+| `body_data.com_pose` | `(N, 7)` | Get center of mass pose of rigid bodies. |
+| `body_data.default_com_pose` | `(N, 7)` | Default center of mass pose. |
 | `body_state` | `(N, 13)` | Get full body state: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
-| `add_force_torque(force, torque, pos, env_ids)` | `force: (N, 3)`, `torque: (N, 3)` | Apply continuous force and/or torque to the object. |
+
+### Dynamics Control
+
+| Method / Property | Return / Args | Description |
+| :--- | :--- | :--- |
+| `add_force_torque(force, torque, pos, env_ids)` | `force: (N, 3)`, `torque: (N, 3)` | Apply continuous force and/or torque to object. |
+| `set_velocity(lin_vel, ang_vel, env_ids)` | `lin_vel: (N, 3)`, `ang_vel: (N, 3)` | Set linear and/or angular velocity directly. |
 | `clear_dynamics(env_ids=None)` | - | Reset velocities and clear all forces/torques. |
-| `set_visual_material(mat, env_ids=None)` | `mat: VisualMaterial` | Change visual appearance at runtime. |
-| `enable_collision(flag, env_ids=None)` | `flag: torch.Tensor` | Enable/disable collision for specific instances. |
+
+### Physical Properties
+
+| Method / Property | Return / Args | Description |
+| :--- | :--- | :--- |
+| `set_attrs(attrs, env_ids=None)` | `attrs: RigidBodyAttributesCfg` | Set physical attributes (mass, friction, damping, etc.). |
+| `set_mass(mass, env_ids=None)` | `mass: (N,)` | Set mass for rigid object. |
+| `get_mass(env_ids=None)` | `(N,)` | Get mass for rigid object. |
+| `set_friction(friction, env_ids=None)` | `friction: (N,)` | Set dynamic and static friction. |
+| `get_friction(env_ids=None)` | `(N,)` | Get friction (dynamic friction value). |
+| `set_damping(damping, env_ids=None)` | `damping: (N, 2)` | Set linear and angular damping. |
+| `get_damping(env_ids=None)` | `(N, 2)` | Get linear and angular damping. |
+| `set_inertia(inertia, env_ids=None)` | `inertia: (N, 3)` | Set inertia tensor diagonal values. |
+| `get_inertia(env_ids=None)` | `(N, 3)` | Get inertia tensor diagonal values. |
+| `set_com_pose(com_pose, env_ids=None)` | `com_pose: (N, 7)` | Set center of mass pose (dynamic/kinematic only). |
+
+### Geometry & Body Type
+
+| Method / Property | Return / Args | Description |
+| :--- | :--- | :--- |
+| `get_vertices(env_ids=None)` | `(N, num_verts, 3)` | Get mesh vertices of the rigid objects. |
+| `get_body_scale(env_ids=None)` | `(N, 3)` | Get the body scale. |
+| `set_body_scale(scale, env_ids=None)` | `scale: (N, 3)` | Set scale of rigid body (CPU only). |
+| `set_body_type(body_type)` | `body_type: str` | Change body type between 'dynamic' and 'kinematic'. |
+| `is_static` | `bool` | Check if the rigid object is static. |
+| `is_non_dynamic` | `bool` | Check if the rigid object is non-dynamic (static or kinematic). |
+
+### Collision & Filtering
+
+| Method / Property | Return / Args | Description |
+| :--- | :--- | :--- |
+| `enable_collision(enable, env_ids=None)` | `enable: (N,)` | Enable/disable collision for specific instances. |
+| `set_collision_filter(filter_data, env_ids=None)` | `filter_data: (N, 4)` | Set collision filter data (arena id, collision flag, ...). |
+
+### Visual & Appearance
+
+| Method / Property | Return / Args | Description |
+| :--- | :--- | :--- |
+| `set_visual_material(mat, env_ids=None, shared=False)` | `mat: VisualMaterial` | Change visual appearance at runtime. |
+| `get_visual_material_inst(env_ids=None)` | `List[VisualMaterialInst]` | Get material instances for the rigid object. |
+| `share_visual_material_inst(mat_insts)` | `mat_insts: List[VisualMaterialInst]` | Share material instances between objects. |
+| `set_visible(visible)` | `visible: bool` | Set visibility of the rigid object. |
+| `set_physical_visible(visible, rgba=None)` | `visible: bool`, `rgba: (4,)` | Set collision body render visibility. |
+
+### Utility & Identification
+
+| Method / Property | Return / Args | Description |
+| :--- | :--- | :--- |
+| `get_user_ids()` | `(N,)` | Get the user IDs of the rigid bodies. |
 | `reset(env_ids=None)` | - | Reset objects to initial configuration. |
+| `destroy()` | - | Destroy and remove the rigid object from simulation. |
 
 ### Observation Shapes
 

@@ -851,7 +851,7 @@ class Robot(Articulation):
             drive_type = getattr(drive_pros, "drive_type", "force")
 
         # Apply drive parameters to all articulations in the batch
-        self.set_drive(
+        self.set_joint_drive(
             stiffness=self.default_joint_stiffness,
             damping=self.default_joint_damping,
             max_effort=self.default_joint_max_effort,
