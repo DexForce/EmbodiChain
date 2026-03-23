@@ -21,12 +21,14 @@ import math
 import torch
 import uuid
 import numpy as np
+import warp as wp
 
 from typing import Union, Tuple, Sequence, List, Optional, Dict
 from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils import logger, configclass
+from embodichain.utils.warp.kernels import scatter_contact_data
 
 
 @configclass
@@ -324,110 +326,35 @@ class ContactSensor(BaseSensor):
 
         # Subtract arena offsets from contact positions
         contact_offsets = self._sim.arena_offsets[filtered_env_ids]
-        filtered_contact_data[:, 0:3] = filtered_contact_data[:, 0:3] - contact_offsets
+        filtered_contact_data[:, 0:3] = (
+            filtered_contact_data[:, 0:3] - contact_offsets
+        )  # minus arean offsets
 
-        # Distribute contacts to per-environment buffers (vectorized)
-        # Sort by env_id for efficient grouping
-        sorted_indices = torch.argsort(filtered_env_ids)
-        sorted_env_ids = filtered_env_ids[sorted_indices]
-        sorted_contact_data = filtered_contact_data[sorted_indices]
-        sorted_user_ids = filtered_user_ids[sorted_indices]
+        # Reset is_valid buffer
+        self._data_buffer["is_valid"][:] = False
 
-        # Get unique env_ids and their counts (using consecutive since sorted)
-        unique_env_ids, env_contact_counts = torch.unique_consecutive(
-            sorted_env_ids, return_counts=True
-        )
-
-        # Truncate counts and set _num_contacts_per_env
-        truncated_counts = torch.clamp_max(
-            env_contact_counts, self.cfg.max_contacts_per_env
-        )
-        self._num_contacts_per_env[:] = 0
-        self._num_contacts_per_env[unique_env_ids] = truncated_counts.to(
-            self._num_contacts_per_env.dtype
-        )
-
-        # Check for truncation and log warning
-        truncated_mask = env_contact_counts > self.cfg.max_contacts_per_env
-        if truncated_mask.any():
-            truncated_envs = unique_env_ids[truncated_mask]
-            for env_id in truncated_envs:
-                original_count = env_contact_counts[unique_env_ids == env_id].item()
-                logger.log_warning(
-                    f"Environment {env_id.item()} has {original_count} contacts, "
-                    f"but max_contacts_per_env is {self.cfg.max_contacts_per_env}. "
-                    "Some contacts will be truncated."
-                )
-
-        # Fill per-environment buffers using fully vectorized scatter operations
-        # Create local positions (0, 1, 2, ...) within each environment
-        # Get diff to detect environment boundaries
-        env_diff = torch.cat(
-            [
-                torch.tensor([1], dtype=sorted_env_ids.dtype, device=self.device),
-                (sorted_env_ids[1:] != sorted_env_ids[:-1]).long(),
-            ]
-        )
-        # Cumulative sum of diff gives group identifiers (1 for first env, 2 for second, etc.)
-        cumsum_diff = torch.cumsum(env_diff, dim=0)
-        # The offset at each position equals the starting index of its group
-        # We find where each group starts (first occurrence of each unique cumsum_diff value)
-        unique_cumsum = torch.unique(cumsum_diff)
-        # Find first occurrence index for each unique cumsum value
-        group_start_indices = torch.zeros(
-            len(unique_cumsum), dtype=torch.long, device=self.device
-        )
-        for idx, val in enumerate(unique_cumsum):
-            group_start_indices[idx] = torch.nonzero(cumsum_diff == val, as_tuple=True)[
-                0
-            ][0]
-        # Map each cumsum_diff value to its group start index
-        # Since unique_cumsum is sorted, we can use searchsorted for efficiency
-        group_indices = torch.searchsorted(unique_cumsum, cumsum_diff)
-        offsets = group_start_indices[group_indices]
-        local_positions = (
-            torch.arange(len(sorted_env_ids), device=self.device) - offsets
-        )
-
-        # Create flat buffer indices: env_id * max_contacts_per_env + local_position
-        buffer_flat_indices = (
-            sorted_env_ids * self.cfg.max_contacts_per_env + local_positions
-        )
-
-        # Flatten target buffers for scatter
-        max_total = self.max_total_contacts
-        position_flat = self._data_buffer["position"].view(max_total, 3)
-        normal_flat = self._data_buffer["normal"].view(max_total, 3)
-        friction_flat = self._data_buffer["friction"].view(max_total, 3)
-        impulse_flat = self._data_buffer["impulse"].view(max_total)
-        distance_flat = self._data_buffer["distance"].view(max_total)
-        user_ids_flat = self._data_buffer["user_ids"].view(max_total, 2)
-        is_valid_flat = self._data_buffer["is_valid"].view(max_total)
-
-        # Reset buffers (zero out) for environments with contacts
-        envs_with_contacts = unique_env_ids[truncated_counts > 0]
-        if envs_with_contacts.numel() > 0:
-            env_start = envs_with_contacts * self.cfg.max_contacts_per_env
-            env_end = env_start + self.cfg.max_contacts_per_env
-            for i in range(len(envs_with_contacts)):
-                position_flat[env_start[i] : env_end[i]] = 0
-                normal_flat[env_start[i] : env_end[i]] = 0
-                friction_flat[env_start[i] : env_end[i]] = 0
-                impulse_flat[env_start[i] : env_end[i]] = 0
-                distance_flat[env_start[i] : env_end[i]] = 0
-                user_ids_flat[env_start[i] : env_end[i]] = 0
-                is_valid_flat[env_start[i] : env_end[i]] = False
-
-        # Scatter data using index_put_ for vectorized assignment
-        position_flat.index_put_((buffer_flat_indices,), sorted_contact_data[:, 0:3])
-        normal_flat.index_put_((buffer_flat_indices,), sorted_contact_data[:, 3:6])
-        friction_flat.index_put_((buffer_flat_indices,), sorted_contact_data[:, 6:9])
-        impulse_flat.index_put_((buffer_flat_indices,), sorted_contact_data[:, 9])
-        distance_flat.index_put_((buffer_flat_indices,), sorted_contact_data[:, 10])
-        user_ids_flat.index_put_((buffer_flat_indices,), sorted_user_ids)
-        is_valid_flat.index_put_(
-            (buffer_flat_indices,),
-            torch.ones(len(buffer_flat_indices), dtype=torch.bool, device=self.device),
+        num_contacts = len(filtered_contact_data)
+        device = str(self.device)
+        wp.launch(
+            kernel=scatter_contact_data,
+            dim=num_contacts,
+            inputs=[
+                wp.from_torch(filtered_contact_data),
+                wp.from_torch(filtered_user_ids),
+                wp.from_torch(filtered_env_ids),
+                wp.from_torch(self._num_contacts_per_env),
+                self.cfg.max_contacts_per_env,
+            ],
+            outputs=[
+                wp.from_torch(self._data_buffer["position"]),
+                wp.from_torch(self._data_buffer["normal"]),
+                wp.from_torch(self._data_buffer["friction"]),
+                wp.from_torch(self._data_buffer["impulse"]),
+                wp.from_torch(self._data_buffer["distance"]),
+                wp.from_torch(self._data_buffer["user_ids"]),
+                wp.from_torch(self._data_buffer["is_valid"]),
+            ],
+            device="cuda:0" if device == "cuda" else device,
         )
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor:
@@ -577,25 +504,13 @@ class ContactSensor(BaseSensor):
             env_ids = range(self.num_instances)
 
         if visible:
-            # Collect contact positions from all specified environments
-            contact_position_list = []
-            for env_id in env_ids:
-                num_contacts = self._num_contacts_per_env[env_id].item()
-                if num_contacts > 0:
-                    contact_position_arena = self._data_buffer["position"][
-                        env_id, :num_contacts
-                    ]
-                    contact_offsets = self._sim.arena_offsets[env_id]
-                    contact_position_world = contact_position_arena + contact_offsets
-                    contact_position_list.append(contact_position_world)
-
-            if not contact_position_list:
-                # No contacts to visualize
-                if isinstance(self._visualizer, dexsim.models.PointCloud):
-                    self._visualizer.clear()
-                return
-
-            contact_position_world = torch.cat(contact_position_list, dim=0)
+            contact_position_arena = self._data_buffer["position"][
+                : self.total_current_contacts
+            ]
+            contact_offsets = self._sim.arena_offsets[
+                self._data_buffer["env_ids"][: self.total_current_contacts]
+            ]
+            contact_position_world = contact_position_arena + contact_offsets
 
             if self._visualizer is None:
                 # create new visualizer
