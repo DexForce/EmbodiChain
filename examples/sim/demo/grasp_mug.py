@@ -236,15 +236,19 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=5000, max_length=0.088, min_length=0.003
         ),
-        force_regenerate=True,
+        force_regenerate=True,  # force user to annotate grasp region each time
     )
     sim.open_window()
+
+    # 1. View grasp object in browser (e.g http://localhost:11801)
+    # 2. press 'Rect Select Region', select grasp region
+    # 3. press 'Confirm Selection' to finish grasp region selection.
     grasp_xpos = mug.get_grasp_pose(
         approach_direction=torch.tensor(
             [0, 0, -1], dtype=torch.float32, device=sim.device
-        ),
+        ),  # gripper approach direction in the mug local frame
         cfg=grasp_cfg,
-        is_visual=True,
+        is_visual=True,  # visualize selected grasp pose finally
     )
 
     grab_traj = get_grasp_traj(sim, robot, grasp_xpos)
