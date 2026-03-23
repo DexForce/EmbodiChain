@@ -135,6 +135,7 @@ The {class}`ContactSensorCfg` class defines the configuration for contact sensor
 | `rigid_uid_list` | `List[str]` | `[]` | List of rigid body UIDs to monitor for contacts. |
 | `articulation_cfg_list` | `List[ArticulationContactFilterCfg]` | `[]` | List of articulation link contact filter configurations. |
 | `filter_need_both_actor` | `bool` | `True` | Whether to filter contact only when both actors are in the filter list. If `False`, contact is reported if either actor is in the filter. |
+| `max_contacts_per_env` | `int` | `64` | Maximum number of contacts per environment that the sensor can handle. |
 
 ### Articulation Contact Filter Configuration
 
@@ -170,6 +171,9 @@ contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
 # Only report contacts when both actors are in the filter list
 contact_filter_cfg.filter_need_both_actor = True
 
+# Set maximum contacts per environment
+contact_filter_cfg.max_contacts_per_env = 128
+
 # 2. Add Sensor to Simulation
 contact_sensor: ContactSensor = sim.add_sensor(sensor_cfg=contact_filter_cfg)
 
@@ -178,17 +182,28 @@ sim.update(step=1)
 contact_sensor.update()
 contact_report = contact_sensor.get_data()
 
+# Access contacts for a specific environment using is_valid mask
+env_id = 0
+env_valid_mask = contact_report["is_valid"][env_id]
+env_contact_positions = contact_report["position"][env_id][env_valid_mask]
+
+# Or get all valid contacts across all environments
+valid_mask = contact_report["is_valid"]
+all_valid_positions = contact_report["position"][valid_mask]  # Shape: (total_valid_contacts, 3)
+
 # 4. Filter contacts by specific user IDs
 cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
 finger1_user_ids = sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
 filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
-filter_contact_report = contact_sensor.filter_by_user_ids(filter_user_ids)
+# Filter for specific environments
+filter_contact_report = contact_sensor.filter_by_user_ids(filter_user_ids, env_ids=[env_id])
 
 # 5. Visualize Contact Points
 contact_sensor.set_contact_point_visibility(
-    visible=True, 
+    visible=True,
     rgba=(0.0, 0.0, 1.0, 1.0),  # Blue color
-    point_size=6.0
+    point_size=6.0,
+    env_ids=[env_id],  # Optional: visualize only specific environments
 )
 ```
 
@@ -198,17 +213,27 @@ Retrieve contact data using `contact_sensor.get_data()`. The data is returned as
 
 | Key | Data Type | Shape | Description |
 | :--- | :--- | :--- | :--- |
-| `position` | `torch.float32` | `(n_contact, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
-| `normal` | `torch.float32` | `(n_contact, 3)` | Contact normal vectors. |
-| `friction` | `torch.float32` | `(n_contact, 3)` | Contact friction forces. *Note: Currently this value may not be accurate.* |
-| `impulse` | `torch.float32` | `(n_contact,)` | Contact impulse magnitudes. |
-| `distance` | `torch.float32` | `(n_contact,)` | Contact penetration distances. |
-| `user_ids` | `torch.int32` | `(n_contact, 2)` | Pair of user IDs for the two actors in contact. Use with `rigid_object.get_user_ids()` to identify objects. |
-| `env_ids` | `torch.int32` | `(n_contact,)` | Environment IDs indicating which parallel environment each contact belongs to. |
+| `position` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
+| `normal` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact normal vectors. |
+| `friction` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact friction forces. *Note: Currently this value may not be accurate.* |
+| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Contact impulse magnitudes. |
+| `distance` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Contact penetration distances. |
+| `user_ids` | `torch.int32` | `(num_envs, max_contacts_per_env, 2)` | Pair of user IDs for the two actors in contact. Use with `rigid_object.get_user_ids()` to identify objects. |
+| `is_valid` | `torch.bool` | `(num_envs, max_contacts_per_env)` | Boolean mask indicating which contact slots contain valid data. Use this mask to filter out unused slots. |
 
-*Note: `N` represents the number of contacts detected.*
+**Note**: Use the `is_valid` mask to access only valid contacts:
+```python
+# Get all valid contacts across all environments
+valid_mask = contact_report["is_valid"]
+valid_positions = contact_report["position"][valid_mask]  # Shape: (total_valid_contacts, 3)
+
+# Or access per-environment
+env_id = 0
+num_valid = contact_report["is_valid"][env_id].sum().item()
+env_positions = contact_report["position"][env_id, :num_valid]
+```
 
 ### Additional Methods
 
-- **`filter_by_user_ids(item_user_ids)`**: Filter contact report to include only contacts involving specific user IDs.
-- **`set_contact_point_visibility(visible, rgba, point_size)`**: Enable/disable visualization of contact points with customizable color and size.
+- **`filter_by_user_ids(item_user_ids, env_ids=None)`**: Filter contact report to include only contacts involving specific user IDs. Optionally filter by specific environment IDs.
+- **`set_contact_point_visibility(visible, rgba, point_size, env_ids=None)`**: Enable/disable visualization of contact points with customizable color and size. Optionally visualize only specific environments.

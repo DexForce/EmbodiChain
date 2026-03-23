@@ -142,6 +142,32 @@ def get_object_body_scale(
     return obj.get_body_scale()
 
 
+def get_object_uid(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Get the user IDs of the objects in the environment.
+
+    If the object with the specified UID does not exist in the environment,
+    a zero tensor will be returned.
+
+    Args:
+        env: The environment instance.
+        obs: The observation dictionary.
+        entity_cfg: The configuration of the scene entity.
+
+    Returns:
+        A tensor of shape (num_envs,) representing the user IDs of the objects.
+    """
+    if entity_cfg.uid not in env.sim.asset_uids:
+        return torch.zeros((env.num_envs,), dtype=torch.int32, device=env.device)
+
+    obj = env.sim.get_asset(entity_cfg.uid)
+
+    return obj.get_user_ids()
+
+
 def get_rigid_object_velocity(
     env: EmbodiedEnv,
     obs: EnvObs,
