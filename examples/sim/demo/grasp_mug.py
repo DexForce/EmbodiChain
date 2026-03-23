@@ -246,7 +246,7 @@ if __name__ == "__main__":
     grasp_xpos = mug.get_grasp_pose(
         approach_direction=torch.tensor(
             [0, 0, -1], dtype=torch.float32, device=sim.device
-        ),  # gripper approach direction in the mug local frame
+        ),  # gripper approach direction in the world frame
         cfg=grasp_cfg,
         is_visual=True,  # visualize selected grasp pose finally
     )
