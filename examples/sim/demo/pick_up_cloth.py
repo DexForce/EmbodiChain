@@ -113,9 +113,9 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
             ]
         ),
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e3},
-            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e2},
-            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e4},
+            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
+            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
+            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},
             drive_type="force",
         ),
         control_parts={
@@ -144,10 +144,10 @@ def create_padding_box(sim: SimulationManager):
     padding_box_cfg = RigidObjectCfg(
         uid="padding_box",
         shape=CubeCfg(
-            size=[0.008, 0.03, 0.02],
+            size=[0.01, 0.04, 0.03],
         ),
         attrs=RigidBodyAttributesCfg(
-            mass=0.01,
+            mass=1.0,
             static_friction=0.95,
             dynamic_friction=0.9,
             restitution=0.01,
@@ -197,7 +197,7 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
 
 
 def create_cloth(sim: SimulationManager):
-    cloth_verts, cloth_faces = create_2d_grid_mesh(width=0.3, height=0.3, nx=20, ny=20)
+    cloth_verts, cloth_faces = create_2d_grid_mesh(width=0.3, height=0.3, nx=12, ny=12)
     cloth_mesh = o3d.geometry.TriangleMesh(
         vertices=o3d.utility.Vector3dVector(cloth_verts.to("cpu").numpy()),
         triangles=o3d.utility.Vector3iVector(cloth_faces.to("cpu").numpy()),
@@ -213,12 +213,12 @@ def create_cloth(sim: SimulationManager):
             init_rot=[0, 0, 0],
             physical_attr=ClothPhysicalAttributesCfg(
                 mass=0.01,
-                youngs=1e6,
-                poissons=0.3,
-                thickness=0.02,
+                youngs=1e10,
+                poissons=0.4,
+                thickness=0.04,
                 bending_stiffness=0.01,
                 bending_damping=0.1,
-                dynamic_friction=0.99,
+                dynamic_friction=0.95,
                 min_position_iters=30,
             ),
         )
