@@ -288,6 +288,8 @@ class ContactSensor(BaseSensor):
         """
 
         self._num_contacts_per_env.zero_()
+        # Reset is_valid buffer
+        self._data_buffer["is_valid"][:] = False
 
         if not self.is_use_gpu_physics:
             contact_data_np, body_user_indices_np = self._ps.get_cpu_contact_buffer()
@@ -329,9 +331,6 @@ class ContactSensor(BaseSensor):
         filtered_contact_data[:, 0:3] = (
             filtered_contact_data[:, 0:3] - contact_offsets
         )  # minus arean offsets
-
-        # Reset is_valid buffer
-        self._data_buffer["is_valid"][:] = False
 
         num_contacts = len(filtered_contact_data)
         device = str(self.device)
