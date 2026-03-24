@@ -28,6 +28,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.sensors import (
     ContactSensorCfg,
     ArticulationContactFilterCfg,
+    SensorCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot, RobotCfg
@@ -197,8 +198,33 @@ class ContactTest:
         self.sim.update(step=1)
         self.contact_sensor.update()
         contact_report = self.contact_sensor.get_data()
-        n_contacts = contact_report["position"].shape[0]
-        assert n_contacts > 0, "No contact detected."
+
+        # Check that contact data has correct shape (num_envs, max_contacts_per_env, ...)
+        assert contact_report["position"].shape[0] == self.sim.num_envs
+        assert (
+            contact_report["position"].dim() == 3
+        )  # (num_envs, max_contacts_per_env, 3)
+
+        # Check that is_valid field exists and has correct shape
+        assert "is_valid" in contact_report.keys()
+        assert contact_report["is_valid"].shape == (
+            self.sim.num_envs,
+            self.contact_sensor.cfg.max_contacts_per_env,
+        )
+        assert contact_report["is_valid"].dtype == torch.bool
+
+        # Check that we have contacts in at least one environment
+        total_contacts = self.contact_sensor.total_current_contacts
+        assert total_contacts > 0, "No contact detected."
+
+        # Check that is_valid correctly indicates valid contacts
+        for env_id in range(self.sim.num_envs):
+            num_contacts = self.contact_sensor._num_contacts_per_env[env_id].item()
+            if num_contacts > 0:
+                # First num_contacts slots should be True
+                assert contact_report["is_valid"][env_id, :num_contacts].all()
+                # Remaining slots should be False
+                assert not contact_report["is_valid"][env_id, num_contacts:].any()
 
         cube2_user_ids = self.sim.get_rigid_object("cube2").get_user_ids()
         finger1_user_ids = (
@@ -208,6 +234,10 @@ class ContactTest:
         filter_contact_report = self.contact_sensor.filter_by_user_ids(filter_user_ids)
         n_filtered_contact = filter_contact_report["position"].shape[0]
         assert n_filtered_contact > 0, "No contact detected between gripper and cube."
+        # Check that filtered results also have is_valid field
+        assert "is_valid" in filter_contact_report.keys()
+        # All filtered contacts should be valid (True)
+        assert filter_contact_report["is_valid"].all()
 
     def teardown_method(self):
         """Clean up resources after each test method."""
@@ -232,6 +262,36 @@ class TestContactFastRT(ContactTest):
 class TestContactFastRTCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation("cuda", enable_rt=True)
+
+
+def test_contact_sensor_from_dict():
+    """Test ContactSensorCfg.from_dict converts list items correctly."""
+    dict_config = {
+        "sensor_type": "ContactSensor",
+        "rigid_uid_list": ["cube1", "cube2"],
+        "articulation_cfg_list": [
+            {
+                "articulation_uid": "robot1",
+                "link_name_list": ["link1", "link2"],
+            }
+        ],
+        "filter_need_both_actor": True,
+        "max_contacts_per_env": 1000,
+    }
+
+    cfg = SensorCfg.from_dict(dict_config)
+
+    assert cfg.sensor_type == "ContactSensor"
+    assert cfg.rigid_uid_list == ["cube1", "cube2"]
+    assert cfg.filter_need_both_actor is True
+    assert cfg.max_contacts_per_env == 1000
+
+    # Verify articulation_cfg_list items are properly converted
+    assert len(cfg.articulation_cfg_list) == 1
+    art_cfg = cfg.articulation_cfg_list[0]
+    assert isinstance(art_cfg, ArticulationContactFilterCfg)
+    assert art_cfg.articulation_uid == "robot1"
+    assert art_cfg.link_name_list == ["link1", "link2"]
 
 
 if __name__ == "__main__":
