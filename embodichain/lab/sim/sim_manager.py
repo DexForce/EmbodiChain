@@ -54,6 +54,7 @@ from embodichain.lab.sim.objects import (
     RigidObject,
     RigidObjectGroup,
     SoftObject,
+    ClothObject,
     Articulation,
     Robot,
     Light,
@@ -73,6 +74,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
     RigidObjectCfg,
     SoftObjectCfg,
+    ClothObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
     RobotCfg,
@@ -879,6 +881,36 @@ class SimulationManager:
         soft_obj = SoftObject(cfg=cfg, entities=obj_list, device=self.device)
         self._soft_objects[uid] = soft_obj
         return soft_obj
+
+    def add_cloth_object(self, cfg: ClothObjectCfg) -> ClothObject:
+        """Add a cloth object to the scene.
+
+        Args:
+            cfg (ClothObjectCfg): Configuration for the cloth object.
+
+        Returns:
+            ClothObject: The added cloth object instance handle.
+        """
+        if not self.is_use_gpu_physics:
+            logger.log_error("Cloth object requires GPU physics to be enabled.")
+
+        from embodichain.lab.sim.utility import (
+            load_cloth_object_from_cfg,
+        )
+
+        uid = cfg.uid
+        if uid is None:
+            logger.log_error("Cloth object uid must be specified.")
+
+        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+        obj_list = load_cloth_object_from_cfg(
+            cfg=cfg,
+            env_list=env_list,
+        )
+
+        cloth_obj = ClothObject(cfg=cfg, entities=obj_list, device=self.device)
+        self._soft_objects[uid] = cloth_obj
+        return cloth_obj
 
     def get_rigid_object(self, uid: str) -> RigidObject | None:
         """Get a rigid object by its unique ID.

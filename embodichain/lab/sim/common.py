@@ -24,6 +24,7 @@ from typing import List, TypeVar, Sequence
 
 from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.utils import logger
+import dexsim
 from copy import deepcopy
 
 T = TypeVar("T")
@@ -62,7 +63,7 @@ class BatchEntity(ABC):
         self.uid = self.cfg.uid
         if self.uid is None:
             logger.log_error("UID must be set in the configuration.")
-        self._entities = entities
+        self._entities: tuple[dexsim.models.MeshObject] = entities
         self.device = device
 
         self.reset()

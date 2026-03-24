@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
-from dexsim.engine import PhysicsScene, SoftBody
-from dexsim.types import SoftBodyGPUAPIReadWriteType
+from dexsim.engine import PhysicsScene, ClothBody
+from dexsim.types import ClothBodyGPUAPIReadWriteType
 from embodichain.lab.sim.common import (
     BatchEntity,
 )
@@ -33,14 +33,14 @@ from embodichain.utils.math import (
 )
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
-    SoftObjectCfg,
+    ClothObjectCfg,
 )
 from embodichain.utils.math import xyz_quat_to_4x4_matrix
 
 
 @dataclass
-class SoftBodyData:
-    """Data manager for soft body
+class ClothBodyData:
+    """Data manager for cloth.
 
     Note:
         1. The pose data managed by dexsim is in the format of (qx, qy, qz, qw, x, y, z), but in EmbodiChain, we use (x, y, z, qw, qx, qy, qz) format.
@@ -49,58 +49,42 @@ class SoftBodyData:
     def __init__(
         self, entities: List[MeshObject], ps: PhysicsScene, device: torch.device
     ) -> None:
-        """Initialize the SoftBodyData.
+        """Initialize the ClothBodyData.
 
         Args:
-            entities (List[MeshObject]): List of MeshObjects representing the soft bodies.
+            entities (List[MeshObject]): List of MeshObjects representing the cloth bodies.
             ps (PhysicsScene): The physics scene.
-            device (torch.device): The device to use for the soft body data.
+            device (torch.device): The device to use for the cloth body data.
         """
         self.entities = entities
-        # TODO: soft body data can only be stored in cuda device for now.
+        # TODO: cloth body data can only be stored in cuda device for now.
         self.device = device
         # TODO: inorder to retrieve arena position, we need to access the node of each entity.
         self._arena_positions = self._get_arena_position()
         self.ps = ps
         self.num_instances = len(entities)
 
-        self.softbodies: tuple[SoftBody] = [
+        self.cloth_bodies: tuple[ClothBody] = [
             self.entities[i].get_physical_body() for i in range(self.num_instances)
         ]
-        self.n_collision_vertices = self.softbodies[0].get_num_vertices()
-        self.n_sim_vertices = self.softbodies[0].get_num_sim_vertices()
+        self.n_vertices = self.cloth_bodies[0].get_num_vertices()
 
         self._rest_position_buffer = torch.empty(
-            (self.num_instances, self.n_collision_vertices, 4),
+            (self.num_instances, self.n_vertices, 4),
             device=self.device,
             dtype=torch.float32,
         )
-        for i, softbody in enumerate(self.softbodies):
-            self._rest_position_buffer[i] = softbody.get_position_inv_mass_buffer()
+        for i, cloth_body in enumerate(self.cloth_bodies):
+            self._rest_position_buffer[i] = cloth_body.get_position_inv_mass_buffer()
 
-        self._rest_sim_position_buffer = torch.empty(
-            (self.num_instances, self.n_sim_vertices, 4),
+        self._vertex_position = torch.zeros(
+            (self.num_instances, self.n_vertices, 3),
             device=self.device,
             dtype=torch.float32,
         )
 
-        for i, softbody in enumerate(self.softbodies):
-            self._rest_sim_position_buffer[i] = (
-                softbody.get_sim_position_inv_mass_buffer()
-            )
-
-        self._collision_position = torch.zeros(
-            (self.num_instances, self.n_collision_vertices, 3),
-            device=self.device,
-            dtype=torch.float32,
-        )
-        self._sim_vertex_velocity = torch.zeros(
-            (self.num_instances, self.n_sim_vertices, 3),
-            device=self.device,
-            dtype=torch.float32,
-        )
-        self._sim_vertex_position = torch.zeros(
-            (self.num_instances, self.n_sim_vertices, 3),
+        self._vertex_velocity = torch.zeros(
+            (self.num_instances, self.n_vertices, 3),
             device=self.device,
             dtype=torch.float32,
         )
@@ -119,47 +103,31 @@ class SoftBodyData:
         return arena_positions
 
     @property
-    def rest_collision_vertices(self):
-        """Get the rest position buffer of the soft bodies."""
+    def rest_vertices(self):
+        """Get the rest position buffer of the cloth bodies."""
         return self._rest_position_buffer[:, :, :3].clone()
 
     @property
-    def rest_sim_vertices(self):
-        """Get the rest sim position buffer of the soft bodies."""
-        return self._rest_sim_position_buffer[:, :, :3].clone()
+    def vertex_position(self):
+        """Get the current vertex position buffer of the cloth bodies."""
+        for i, clothbody in enumerate(self.cloth_bodies):
+            self._vertex_position[i] = clothbody.get_position_inv_mass_buffer()[:, :3]
+        return self._vertex_position.clone()
 
     @property
-    def collision_position(self):
-        """Get the current vertex position buffer of the soft bodies."""
-        for i, softbody in enumerate(self.soft_bodies):
-            self._collision_position[i] = softbody.get_position_inv_mass_buffer()[:, :3]
-        return self._collision_position.clone()
-
-    @property
-    def sim_vertex_position(self):
-        """Get the current sim vertex position buffer of the soft bodies."""
-        for i, softbody in enumerate(self.soft_bodies):
-            self._sim_vertex_position[i] = softbody.get_sim_position_inv_mass_buffer()[
-                :, :3
-            ]
-        return self._sim_vertex_position.clone()
-
-    @property
-    def sim_vertex_velocity(self):
-        """Get the current vertex velocity buffer of the soft bodies."""
-        for i, softbody in enumerate(self.soft_bodies):
-            self._sim_vertex_velocity[i] = softbody.get_sim_position_inv_mass_buffer()[
-                :, :3
-            ]
-        return self._sim_vertex_velocity.clone()
+    def vertex_velocity(self):
+        """Get the current vertex velocity buffer of the cloth bodies."""
+        for i, clothbody in enumerate(self.cloth_bodies):
+            self._vertex_velocity[i] = clothbody.get_velocity_buffer()[:, 3:]
+        return self._vertex_velocity.clone()
 
 
-class SoftObject(BatchEntity):
-    """SoftObject represents a batch of soft body in the simulation."""
+class ClothObject(BatchEntity):
+    """ClothObject represents a batch of cloth body in the simulation."""
 
     def __init__(
         self,
-        cfg: SoftObjectCfg,
+        cfg: ClothObjectCfg,
         entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
     ) -> None:
@@ -167,13 +135,11 @@ class SoftObject(BatchEntity):
         self._ps = self._world.get_physics_scene()
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
-        self._data = SoftBodyData(entities=entities, ps=self._ps, device=device)
+        self._data = ClothBodyData(entities=entities, ps=self._ps, device=device)
 
         self._world.update(0.001)
 
         super().__init__(cfg=cfg, entities=entities, device=device)
-
-        # set default collision filter
         self._set_default_collision_filter()
 
     def _set_default_collision_filter(self) -> None:
@@ -188,7 +154,7 @@ class SoftObject(BatchEntity):
     def set_collision_filter(
         self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
-        """Set collision filter data for the soft object.
+        """Set collision filter data for the cloth object.
 
         Args:
             filter_data (torch.Tensor): [N, 4] of int.
@@ -212,21 +178,45 @@ class SoftObject(BatchEntity):
             )
 
     @property
-    def body_data(self) -> SoftBodyData | None:
-        """Get the soft body data manager for this soft object.
+    def body_data(self) -> ClothBodyData | None:
+        """Get the cloth body data manager for this cloth object.
 
         Returns:
-            SoftBodyData | None: The soft body data manager.
+            ClothBodyData | None: The cloth body data manager.
         """
         return self._data
+
+    def get_rest_vertex_position(self) -> torch.Tensor:
+        """Get the rest vertex position of the cloth bodies.
+
+        Returns:
+            torch.Tensor: The rest vertex position of the cloth bodies, shape (num_instances, n_vertices, 3).
+        """
+        return self._data.rest_vertices
+
+    def get_current_vertex_position(self) -> torch.Tensor:
+        """Get the current vertex position of the cloth bodies.
+
+        Returns:
+            torch.Tensor: The current vertex position of the cloth bodies, shape (num_instances, n_vertices, 3).
+        """
+        return self._data.vertex_position
+
+    def get_current_vertex_velocity(self) -> torch.Tensor:
+        """Get the current vertex velocity of the cloth bodies.
+
+        Returns:
+            torch.Tensor: The current vertex velocity of the cloth bodies, shape (num_instances, n_vertices, 3).
+        """
+        return self._data.vertex_velocity
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
-        """Set local pose of the soft object.
+        """Set local pose of the cloth object.
 
         Args:
-            pose (torch.Tensor): The local pose of the soft object with shape (N, 7) or (N, 4, 4).
+            pose (torch.Tensor): The local pose of the cloth object with shape (N, 7) or (N, 4, 4).
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -246,103 +236,46 @@ class SoftObject(BatchEntity):
             )
 
         for i, env_idx in enumerate(local_env_ids):
-            # TODO: soft body cannot directly set by `set_local_pose` currently.
-            rest_collision_vertices = self.body_data.rest_collision_vertices[i]
-            rest_sim_vertices = self.body_data.rest_sim_vertices[i]
+            # TODO: cloth body cannot directly set by `set_local_pose` currently.
+            rest_vertices = self.body_data.rest_vertices[i]
             rotation = pose4x4[i][:3, :3]
             translation = pose4x4[i][:3, 3]
 
             # apply transformation to local rest vertices and back
-            rest_collision_vertices_local = (
-                rest_collision_vertices - self._data._arena_positions[i]
-            )
-            transformed_collision_vertices = (
-                rest_collision_vertices_local @ rotation.T + translation
-            )
-            transformed_collision_vertices = (
-                transformed_collision_vertices + self._data._arena_positions[i]
-            )
+            rest_vertices_local = rest_vertices - self._data._arena_positions[i]
+            transformed_vertices = rest_vertices_local @ rotation.T + translation
+            transformed_vertices = transformed_vertices + self._data._arena_positions[i]
 
-            rest_sim_vertices_local = rest_sim_vertices - self._data._arena_positions[i]
-            transformed_sim_vertices = (
-                rest_sim_vertices_local @ rotation.T + translation
-            )
-            transformed_sim_vertices = (
-                transformed_sim_vertices + self._data._arena_positions[i]
-            )
+            cloth_body: ClothBody = self._entities[env_idx].get_physical_body()
+            position_buffer = cloth_body.get_position_inv_mass_buffer()
+            velocity_buffer = cloth_body.get_velocity_buffer()
+            position_buffer[:, :3] = transformed_vertices
+            velocity_buffer[:, 3:] = 0.0
 
-            # apply vertices to soft body
-            soft_body: SoftBody = self._entities[env_idx].get_physical_body()
-            collision_position_buffer = soft_body.get_position_inv_mass_buffer()
-            sim_position_buffer = soft_body.get_sim_position_inv_mass_buffer()
-            sim_velocity_buffer = soft_body.get_sim_velocity_buffer()
+            cloth_body.mark_dirty(ClothBodyGPUAPIReadWriteType.ALL)
+            # TODO: currently cloth body has no wake up interface, use set_wake_counter and pass in a positive value to wake it up
+            cloth_body.set_wake_counter(0.4)
 
-            collision_position_buffer[:, :3] = transformed_collision_vertices
-            sim_position_buffer[:, :3] = transformed_sim_vertices
-            sim_velocity_buffer[:, :3] = 0.0
-
-            soft_body.mark_dirty(SoftBodyGPUAPIReadWriteType.ALL)
-            # TODO: currently soft body has no wake up interface, use set_wake_counter and pass in a positive value to wake it up
-            soft_body.set_wake_counter(0.4)
-
-    def get_rest_collision_vertices(self) -> torch.Tensor:
-        """Get the rest collision vertices of the soft object.
-
-        Returns:
-            torch.Tensor: The rest collision vertices with shape (N, num_collision_vertices, 3).
-        """
-        return self.body_data.rest_collision_vertices
-
-    def get_rest_sim_vertices(self) -> torch.Tensor:
-        """Get the rest sim vertices of the soft object.
-
-        Returns:
-            torch.Tensor: The rest sim vertices with shape (N, num_sim_vertices, 3).
-        """
-        return self.body_data.rest_sim_vertices
-
-    def get_current_collision_vertices(self) -> torch.Tensor:
-        """Get the current collision vertices of the soft object.
-
-        Returns:
-            torch.Tensor: The current collision vertices with shape (N, num_collision_vertices, 3).
-        """
-        return self.body_data.collision_position_buffer
-
-    def get_current_sim_vertices(self) -> torch.Tensor:
-        """Get the current sim vertices of the soft object.
-
-        Returns:
-            torch.Tensor: The current sim vertices with shape (N, num_sim_vertices, 3).
-        """
-        return self.body_data.sim_vertex_position_buffer
-
-    def get_current_sim_vertex_velocities(self) -> torch.Tensor:
-        """Get the current sim vertex velocities of the soft object.
-
-        Returns:
-            torch.Tensor: The current sim vertex velocities with shape (N, num_sim_vertices, 3).
-        """
-        return self.body_data.sim_vertex_velocity_buffer
-
-    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        """Get local pose of the soft object.
+    def get_local_pose(self, to_matrix=False):
+        """Get local pose of the cloth object.
 
         Args:
             to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
 
         Returns:
-            torch.Tensor: The local pose of the soft object with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
+            torch.Tensor: The local pose of the cloth object with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
         """
-        raise NotImplementedError("Getting local pose for SoftObject is not supported.")
+        raise NotImplementedError(
+            "Getting local pose for ClothObject is not supported."
+        )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 
-        # TODO: set attr for soft body after loading in physics scene.
+        # TODO: set attr for cloth body after loading in physics scene.
 
-        # rest soft body to init_pos
+        # rest cloth body to init_pos
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
         )
