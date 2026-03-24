@@ -435,6 +435,9 @@ class TestTargetPosition:
 class TestGetObjectUid:
     """Tests for get_object_uid functor."""
 
+    @patch(
+        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+    )
     def test_returns_correct_shape(self):
         """Test that get_object_uid returns correct tensor shape."""
         env = MockEnv(num_envs=4)
@@ -445,6 +448,9 @@ class TestGetObjectUid:
         assert result.shape == (4,)
         assert result.dtype == torch.int32
 
+    @patch(
+        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+    )
     def test_returns_correct_value(self):
         """Test that get_object_uid returns correct user ID from object."""
         env = MockEnv(num_envs=4)
@@ -467,6 +473,9 @@ class TestGetObjectUid:
         assert result.shape == (4,)
         assert torch.all(result == 0)
 
+    @patch(
+        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+    )
     def test_different_num_envs(self):
         """Test that functor works with different number of environments."""
         env = MockEnv(num_envs=8)
