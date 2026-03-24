@@ -70,7 +70,7 @@ class ArticulationContactFilterCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, List[str]]]
+        cls, init_dict: dict[str, str | List[str]]
     ) -> "ArticulationContactFilterCfg":
         """Initialize the configuration from a dictionary.
 

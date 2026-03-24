@@ -104,11 +104,28 @@ class SensorCfg(ObjectBaseCfg):
         )()
         # Pass the module's global namespace for evaluating forward references
         module_name = cfg.__class__.__module__
-        globalns = sys.modules[module_name].__dict__
+        globalns = sys.modules[module_name].__dict__.copy()
+
+        # Include global namespaces of parent classes for inherited types
+        for base in cfg.__class__.__mro__[1:]:
+            base_module = sys.modules.get(base.__module__)
+            if base_module:
+                base_ns = base_module.__dict__
+                for key, value in base_ns.items():
+                    if key not in globalns:
+                        globalns[key] = value
+                # Also include nested config classes from parent classes
+                for key in dir(base):
+                    if not key.startswith("_"):
+                        value = getattr(base, key, None)
+                        if is_configclass(value) or (
+                            isinstance(value, type) and is_configclass(value)
+                        ):
+                            if key not in globalns:
+                                globalns[key] = value
 
         import numpy as np
 
-        globalns["np"] = np
         type_hints = get_type_hints(cfg.__class__, globalns=globalns)
 
         for key, value in init_dict.items():
