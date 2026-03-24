@@ -124,8 +124,6 @@ class SensorCfg(ObjectBaseCfg):
                             if key not in globalns:
                                 globalns[key] = value
 
-        import numpy as np
-
         type_hints = get_type_hints(cfg.__class__, globalns=globalns)
 
         for key, value in init_dict.items():

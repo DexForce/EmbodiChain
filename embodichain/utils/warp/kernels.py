@@ -95,19 +95,19 @@ wp.overload(
 
 @wp.kernel(enable_backward=False)
 def scatter_contact_data(
-    contact_data: Any,
-    user_ids: Any,
-    env_ids: Any,
-    num_contacts_per_env: Any,
+    contact_data: wp.array(dtype=wp.float32, ndim=2),
+    user_ids: wp.array(dtype=wp.int32, ndim=2),
+    env_ids: wp.array(dtype=wp.int32, ndim=1),
+    num_contacts_per_env: wp.array(dtype=wp.int32, ndim=1),
     max_contacts_per_env: int,
     # Output buffers
-    position: Any,
-    normal: Any,
-    friction: Any,
-    impulse: Any,
-    distance: Any,
-    user_ids_out: Any,
-    is_valid: Any,
+    position: wp.array(dtype=wp.float32, ndim=3),
+    normal: wp.array(dtype=wp.float32, ndim=3),
+    friction: wp.array(dtype=wp.float32, ndim=3),
+    impulse: wp.array(dtype=wp.float32, ndim=2),
+    distance: wp.array(dtype=wp.float32, ndim=2),
+    user_ids_out: wp.array(dtype=wp.int32, ndim=3),
+    is_valid: wp.array(dtype=wp.bool, ndim=2),
 ):
     """Scatters contact data into per-environment buffers.
 

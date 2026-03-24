@@ -152,6 +152,11 @@ def get_object_uid(
     If the object with the specified UID does not exist in the environment,
     a zero tensor will be returned.
 
+    Note:
+        - If asset is RigidObject, the user IDs is shaped as (num_envs,)
+        - If asset is Articulation or Robot, the user IDs is shaped as (num_envs, num_links) and ordered by
+            link_names in the configuration.
+
     Args:
         env: The environment instance.
         obs: The observation dictionary.
@@ -164,6 +169,10 @@ def get_object_uid(
         return torch.zeros((env.num_envs,), dtype=torch.int32, device=env.device)
 
     obj = env.sim.get_asset(entity_cfg.uid)
+    if isinstance(obj, (Articulation, Robot, RigidObject)) is False:
+        logger.log_error(
+            f"Object with UID '{entity_cfg.uid}' is not an Articulation, Robot or RigidObject. Currently only support getting user IDs for Articulation, Robot and RigidObject, please check again."
+        )
 
     return obj.get_user_ids()
 

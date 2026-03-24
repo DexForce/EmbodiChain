@@ -260,7 +260,7 @@ class RigidObject(BatchEntity):
         """Get the user ids of the rigid object.
 
         Returns:
-            torch.Tensor: The user ids of the rigid object with shape (N, 1).
+            torch.Tensor: The user ids of the rigid object with shape (N,).
         """
         return torch.as_tensor(
             np.array([entity.get_user_id() for entity in self._entities]),
