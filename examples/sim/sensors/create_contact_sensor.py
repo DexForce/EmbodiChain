@@ -202,7 +202,7 @@ def main():
         width=1920,
         height=1080,
         num_envs=args.num_envs,
-        headless=True,
+        headless=args.headless,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
         enable_rt=args.enable_rt,  # Enable ray tracing for better visuals
