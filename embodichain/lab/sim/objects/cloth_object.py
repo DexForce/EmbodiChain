@@ -64,7 +64,7 @@ class ClothBodyData:
         self.ps = ps
         self.num_instances = len(entities)
 
-        self.cloth_bodies: tuple[ClothBody] = [
+        self.cloth_bodies: Sequence[ClothBody] = [
             self.entities[i].get_physical_body() for i in range(self.num_instances)
         ]
         self.n_vertices = self.cloth_bodies[0].get_num_vertices()

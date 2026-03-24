@@ -64,7 +64,7 @@ class SoftBodyData:
         self.ps = ps
         self.num_instances = len(entities)
 
-        self.softbodies: tuple[SoftBody] = [
+        self.softbodies: Sequence[SoftBody] = [
             self.entities[i].get_physical_body() for i in range(self.num_instances)
         ]
         self.n_collision_vertices = self.softbodies[0].get_num_vertices()
