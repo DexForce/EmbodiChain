@@ -69,6 +69,8 @@ This page lists all available observation functors that can be used with the Obs
 
 * - Functor Name
   - Description
+* - ``get_object_uid``
+  - Get the user IDs of objects. Returns tensor of shape (num_envs,) with dtype int32. Returns zero tensor if object doesn't exist.
 * - ``get_object_body_scale``
   - Get the body scale of objects. Returns tensor of shape (num_envs, 3). Only supports ``RigidObject``. Returns zero tensor if object doesn't exist.
 * - ``get_rigid_object_velocity``
@@ -149,6 +151,15 @@ observations = {
         func="get_rigid_object_physics_attributes",
         mode="add",
         name="object/cube/physics",
+        params={
+            "entity_cfg": SceneEntityCfg(uid="cube"),
+        },
+    ),
+    # Example: Get object user ID
+    "object_uid": ObservationCfg(
+        func="get_object_uid",
+        mode="add",
+        name="object/cube/uid",
         params={
             "entity_cfg": SceneEntityCfg(uid="cube"),
         },

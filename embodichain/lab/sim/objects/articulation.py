@@ -719,6 +719,24 @@ class Articulation(BatchEntity):
         return self._data.link_names
 
     @cached_property
+    def user_ids(self) -> torch.Tensor:
+        """Get the user-defined IDs of the articulation.
+
+        Note:
+            The return tensor has shape (num_instances, num_links), where each column corresponds to a link in the articulation.
+
+        Returns:
+            torch.Tensor: The user-defined IDs of the articulation with shape (num_instances, num_links).
+        """
+        user_ids = torch.zeros(
+            (self.num_instances, self.num_links), dtype=torch.int32, device=self.device
+        )
+        for i, entity in enumerate(self._entities):
+            for j, link_name in enumerate(self.link_names):
+                user_ids[i, j] = entity.get_user_ids(link_name)[0]
+        return user_ids
+
+    @cached_property
     def root_link_name(self) -> str:
         """Get the name of the root link of the articulation.
 
@@ -1330,22 +1348,30 @@ class Articulation(BatchEntity):
             )[local_joint_ids_tensor]
         return stiffness, damping, max_effort, max_velocity, friction
 
-    def get_user_ids(self, link_name: str | None = None) -> torch.Tensor:
+    def get_user_ids(
+        self, link_name: str | None = None, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
         """Get the user ids of the articulation.
 
         Args:
             link_name: (str | None): The name of the link. If None, returns user ids for all links.
+            env_ids: (Sequence[int] | None): Environment indices. If None, then all indices are used.
 
         Returns:
             torch.Tensor: The user ids of the articulation with shape (N, 1) for given link_name or (N, num_links) if link_name is None.
         """
-        return torch.as_tensor(
-            np.array(
-                [entity.get_user_ids(link_name) for entity in self._entities],
-            ),
-            dtype=torch.int32,
-            device=self.device,
-        )
+        if link_name is not None and link_name not in self.link_names:
+            logger.log_error(
+                f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
+            )
+
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if link_name is None:
+            return self.user_ids[local_env_ids]
+        else:
+            link_idx = self.link_names.index(link_name)
+            return self.user_ids[local_env_ids, link_idx]
 
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the articulation.

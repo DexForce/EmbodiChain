@@ -16,10 +16,22 @@
 
 from __future__ import annotations
 
+import sys
 import torch
 
 from abc import abstractmethod
-from typing import Dict, List, Any, Sequence, Tuple, Union
+from typing import (
+    Dict,
+    List,
+    Any,
+    Sequence,
+    Tuple,
+    Union,
+    get_origin,
+    get_args,
+    get_type_hints,
+)
+from functools import cached_property
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import ObjectBaseCfg
@@ -90,13 +102,57 @@ class SensorCfg(ObjectBaseCfg):
         cfg = get_class_instance(
             "embodichain.lab.sim.sensors", init_dict["sensor_type"] + "Cfg"
         )()
+        # Pass the module's global namespace for evaluating forward references
+        module_name = cfg.__class__.__module__
+        globalns = sys.modules[module_name].__dict__.copy()
+
+        # Include global namespaces of parent classes for inherited types
+        for base in cfg.__class__.__mro__[1:]:
+            base_module = sys.modules.get(base.__module__)
+            if base_module:
+                base_ns = base_module.__dict__
+                for key, value in base_ns.items():
+                    if key not in globalns:
+                        globalns[key] = value
+                # Also include nested config classes from parent classes
+                for key in dir(base):
+                    if not key.startswith("_"):
+                        value = getattr(base, key, None)
+                        if is_configclass(value) or (
+                            isinstance(value, type) and is_configclass(value)
+                        ):
+                            if key not in globalns:
+                                globalns[key] = value
+
+        type_hints = get_type_hints(cfg.__class__, globalns=globalns)
+
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
+                attr_type = type_hints.get(key)
+
+                # Handle single configclass
                 if is_configclass(attr):
-                    setattr(
-                        cfg, key, attr.from_dict(value)
-                    )  # Call from_dict on the attribute
+                    setattr(cfg, key, attr.from_dict(value))
+                # Handle list of configclasses (e.g., List[SomeCfg])
+                elif (
+                    isinstance(value, list) and len(value) > 0 and attr_type is not None
+                ):
+                    origin = get_origin(attr_type)
+                    if origin is list:
+                        args = get_args(attr_type)
+                        if args and is_configclass(args[0]):
+                            converted_list = []
+                            for item in value:
+                                if isinstance(item, dict):
+                                    converted_list.append(args[0].from_dict(item))
+                                else:
+                                    converted_list.append(item)
+                            setattr(cfg, key, converted_list)
+                        else:
+                            setattr(cfg, key, value)
+                    else:
+                        setattr(cfg, key, value)
                 else:
                     setattr(cfg, key, value)
             else:
@@ -127,6 +183,10 @@ class BaseSensor(BatchEntity):
         self._build_sensor_from_config(config, device=device)
 
         super().__init__(config, self._entities, device)
+
+    @cached_property
+    def num_instances(self) -> int:
+        return get_dexsim_arena_num()
 
     @abstractmethod
     def _build_sensor_from_config(

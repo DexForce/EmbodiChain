@@ -118,6 +118,10 @@ class MockRigidObject:
         """Return mock body scale for each environment."""
         return torch.tensor([[1.0, 1.0, 1.0]]).repeat(self.num_envs, 1)
 
+    def get_user_ids(self):
+        """Return mock user IDs for each environment."""
+        return torch.ones(self.num_envs, dtype=torch.int32)
+
     @property
     def body(self):
         return self
@@ -187,6 +191,14 @@ class MockSim:
     def get_sensor(self, uid: str):
         return self._sensors.get(uid)
 
+    def get_asset(self, uid: str):
+        """Get an asset by UID from rigid objects or robots."""
+        if uid in self._rigid_objects:
+            return self._rigid_objects.get(uid)
+        elif uid in self._robots:
+            return self._robots.get(uid)
+        return None
+
     def add_rigid_object(self, obj):
         self._rigid_objects[obj.uid] = obj
         self.asset_uids.append(obj.uid)
@@ -232,6 +244,7 @@ from embodichain.lab.gym.envs.managers.observations import (
     target_position,
     get_rigid_object_physics_attributes,
     get_articulation_joint_drive,
+    get_object_uid,
 )
 
 
@@ -417,6 +430,60 @@ class TestTargetPosition:
 
         assert result.shape == (4, 3)
         torch.testing.assert_close(result[0], torch.tensor([0.5, 0.3, 0.1]))
+
+
+class TestGetObjectUid:
+    """Tests for get_object_uid functor."""
+
+    @patch(
+        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+    )
+    def test_returns_correct_shape(self):
+        """Test that get_object_uid returns correct tensor shape."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_object_uid(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        assert result.shape == (4,)
+        assert result.dtype == torch.int32
+
+    @patch(
+        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+    )
+    def test_returns_correct_value(self):
+        """Test that get_object_uid returns correct user ID from object."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_object_uid(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        # Check value matches mock object's user_id (which is 1)
+        torch.testing.assert_close(
+            result, torch.tensor([1, 1, 1, 1], dtype=torch.int32)
+        )
+
+    def test_returns_zero_for_nonexistent_object(self):
+        """Test that get_object_uid returns zeros for non-existent object."""
+        env = MockEnv(num_envs=4)
+        obs = {}
+
+        result = get_object_uid(env, obs, entity_cfg=MagicMock(uid="nonexistent"))
+
+        assert result.shape == (4,)
+        assert torch.all(result == 0)
+
+    @patch(
+        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+    )
+    def test_different_num_envs(self):
+        """Test that functor works with different number of environments."""
+        env = MockEnv(num_envs=8)
+        obs = {}
+
+        result = get_object_uid(env, obs, entity_cfg=MagicMock(uid="test_cube"))
+
+        assert result.shape == (8,)
 
 
 class TestGetRigidObjectPhysicsAttributes:
