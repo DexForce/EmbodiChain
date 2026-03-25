@@ -20,6 +20,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from typing import List, Sequence, Union
+from functools import cached_property
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
@@ -257,6 +258,19 @@ class RigidObject(BatchEntity):
         return (
             parent_str
             + f" | body type: {self.body_type} | max_convex_hull_num: {self.cfg.max_convex_hull_num}"
+        )
+
+    @cached_property
+    def user_ids(self) -> torch.Tensor:
+        """Get the user ids of the rigid object.
+
+        Returns:
+            torch.Tensor: The user ids of the rigid object with shape (N,).
+        """
+        return torch.as_tensor(
+            np.array([entity.get_user_id() for entity in self._entities]),
+            dtype=torch.int32,
+            device=self.device,
         )
 
     @property
@@ -960,17 +974,17 @@ class RigidObject(BatchEntity):
             device=self.device,
         )
 
-    def get_user_ids(self) -> torch.Tensor:
+    def get_user_ids(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get the user ids of the rigid bodies.
+
+        Args:
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
 
         Returns:
             torch.Tensor: A tensor of shape (num_envs,) representing the user ids of the rigid bodies.
         """
-        return torch.as_tensor(
-            [entity.get_user_id() for entity in self._entities],
-            dtype=torch.int32,
-            device=self.device,
-        )
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        return self.user_ids[local_env_ids]
 
     def enable_collision(
         self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
