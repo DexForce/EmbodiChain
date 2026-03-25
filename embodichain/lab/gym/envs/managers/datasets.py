@@ -416,23 +416,25 @@ class LeRobotRecorder(Functor):
             if feature["shape"] == ():
                 features[key]["shape"] = (1,)
 
-        for functor_name in self._env.observation_manager.active_functors["add"]:
-            functor_cfg = self._env.observation_manager.get_functor_cfg(
-                functor_name=functor_name
-            )
-            if functor_cfg.func == get_object_uid:
-                obs_key = functor_cfg.name
-                asset_uid = functor_cfg.params["entity_cfg"].uid
-                asset = self._env.sim.get_asset(asset_uid)
-                if isinstance(asset, RigidObject):
-                    features[obs_key]["names"] = asset_uid
-                elif isinstance(asset, (Articulation, Robot)):
-                    link_names = asset.link_names
-                    features[obs_key]["names"] = link_names
-                else:
-                    logger.log_warning(
-                        f"Asset with UID '{asset_uid}' is not RigidObject, Articulation or Robot. Cannot assign feature names based on asset properties."
-                    )
+        # Add extra observation in `add` mode based on functor config
+        if "add" in self._env.observation_manager.active_functors:
+            for functor_name in self._env.observation_manager.active_functors["add"]:
+                functor_cfg = self._env.observation_manager.get_functor_cfg(
+                    functor_name=functor_name
+                )
+                if functor_cfg.func == get_object_uid:
+                    obs_key = functor_cfg.name
+                    asset_uid = functor_cfg.params["entity_cfg"].uid
+                    asset = self._env.sim.get_asset(asset_uid)
+                    if isinstance(asset, RigidObject):
+                        features[obs_key]["names"] = asset_uid
+                    elif isinstance(asset, (Articulation, Robot)):
+                        link_names = asset.link_names
+                        features[obs_key]["names"] = link_names
+                    else:
+                        logger.log_warning(
+                            f"Asset with UID '{asset_uid}' is not RigidObject, Articulation or Robot. Cannot assign feature names based on asset properties."
+                        )
 
     def _convert_frame_to_lerobot(
         self, obs: TensorDict, action: TensorDict | torch.Tensor, task: str
