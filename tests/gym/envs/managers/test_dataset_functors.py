@@ -36,6 +36,16 @@ except ImportError:
     LeRobotRecorder = None
 
 
+# Import Camera for mocking (only if available)
+try:
+    from embodichain.lab.sim.sensors import Camera
+
+    CAMERA_AVAILABLE = True
+except ImportError:
+    CAMERA_AVAILABLE = False
+    Camera = None
+
+
 class MockRobot:
     """Mock robot for dataset functor tests."""
 
@@ -91,6 +101,10 @@ class MockEnvForDataset:
         # Setup mock sensor
         self._sensors = {"camera": MockSensor("camera")}
         self._sensor_uids = ["camera"]
+
+        # Mock observation manager with active_functors
+        self.observation_manager = Mock()
+        self.observation_manager.active_functors = {"add": []}
 
     def get_sensor(self, uid: str):
         return self._sensors.get(uid)
@@ -245,8 +259,23 @@ class TestLeRobotRecorderFeatures:
             }
         )
 
-        recorder = LeRobotRecorder(cfg, env)
-        features = recorder._build_features()
+        # Patch isinstance to treat MockSensor as Camera
+        original_isinstance = isinstance
+
+        def mock_isinstance(obj, class_or_tuple):
+            if isinstance(obj, MockSensor):
+                if class_or_tuple is Camera or (
+                    isinstance(class_or_tuple, tuple) and Camera in class_or_tuple
+                ):
+                    return True
+            return original_isinstance(obj, class_or_tuple)
+
+        with patch(
+            "embodichain.lab.gym.envs.managers.datasets.isinstance",
+            side_effect=mock_isinstance,
+        ):
+            recorder = LeRobotRecorder(cfg, env)
+            features = recorder._build_features()
 
         # Check camera feature exists
         assert "camera.color" in features

@@ -90,6 +90,25 @@ A `CLAUDE.md` file is present at the root of this repository. Claude Code reads 
   What could cause this and how should it be fixed?
 ```
 
+**Create a pull request**
+
+After you've made your changes and committed them, use the `/pr` command to create a pull request:
+
+```
+> /pr
+```
+
+This will guide you through:
+1. Checking the current git state and changes
+2. Determining the PR type (bug fix, enhancement, new feature, etc.)
+3. Drafting a proper PR description following the project template
+4. Running code formatting with `black .`
+5. Creating a properly named feature branch
+6. Committing changes with a conventional commit message
+7. Pushing to remote and creating the PR via `gh` CLI
+
+The `/pr` skill ensures your PR follows the EmbodiChain contribution guidelines and populates the required checklist items.
+
 ### Tips
 
 *   Always run `black .` after Claude Code generates or edits Python files — Claude Code can do this for you if you ask.

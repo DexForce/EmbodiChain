@@ -144,7 +144,7 @@ class record_camera_data(Functor):
     ):
         # TODO: the current implementation will lost the final episode frames recording.
         # Check if the frames should be saved for the current episode
-        if env.elapsed_steps.sum().item() == len(env_ids) and len(self._frames) > 0:
+        if env.elapsed_steps.sum().item() == 0 and len(self._frames) > 0:
             video_name = f"episode_{self._current_episode}_{self._name}"
             images_to_video(self._frames, save_path, video_name, fps=20)
 
