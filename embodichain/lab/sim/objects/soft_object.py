@@ -60,7 +60,6 @@ class SoftBodyData:
         # TODO: soft body data can only be stored in cuda device for now.
         self.device = device
         # TODO: inorder to retrieve arena position, we need to access the node of each entity.
-        self._arena_positions = self._get_arena_position()
         self.ps = ps
         self.num_instances = len(entities)
 
@@ -104,19 +103,6 @@ class SoftBodyData:
             device=self.device,
             dtype=torch.float32,
         )
-
-    def _get_arena_position(self):
-        n_env = len(self.entities)
-        arena_positions = torch.empty(
-            (n_env, 3), device=self.device, dtype=torch.float32
-        )
-        for i, entity in enumerate(self.entities):
-            arena = entity.node.get_parent()
-            arena_position = arena.get_world_pose()[:3, 3]
-            arena_positions[i] = torch.as_tensor(
-                arena_position, device=self.device, dtype=torch.float32
-            )
-        return arena_positions
 
     @property
     def rest_collision_vertices(self):
@@ -229,6 +215,9 @@ class SoftObject(BatchEntity):
             pose (torch.Tensor): The local pose of the soft object with shape (N, 7) or (N, 4, 4).
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
+        from embodichain.lab.sim import SimulationManager
+
+        sim = SimulationManager.get_instance()
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         if len(local_env_ids) != len(pose):
@@ -245,6 +234,7 @@ class SoftObject(BatchEntity):
                 f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
             )
 
+        arena_offsets = sim.arena_offsets
         for i, env_idx in enumerate(local_env_ids):
             # TODO: soft body cannot directly set by `set_local_pose` currently.
             rest_collision_vertices = self.body_data.rest_collision_vertices[i]
@@ -253,23 +243,17 @@ class SoftObject(BatchEntity):
             translation = pose4x4[i][:3, 3]
 
             # apply transformation to local rest vertices and back
-            rest_collision_vertices_local = (
-                rest_collision_vertices - self._data._arena_positions[i]
-            )
+            rest_collision_vertices_local = rest_collision_vertices - arena_offsets[i]
             transformed_collision_vertices = (
                 rest_collision_vertices_local @ rotation.T + translation
             )
-            transformed_collision_vertices = (
-                transformed_collision_vertices + self._data._arena_positions[i]
-            )
+            transformed_collision_vertices = transformed_collision_vertices
 
-            rest_sim_vertices_local = rest_sim_vertices - self._data._arena_positions[i]
+            rest_sim_vertices_local = rest_sim_vertices - arena_offsets[i]
             transformed_sim_vertices = (
                 rest_sim_vertices_local @ rotation.T + translation
             )
-            transformed_sim_vertices = (
-                transformed_sim_vertices + self._data._arena_positions[i]
-            )
+            transformed_sim_vertices = transformed_sim_vertices
 
             # apply vertices to soft body
             soft_body: SoftBody = self._entities[env_idx].get_physical_body()

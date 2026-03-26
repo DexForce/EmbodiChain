@@ -62,6 +62,9 @@ def parse_arguments():
     parser.add_argument(
         "--enable_rt", action="store_true", help="Enable ray tracing rendering"
     )
+    parser.add_argument(
+        "--num_envs", type=int, default=4, help="Number of parallel environments"
+    )
     return parser.parse_args()
 
 
@@ -80,6 +83,7 @@ def initialize_simulation(args):
         sim_device="cuda",
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
     )
     sim = SimulationManager(config)
 
@@ -232,7 +236,6 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
 
     approach_xpos = grasp_xpos.clone()
     approach_xpos[:, 2, 3] += 0.04
-
     _, qpos_approach = robot.compute_ik(
         pose=approach_xpos, joint_seed=rest_arm_qpos, name="arm"
     )
@@ -302,6 +305,7 @@ def main():
         dtype=torch.float32,
         device=sim.device,
     )
+    grasp_xpos = grasp_xpos.repeat(sim.num_envs, 1, 1)
     grab_traj = get_grasp_traj(sim, robot, grasp_xpos)
     input("Press Enter to start grabing cloth...")
 
