@@ -63,7 +63,7 @@ class BatchEntity(ABC):
         self.uid = self.cfg.uid
         if self.uid is None:
             logger.log_error("UID must be set in the configuration.")
-        self._entities: tuple[dexsim.models.MeshObject] = entities
+        self._entities = entities
         self.device = device
 
         self.reset()
