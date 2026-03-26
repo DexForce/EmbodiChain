@@ -813,9 +813,6 @@ class URDFAssemblyManager:
             if comp_obj and comp_obj.transform is not None:
                 component_transforms[comp] = comp_obj.transform
 
-        print("\n📦 Processing components in order:")
-        print(self.component_order_and_prefix)
-
         for comp, prefix in self.component_order_and_prefix:
             comp_obj = self.component_registry.get(comp)
             if not comp_obj:
