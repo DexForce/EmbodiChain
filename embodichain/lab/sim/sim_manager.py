@@ -258,6 +258,7 @@ class SimulationManager:
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._soft_objects: Dict[str, SoftObject] = dict()
+        self._cloth_objects: Dict[str, ClothObject] = dict()
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 
@@ -373,6 +374,7 @@ class SimulationManager:
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._soft_objects.keys()))
+        uid_list.extend(list(self._cloth_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -746,6 +748,8 @@ class SimulationManager:
             return self._rigid_object_groups[uid]
         if uid in self._soft_objects:
             return self._soft_objects[uid]
+        if uid in self._cloth_objects:
+            return self._cloth_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -909,7 +913,7 @@ class SimulationManager:
         )
 
         cloth_obj = ClothObject(cfg=cfg, entities=obj_list, device=self.device)
-        self._soft_objects[uid] = cloth_obj
+        self._cloth_objects[uid] = cloth_obj
         return cloth_obj
 
     def get_rigid_object(self, uid: str) -> RigidObject | None:
@@ -940,6 +944,20 @@ class SimulationManager:
             return None
         return self._soft_objects[uid]
 
+    def get_cloth_object(self, uid: str) -> ClothObject | None:
+        """Get a cloth object by its unique ID.
+
+        Args:
+            uid (str): The unique ID of the cloth object.
+
+        Returns:
+            ClothObject | None: The cloth object instance if found, otherwise None.
+        """
+        if uid not in self._cloth_objects:
+            logger.log_warning(f"Cloth object {uid} not found.")
+            return None
+        return self._cloth_objects[uid]
+
     def get_rigid_object_uid_list(self) -> List[str]:
         """Get current rigid body uid list
 
@@ -955,6 +973,14 @@ class SimulationManager:
             List[str]: list of soft body uid.
         """
         return list(self._soft_objects.keys())
+
+    def get_cloth_object_uid_list(self) -> List[str]:
+        """Get current cloth body uid list
+
+        Returns:
+            List[str]: list of cloth body uid.
+        """
+        return list(self._cloth_objects.keys())
 
     def add_rigid_object_group(self, cfg: RigidObjectGroupCfg) -> RigidObjectGroup:
         """Add a rigid object group to the scene.
@@ -1473,6 +1499,11 @@ class SimulationManager:
 
         if uid in self._soft_objects:
             obj = self._soft_objects.pop(uid)
+            obj.destroy()
+            return True
+
+        if uid in self._cloth_objects:
+            obj = self._cloth_objects.pop(uid)
             obj.destroy()
             return True
 
