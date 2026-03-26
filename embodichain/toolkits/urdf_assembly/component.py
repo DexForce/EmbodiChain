@@ -130,6 +130,44 @@ class URDFComponentManager:
                         mode,
                     )
 
+    @property
+    def name_case(self) -> dict[str, str]:
+        """Get the current name case policy.
+
+        Returns:
+            dict[str, str]: A mapping of ``"joint"`` / ``"link"`` to their
+            case modes.
+        """
+        return self._name_case
+
+    @name_case.setter
+    def name_case(self, new_name_case: dict[str, str]) -> None:
+        """Replace the name case policy.
+
+        Invalid entries are silently ignored (logged as warnings) to stay
+        consistent with the constructor behaviour. This intentionally differs
+        from :class:`URDFAssemblyManager`, which raises ``ValueError`` for
+        bad inputs, because this low-level manager is designed to be lenient
+        so it can be used in contexts where the caller cannot easily validate
+        inputs upfront.
+
+        Args:
+            new_name_case (dict[str, str]): Mapping of ``"joint"`` / ``"link"``
+                to ``"upper"``, ``"lower"``, or ``"none"``.
+        """
+        updated: dict[str, str] = {}
+        for key, mode in new_name_case.items():
+            if key in {"joint", "link"} and mode in {"upper", "lower", "none"}:
+                updated[key] = mode
+            else:
+                self.logger.warning(
+                    "Ignoring invalid name_case entry %r=%r (allowed keys: 'joint', 'link'; "
+                    "allowed modes: 'upper', 'lower', 'none')",
+                    key,
+                    mode,
+                )
+        self._name_case.update(updated)
+
     def _apply_case(self, kind: str, name: str | None) -> str | None:
         """Normalize a name according to the configured case policy.
 
