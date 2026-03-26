@@ -230,17 +230,25 @@ class URDFConnectionManager:
                 self.logger.error(f"Invalid connection rule: {parent} -> {child}")
 
     def add_sensor_attachments(
-        self, joints: list, attach_dict: dict, base_points: dict
+        self, links: list, joints: list, attach_dict: dict, base_points: dict
     ):
-        r"""Attach sensors to the robot by creating fixed joints."""
+        r"""Attach sensors to the robot by creating fixed joints and links.
+
+        Args:
+            links (list): A list to collect link elements from the sensor URDF.
+            joints (list): A list to collect joint elements from the sensor URDF
+                and the new attachment joint.
+            attach_dict (dict): A mapping from sensor names to their attachment configs.
+            base_points (dict): A mapping from component names to their base link names.
+        """
         for sensor_name, attach in attach_dict.items():
             sensor_urdf = ET.parse(attach.sensor_urdf).getroot()
 
-            # Add sensor links and joints to the main lists
+            # Add sensor links to the links list
             for link in sensor_urdf.findall("link"):
                 # Ensure sensor link names are lowercase
                 link.set("name", self._apply_case("link", link.get("name")))
-                joints.append(link)  # This should be added to links list instead
+                links.append(link)
 
             for joint in sensor_urdf.findall("joint"):
                 # Ensure sensor joint names are uppercase and link references are lowercase
