@@ -51,7 +51,7 @@ def main():
                         "component_type": "right_hand",
                         "urdf_path": "DH_PGC_140_50/DH_PGC_140_50.urdf",
                     },
-                ]
+                ],
             },
             "drive_pros": {
                 "max_effort": {

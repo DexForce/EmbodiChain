@@ -201,6 +201,74 @@ Get all attached sensors.
 manager.get_attached_sensors() -> dict
 ```
 
+##### Component name prefixes (`component_prefix`)
+
+`URDFAssemblyManager` uses `component_prefix` to configure name prefixes for
+each supported component type. This attribute is a list of 2-tuples:
+
+- Form: `[(component_name, prefix), ...]`
+- The default value is:
+
+    ```python
+    [
+        ("chassis", None),
+        ("legs", None),
+        ("torso", None),
+        ("head", None),
+        ("left_arm", "left_"),
+        ("right_arm", "right_"),
+        ("left_hand", "left_"),
+        ("right_hand", "right_"),
+        ("arm", None),
+        ("hand", None),
+    ]
+    ```
+
+You can configure it in a *patch-style* manner via the property:
+
+```python
+# Only override prefixes for existing components; do not introduce
+# new component names.
+manager.component_prefix = [
+    ("left_arm", "L_"),
+    ("right_arm", "R_"),
+    ("left_hand", "L_"),
+    ("right_hand", "R_"),
+]
+```
+
+Semantics:
+
+- Only components that already exist in the default configuration (e.g. `chassis/torso/left_arm/...`) may be overridden; new component names are not allowed.
+- Components not listed in `new_prefixes` keep their original prefix.
+- If `new_prefixes` contains an unknown component name, a `ValueError` is raised indicating that new component types cannot be introduced.
+
+##### Name casing policy (`name_case`)
+
+`URDFAssemblyManager` supports a global name casing policy that controls how
+link and joint names are normalized during assembly. This is configured via
+the optional `name_case` argument in the constructor:
+
+```python
+manager = URDFAssemblyManager(
+        name_case={
+                "joint": "upper",  # or "lower" / "none"
+                "link": "lower",  # or "upper" / "none"
+        }
+)
+```
+
+Semantics:
+
+- Valid keys: `"joint"`, `"link"`.
+- Valid values: `"upper"`, `"lower"`, `"none"`.
+- Default behavior matches the legacy implementation:
+  - joints are normalized to **UPPERCASE**,
+  - links are normalized to **lowercase**.
+- This policy is propagated to the internal component and connection managers,
+    and is also included in the assembly signature. Changing `name_case` will
+    therefore force a rebuild of the assembled URDF.
+
 ## Using with URDFCfg for Robot Creation
 
 The URDF Assembly Tool can be used directly with `URDFCfg` to create robots with multiple components in the simulation. This is the recommended approach when building robots from assembled URDF files.
@@ -230,6 +298,27 @@ cfg = RobotCfg(
     control_parts={...},
     drive_pros={...},
 )
+```
+
+When using `URDFCfg` to build multi-component robots, you can pass custom
+component prefixes to the internal `URDFAssemblyManager` via
+`URDFCfg.component_prefix`. Its semantics are identical to
+`URDFAssemblyManager.component_prefix`:
+
+- Each element is a `(component_name, prefix)` tuple.
+- Only prefixes for components that exist in the default configuration may be overridden; no new component names can be added.
+- Components not explicitly listed keep their original prefix.
+
+Example:
+
+```python
+urdf_cfg = URDFCfg(
+    components=[...],
+)
+urdf_cfg.component_prefix = [
+    ("left_arm", "L_"),
+    ("right_arm", "R_"),
+]
 ```
 
 ### Complete Example

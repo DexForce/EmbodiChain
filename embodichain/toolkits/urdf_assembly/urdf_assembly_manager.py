@@ -128,6 +128,15 @@ class URDFAssemblyManager:
     ):
         self.logger = setup_urdf_logging()
 
+        # Global name normalization strategy for this assembly. By default,
+        # this preserves the legacy behavior: link names are lowercase and
+        # joint names are uppercase. The same mapping is passed down to
+        # managers that deal with naming so that the policy stays consistent.
+        self._name_case: dict[str, str] = {
+            "joint": "upper",
+            "link": "lower",
+        }
+
         # Use registries for components and sensors
         self.component_registry = component_registry or ComponentRegistry()
         self.sensor_registry = sensor_registry or SensorRegistry()
@@ -137,13 +146,13 @@ class URDFAssemblyManager:
 
         # Initialize managers for components and sensors
         self.component_manager = component_manager or URDFComponentManager(
-            self.mesh_manager
+            self.mesh_manager, name_case=self._name_case
         )
         self.sensor_manager = sensor_manager or URDFSensorManager(self.mesh_manager)
 
         # Processing order for components with their name prefixes
         # Tuple format: (component_name, prefix)
-        self.component_order = [
+        self._component_order_and_prefix = [
             ("chassis", None),
             ("legs", None),
             ("torso", None),
@@ -204,6 +213,147 @@ class URDFAssemblyManager:
 
         # Initialize signature manager instead of cache manager
         self.signature_manager = URDFAssemblySignatureManager()
+
+    @property
+    def name_case(self):
+        """Get the current name case policy for joints and links.
+
+        Returns:
+            dict[str, str]: A dictionary mapping 'joint' and 'link' to their respective case modes.
+        """
+        return self._name_case
+
+    @name_case.setter
+    def name_case(self, new_name_case: dict[str, str]):
+        """Set a new name case policy for joints and links.
+
+        This method updates the name case policy and propagates it to the component and sensor managers.
+
+        Args:
+            new_name_case (dict[str, str]): A dictionary mapping 'joint' and 'link' to their desired case modes (e.g., 'upper', 'lower', 'none').
+        """
+        if not isinstance(new_name_case, dict):
+            raise ValueError(
+                "name_case must be a dictionary mapping 'joint' and 'link' to case modes."
+            )
+        if "joint" not in new_name_case or "link" not in new_name_case:
+            raise ValueError("name_case must contain keys 'joint' and 'link'.")
+
+        self._name_case = new_name_case
+        self.component_manager.name_case = new_name_case
+        self.sensor_manager.name_case = new_name_case
+
+    def _apply_case(self, kind: str, name: str | None) -> str | None:
+        """Normalize a name according to the assembly-wide case policy.
+
+        This helper mirrors the behavior of the managers' own case helpers so
+        that any name sets computed here (e.g. for sensors) stay consistent
+        with how names are written into the URDF.
+
+        Args:
+            kind (str): One of ``"joint"`` or ``"link"``.
+            name (str | None): The original name.
+
+        Returns:
+            str | None: The normalized name, or the original value if the
+            kind is unknown or its mode is ``"none"``.
+        """
+
+        if name is None:
+            return None
+
+        mode = self._name_case.get(kind, "none")
+        if mode == "lower":
+            return name.lower()
+        if mode == "upper":
+            return name.upper()
+        return name
+
+    @property
+    def component_order_and_prefix(self):
+        """Get the internal component order with their name prefixes.
+
+        Note:
+            This exposes the internal list of ``(component_name, prefix)`` pairs
+            used when assembling URDFs. In most user code it is recommended to
+            use :attr:`component_prefix` instead, which focuses on configuring
+            prefixes rather than ordering.
+
+        Returns:
+            list[tuple[str, str | None]]: A list of tuples specifying component
+            names and their prefixes.
+        """
+        return self._component_order_and_prefix
+
+    @component_order_and_prefix.setter
+    def component_order_and_prefix(self, new_order):
+        """Patch the internal component prefix configuration.
+
+        Args:
+            new_order (list[tuple[str, str | None]]): List of
+                ``(component_name, prefix)`` tuples.
+
+        Raises:
+            ValueError: If the new order is not a list of tuples or if it
+                contains unknown component names.
+        """
+        self._component_order_and_prefix = new_order
+
+    @property
+    def component_prefix(self):
+        """Configure name prefixes per component type.
+
+        This is a user-facing alias over :attr:`component_order_and_prefix`.
+        It accepts a list of ``(component_name, prefix)`` tuples and updates
+        the internal configuration in a patch-style manner, without requiring
+        users to reason about the full processing order.
+        """
+
+        return self.component_order_and_prefix
+
+    @component_prefix.setter
+    def component_prefix(self, new_prefixes):
+        if not isinstance(new_prefixes, list) or not all(
+            isinstance(item, tuple) and len(item) == 2 for item in new_prefixes
+        ):
+            raise ValueError(
+                "component_order_and_prefix must be a list of (component_name, prefix) tuples."
+            )
+
+        # Treat new_order as a patch on top of the existing/default order:
+        #  - For components already present in self._component_order_and_prefix, update their prefix.
+        #  - Preserve components that are not mentioned in new_order, keeping their relative order.
+        #  - Append any brand‑new components from new_order at the end.
+
+        # Allowed components are exactly those already present in the default order.
+        existing_components = {comp for comp, _ in self._component_order_and_prefix}
+
+        # Build override map from the incoming list, but only for existing components.
+        override_map = {}
+        for comp, prefix in new_prefixes:
+            if not isinstance(comp, str):
+                raise ValueError(
+                    "component name in component_order_and_prefix must be a string."
+                )
+            if comp not in existing_components:
+                raise ValueError(
+                    f"component_order_and_prefix cannot introduce new component '{comp}'. "
+                    f"Allowed components: {sorted(existing_components)}"
+                )
+            override_map[comp] = prefix
+
+        merged_order: list[tuple[str, str | None]] = []
+
+        # First, walk the existing order and apply overrides where available.
+        # The relative order of components is kept internal and usually does
+        # not need to be changed by users.
+        for comp, prefix in self._component_order_and_prefix:
+            if comp in override_map:
+                merged_order.append((comp, override_map.pop(comp)))
+            else:
+                merged_order.append((comp, prefix))
+
+        self._component_order_and_prefix = merged_order
 
     def add_component(
         self,
@@ -572,9 +722,21 @@ class URDFAssemblyManager:
                 self.logger.debug(f"    Transform: applied")
 
         if use_signature_check:
-            # Calculate current assembly signature
+            # Calculate current assembly signature. In addition to the component
+            # registry contents, include the current component_order_and_prefix
+            # so that changes to name prefixes also invalidate the cache.
+            component_info = self.component_registry.all().copy()
+            component_info["__component_order_and_prefix__"] = list(
+                self.component_order_and_prefix
+            )
+            # Also include the assembly-wide name_case policy so that
+            # renaming rules (e.g. link/joint casing) participate in the
+            # signature. This ensures that changing naming strategy forces
+            # a rebuild.
+            component_info["__name_case__"] = dict(self._name_case)
+
             assembly_signature = self.signature_manager.calculate_assembly_signature(
-                self.component_registry.all(), output_path
+                component_info, output_path
             )
 
             self.logger.info(f"Current assembly signature: [{assembly_signature}]")
@@ -622,8 +784,12 @@ class URDFAssemblyManager:
         ensure_directory_exists(output_dir, self.logger)
         mesh_manager = URDFMeshManager(output_dir)
         mesh_manager.ensure_dirs()
-        component_manager = URDFComponentManager(mesh_manager)
-        connection_manager = URDFConnectionManager(self.base_link_name)
+        component_manager = URDFComponentManager(
+            mesh_manager, name_case=self._name_case
+        )
+        connection_manager = URDFConnectionManager(
+            self.base_link_name, name_case=self._name_case
+        )
 
         # Initialize sensor manager with mesh_manager
         sensor_manager = URDFSensorManager(mesh_manager)
@@ -647,7 +813,10 @@ class URDFAssemblyManager:
             if comp_obj and comp_obj.transform is not None:
                 component_transforms[comp] = comp_obj.transform
 
-        for comp, prefix in self.component_order:
+        print("\n📦 Processing components in order:")
+        print(self.component_order_and_prefix)
+
+        for comp, prefix in self.component_order_and_prefix:
             comp_obj = self.component_registry.get(comp)
             if not comp_obj:
                 continue
@@ -747,12 +916,18 @@ class URDFAssemblyManager:
             component_transforms,
         )
 
-        # Track existing names for sensor processing
+        # Track existing names for sensor processing. Use the same case policy
+        # as the rest of the assembly so that collision checks are consistent
+        # with how names are written.
         existing_link_names = {
-            link.get("name").lower() for link in links if link.get("name")
+            self._apply_case("link", link.get("name"))
+            for link in links
+            if link.get("name")
         }
         existing_joint_names = {
-            joint.get("name").upper() for joint in joints if joint.get("name")
+            self._apply_case("joint", joint.get("name"))
+            for joint in joints
+            if joint.get("name")
         }
 
         # 5. Process sensor attachments using the new sensor manager

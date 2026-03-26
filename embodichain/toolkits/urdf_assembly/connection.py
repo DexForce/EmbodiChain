@@ -30,14 +30,62 @@ class URDFConnectionManager:
     Responsible for managing connection rules between components and sensor attachments.
     """
 
-    def __init__(self, base_link_name: str):
-        r"""Initialize the URDFConnectionManager.
+    def __init__(self, base_link_name: str, name_case: dict[str, str] | None = None):
+        """Initialize the URDFConnectionManager.
 
         Args:
-            base_link_name (str): The name of the base link to which the chassis or other components may be attached.
+            base_link_name (str): The name of the base link to which the
+                chassis or other components may be attached.
+            name_case (dict[str, str] | None): Optional mapping controlling
+                how joint and link names are normalized. Supported keys are
+                ``"joint"`` and ``"link"`` with values ``"upper"``,
+                ``"lower"`` or ``"none"``. When omitted, joints are
+                uppercased and links are lowercased (the previous default
+                behavior).
         """
         self.base_link_name = base_link_name
         self.logger = URDFAssemblyLogger.get_logger("connection_manager")
+
+        # Configure name normalization strategy for different entity types.
+        # By default, this preserves the legacy behavior of using uppercase
+        # for joint names and lowercase for link names.
+        self._name_case: dict[str, str] = {
+            "joint": "upper",
+            "link": "lower",
+        }
+        if name_case is not None:
+            for key, mode in name_case.items():
+                if key in self._name_case and mode in {"upper", "lower", "none"}:
+                    self._name_case[key] = mode
+                else:
+                    self.logger.warning(
+                        "Ignoring invalid name_case entry %r=%r (allowed keys: 'joint', 'link'; "
+                        "allowed modes: 'upper', 'lower', 'none')",
+                        key,
+                        mode,
+                    )
+
+    def _apply_case(self, kind: str, name: str | None) -> str | None:
+        """Normalize a name according to the configured case policy.
+
+        Args:
+            kind (str): One of ``"joint"`` or ``"link"``.
+            name (str | None): The original name.
+
+        Returns:
+            str | None: The normalized name, or the original value if
+            ``kind`` is unknown or mode is ``"none"``.
+        """
+
+        if name is None:
+            return None
+
+        mode = self._name_case.get(kind, "none")
+        if mode == "lower":
+            return name.lower()
+        if mode == "upper":
+            return name.upper()
+        return name
 
     def add_connections(
         self,
@@ -66,7 +114,9 @@ class URDFConnectionManager:
         # chassis is always attached to base_link (no transform applied to this connection)
         if chassis_component in base_points:
             chassis_first_link = base_points[chassis_component]
-            joint_name = f"BASE_LINK_TO_{chassis_component.upper()}_CONNECTOR"
+            joint_name = self._apply_case(
+                "joint", f"BASE_LINK_TO_{chassis_component}_CONNECTOR"
+            )
             if joint_name not in existing_joint_names:
                 joint = ET.Element("joint", name=joint_name, type="fixed")
                 ET.SubElement(joint, "origin", xyz="0 0 0", rpy="0 0 0")
@@ -93,7 +143,7 @@ class URDFConnectionManager:
 
             for comp in orphan_components:
                 comp_first_link = base_points[comp]
-                joint_name = f"BASE_TO_{comp.upper()}_CONNECTOR"
+                joint_name = self._apply_case("joint", f"BASE_TO_{comp}_CONNECTOR")
 
                 if joint_name not in existing_joint_names:
                     joint = ET.Element("joint", name=joint_name, type="fixed")
@@ -118,7 +168,11 @@ class URDFConnectionManager:
                         ET.SubElement(joint, "origin", xyz="0 0 0", rpy="0 0 0")
 
                     ET.SubElement(joint, "parent", link=self.base_link_name)
-                    ET.SubElement(joint, "child", link=comp_first_link)
+                    ET.SubElement(
+                        joint,
+                        "child",
+                        link=self._apply_case("link", comp_first_link),
+                    )
                     joints.append(joint)
                     existing_joint_names.add(joint_name)
 
@@ -129,15 +183,19 @@ class URDFConnectionManager:
         # Process other connection relationships
         for parent, child in connection_rules:
             if parent in parent_attach_points and child in base_points:
-                parent_connect_link = parent_attach_points[parent].lower()
-                child_connect_link = base_points[child].lower()
+                parent_connect_link = self._apply_case(
+                    "link", parent_attach_points[parent]
+                )
+                child_connect_link = self._apply_case("link", base_points[child])
 
                 self.logger.info(
                     f"Connecting [{parent}]-({parent_connect_link}) to [{child}]-({child_connect_link})"
                 )
 
                 # Create a unique joint name
-                base_joint_name = f"{parent.upper()}_TO_{child.upper()}_CONNECTOR"
+                base_joint_name = self._apply_case(
+                    "joint", f"{parent}_TO_{child}_CONNECTOR"
+                )
                 if base_joint_name not in existing_joint_names:
                     joint = ET.Element("joint", name=base_joint_name, type="fixed")
 
@@ -181,32 +239,43 @@ class URDFConnectionManager:
             # Add sensor links and joints to the main lists
             for link in sensor_urdf.findall("link"):
                 # Ensure sensor link names are lowercase
-                link.set("name", link.get("name").lower())
+                link.set("name", self._apply_case("link", link.get("name")))
                 joints.append(link)  # This should be added to links list instead
 
             for joint in sensor_urdf.findall("joint"):
                 # Ensure sensor joint names are uppercase and link references are lowercase
-                joint.set("name", joint.get("name").upper())
+                joint.set("name", self._apply_case("joint", joint.get("name")))
                 parent_elem = joint.find("parent")
                 child_elem = joint.find("child")
                 if parent_elem is not None:
-                    parent_elem.set("link", parent_elem.get("link").lower())
+                    parent_elem.set(
+                        "link",
+                        self._apply_case("link", parent_elem.get("link")),
+                    )
                 if child_elem is not None:
-                    child_elem.set("link", child_elem.get("link").lower())
+                    child_elem.set(
+                        "link",
+                        self._apply_case("link", child_elem.get("link")),
+                    )
                 joints.append(joint)
 
-            parent_link = base_points.get(
-                attach.parent_component, attach.parent_component
-            ).lower()  # Ensure lowercase
+            parent_link = self._apply_case(
+                "link",
+                base_points.get(attach.parent_component, attach.parent_component),
+            )
 
             # Create connection joint with uppercase name
-            joint_name = (
-                f"{attach.parent_component.upper()}_TO_{sensor_name.upper()}_CONNECTOR"
+            joint_name = f"{attach.parent_component}_TO_{sensor_name}_CONNECTOR"
+            joint = ET.Element(
+                "joint",
+                name=self._apply_case("joint", joint_name),
+                type="fixed",
             )
-            joint = ET.Element("joint", name=joint_name, type="fixed")
             ET.SubElement(joint, "origin", xyz="0 0 0", rpy="0 0 0")
             ET.SubElement(joint, "parent", link=parent_link)
             ET.SubElement(
-                joint, "child", link=sensor_urdf.find("link").get("name").lower()
+                joint,
+                "child",
+                link=self._apply_case("link", sensor_urdf.find("link").get("name")),
             )
             joints.append(joint)

@@ -160,6 +160,18 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         urdf_path=component.get("urdf_path"),
                         transform=component.get("transform"),
                     )
+                for sensor in user_urdf_cfg.get("sensors", []):
+                    base_cfg.urdf_cfg.add_sensor(
+                        sensor_type=sensor.get("sensor_type"),
+                        urdf_path=sensor.get("urdf_path"),
+                        transform=sensor.get("transform"),
+                    )
+                component_prefix = user_urdf_cfg.get("component_prefix", None)
+                if component_prefix:
+                    base_cfg.urdf_cfg.component_prefix = component_prefix
+                name_case = user_urdf_cfg.get("name_case", None)
+                if name_case:
+                    base_cfg.urdf_cfg.name_case = name_case
             else:
                 logger.log_warning(
                     "urdf_cfg should be a dictionary. Skipping urdf_cfg merge."
