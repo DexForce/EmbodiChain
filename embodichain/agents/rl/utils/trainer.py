@@ -20,6 +20,7 @@ from typing import Dict
 import time
 import numpy as np
 import torch
+from embodichain.utils import logger
 from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 import wandb
@@ -146,7 +147,7 @@ class Trainer:
 
     def train(self, total_timesteps: int):
         if self.rank == 0:
-            print(f"Start training, total steps: {total_timesteps}")
+            logger.info(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
