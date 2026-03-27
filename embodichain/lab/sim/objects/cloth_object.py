@@ -235,7 +235,7 @@ class ClothObject(BatchEntity):
             # apply transformation to local rest vertices and back
             rest_vertices_local = rest_vertices - arena_offsets[i]
             transformed_vertices = rest_vertices_local @ rotation.T + translation
-            transformed_vertices = transformed_vertices
+            transformed_vertices = transformed_vertices + arena_offsets[i]
 
             cloth_body: ClothBody = self._entities[env_idx].get_physical_body()
             position_buffer = cloth_body.get_position_inv_mass_buffer()

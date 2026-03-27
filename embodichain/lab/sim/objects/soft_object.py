@@ -247,13 +247,15 @@ class SoftObject(BatchEntity):
             transformed_collision_vertices = (
                 rest_collision_vertices_local @ rotation.T + translation
             )
-            transformed_collision_vertices = transformed_collision_vertices
+            transformed_collision_vertices = (
+                transformed_collision_vertices + arena_offsets[i]
+            )
 
             rest_sim_vertices_local = rest_sim_vertices - arena_offsets[i]
             transformed_sim_vertices = (
                 rest_sim_vertices_local @ rotation.T + translation
             )
-            transformed_sim_vertices = transformed_sim_vertices
+            transformed_sim_vertices = transformed_sim_vertices + arena_offsets[i]
 
             # apply vertices to soft body
             soft_body: SoftBody = self._entities[env_idx].get_physical_body()
