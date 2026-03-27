@@ -57,6 +57,9 @@ def parse_arguments():
     parser.add_argument(
         "--enable_rt", action="store_true", help="Enable ray tracing rendering"
     )
+    parser.add_argument(
+        "--num_envs", type=int, default=9, help="Number of parallel environments"
+    )
     return parser.parse_args()
 
 
@@ -75,6 +78,7 @@ def initialize_simulation(args):
         sim_device="cuda",
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
     )
     sim = SimulationManager(config)
 
@@ -186,7 +190,7 @@ def press_cow(sim: SimulationManager, robot: Robot):
     )
     interp_trajectory = interp_trajectory[0]
     for qpos in interp_trajectory:
-        robot.set_qpos(qpos.unsqueeze(0), joint_ids=arm_ids)
+        robot.set_qpos(qpos.unsqueeze(0).repeat(sim.num_envs, 1), joint_ids=arm_ids)
         sim.update(step=5)
 
 

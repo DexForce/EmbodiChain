@@ -24,6 +24,7 @@ from typing import List, TypeVar, Sequence
 
 from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.utils import logger
+import dexsim
 from copy import deepcopy
 
 T = TypeVar("T")
