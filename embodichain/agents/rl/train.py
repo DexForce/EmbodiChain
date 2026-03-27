@@ -403,6 +403,9 @@ def train_from_config(config_path: str, distributed: bool | None = None):
             if rank == 0:
                 logger.log_warning(f"Failed to close evaluation environment: {e}")
 
+        if distributed and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
         if rank == 0:
             logger.log_info("Training finished")
 

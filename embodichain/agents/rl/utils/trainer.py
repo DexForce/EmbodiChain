@@ -148,7 +148,7 @@ class Trainer:
 
     def train(self, total_timesteps: int):
         if self.rank == 0:
-            logger.info(f"Start training, total steps: {total_timesteps}")
+            logger.log_info(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
