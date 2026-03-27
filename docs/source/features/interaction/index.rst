@@ -7,4 +7,5 @@ The Interactive Simulation module provides tools and interfaces for interacting 
    :maxdepth: 2
 
    Window interaction <window.md>
+   Asset preview <preview_asset.md>
    
