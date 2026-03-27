@@ -15,7 +15,9 @@ This module provides the RL training entry script, responsible for parsing confi
 ## Argument Parsing
 - Supports command-line arguments:
     - `--config`: Specify the path to the config file (JSON only).
+    - `--distributed`: Enable multi-GPU distributed training.
 - The config file includes parameters for trainer, policy, algorithm, events, and other modules.
+- See [Multi-GPU Training](multi_gpu.md) for distributed training.
 
 ## Module Initialization
 - Device selection (CPU/GPU), automatic detection and setup.
