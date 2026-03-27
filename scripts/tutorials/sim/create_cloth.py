@@ -28,17 +28,13 @@ import open3d as o3d
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    RobotCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
-    SoftObjectCfg,
-    SoftbodyVoxelAttributesCfg,
-    SoftbodyPhysicalAttributesCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
-from embodichain.lab.sim.objects import RigidObject, ClothObject, SoftObject
+from embodichain.lab.sim.objects import ClothObject
 
 
 def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
@@ -89,7 +85,7 @@ def main():
         help="Run simulation in headless mode",
     )
     parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of parallel environments"
+        "--num_envs", type=int, default=1, help="Number of parallel environments"
     )
     parser.add_argument(
         "--enable_rt",
