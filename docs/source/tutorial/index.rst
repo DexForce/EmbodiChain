@@ -7,6 +7,7 @@ Tutorials
 
    create_scene
    create_softbody
+   create_cloth
    rigid_object_group
    robot
    add_robot

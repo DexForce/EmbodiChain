@@ -30,6 +30,7 @@ from dexsim.types import (
     VoxelConfig,
     SoftBodyAttr,
     SoftBodyMaterialModel,
+    ClothBodyAttr,
 )
 from embodichain.utils import configclass, is_configclass
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
@@ -385,6 +386,116 @@ class SoftbodyPhysicalAttributesCfg:
 
 
 @configclass
+class ClothPhysicalAttributesCfg:
+    # material properties
+    youngs: float = 1e10
+    """Young's modulus (higher = stiffer)."""
+
+    poissons: float = 0.3
+    """Poisson's ratio."""
+
+    dynamic_friction: float = 0.5
+    """Dynamic friction coefficient."""
+
+    elasticity_damping: float = 0.0
+    """Elasticity damping factor."""
+
+    thickness: float = 0.001
+    """Cloth thickness (m)."""
+
+    bending_stiffness: float = 0.00001
+    """Bending stiffness."""
+
+    bending_damping: float = 0.0
+    """Bending damping."""
+
+    # cloth body properties
+    enable_kinematic: bool = False
+    """If True, (partially) kinematic behavior is enabled."""
+
+    enable_ccd: bool = True
+    """Enable continuous collision detection (CCD)."""
+
+    enable_self_collision: bool = False
+    """Enable self-collision handling."""
+
+    has_gravity: bool = True
+    """Whether the cloth is affected by gravity."""
+
+    self_collision_stress_tolerance: float = 0.9
+    """Stress tolerance threshold for self-collision constraints."""
+
+    collision_mesh_simplification: bool = True
+    """Whether to simplify the collision mesh for self-collision."""
+
+    vertex_velocity_damping: float = 0.005
+    """Per-vertex velocity damping."""
+
+    mass: float = -1.0
+    """Total mass of the cloth. If negative, density is used to compute mass."""
+
+    density: float = 1.0
+    """Material density in kg/m^3."""
+
+    max_depenetration_velocity: float = 1e6
+    """Maximum velocity used to resolve penetrations."""
+
+    max_velocity: float = 100.0
+    """Clamp for linear (or vertex) velocity."""
+
+    self_collision_filter_distance: float = 0.1
+    """Distance threshold for filtering self-collision vertex pairs."""
+
+    linear_damping: float = 0.05
+    """Global linear damping applied to the cloth."""
+
+    sleep_threshold: float = 0.05
+    """Velocity/energy threshold below which the cloth can go to sleep."""
+
+    settling_threshold: float = 0.1
+    """Threshold used to decide convergence/settling state."""
+
+    settling_damping: float = 10.0
+    """Additional damping applied during settling phase."""
+
+    min_position_iters: int = 4
+    """Minimum solver iterations for position correction."""
+
+    min_velocity_iters: int = 1
+    """Minimum solver iterations for velocity updates."""
+
+    def attr(self) -> ClothBodyAttr:
+        """Convert to dexsim ClothBodyAttr."""
+        attr = ClothBodyAttr()
+        attr.youngs = self.youngs
+        attr.poissons = self.poissons
+        attr.dynamic_friction = self.dynamic_friction
+        attr.elasticity_damping = self.elasticity_damping
+        attr.thickness = self.thickness
+        attr.bending_stiffness = self.bending_stiffness
+        attr.bending_damping = self.bending_damping
+        attr.enable_kinematic = self.enable_kinematic
+        attr.enable_ccd = self.enable_ccd
+        attr.enable_self_collision = self.enable_self_collision
+        attr.has_gravity = self.has_gravity
+        attr.self_collision_stress_tolerance = self.self_collision_stress_tolerance
+        attr.collision_mesh_simplification = self.collision_mesh_simplification
+        attr.vertex_velocity_damping = self.vertex_velocity_damping
+        attr.mass = self.mass
+        attr.density = self.density
+        attr.max_depenetration_velocity = self.max_depenetration_velocity
+        attr.max_velocity = self.max_velocity
+        attr.self_collision_filter_distance = self.self_collision_filter_distance
+        attr.linear_damping = self.linear_damping
+        attr.sleep_threshold = self.sleep_threshold
+        attr.settling_threshold = self.settling_threshold
+        attr.settling_damping = self.settling_damping
+        attr.min_position_iters = self.min_position_iters
+        attr.min_velocity_iters = self.min_velocity_iters
+        return attr
+
+
+@configclass
 class JointDrivePropertiesCfg:
     """Properties to define the drive mechanism of a joint."""
 
@@ -590,6 +701,21 @@ class SoftObjectCfg(ObjectBaseCfg):
 
     shape: MeshCfg = MeshCfg()
     """Mesh configuration for the soft body."""
+
+
+@configclass
+class ClothObjectCfg(ObjectBaseCfg):
+    """Configuration for a cloth body asset in the simulation.
+
+    This class extends the base asset configuration to include specific properties for cloth bodies,
+    such as physical attributes and collision group.
+    """
+
+    physical_attr: ClothPhysicalAttributesCfg = ClothPhysicalAttributesCfg()
+    """Physical attributes for the cloth body."""
+
+    shape: MeshCfg = MeshCfg()
+    """Mesh configuration for the cloth body."""
 
 
 @configclass
