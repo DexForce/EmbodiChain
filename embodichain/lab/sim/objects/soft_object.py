@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
-from dexsim.engine import PhysicsScene
+from dexsim.engine import PhysicsScene, SoftBody
 from dexsim.types import SoftBodyGPUAPIReadWriteType
 from embodichain.lab.sim.common import (
     BatchEntity,
@@ -60,11 +60,10 @@ class SoftBodyData:
         # TODO: soft body data can only be stored in cuda device for now.
         self.device = device
         # TODO: inorder to retrieve arena position, we need to access the node of each entity.
-        self._arena_positions = self._get_arena_position()
         self.ps = ps
         self.num_instances = len(entities)
 
-        self.softbodies = [
+        self.softbodies: Sequence[SoftBody] = [
             self.entities[i].get_physical_body() for i in range(self.num_instances)
         ]
         self.n_collision_vertices = self.softbodies[0].get_num_vertices()
@@ -105,19 +104,6 @@ class SoftBodyData:
             dtype=torch.float32,
         )
 
-    def _get_arena_position(self):
-        n_env = len(self.entities)
-        arena_positions = torch.empty(
-            (n_env, 3), device=self.device, dtype=torch.float32
-        )
-        for i, entity in enumerate(self.entities):
-            arena = entity.node.get_parent()
-            arena_position = arena.get_world_pose()[:3, 3]
-            arena_positions[i] = torch.as_tensor(
-                arena_position, device=self.device, dtype=torch.float32
-            )
-        return arena_positions
-
     @property
     def rest_collision_vertices(self):
         """Get the rest position buffer of the soft bodies."""
@@ -155,7 +141,7 @@ class SoftBodyData:
 
 
 class SoftObject(BatchEntity):
-    """SoftObject represents a batch of rigid body in the simulation."""
+    """SoftObject represents a batch of soft body in the simulation."""
 
     def __init__(
         self,
@@ -163,7 +149,7 @@ class SoftObject(BatchEntity):
         entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
     ) -> None:
-        self._world = dexsim.default_world()
+        self._world: dexsim.World = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
@@ -188,7 +174,7 @@ class SoftObject(BatchEntity):
     def set_collision_filter(
         self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
-        """Set collision filter data for the rigid object.
+        """Set collision filter data for the soft object.
 
         Args:
             filter_data (torch.Tensor): [N, 4] of int.
@@ -213,22 +199,25 @@ class SoftObject(BatchEntity):
 
     @property
     def body_data(self) -> SoftBodyData | None:
-        """Get the soft body data manager for this rigid object.
+        """Get the soft body data manager for this soft object.
 
         Returns:
-            SoftBodyData | None: The rigid body data manager.
+            SoftBodyData | None: The soft body data manager.
         """
         return self._data
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
-        """Set local pose of the rigid object.
+        """Set local pose of the soft object.
 
         Args:
-            pose (torch.Tensor): The local pose of the rigid object with shape (N, 7) or (N, 4, 4).
+            pose (torch.Tensor): The local pose of the soft object with shape (N, 7) or (N, 4, 4).
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
+        from embodichain.lab.sim import SimulationManager
+
+        sim = SimulationManager.get_instance()
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         if len(local_env_ids) != len(pose):
@@ -245,6 +234,7 @@ class SoftObject(BatchEntity):
                 f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
             )
 
+        arena_offsets = sim.arena_offsets
         for i, env_idx in enumerate(local_env_ids):
             # TODO: soft body cannot directly set by `set_local_pose` currently.
             rest_collision_vertices = self.body_data.rest_collision_vertices[i]
@@ -253,26 +243,22 @@ class SoftObject(BatchEntity):
             translation = pose4x4[i][:3, 3]
 
             # apply transformation to local rest vertices and back
-            rest_collision_vertices_local = (
-                rest_collision_vertices - self._data._arena_positions[i]
-            )
+            rest_collision_vertices_local = rest_collision_vertices - arena_offsets[i]
             transformed_collision_vertices = (
                 rest_collision_vertices_local @ rotation.T + translation
             )
             transformed_collision_vertices = (
-                transformed_collision_vertices + self._data._arena_positions[i]
+                transformed_collision_vertices + arena_offsets[i]
             )
 
-            rest_sim_vertices_local = rest_sim_vertices - self._data._arena_positions[i]
+            rest_sim_vertices_local = rest_sim_vertices - arena_offsets[i]
             transformed_sim_vertices = (
                 rest_sim_vertices_local @ rotation.T + translation
             )
-            transformed_sim_vertices = (
-                transformed_sim_vertices + self._data._arena_positions[i]
-            )
+            transformed_sim_vertices = transformed_sim_vertices + arena_offsets[i]
 
             # apply vertices to soft body
-            soft_body = self._entities[env_idx].get_physical_body()
+            soft_body: SoftBody = self._entities[env_idx].get_physical_body()
             collision_position_buffer = soft_body.get_position_inv_mass_buffer()
             sim_position_buffer = soft_body.get_sim_position_inv_mass_buffer()
             sim_velocity_buffer = soft_body.get_sim_velocity_buffer()
@@ -326,13 +312,13 @@ class SoftObject(BatchEntity):
         return self.body_data.sim_vertex_velocity_buffer
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        """Get local pose of the rigid object.
+        """Get local pose of the soft object.
 
         Args:
             to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
 
         Returns:
-            torch.Tensor: The local pose of the rigid object with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
+            torch.Tensor: The local pose of the soft object with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
         """
         raise NotImplementedError("Getting local pose for SoftObject is not supported.")
 
