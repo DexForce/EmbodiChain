@@ -44,14 +44,22 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to JSON config")
+    parser.add_argument(
+        "--distributed",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable multi-GPU distributed training",
+    )
     return parser.parse_args()
 
 
-def train_from_config(config_path: str):
+def train_from_config(config_path: str, distributed: bool | None = None):
     """Run training from a config file path.
 
     Args:
         config_path: Path to the JSON config file
+        distributed: If True, run multi-GPU distributed training.
+            If None, use trainer.distributed from config.
     """
     with open(config_path, "r") as f:
         cfg_json = json.load(f)
@@ -60,10 +68,42 @@ def train_from_config(config_path: str):
     policy_block = cfg_json["policy"]
     algo_block = cfg_json["algorithm"]
 
+    # Resolve distributed flag
+    if distributed is None:
+        distributed = bool(trainer_cfg.get("distributed", False))
+
+    # Distributed setup
+    rank = 0
+    world_size = 1
+    local_rank = 0
+    if distributed:
+        if not torch.distributed.is_available():
+            raise RuntimeError(
+                "Distributed training requested but torch.distributed is not available."
+            )
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "Distributed training with NCCL backend requires CUDA, "
+                "but torch.cuda.is_available() is False."
+            )
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        if local_rank < 0 or local_rank >= torch.cuda.device_count():
+            raise ValueError(
+                f"LOCAL_RANK {local_rank} is out of range "
+                f"(available GPUs: {torch.cuda.device_count()})."
+            )
+        torch.cuda.set_device(local_rank)
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl")
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+
     # Runtime
     exp_name = trainer_cfg.get("exp_name", "generic_exp")
     seed = int(trainer_cfg.get("seed", 1))
     device_str = trainer_cfg.get("device", "cpu")
+    if distributed:
+        device_str = f"cuda:{local_rank}"
     iterations = int(trainer_cfg.get("iterations", 250))
     buffer_size = int(
         trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 2048))
@@ -107,33 +147,43 @@ def train_from_config(config_path: str):
         device = torch.device(f"cuda:{index}")
     elif device.type != "cpu":
         raise ValueError(f"Unsupported device type: {device}")
-    logger.log_info(f"Device: {device}")
+    if rank == 0:
+        logger.log_info(f"Device: {device}")
+    if distributed and rank == 0:
+        logger.log_info(f"Distributed training: world_size={world_size}")
 
     # Seeds
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    effective_seed = seed + rank
+    np.random.seed(effective_seed)
+    torch.manual_seed(effective_seed)
     torch.backends.cudnn.deterministic = True
     if device.type == "cuda":
-        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed_all(effective_seed)
 
     # Outputs
-    run_stamp = time.strftime("%Y%m%d_%H%M%S")
+    if distributed:
+        run_stamp = time.strftime("%Y%m%d_%H%M%S") if rank == 0 else None
+        run_stamp_list = [run_stamp]
+        torch.distributed.broadcast_object_list(run_stamp_list, src=0)
+        run_stamp = run_stamp_list[0]
+    else:
+        run_stamp = time.strftime("%Y%m%d_%H%M%S")
     run_base = os.path.join("outputs", f"{exp_name}_{run_stamp}")
     log_dir = os.path.join(run_base, "logs")
     checkpoint_dir = os.path.join(run_base, "checkpoints")
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    writer = SummaryWriter(f"{log_dir}/{exp_name}")
+    if rank == 0:
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(checkpoint_dir, exist_ok=True)
+    writer = SummaryWriter(f"{log_dir}/{exp_name}") if rank == 0 else None
 
     # Initialize Weights & Biases (optional)
     use_wandb = trainer_cfg.get("use_wandb", False)
-
-    # Initialize Weights & Biases (optional)
-    if use_wandb:
+    if use_wandb and rank == 0:
         wandb.init(project=wandb_project_name, name=exp_name, config=cfg_json)
 
     gym_config_path = Path(trainer_cfg["gym_config"])
-    logger.log_info(f"Current working directory: {Path.cwd()}")
+    if rank == 0:
+        logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_json(str(gym_config_path))
     gym_env_cfg = config_to_cfg(
@@ -141,9 +191,6 @@ def train_from_config(config_path: str):
     )
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
-
-    if num_envs is not None:
-        gym_env_cfg.num_envs = num_envs
 
     # Ensure sim configuration mirrors runtime overrides
     if gym_env_cfg.sim_cfg is None:
@@ -159,11 +206,12 @@ def train_from_config(config_path: str):
         gym_env_cfg.sim_cfg.sim_device = torch.device("cpu")
     gym_env_cfg.sim_cfg.headless = headless
     gym_env_cfg.sim_cfg.enable_rt = enable_rt
-    gym_env_cfg.sim_cfg.gpu_id = gpu_id
+    gym_env_cfg.sim_cfg.gpu_id = local_rank if distributed else gpu_id
 
-    logger.log_info(
-        f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, enable_rt={gym_env_cfg.sim_cfg.enable_rt}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
-    )
+    if rank == 0:
+        logger.log_info(
+            f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, enable_rt={gym_env_cfg.sim_cfg.enable_rt}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
+        )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
     sample_obs, _ = env.reset()
@@ -174,7 +222,7 @@ def train_from_config(config_path: str):
     # Create evaluation environment only if enabled
     eval_env = None
     num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
-    if enable_eval:
+    if enable_eval and rank == 0:
         eval_gym_env_cfg = deepcopy(gym_env_cfg)
         eval_gym_env_cfg.num_envs = num_eval_envs
         eval_gym_env_cfg.sim_cfg.headless = True
@@ -240,7 +288,13 @@ def train_from_config(config_path: str):
     # Build Algorithm via factory
     algo_name = algo_block["name"].lower()
     algo_cfg = algo_block["cfg"]
-    algo = build_algo(algo_name, algo_cfg, policy, device)
+    algo = build_algo(
+        algo_name,
+        algo_cfg,
+        policy,
+        device,
+        distributed=distributed,
+    )
 
     # Build Trainer
     event_modules = [
@@ -296,30 +350,39 @@ def train_from_config(config_path: str):
         use_wandb=use_wandb,
         eval_env=eval_env,  # None if enable_eval=False
         event_cfg=train_event_cfg,
-        eval_event_cfg=eval_event_cfg if enable_eval else {},
+        eval_event_cfg=eval_event_cfg if (enable_eval and rank == 0) else {},
         num_eval_episodes=num_eval_episodes,
+        distributed=distributed,
+        rank=rank,
+        world_size=world_size,
     )
 
-    logger.log_info("Generic training initialized")
-    logger.log_info(f"Task: {type(env).__name__}")
-    logger.log_info(
-        f"Policy: {policy_name} (available: {get_registered_policy_names()})"
-    )
-    logger.log_info(
-        f"Algorithm: {algo_name} (available: {get_registered_algo_names()})"
-    )
+    if rank == 0:
+        logger.log_info("Generic training initialized")
+        logger.log_info(f"Task: {type(env).__name__}")
+        logger.log_info(
+            f"Policy: {policy_name} (available: {get_registered_policy_names()})"
+        )
+        logger.log_info(
+            f"Algorithm: {algo_name} (available: {get_registered_algo_names()})"
+        )
 
-    total_steps = int(iterations * buffer_size * env.num_envs)
-    logger.log_info(f"Total steps: {total_steps} (iterations≈{iterations})")
+    total_steps = int(iterations * buffer_size * env.num_envs * world_size)
+    if rank == 0:
+        logger.log_info(
+            f"Total steps: {total_steps} (iterations≈{iterations}, world_size={world_size})"
+        )
 
     try:
         trainer.train(total_steps)
     except KeyboardInterrupt:
-        logger.log_info("Training interrupted by user")
+        if rank == 0:
+            logger.log_info("Training interrupted by user")
     finally:
         trainer.save_checkpoint()
-        writer.close()
-        if use_wandb:
+        if writer is not None:
+            writer.close()
+        if use_wandb and rank == 0:
             try:
                 wandb.finish()
             except Exception:
@@ -330,21 +393,27 @@ def train_from_config(config_path: str):
             if env is not None:
                 env.close()
         except Exception as e:
-            logger.log_warning(f"Failed to close training environment: {e}")
+            if rank == 0:
+                logger.log_warning(f"Failed to close training environment: {e}")
 
         try:
             if eval_env is not None:
                 eval_env.close()
         except Exception as e:
-            logger.log_warning(f"Failed to close evaluation environment: {e}")
+            if rank == 0:
+                logger.log_warning(f"Failed to close evaluation environment: {e}")
 
-        logger.log_info("Training finished")
+        if distributed and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
+        if rank == 0:
+            logger.log_info("Training finished")
 
 
 def main():
     """Main entry point for command-line training."""
     args = parse_args()
-    train_from_config(args.config)
+    train_from_config(args.config, distributed=args.distributed)
 
 
 if __name__ == "__main__":
