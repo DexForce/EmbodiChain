@@ -25,6 +25,7 @@ from embodichain.utils import logger
 
 @dataclass
 class AntipodalSamplerCfg:
+    """ Configuration for AntipodalSampler."""
     n_sample: int = 20000
     """surface point sample number"""
     max_angle: float = np.pi / 12
@@ -36,6 +37,7 @@ class AntipodalSamplerCfg:
 
 
 class AntipodalSampler:
+    """ AntipodalSampler samples antipodal point pairs on a given mesh. It uses Open3D's raycasting functionality to find points on the mesh that are visible along the negative normal direction from uniformly sampled points on the mesh surface. The sampler can also apply a random disturbance to the ray direction to increase the diversity of sampled antipodal points. The resulting antipodal point pairs can be used for grasp generation and annotation tasks."""
     def __init__(
         self,
         cfg: AntipodalSamplerCfg = AntipodalSamplerCfg(),
@@ -45,6 +47,10 @@ class AntipodalSampler:
 
     def sample(self, vertices: torch.Tensor, faces: torch.Tensor) -> torch.Tensor:
         """Get sample Antipodal point pair
+
+        Args:
+            vertices: [V, 3] vertex positions of the mesh
+            faces: [F, 3] triangle indices of the mesh
 
         Returns:
             hit_point_pairs: [N, 2, 3] tensor of N antipodal point pairs. Each pair consists of a hit point and its corresponding surface point.
@@ -83,13 +89,13 @@ class AntipodalSampler:
         ray_origin = torch.vstack([ray_origin, ray_origin])
         ray_direc = torch.vstack([ray_direc, disturb_direc])
         # casting
-        return self.get_raycast_result(
+        return self._get_raycast_result(
             ray_origin,
             ray_direc,
             surface_origin=torch.vstack([sample_points, sample_points]),
         )
 
-    def get_raycast_result(
+    def _get_raycast_result(
         self,
         ray_origin: torch.Tensor,
         ray_direc: torch.Tensor,

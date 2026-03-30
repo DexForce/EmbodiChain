@@ -242,6 +242,7 @@ if __name__ == "__main__":
     )
     sim.open_window()
 
+    # Annotate part of the mug to be grasped by following the instructions in the visualization window:
     # 1. View grasp object in browser (e.g http://localhost:11801)
     # 2. press 'Rect Select Region', select grasp region
     # 3. press 'Confirm Selection' to finish grasp region selection.

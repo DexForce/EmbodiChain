@@ -1167,7 +1167,7 @@ class RigidObject(BatchEntity):
         grasp_poses: tuple[torch.Tensor] = []
         open_lengths: tuple[torch.Tensor] = []
         for pose in poses:
-            grasp_pose, open_length = self._grasp_annotator.get_approach_grasp_poses(
+            grasp_pose, open_length = self._grasp_annotator.get_grasp_poses(
                 self._hit_point_pairs, pose, approach_direction, is_visual=False
             )
             grasp_poses.append(grasp_pose)

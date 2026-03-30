@@ -59,12 +59,20 @@ class SelectResult:
 
 
 class GraspAnnotator:
+    """GraspAnnotator provides functionality to annotate antipodal grasp regions on a given object mesh. It allows users to interactively select regions on the mesh and generates antipodal point pairs for grasping based on the selected region. The annotator also includes a collision checker to filter out infeasible grasp poses and can visualize the generated grasp poses in a 3D viewer.
+    """
     def __init__(
         self,
         vertices: torch.Tensor,
         triangles: torch.Tensor,
         cfg: GraspAnnotatorCfg = GraspAnnotatorCfg(),
     ) -> None:
+        """Initialize the GraspAnnotator with the given mesh vertices, triangles, and configuration.
+        Args:
+            vertices (torch.Tensor): A tensor of shape (V, 3) representing the vertex positions of the mesh.
+            triangles (torch.Tensor): A tensor of shape (F, 3) representing the triangle indices of the mesh.
+            cfg (GraspAnnotatorCfg, optional): Configuration for the grasp annotator. Defaults to GraspAnnotatorCfg().
+        """
         self.device = vertices.device
         self.vertices = vertices
         self.triangles = triangles
@@ -82,7 +90,11 @@ class GraspAnnotator:
         self.cfg = cfg
         self.antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)
 
-    def annotate(self):
+    def annotate(self) -> torch.Tensor:
+        """Annotate antipodal grasp region on the mesh and return sampled antipodal point pairs.
+        Returns:
+            torch.Tensor: A tensor of shape (N, 2, 3) representing N antipodal point pairs. Each pair consists of a hit point and its corresponding surface point.
+        """
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
         if os.path.exists(cache_path) and not self.cfg.force_regenerate:
             logger.log_info(
@@ -359,7 +371,7 @@ class GraspAnnotator:
         t = transform[:3, 3]
         return points @ r.T + t
 
-    def get_approach_grasp_poses(
+    def get_grasp_poses(
         self,
         hit_point_pairs: torch.Tensor,
         object_pose: torch.Tensor,
