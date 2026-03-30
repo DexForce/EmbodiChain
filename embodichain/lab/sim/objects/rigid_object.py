@@ -1164,11 +1164,11 @@ class RigidObject(BatchEntity):
 
         poses = self.get_local_pose(to_matrix=True)
         poses = torch.as_tensor(poses, dtype=torch.float32, device=self.device)
-        grasp_poses = []
-        open_lengths = []
+        grasp_poses: tuple[torch.Tensor] = []
+        open_lengths: tuple[torch.Tensor] = []
         for pose in poses:
             grasp_pose, open_length = self._grasp_annotator.get_approach_grasp_poses(
-                self._hit_point_pairs, pose, approach_direction
+                self._hit_point_pairs, pose, approach_direction, is_visual=False
             )
             grasp_poses.append(grasp_pose)
             open_lengths.append(open_length)
@@ -1184,6 +1184,6 @@ class RigidObject(BatchEntity):
             self._grasp_annotator.visualize_grasp_pose(
                 obj_pose=poses[0],
                 grasp_pose=grasp_poses[0],
-                open_length=open_lengths[0],
+                open_length=open_lengths[0].item(),
             )
         return grasp_poses

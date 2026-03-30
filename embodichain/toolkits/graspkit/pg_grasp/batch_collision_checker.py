@@ -1,3 +1,19 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
 import trimesh
 import numpy as np
 import torch
@@ -10,6 +26,9 @@ import os
 import pickle
 import open3d as o3d
 from embodichain.utils import logger
+from embodichain.utils.warp import convex_signed_distance_kernel
+import warp as wp
+from embodichain.utils.device_utils import standardize_device_string
 
 CONVEX_CACHE_DIR = os.path.join(
     os.path.expanduser("~"), ".cache", "embodichain_cache", "convex_decomposition"
@@ -51,14 +70,84 @@ class BatchConvexCollisionChecker:
         )
 
         if not os.path.isfile(self.cache_path):
+            # [n_convex, n_max_faces, 4]: plane equations, normals(3) and offsets(1), padded with zeros if a hull has less than n_max_faces
+            # [n_convex, ]: number of faces for each convex hull
+
             # generate convex hulls and extract plane equations, then cache to disk
-            self.plane_equations = BatchConvexCollisionChecker._compute_plane_equations(
+            plane_equations_np = BatchConvexCollisionChecker._compute_plane_equations(
                 base_mesh_verts_np, base_mesh_faces_np, max_decomposition_hulls
             )
+            # pack as a single tensor
+            n_convex = len(plane_equations_np)
+            n_max_equation = max(len(normals) for normals, _ in plane_equations_np)
+            plane_equations = torch.zeros(
+                size=(n_convex, n_max_equation, 4),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            plane_equations_counts = torch.zeros(
+                n_convex, dtype=torch.int32, device=self.device
+            )
+            for i in range(n_convex):
+                n_equation = plane_equations_np[i][0].shape[0]
+                # plane normals
+                plane_equations[i, :n_equation, :3] = torch.tensor(
+                    plane_equations_np[i][0], device=self.device
+                )
+                # plane offsets
+                plane_equations[i, :n_equation, 3] = torch.tensor(
+                    plane_equations_np[i][1], device=self.device
+                )
+                plane_equations_counts[i] = n_equation
+            self.plane_equations = {
+                "plane_equations": plane_equations,
+                "plane_equation_counts": plane_equations_counts,
+            }
             pickle.dump(self.plane_equations, open(self.cache_path, "wb"))
         else:
-            # load precomputed plane equations from cache
             self.plane_equations = pickle.load(open(self.cache_path, "rb"))
+            self.plane_equations["plane_equations"] = self.plane_equations[
+                "plane_equations"
+            ].to(self.device)
+            self.plane_equations["plane_equation_counts"] = self.plane_equations[
+                "plane_equation_counts"
+            ].to(self.device)
+
+    @staticmethod
+    def batch_point_convex_query(
+        plane_equations: torch.Tensor,
+        plane_equation_counts: torch.Tensor,
+        batch_points: torch.Tensor,
+        device: torch.device,
+        collision_threshold: float = -0.003,
+    ):
+        plane_equations_wp = wp.from_torch(plane_equations)
+        plane_equation_counts_wp = wp.from_torch(plane_equation_counts)
+        batch_points_wp = wp.from_torch(batch_points)
+
+        n_pose = batch_points.shape[0]
+        n_point = batch_points.shape[1]
+        n_convex = plane_equations.shape[0]
+        point_convex_signed_distance_wp = wp.full(
+            shape=(n_pose, n_point, n_convex),
+            value=-float("inf"),
+            dtype=float,
+            device=standardize_device_string(device),
+        )  # [n_pose, n_point, n_convex]
+        wp.launch(
+            kernel=convex_signed_distance_kernel,
+            dim=(n_pose, n_point, n_convex),
+            inputs=(batch_points_wp, plane_equations_wp, plane_equation_counts_wp),
+            outputs=(point_convex_signed_distance_wp,),
+            device=standardize_device_string(device),
+        )
+        point_convex_signed_distance = wp.to_torch(point_convex_signed_distance_wp)
+        # import ipdb; ipdb.set_trace()
+        point_signed_distance = point_convex_signed_distance.min(
+            dim=-1
+        ).values  # [n_pose, n_point]
+        is_point_collide = point_signed_distance <= collision_threshold
+        return point_signed_distance, is_point_collide
 
     def query_batch_points(
         self,
@@ -67,27 +156,17 @@ class BatchConvexCollisionChecker:
         is_visual: bool = False,
     ):
         n_batch = batch_points.shape[0]
-        n_points = batch_points.shape[1]
-        penetration_result = torch.zeros(size=(n_batch, n_points), device=self.device)
-        penetration_result.fill_(-float("inf"))
-        collision_result = torch.zeros(
-            size=(n_batch, n_points), dtype=torch.bool, device=self.device
-        )
-        collision_result.fill_(False)
-        for normals, offsets in self.plane_equations:
-            normals_torch = torch.tensor(normals, device=self.device)
-            offsets_torch = torch.tensor(offsets, device=self.device)
-            penetration, collides = check_collision_single_hull(
-                normals_torch,
-                offsets_torch,
+        point_signed_distance, is_point_collide = (
+            BatchConvexCollisionChecker.batch_point_convex_query(
+                self.plane_equations["plane_equations"],
+                self.plane_equations["plane_equation_counts"],
                 batch_points,
-                collision_threshold,
+                device=self.device,
+                collision_threshold=collision_threshold,
             )
-            penetration_result = torch.max(penetration_result, penetration)
-            collision_result = torch.logical_or(collision_result, collides)
-        is_colliding = collision_result.any(dim=-1)  # [B]
-        max_penetration = penetration_result.max(dim=-1)[0]  # [B]
-
+        )
+        is_pose_collide = is_point_collide.any(dim=-1)  # [B]
+        pose_surface_distance = point_signed_distance.min(dim=-1).values  # [B]
         if is_visual:
             # visualize result
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
@@ -96,12 +175,12 @@ class BatchConvexCollisionChecker:
                 query_points_np = batch_points[i].cpu().numpy()
                 query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
                 query_points_color = np.zeros_like(query_points_np)
-                query_points_color[collision_result[i].cpu().numpy()] = [
+                query_points_color[is_point_collide[i].cpu().numpy()] = [
                     1.0,
                     0,
                     0,
                 ]  # red for colliding points
-                query_points_color[~collision_result[i].cpu().numpy()] = [
+                query_points_color[~is_point_collide[i].cpu().numpy()] = [
                     0,
                     1.0,
                     0,
@@ -110,7 +189,7 @@ class BatchConvexCollisionChecker:
                 o3d.visualization.draw_geometries(
                     [self.mesh, query_points_o3d, frame], mesh_show_back_face=True
                 )
-        return is_colliding, max_penetration
+        return is_pose_collide, pose_surface_distance
 
     def query(
         self,
@@ -299,47 +378,6 @@ def check_collision_single_hull(
     collides = penetration > threshold  # [B, P]
 
     return penetration, collides
-
-
-def merge_collision_results(
-    hull_results: List[Tuple[torch.Tensor, torch.Tensor]], device: torch.device
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Merge collision detection results from multiple convex hulls.
-
-    A pose is considered colliding if ANY point penetrates ANY convex hull.
-    The reported penetration depth is the maximum across all points and all hulls.
-
-    Args:
-        hull_results: List of (penetration [B, P], collides [B, P]) tuples,
-                      one per convex hull, as returned by check_collision_single_hull.
-        device: torch device.
-
-    Returns:
-        overall_collisions: [B] boolean, True if the pose collides with any hull.
-        overall_max_penetrations: [B] float, maximum penetration depth per pose.
-    """
-    if not hull_results:
-        raise ValueError("hull_results is empty, nothing to merge.")
-
-    B = hull_results[0][0].shape[0]
-
-    overall_collisions = torch.zeros(B, dtype=torch.bool, device=device)
-    overall_max_penetrations = torch.full(
-        (B,), -float("inf"), dtype=torch.float32, device=device
-    )
-
-    for penetration, collides in hull_results:
-        # Update collision flag: OR across hulls
-        # A pose collides if any point collides with this hull
-        overall_collisions |= collides.any(dim=-1)  # [B]
-
-        # Update max penetration: take the per-pose maximum across all points for this hull,
-        # then compare with the running maximum
-        hull_max_pen = penetration.max(dim=-1)[0]  # [B]
-        overall_max_penetrations = torch.max(overall_max_penetrations, hull_max_pen)
-
-    return overall_collisions, overall_max_penetrations
 
 
 def transform_points_batch(

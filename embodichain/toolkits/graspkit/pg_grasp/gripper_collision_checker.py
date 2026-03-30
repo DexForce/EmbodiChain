@@ -30,8 +30,9 @@ class SimpleGripperCollisionCfg:
     x_thickness: float = 0.01
     root_z_width: float = 0.06
     device = torch.device("cpu")
-    rough_dense: float = 0.01
+    rough_dense: float = 0.015
     max_decomposition_hulls: int = 16
+    open_check_margin: float = 0.01
 
 
 class SimpleGripperCollisionChecker:
@@ -46,6 +47,7 @@ class SimpleGripperCollisionChecker:
             base_mesh_faces=object_mesh_faces,
             max_decomposition_hulls=cfg.max_decomposition_hulls,
         )
+        self.device = object_mesh_verts.device
         self.cfg = cfg
         self._init_pc_template()
 
@@ -57,14 +59,17 @@ class SimpleGripperCollisionChecker:
                 self.cfg.root_z_width,
             ),
             dense=self.cfg.rough_dense,
+            device=self.device,
         )
         self.left_template = box_surface_grid(
             size=(self.cfg.x_thickness, self.cfg.y_thickness, self.cfg.finger_length),
             dense=self.cfg.rough_dense,
+            device=self.device,
         )
         self.right_template = box_surface_grid(
             size=(self.cfg.x_thickness, self.cfg.y_thickness, self.cfg.finger_length),
             dense=self.cfg.rough_dense,
+            device=self.device,
         )
 
     def _get_gripper_pc(
@@ -84,7 +89,9 @@ class SimpleGripperCollisionChecker:
             * 0.5
             * (self.cfg.finger_length + self.cfg.root_z_width)
         )
-        open_lengths_repeat = open_lengths[:, None].repeat(1, 3)
+        open_lengths_repeat = (
+            open_lengths[:, None] + self.cfg.open_check_margin
+        ).repeat(1, 3)
         left_finger_poses = grasp_poses.clone()
         left_finger_poses[:, :3, 3] -= left_finger_poses[:, :3, 0] * open_lengths_repeat
 
@@ -104,6 +111,8 @@ class SimpleGripperCollisionChecker:
         obj_pose: torch.Tensor,
         grasp_poses: torch.Tensor,
         open_lengths: torch.Tensor,
+        collision_threshold: float = 0.0,
+        is_visual: bool = False,
     ) -> torch.Tensor:
         inv_obj_pose = obj_pose.clone()
         inv_obj_pose[:3, :3] = obj_pose[:3, :3].T
@@ -112,7 +121,7 @@ class SimpleGripperCollisionChecker:
         grasp_relative_pose = torch.bmm(inv_obj_poses, grasp_poses)
         gripper_pc = self._get_gripper_pc(grasp_relative_pose, open_lengths)
         return self._checker.query_batch_points(
-            gripper_pc, collision_threshold=0.005, is_visual=False
+            gripper_pc, collision_threshold=collision_threshold, is_visual=is_visual
         )
 
 

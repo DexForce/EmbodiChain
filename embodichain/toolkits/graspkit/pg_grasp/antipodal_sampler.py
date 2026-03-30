@@ -25,7 +25,7 @@ from embodichain.utils import logger
 
 @dataclass
 class AntipodalSamplerCfg:
-    n_sample: int = 10000
+    n_sample: int = 20000
     """surface point sample number"""
     max_angle: float = np.pi / 12
     """maximum angle (in radians) to randomly disturb the ray direction for antipodal point sampling, used to increase the diversity of sampled antipodal points. Note that setting max_angle to 0 will disable the random disturbance and sample antipodal points strictly along the surface normals, which may result in less diverse antipodal points and may not be ideal for all objects or grasping scenarios."""

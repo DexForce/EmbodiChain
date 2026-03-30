@@ -364,6 +364,7 @@ class GraspAnnotator:
         hit_point_pairs: torch.Tensor,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
+        is_visual: bool = False,
     ) -> torch.Tensor:
         """Get grasp pose given approach direction
 
@@ -380,7 +381,9 @@ class GraspAnnotator:
         origin_points_ = self._apply_transform(origin_points, object_pose)
         hit_points_ = self._apply_transform(hit_points, object_pose)
         centers = (origin_points_ + hit_points_) / 2
-        center = centers.mean(dim=0)
+
+        mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
+        mesh_center = mesh_vert_transformed.mean(dim=0)
 
         # filter perpendicular antipodal point
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
@@ -400,11 +403,13 @@ class GraspAnnotator:
             origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
         )
         # select non-collide grasp poses
-
         is_colliding, max_penetration = self._collision_checker.query(
-            object_pose, valid_grasp_poses, valid_open_lengths
+            object_pose,
+            valid_grasp_poses,
+            valid_open_lengths,
+            is_visual=is_visual,
+            collision_threshold=0.0,
         )
-
         # get best grasp pose
         valid_grasp_poses = valid_grasp_poses[~is_colliding]
         valid_open_lengths = valid_open_lengths[~is_colliding]
@@ -416,10 +421,10 @@ class GraspAnnotator:
         )
         positive_angle = torch.abs(torch.acos(cos_angle))
         angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
-        center_distance = torch.norm(valid_centers - center, dim=-1)
+        center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
-        total_cost = 0.4 * angle_cost + 0.3 * length_cost + 0.3 * center_cost
+        total_cost = 0.3 * angle_cost + 0.3 * length_cost + 0.4 * center_cost
         best_idx = torch.argmin(total_cost)
         best_grasp_pose = valid_grasp_poses[best_idx]
         best_open_length = valid_open_lengths[best_idx]

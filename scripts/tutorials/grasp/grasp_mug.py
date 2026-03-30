@@ -68,7 +68,7 @@ def parse_arguments():
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default="cuda",
         help="device to run the environment on, e.g., 'cpu' or 'cuda'",
     )
     return parser.parse_args()
@@ -182,7 +182,7 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     rest_arm_qpos = robot.get_qpos("arm")
 
     approach_xpos = grasp_xpos.clone()
-    approach_xpos[:, 2, 3] += 0.04
+    approach_xpos[:, 2, 3] += 0.1
 
     _, qpos_approach = robot.compute_ik(
         pose=approach_xpos, joint_seed=rest_arm_qpos, name="arm"
@@ -219,12 +219,14 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     )
     all_trajectory = torch.cat([arm_trajectory, hand_trajectory], dim=-1)
     interp_trajectory = interpolate_with_distance(
-        trajectory=all_trajectory, interp_num=300, device=sim.device
+        trajectory=all_trajectory, interp_num=200, device=sim.device
     )
     return interp_trajectory
 
 
 if __name__ == "__main__":
+    import time
+
     args = parse_arguments()
     sim = initialize_simulation(args)
     robot = create_robot(sim, position=[0.0, 0.0, 0.0])
@@ -234,15 +236,17 @@ if __name__ == "__main__":
     grasp_cfg = GraspAnnotatorCfg(
         viser_port=11801,
         antipodal_sampler_cfg=AntipodalSamplerCfg(
-            n_sample=5000, max_length=0.088, min_length=0.003
+            n_sample=20000, max_length=0.088, min_length=0.003
         ),
-        force_regenerate=False,  # force user to annotate grasp region each time
+        force_regenerate=True,  # force user to annotate grasp region each time
     )
     sim.open_window()
 
     # 1. View grasp object in browser (e.g http://localhost:11801)
     # 2. press 'Rect Select Region', select grasp region
     # 3. press 'Confirm Selection' to finish grasp region selection.
+
+    start_time = time.time()
     grasp_xpos = mug.get_grasp_pose(
         approach_direction=torch.tensor(
             [0, 0, -1], dtype=torch.float32, device=sim.device
@@ -250,6 +254,8 @@ if __name__ == "__main__":
         cfg=grasp_cfg,
         is_visual=True,  # visualize selected grasp pose finally
     )
+    cost_time = time.time() - start_time
+    logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 
     grab_traj = get_grasp_traj(sim, robot, grasp_xpos)
     input("Press Enter to start the grab mug demo...")
