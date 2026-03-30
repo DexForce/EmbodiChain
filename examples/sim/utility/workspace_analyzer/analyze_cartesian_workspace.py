@@ -20,7 +20,7 @@ from IPython import embed
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
-from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg
 from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
     WorkspaceAnalyzer,
     WorkspaceAnalyzerConfig,
@@ -36,7 +36,11 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
-        headless=False, sim_device="cpu", width=1080, height=1080
+        headless=False,
+        sim_device="cpu",
+        width=1080,
+        height=1080,
+        render_cfg=RenderCfg(renderer="legacy"),
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
