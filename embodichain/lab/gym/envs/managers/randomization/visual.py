@@ -183,9 +183,10 @@ def randomize_camera_extrinsics(
         ).repeat(num_instance, 1)
         if pos_range:
             random_value = sample_uniform(
-                lower=torch.tensor(pos_range[0]),
-                upper=torch.tensor(pos_range[1]),
+                lower=torch.tensor(pos_range[0], device=env.device),
+                upper=torch.tensor(pos_range[1], device=env.device),
                 size=(num_instance, 3),
+                device=env.device,
             )
             new_pose[:, :3] += random_value
         if euler_range:
@@ -198,9 +199,10 @@ def randomize_camera_extrinsics(
             init_euler = torch.stack(euler_xyz_from_quat(init_quat_np), dim=1)
             # 2. Sample perturbation for euler angles
             random_value = sample_uniform(
-                lower=torch.tensor(euler_range[0]),
-                upper=torch.tensor(euler_range[1]),
+                lower=torch.tensor(euler_range[0], device=env.device),
+                upper=torch.tensor(euler_range[1], device=env.device),
                 size=(num_instance, 3),
+                device=env.device,
             )
             # 3. Add perturbation to each environment and convert back to quaternion
             roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
@@ -229,9 +231,10 @@ def randomize_camera_extrinsics(
 
         if eye_range:
             eye_delta = sample_uniform(
-                lower=torch.tensor(eye_range[0]),
-                upper=torch.tensor(eye_range[1]),
+                lower=torch.tensor(eye_range[0], device=env.device),
+                upper=torch.tensor(eye_range[1], device=env.device),
                 size=(num_instance, 3),
+                device=env.device,
             )
             new_eye = init_eye + eye_delta
         else:
@@ -239,9 +242,10 @@ def randomize_camera_extrinsics(
 
         if target_range:
             target_delta = sample_uniform(
-                lower=torch.tensor(target_range[0]),
-                upper=torch.tensor(target_range[1]),
+                lower=torch.tensor(target_range[0], device=env.device),
+                upper=torch.tensor(target_range[1], device=env.device),
                 size=(num_instance, 3),
+                device=env.device,
             )
             new_target = init_target + target_delta
         else:
@@ -249,9 +253,10 @@ def randomize_camera_extrinsics(
 
         if up_range:
             up_delta = sample_uniform(
-                lower=torch.tensor(up_range[0]),
-                upper=torch.tensor(up_range[1]),
+                lower=torch.tensor(up_range[0], device=env.device),
+                upper=torch.tensor(up_range[1], device=env.device),
                 size=(num_instance, 3),
+                device=env.device,
             )
             new_up = init_up + up_delta
         else:
