@@ -78,3 +78,4 @@ See also
     trainer.md
     config.md
     train_script.md
+    multi_gpu.md

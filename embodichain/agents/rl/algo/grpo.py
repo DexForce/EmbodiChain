@@ -55,7 +55,8 @@ class GRPO(BaseAlgorithm):
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
         if self.cfg.kl_coef > 0.0:
-            self.ref_policy = deepcopy(policy).to(self.device).eval()
+            raw_policy = getattr(policy, "module", policy)
+            self.ref_policy = deepcopy(raw_policy).to(self.device).eval()
             for param in self.ref_policy.parameters():
                 param.requires_grad_(False)
         else:
@@ -152,7 +153,8 @@ class GRPO(BaseAlgorithm):
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
 
-                eval_batch = self.policy.evaluate_actions(batch, rollout=rollout)
+                policy_module = getattr(self.policy, "module", self.policy)
+                eval_batch = policy_module.evaluate_actions(batch, rollout=rollout)
                 logprobs = eval_batch["sample_log_prob"]
                 entropy = eval_batch["entropy"]
                 ratio = (logprobs - old_logprobs).exp()
