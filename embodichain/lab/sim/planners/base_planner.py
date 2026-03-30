@@ -14,76 +14,142 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import numpy as np
-from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Union
-import matplotlib.pyplot as plt
+import torch
 
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+import functools
+from abc import ABC, abstractmethod
+from dataclasses import MISSING
+
 from embodichain.utils import logger
+from embodichain.utils import configclass
+from embodichain.lab.sim.sim_manager import SimulationManager
+from .utils import PlanState, PlanResult
+
+__all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
+
+
+@configclass
+class BasePlannerCfg:
+
+    robot_uid: str = MISSING
+    """UID of the robot to control. Must correspond to a robot added to the simulation with this UID."""
+
+    planner_type: str = "base"
+
+
+@configclass
+class PlanOptions:
+    pass
+
+
+def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
+    """Decorator (factory) that validates the ``options`` argument is a ``PlanOptions`` instance.
+
+    Supports three usage styles:
+
+    .. code-block:: python
+
+        # 1. Bare decorator — validates against PlanOptions (default)
+        @validate_plan_options
+        def plan(self, target_states, options=PlanOptions()): ...
+
+        # 2. Called with no arguments — same as above
+        @validate_plan_options()
+        def plan(self, target_states, options=PlanOptions()): ...
+
+        # 3. Custom options class — useful in BasePlanner subclasses
+        @validate_plan_options(options_cls=MyPlanOptions)
+        def plan(self, target_states, options=MyPlanOptions()): ...
+
+    Args:
+        _func: Populated automatically when used as a bare decorator (no parentheses).
+        options_cls: The expected type for the ``options`` argument. Subclasses of
+            this type are also accepted. Defaults to :class:`PlanOptions`.
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            options = kwargs.get("options", args[1] if len(args) > 1 else None)
+            if options is not None and not isinstance(options, options_cls):
+                logger.log_error(
+                    f"Expected 'options' to be of type {options_cls.__name__} "
+                    f"(or a subclass), but got {type(options).__name__}.",
+                    TypeError,
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    if _func is not None:
+        # Used as @validate_plan_options (no parentheses) — decorate immediately.
+        return decorator(_func)
+    # Used as @validate_plan_options() or @validate_plan_options(options_cls=...).
+    return decorator
 
 
 class BasePlanner(ABC):
     r"""Base class for trajectory planners.
 
     This class provides common functionality that can be shared across different
-    planner implementations, such as constraint checking and trajectory visualization.
+    planner implementations.
 
     Args:
-        dofs: Number of degrees of freedom
-        max_constraints: Dictionary containing 'velocity' and 'acceleration' constraints
+        cfg: Configuration object for the planner.
     """
 
-    def __init__(self, dofs: int, max_constraints: Dict[str, List[float]]):
-        self.dofs = dofs
-        self.max_constraints = max_constraints
+    def __init__(self, cfg: BasePlannerCfg):
+        self.cfg: BasePlannerCfg = cfg
 
+        if cfg.robot_uid is MISSING:
+            logger.log_error("robot_uid is required in planner config", ValueError)
+
+        self.robot = SimulationManager.get_instance().get_robot(cfg.robot_uid)
+        if self.robot is None:
+            logger.log_error(f"Robot {cfg.robot_uid} not found", ValueError)
+
+        self.device = self.robot.device
+
+    @validate_plan_options
     @abstractmethod
     def plan(
         self,
-        current_state: Dict,
-        target_states: List[Dict],
-        **kwargs,
-    ) -> Tuple[
-        bool,
-        np.ndarray | None,
-        np.ndarray | None,
-        np.ndarray | None,
-        np.ndarray | None,
-        float,
-    ]:
+        target_states: list[PlanState],
+        options: PlanOptions = PlanOptions(),
+    ) -> PlanResult:
         r"""Execute trajectory planning.
 
         This method must be implemented by subclasses to provide the specific
         planning algorithm.
 
         Args:
-            current_state: Dictionary containing 'position', 'velocity', 'acceleration' for current state
             target_states: List of dictionaries containing target states
 
         Returns:
-            Tuple of (success, positions, velocities, accelerations, times, duration):
+            PlanResult: An object containing:
                 - success: bool, whether planning succeeded
-                - positions: np.ndarray (N, DOF), joint positions along trajectory
-                - velocities: np.ndarray (N, DOF), joint velocities along trajectory
-                - accelerations: np.ndarray (N, DOF), joint accelerations along trajectory
-                - times: np.ndarray (N,), time stamps for each point
+                - positions: torch.Tensor (N, DOF), joint positions along trajectory
+                - velocities: torch.Tensor (N, DOF), joint velocities along trajectory
+                - accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory
+                - times: torch.Tensor (N,), time stamps for each point
                 - duration: float, total trajectory duration
+                - error_msg: Optional error message if planning failed
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 
     def is_satisfied_constraint(
-        self, velocities: np.ndarray, accelerations: np.ndarray
+        self, vels: torch.Tensor, accs: torch.Tensor, constraints: dict
     ) -> bool:
         r"""Check if the trajectory satisfies velocity and acceleration constraints.
 
         This method checks whether the given velocities and accelerations satisfy
-        the constraints defined in max_constraints. It allows for some tolerance
+        the constraints defined in constraints. It allows for some tolerance
         to account for numerical errors in dense waypoint scenarios.
 
         Args:
-            velocities: Velocity array (N, DOF) where N is the number of trajectory points
-            accelerations: Acceleration array (N, DOF) where N is the number of trajectory points
+            vels: Velocity tensor (..., DOF) where the last dimension is DOF
+            accs: Acceleration tensor (..., DOF) where the last dimension is DOF
+            constraints: Dictionary containing 'velocity' and 'acceleration' limits
 
         Returns:
             bool: True if all constraints are satisfied, False otherwise
@@ -93,109 +159,33 @@ class BasePlanner(ABC):
             - Allows 25% tolerance for acceleration constraints
             - Prints exceed information if constraints are violated
             - Assumes symmetric constraints (velocities and accelerations can be positive or negative)
+            - Supports batch dimension computation, e.g. (B, N, DOF) or (N, DOF)
         """
-        # Convert max_constraints to symmetric format for constraint checking
-        # This assumes symmetric constraints (common for most planners)
-        vlims = np.array([[-v, v] for v in self.max_constraints["velocity"]])
-        alims = np.array([[-a, a] for a in self.max_constraints["acceleration"]])
+        device = vels.device
 
-        vel_check = np.all((velocities >= vlims[:, 0]) & (velocities <= vlims[:, 1]))
-        acc_check = np.all(
-            (accelerations >= alims[:, 0]) & (accelerations <= alims[:, 1])
+        max_vel = torch.tensor(constraints["velocity"], dtype=vels.dtype, device=device)
+        max_acc = torch.tensor(
+            constraints["acceleration"], dtype=accs.dtype, device=device
         )
 
-        # 超限情况
+        # To support batching, we compute along all dimensions except the last one (DOF)
+        reduce_dims = tuple(range(vels.ndim - 1))
+
+        # Check bounds
+        vel_check = torch.all(torch.abs(vels) <= max_vel).item()
+        acc_check = torch.all(torch.abs(accs) <= max_acc).item()
+
         if not vel_check:
-            vel_exceed_info = []
-            min_vel = np.min(velocities, axis=0)
-            max_vel = np.max(velocities, axis=0)
-            for i in range(self.dofs):
-                exceed_percentage = 0
-                max_vel_limit = self.max_constraints["velocity"][i]
-                if min_vel[i] < -max_vel_limit:
-                    exceed_percentage = (min_vel[i] + max_vel_limit) / max_vel_limit
-                if max_vel[i] > max_vel_limit:
-                    temp = (max_vel[i] - max_vel_limit) / max_vel_limit
-                    if temp > exceed_percentage:
-                        exceed_percentage = temp
-                vel_exceed_info.append(exceed_percentage * 100)
+            # max absolute value over all trajectory points and batches
+            max_abs_vel = torch.amax(torch.abs(vels), dim=reduce_dims)
+            exceed_percentage = torch.clamp((max_abs_vel - max_vel) / max_vel, min=0.0)
+            vel_exceed_info = (exceed_percentage * 100).tolist()
             logger.log_info(f"Velocity exceed info: {vel_exceed_info} percentage")
 
         if not acc_check:
-            acc_exceed_info = []
-            min_acc = np.min(accelerations, axis=0)
-            max_acc = np.max(accelerations, axis=0)
-            for i in range(self.dofs):
-                exceed_percentage = 0
-                max_acc_limit = self.max_constraints["acceleration"][i]
-                if min_acc[i] < -max_acc_limit:
-                    exceed_percentage = (min_acc[i] + max_acc_limit) / max_acc_limit
-                if max_acc[i] > max_acc_limit:
-                    temp = (max_acc[i] - max_acc_limit) / max_acc_limit
-                    if temp > exceed_percentage:
-                        exceed_percentage = temp
-                acc_exceed_info.append(exceed_percentage * 100)
+            max_abs_acc = torch.amax(torch.abs(accs), dim=reduce_dims)
+            exceed_percentage = torch.clamp((max_abs_acc - max_acc) / max_acc, min=0.0)
+            acc_exceed_info = (exceed_percentage * 100).tolist()
             logger.log_info(f"Acceleration exceed info: {acc_exceed_info} percentage")
 
         return vel_check and acc_check
-
-    def plot_trajectory(
-        self, positions: np.ndarray, velocities: np.ndarray, accelerations: np.ndarray
-    ) -> None:
-        r"""Plot trajectory data.
-
-        This method visualizes the trajectory by plotting position, velocity, and
-        acceleration curves for each joint over time. It also displays the constraint
-        limits for reference.
-
-        Args:
-            positions: Position array (N, DOF) where N is the number of trajectory points
-            velocities: Velocity array (N, DOF) where N is the number of trajectory points
-            accelerations: Acceleration array (N, DOF) where N is the number of trajectory points
-
-        Note:
-            - Creates a 3-subplot figure (position, velocity, acceleration)
-            - Shows constraint limits as dashed lines
-            - Requires matplotlib to be installed
-        """
-        time_step = 0.01
-        time_steps = np.arange(positions.shape[0]) * time_step
-        fig, axs = plt.subplots(3, 1, figsize=(10, 8))
-
-        for i in range(self.dofs):
-            axs[0].plot(time_steps, positions[:, i], label=f"Joint {i+1}")
-            axs[1].plot(time_steps, velocities[:, i], label=f"Joint {i+1}")
-            axs[2].plot(time_steps, accelerations[:, i], label=f"Joint {i+1}")
-
-        # Plot velocity constraints (only for first joint to avoid clutter)
-        # Convert max_constraints to symmetric format for visualization
-        if self.dofs > 0:
-            max_vel = self.max_constraints["velocity"][0]
-            max_acc = self.max_constraints["acceleration"][0]
-            axs[1].plot(
-                time_steps,
-                [-max_vel] * len(time_steps),
-                "k--",
-                label="Max Velocity",
-            )
-            axs[1].plot(time_steps, [max_vel] * len(time_steps), "k--")
-            # Plot acceleration constraints (only for first joint to avoid clutter)
-            axs[2].plot(
-                time_steps,
-                [-max_acc] * len(time_steps),
-                "k--",
-                label="Max Accleration",
-            )
-            axs[2].plot(time_steps, [max_acc] * len(time_steps), "k--")
-
-        axs[0].set_title("Position")
-        axs[1].set_title("Velocity")
-        axs[2].set_title("Acceleration")
-
-        for ax in axs:
-            ax.set_xlabel("Time [s]")
-            ax.legend()
-            ax.grid()
-
-        plt.tight_layout()
-        plt.show()

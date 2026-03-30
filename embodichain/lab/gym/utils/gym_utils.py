@@ -33,7 +33,7 @@ from dexsim.utility import log_debug, log_error
 
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
-    "embodichain.lab.gym.envs.managers.action_manager",
+    "embodichain.lab.gym.envs.managers.actions",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.randomization",
     "embodichain.lab.gym.envs.managers.record",
@@ -770,6 +770,12 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         action="store_true",
     )
     parser.add_argument(
+        "--arena_space",
+        help="The size of the arena space.",
+        default=5.0,
+        type=float,
+    )
+    parser.add_argument(
         "--enable_rt",
         help="Whether to use RTX rendering backend for the simulation.",
         default=False,
@@ -829,6 +835,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config["headless"] = args.headless
     merged_config["enable_rt"] = args.enable_rt
     merged_config["gpu_id"] = args.gpu_id
+    merged_config["arena_space"] = args.arena_space
     return merged_config
 
 
@@ -871,6 +878,7 @@ def build_env_cfg_from_args(
         sim_device=gym_config["device"],
         enable_rt=gym_config["enable_rt"],
         gpu_id=gym_config["gpu_id"],
+        arena_space=gym_config["arena_space"],
     )
 
     return cfg, gym_config, action_config
@@ -957,6 +965,12 @@ def init_rollout_buffer_from_config(
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
+    The function creates a rollout buffer containing:
+        - Basic observations: ``robot/qpos``, ``robot/qvel``, ``robot/qf``
+        - Sensor observations: ``sensor/<uid>`` for each sensor in config
+        - Extra observations: Custom observations from observation functors in ``add`` mode
+            that have a ``shape`` specified in their ``extra`` parameter
+
     Args:
         config (dict): The environment configuration dictionary.
         max_episode_steps (int): The number of steps in an episode.
@@ -966,6 +980,32 @@ def init_rollout_buffer_from_config(
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
     """
+
+    # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
+    # Parse extra observations from observation functors in 'add' mode
+    extra_obs_desc = {}
+    env_config = config.get("env", {})
+    if "observations" in env_config:
+        for obs_name, obs_params in env_config["observations"].items():
+            obs_mode = obs_params.get("mode", "modify")
+            if obs_mode == "add":
+                obs_extra = obs_params.get("extra", {})
+                shape = obs_extra.get("shape", None)
+                if shape is not None:
+                    # Ensure shape is a tuple
+                    if isinstance(shape, list):
+                        shape = tuple(shape)
+
+                    key = obs_params.get(
+                        "name", obs_name
+                    )  # Use 'name' if provided, otherwise use obs_name
+
+                    # Create buffer with shape (batch_size, max_episode_steps, *shape)
+                    extra_obs_desc[key] = torch.zeros(
+                        (batch_size, max_episode_steps, *shape),
+                        dtype=torch.float32,
+                        device=device,
+                    )
 
     # Parse sensor
     sensor_desc = {}
@@ -1086,5 +1126,10 @@ def init_rollout_buffer_from_config(
         rollout_buffer["obs"]["sensor"] = TensorDict(
             sensor_desc, batch_size=[batch_size, max_episode_steps], device=device
         )
+
+    # Add extra observations from functors in 'add' mode
+    if extra_obs_desc:
+        for obs_name, obs_tensor in extra_obs_desc.items():
+            assign_data_to_dict(rollout_buffer["obs"], obs_name, obs_tensor)
 
     return rollout_buffer

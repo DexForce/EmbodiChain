@@ -90,6 +90,25 @@ A `CLAUDE.md` file is present at the root of this repository. Claude Code reads 
   What could cause this and how should it be fixed?
 ```
 
+**Create a pull request**
+
+After you've made your changes and committed them, use the `/pr` command to create a pull request:
+
+```
+> /pr
+```
+
+This will guide you through:
+1. Checking the current git state and changes
+2. Determining the PR type (bug fix, enhancement, new feature, etc.)
+3. Drafting a proper PR description following the project template
+4. Running code formatting with `black .`
+5. Creating a properly named feature branch
+6. Committing changes with a conventional commit message
+7. Pushing to remote and creating the PR via `gh` CLI
+
+The `/pr` skill ensures your PR follows the EmbodiChain contribution guidelines and populates the required checklist items.
+
 ### Tips
 
 *   Always run `black .` after Claude Code generates or edits Python files — Claude Code can do this for you if you ask.
@@ -99,10 +118,12 @@ A `CLAUDE.md` file is present at the root of this repository. Claude Code reads 
 
 ## Contribute specific robots
 
-TODO: Add instructions for contributing new robot models and its configurations.
+To contribute a new robot, please check the documentation on [Adding a New Robot](https://dexforce.github.io/EmbodiChain/guides/add_robot.html).
 
 ## Contribute specific environments
 
-To contribute a new environment:
+To contribute a new environment, please check the documentation on [Embodied Environments](https://dexforce.github.io/EmbodiChain/overview/gym/env.html) and see the tutorial below:
+- [Creating a Basic Environment](https://dexforce.github.io/EmbodiChain/tutorial/basic_env.html) 
+- [Creating a Modular Environment](https://dexforce.github.io/EmbodiChain/tutorial/modular_env.html)
 
-TODO: Add instructions for contributing new environments.
+If you want to implement your tasks in a new repo and with some customized functors and utilities, you can also use the [Task Template Repo](https://github.com/DexForce/embodichain_task_template).

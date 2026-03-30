@@ -20,6 +20,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from typing import List, Sequence, Union
+from functools import cached_property
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
@@ -252,6 +253,19 @@ class RigidObject(BatchEntity):
         return (
             parent_str
             + f" | body type: {self.body_type} | max_convex_hull_num: {self.cfg.max_convex_hull_num}"
+        )
+
+    @cached_property
+    def user_ids(self) -> torch.Tensor:
+        """Get the user ids of the rigid object.
+
+        Returns:
+            torch.Tensor: The user ids of the rigid object with shape (N,).
+        """
+        return torch.as_tensor(
+            np.array([entity.get_user_id() for entity in self._entities]),
+            dtype=torch.int32,
+            device=self.device,
         )
 
     @property
@@ -638,6 +652,141 @@ class RigidObject(BatchEntity):
 
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
 
+    def set_friction(
+        self, friction: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set friction for the rigid object.
+
+        Args:
+            friction (torch.Tensor): The friction to set with shape (N,).
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(friction):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match friction length {len(friction)}."
+            )
+
+        friction = friction.cpu().numpy()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].get_physical_body().set_dynamic_friction(
+                friction[i]
+            )
+            self._entities[env_idx].get_physical_body().set_static_friction(friction[i])
+
+    def get_friction(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get friction for the rigid object.
+
+        Args:
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+
+        Returns:
+            torch.Tensor: The friction of the rigid object with shape (N,).
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        frictions = []
+        for _, env_idx in enumerate(local_env_ids):
+            friction = (
+                self._entities[env_idx].get_physical_body().get_dynamic_friction()
+            )
+            frictions.append(friction)
+
+        return torch.as_tensor(frictions, dtype=torch.float32, device=self.device)
+
+    def set_damping(
+        self, damping: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set linear and angular damping for the rigid object.
+
+        Args:
+            damping (torch.Tensor): The damping to set with shape (N, 2), where the first column is linear damping and the second column is angular damping.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(damping):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match damping length {len(damping)}."
+            )
+
+        damping = damping.cpu().numpy()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].get_physical_body().set_linear_damping(
+                damping[i, 0]
+            )
+            self._entities[env_idx].get_physical_body().set_angular_damping(
+                damping[i, 1]
+            )
+
+    def get_damping(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get linear and angular damping for the rigid object.
+
+        Args:
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+
+        Returns:
+            torch.Tensor: The damping of the rigid object with shape (N, 2), where the first column is linear damping and the second column is angular damping.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        dampings = []
+        for _, env_idx in enumerate(local_env_ids):
+            linear_damping = (
+                self._entities[env_idx].get_physical_body().get_linear_damping()
+            )
+            angular_damping = (
+                self._entities[env_idx].get_physical_body().get_angular_damping()
+            )
+            dampings.append([linear_damping, angular_damping])
+
+        return torch.as_tensor(dampings, dtype=torch.float32, device=self.device)
+
+    def set_inertia(
+        self, inertia: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set inertia tensor for the rigid object.
+
+        Args:
+            inertia (torch.Tensor): The inertia tensor to set with shape (N, 3), where each row is the diagonal of the inertia tensor.
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(inertia):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match inertia length {len(inertia)}."
+            )
+
+        inertia = inertia.cpu().numpy()
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].get_physical_body().set_mass_space_inertia_tensor(
+                inertia[i]
+            )
+
+    def get_inertia(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get inertia tensor for the rigid object.
+
+        Args:
+            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+
+        Returns:
+            torch.Tensor: The inertia tensor of the rigid object with shape (N, 3), where each row is the diagonal of the inertia tensor.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        inertias = []
+        for _, env_idx in enumerate(local_env_ids):
+            inertia = (
+                self._entities[env_idx]
+                .get_physical_body()
+                .get_mass_space_inertia_tensor()
+            )
+            inertias.append(inertia)
+
+        return torch.as_tensor(inertias, dtype=torch.float32, device=self.device)
+
     def set_visual_material(
         self,
         mat: VisualMaterial,
@@ -741,8 +890,8 @@ class RigidObject(BatchEntity):
 
         if self.device.type == "cpu":
             for i, env_idx in enumerate(local_env_ids):
-                scale = scale[i].cpu().numpy()
-                self._entities[env_idx].set_body_scale(*scale)
+                scale_np = scale[i].cpu().numpy()
+                self._entities[env_idx].set_body_scale(*scale_np)
         else:
             logger.log_error(f"Setting body scale on GPU is not supported yet.")
 
@@ -820,17 +969,17 @@ class RigidObject(BatchEntity):
             device=self.device,
         )
 
-    def get_user_ids(self) -> torch.Tensor:
+    def get_user_ids(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get the user ids of the rigid bodies.
+
+        Args:
+            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
 
         Returns:
             torch.Tensor: A tensor of shape (num_envs,) representing the user ids of the rigid bodies.
         """
-        return torch.as_tensor(
-            [entity.get_user_id() for entity in self._entities],
-            dtype=torch.int32,
-            device=self.device,
-        )
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        return self.user_ids[local_env_ids]
 
     def enable_collision(
         self, enable: torch.Tensor, env_ids: Sequence[int] | None = None

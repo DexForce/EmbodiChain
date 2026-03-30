@@ -51,6 +51,10 @@ class RolloutBuffer:
         self._rollout = self._allocate_rollout()
         self._is_full = False
 
+    @property
+    def buffer(self) -> TensorDict:
+        return self._rollout
+
     def start_rollout(self) -> TensorDict:
         """Return the shared rollout TensorDict for collector write-in."""
         if self._is_full:

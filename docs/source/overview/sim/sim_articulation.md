@@ -90,24 +90,33 @@ robot = sim.add_articulation(cfg=usd_art_cfg_override)
 
 ## Articulation Class
 
-State data is accessed via getter methods that return batched tensors.
+State data is accessed via getter methods that return batched tensors (`N` environments). Certain static properties are available as standard class properties.
 
-| Property | Shape | Description |
+| Property | Type | Description |
 | :--- | :--- | :--- |
-| `get_local_pose` | `(N, 7)` | Root link pose `[x, y, z, qw, qx, qy, qz]`. |
-| `get_qpos` | `(N, dof)` | Joint positions. |
-| `get_qvel` | `(N, dof)` | Joint velocities. |
+| `num_envs` | `int` | Number of simulation environments this articulation is instantiated in. |
+| `dof` | `int` | Degrees of freedom (number of actuated joints). |
+| `joint_names` | `List[str]` | Names of all movable joints. |
+| `link_names` | `List[str]` | Names of all rigid links. |
+| `mass` | `Tensor` | Total mass of the articulation per environment `(N, 1)`. |
 
-
+| Method | Shape / Return Type | Description |
+| :--- | :--- | :--- |
+| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
+| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
+| `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
+| `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
+| `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction)`, each shaped `(N, dof)`. |
 
 ```python
 # Example: Accessing state
-# Note: Use methods (with brackets) instead of properties
+print(f"Degrees of freedom: {articulation.dof}")
 print(f"Current Joint Positions: {articulation.get_qpos()}")
-print(f"Root Pose: {articulation.get_local_pose()}")
+print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
 ```
+
 ### Control & Dynamics
-You can control the articulation by setting joint targets.
+You can control the articulation by setting target states or directly applying forces.
 
 ### Joint Control
 ```python
@@ -121,8 +130,25 @@ target_qpos = torch.zeros_like(current_qpos)
 # target=False: Instantly resets/teleports joints to this position (ignoring physics).
 articulation.set_qpos(target_qpos, target=True)
 
+# Set target velocities
+target_qvel = torch.zeros_like(current_qpos)
+articulation.set_qvel(target_qvel, target=True)
+
+# Apply forces directly
+# Sets an external force tensor (N, dof) applied at the degree of freedom. 
+target_qf = torch.ones_like(current_qpos) * 10.0
+articulation.set_qf(target_qf)
+
 # Important: Step simulation to apply control
 sim.update()
+```
+
+### Pose Control
+```python
+# Teleport the articulation root to a new pose
+# shape: (N, 7) formatted as [x, y, z, qw, qx, qy, qz]
+new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0]], device=device).repeat(sim.num_envs, 1)
+articulation.set_local_pose(new_root_pose)
 ```
 
 ### Drive Configuration
@@ -130,7 +156,7 @@ Dynamically adjust drive properties.
 
 ```python
 # Set stiffness for all joints
-articulation.set_drive(
+articulation.set_joint_drive(
     stiffness=torch.tensor([100.0], device=device), 
     damping=torch.tensor([10.0], device=device)
 )
@@ -138,12 +164,31 @@ articulation.set_drive(
 
 ### Kinematics
 Supports differentiable Forward Kinematics (FK) and Jacobian computation.
+
 ```python
 # Compute Forward Kinematics
-# Note: Ensure 'build_pk_chain=True' in cfg
+# Note: Ensure `build_pk_chain=True` in cfg
 if getattr(art_cfg, 'build_pk_chain', False):
+    # Returns (batch_size, 4, 4) homogeneous transformation matrix
     ee_pose = articulation.compute_fk(
-        qpos=articulation.get_qpos(), # Use method call
+        qpos=articulation.get_qpos(),
         end_link_name="ee_link" # Replace with actual link name
     )
+    
+    # Or return a dictionary of multiple link transforms (pytorch_kinematics Transform3d objects)
+    link_poses = articulation.compute_fk(
+        qpos=articulation.get_qpos(),
+        link_names=["link1", "link2"],
+        to_dict=True
+    )
+```
+
+### State Reset
+Resetting an articulation returns it to its initial state properties.
+```python
+# Clear the physical dynamics and velocities
+articulation.clear_dynamics()
+
+# Reset the articulation entirely (resets pose, velocities, and root states to config defaults)
+articulation.reset()
 ```

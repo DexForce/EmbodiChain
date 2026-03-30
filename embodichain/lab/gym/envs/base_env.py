@@ -550,6 +550,21 @@ class BaseEnv(gym.Env):
         """
         return action
 
+    def _postprocess_action(self, action: EnvAction) -> EnvAction:
+        """Postprocess action after applying to robot.
+
+        Post processing is usually used to modify the action after it has been applied to the robot,
+        performing normalization, noise addition, or any other modifications that need to be applied
+        for policy learning or evaluation purposes.
+
+        Args:
+            action: Action after preprocessing and robot control command generation
+
+        Returns:
+            Final action to be applied in the simulation
+        """
+        return action
+
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
 
@@ -608,8 +623,10 @@ class BaseEnv(gym.Env):
         Returns:
             A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
         """
+
         action = self._preprocess_action(action=action)
         action = self._step_action(action=action)
+
         self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
         self._update_sim_state(**kwargs)
 
@@ -619,6 +636,9 @@ class BaseEnv(gym.Env):
         rewards = self._extend_reward(
             rewards=rewards, obs=obs, action=action, info=info
         )
+
+        # Apply postprocessing to the action after all computations are done.
+        action = self._postprocess_action(action=action)
 
         self._elapsed_steps += 1
 

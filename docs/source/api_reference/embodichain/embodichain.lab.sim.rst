@@ -15,6 +15,7 @@
       shapes
       objects
       sensors
+      planners
       solvers
       utility
 
@@ -91,6 +92,14 @@ Solvers
    :maxdepth: 1
 
    embodichain.lab.sim.solvers
+
+Planners
+--------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.planners
 
 Utility
 -------

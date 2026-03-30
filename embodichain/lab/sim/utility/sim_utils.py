@@ -20,12 +20,24 @@ import open3d as o3d
 
 from typing import List, Union
 
-from dexsim.types import DriveType, ArticulationFlag, LoadOption, RigidBodyShape
+from dexsim.types import (
+    DriveType,
+    ArticulationFlag,
+    LoadOption,
+    RigidBodyShape,
+    SDFConfig,
+    PhysicalAttr,
+)
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
 from dexsim.models import MeshObject
 
-from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg, SoftObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    RigidObjectCfg,
+    SoftObjectCfg,
+    ClothObjectCfg,
+)
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
@@ -254,6 +266,18 @@ def load_mesh_objects_from_cfg(
                     actor_type=body_type,
                     max_convex_hull_num=max_convex_hull_num,
                 )
+            elif cfg.sdf_resolution > 0:
+                obj = env.load_actor(
+                    fpath, duplicate=True, attach_scene=True, option=option
+                )
+                sdf_cfg = SDFConfig()
+                sdf_cfg.resolution = cfg.sdf_resolution
+                obj.add_physical_body(
+                    body_type,
+                    RigidBodyShape.SDF,
+                    config=sdf_cfg,
+                    attr=PhysicalAttr(),
+                )
             else:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
@@ -312,6 +336,36 @@ def load_soft_object_from_cfg(
             fpath=cfg.shape.fpath, duplicate=True, attach_scene=True, option=option
         )
         obj.add_softbody(cfg.voxel_attr.attr(), cfg.physical_attr.attr())
+        if cfg.shape.compute_uv:
+            vertices = obj.get_vertices()
+            triangles = obj.get_triangles()
+
+            o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
+            _, uvs = get_mesh_auto_uv(o3d_mesh, cfg.shape.project_direction)
+            obj.set_uv_mapping(uvs)
+        obj.set_name(f"{cfg.uid}_{i}")
+        obj_list.append(obj)
+    return obj_list
+
+
+def load_cloth_object_from_cfg(
+    cfg: ClothObjectCfg, env_list: List[Arena]
+) -> List[MeshObject]:
+    obj_list = []
+
+    option = LoadOption()
+    option.rebuild_normals = cfg.shape.load_option.rebuild_normals
+    option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
+    option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
+    option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
+    option.smooth = cfg.shape.load_option.smooth
+    option.share_mesh = False
+
+    for i, env in enumerate(env_list):
+        obj = env.load_actor(
+            fpath=cfg.shape.fpath, duplicate=True, attach_scene=True, option=option
+        )
+        obj.add_clothbody(cfg.physical_attr.attr())
         if cfg.shape.compute_uv:
             vertices = obj.get_vertices()
             triangles = obj.get_triangles()

@@ -185,7 +185,11 @@ def train_from_config(config_path: str):
 
     # Build Policy via registry
     policy_name = policy_block["name"]
-    env_action_dim = env.action_space.shape[-1]
+    env_action_dim = (
+        env.get_wrapper_attr("action_manager").total_action_dim
+        if env.get_wrapper_attr("action_manager") is not None
+        else len(env.get_wrapper_attr("active_joint_ids"))
+    )
     action_dim = policy_block.get("action_dim", env_action_dim)
     action_dim = int(action_dim)
     if action_dim != env_action_dim:

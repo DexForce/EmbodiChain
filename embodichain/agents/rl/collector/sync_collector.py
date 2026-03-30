@@ -228,12 +228,12 @@ class SyncCollector(BaseCollector):
         obs, _ = self.env.reset()
         return dict_to_tensordict(obs, self.device)
 
-    def _to_action_dict(self, action: torch.Tensor) -> dict[str, torch.Tensor]:
+    def _to_action_dict(self, action: torch.Tensor) -> TensorDict | torch.Tensor:
         am = getattr(self.env, "action_manager", None)
-        action_type = (
-            am.action_type if am else getattr(self.env, "action_type", "delta_qpos")
-        )
-        return {action_type: action}
+        if am is None:
+            return action
+        else:
+            return am.convert_policy_action_to_env_action(action)
 
     def _write_step(
         self,
