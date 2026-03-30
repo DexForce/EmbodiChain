@@ -14,6 +14,7 @@ Tutorials
    sensor
    motion_gen
    gizmo
+   grasp_generator
    basic_env
    modular_env
    rl
