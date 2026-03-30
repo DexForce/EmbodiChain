@@ -227,7 +227,6 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-
         super().__init__(cfg, entities, device)
 
         # set default collision filter
