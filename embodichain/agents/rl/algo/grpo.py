@@ -114,7 +114,6 @@ class GRPO(BaseAlgorithm):
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         raw_obs = getattr(rollout, "raw_obs", None)
         chunk_step = getattr(rollout, "chunk_step", None)
-        rollout = rollout.clone()
         if raw_obs is not None:
             rollout.raw_obs = raw_obs
         if chunk_step is not None:
@@ -153,9 +152,7 @@ class GRPO(BaseAlgorithm):
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
 
-                eval_batch = self.policy.evaluate_actions(
-                    batch, rollout=rollout, num_envs=num_envs
-                )
+                eval_batch = self.policy.evaluate_actions(batch, rollout=rollout)
                 logprobs = eval_batch["sample_log_prob"]
                 entropy = eval_batch["entropy"]
                 ratio = (logprobs - old_logprobs).exp()
@@ -175,7 +172,7 @@ class GRPO(BaseAlgorithm):
                 if self.ref_policy is not None:
                     with torch.no_grad():
                         ref_batch = self.ref_policy.evaluate_actions(
-                            batch, rollout=rollout, num_envs=num_envs
+                            batch, rollout=rollout
                         )
                         ref_logprobs = ref_batch["sample_log_prob"]
                     log_ref_over_pi = ref_logprobs - logprobs

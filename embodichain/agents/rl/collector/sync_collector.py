@@ -22,6 +22,7 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.agents.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.utils import logger
 from .base import BaseCollector
 
 __all__ = ["SyncCollector"]
@@ -56,13 +57,15 @@ class SyncCollector(BaseCollector):
             self.obs_td = self._reset_env()
 
         if rollout is None:
-            raise ValueError(
-                "SyncCollector.collect() requires a preallocated rollout TensorDict."
+            logger.log_error(
+                "SyncCollector.collect() requires a preallocated rollout TensorDict.",
+                ValueError,
             )
         if tuple(rollout.batch_size) != (self.env.num_envs, num_steps + 1):
-            raise ValueError(
+            logger.log_error(
                 "Preallocated rollout batch size mismatch: "
-                f"expected ({self.env.num_envs}, {num_steps + 1}), got {tuple(rollout.batch_size)}."
+                f"expected ({self.env.num_envs}, {num_steps + 1}), got {tuple(rollout.batch_size)}.",
+                ValueError,
             )
         self._validate_rollout(rollout, num_steps)
         if self._supports_shared_rollout:
@@ -73,26 +76,29 @@ class SyncCollector(BaseCollector):
 
         if use_raw_obs:
             if raw_obs_list is None:
-                raise ValueError(
+                logger.log_error(
                     "Policy requires raw observations, "
                     "but the provided rollout TensorDict has no 'raw_obs' buffer. "
                     "Create the rollout via RolloutBuffer or "
-                    "start_rollout so that 'raw_obs' is allocated."
+                    "start_rollout so that 'raw_obs' is allocated.",
+                    ValueError,
                 )
             try:
                 raw_obs_len = len(raw_obs_list)
             except TypeError:
-                raise ValueError(
+                logger.log_error(
                     "Rollout field 'raw_obs' must be an indexable sequence of length "
-                    f"{num_steps + 1} when policy.use_raw_obs=True."
+                    f"{num_steps + 1} when policy.use_raw_obs=True.",
+                    ValueError,
                 )
             expected_len = num_steps + 1
             if raw_obs_len != expected_len:
-                raise ValueError(
+                logger.log_error(
                     "Rollout 'raw_obs' length mismatch: "
                     f"expected {expected_len} (num_steps + 1), got {raw_obs_len}. "
                     "Ensure the rollout was created with use_raw_obs=True and "
-                    "its time dimension matches the requested num_steps."
+                    "its time dimension matches the requested num_steps.",
+                    ValueError,
                 )
 
         action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
@@ -277,7 +283,8 @@ class SyncCollector(BaseCollector):
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:
-                raise ValueError(
+                logger.log_error(
                     f"Preallocated rollout field '{key}' shape mismatch: "
-                    f"expected {expected_shape}, got {actual_shape}."
+                    f"expected {expected_shape}, got {actual_shape}.",
+                    ValueError,
                 )

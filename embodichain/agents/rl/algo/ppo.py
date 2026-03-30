@@ -48,7 +48,6 @@ class PPO(BaseAlgorithm):
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""
-        rollout = rollout.clone()
         compute_gae(rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda)
         flat_rollout = transition_view(rollout, flatten=True)
 

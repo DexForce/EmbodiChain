@@ -180,7 +180,7 @@ class VLAPolicy(Policy):
         return tensordict
 
     def evaluate_actions(
-        self, tensordict: TensorDict, rollout=None, num_envs=None, **kwargs
+        self, tensordict: TensorDict, rollout=None, **kwargs
     ) -> TensorDict:
         """Compute log_prob via Gaussian proxy"""
         b = tensordict.batch_size[0]
@@ -193,10 +193,10 @@ class VLAPolicy(Policy):
         raw_obs = getattr(rollout, "raw_obs", None)
         chunk_step = tensordict.get("chunk_step", None)
         indices = tensordict.get("_indices", None)
-        if raw_obs is None or chunk_step is None or indices is None or num_envs is None:
+        if raw_obs is None or chunk_step is None or indices is None:
             raise ValueError(
-                "VLAPolicy.evaluate_actions requires rollout.raw_obs, chunk_step, _indices, num_envs. "
-                "Ensure collector uses use_raw_obs and use_action_chunk, and GRPO passes rollout and num_envs."
+                "VLAPolicy.evaluate_actions requires rollout.raw_obs, chunk_step, and _indices. "
+                "Ensure collector uses use_raw_obs and use_action_chunk, and GRPO passes rollout."
             )
 
         time_dim = len(raw_obs) - 1
