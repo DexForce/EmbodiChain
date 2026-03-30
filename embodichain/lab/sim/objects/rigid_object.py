@@ -227,8 +227,6 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        if device.type == "cuda":
-            self._world.update(0.001)
 
         super().__init__(cfg, entities, device)
 

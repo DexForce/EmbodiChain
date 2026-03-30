@@ -573,9 +573,6 @@ class Articulation(BatchEntity):
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
-        if device.type == "cuda":
-            self._world.update(0.001)
-
         self._data = ArticulationData(entities=entities, ps=self._ps, device=device)
 
         self.cfg: ArticulationCfg
@@ -663,10 +660,6 @@ class Articulation(BatchEntity):
         self._mimic_info = entities[0].get_mimic_info()
 
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
-
-        # TODO: very weird that we must call update here to make sure the GPU indices are valid.
-        if device.type == "cuda":
-            self._world.update(0.001)
 
         super().__init__(cfg, entities, device)
 
@@ -904,10 +897,6 @@ class Articulation(BatchEntity):
                 logger.log_error(
                     f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
                 )
-
-            # TODO: in manual physics mode, the update should be explicitly called after
-            # setting the pose to synchronize the state to renderer.
-            self._world.update(0.001)
 
         else:
             if pose.dim() == 2 and pose.shape[1] == 7:
@@ -1504,8 +1493,6 @@ class Articulation(BatchEntity):
                     link_pose=CudaArray(link_pose),
                     articulation_gpu_indices=CudaArray(indices),
                 )
-        else:
-            self._world.update(0.001)
 
     def _set_default_joint_drive(self) -> None:
         """Set default joint drive parameters based on the configuration."""

@@ -181,11 +181,17 @@ class CobotMagicCfg(RobotCfg):
 
 if __name__ == "__main__":
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.lab.sim.robots import CobotMagicCfg
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cuda", num_envs=2)
+    config = SimulationManagerCfg(
+        headless=False,
+        sim_device="cpu",
+        num_envs=2,
+        render_cfg=RenderCfg(renderer="fast-rt"),
+    )
     sim = SimulationManager(config)
 
     config = {
@@ -195,7 +201,6 @@ if __name__ == "__main__":
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)
 
-    sim.init_gpu_physics()
     print("CobotMagic added to the simulation.")
 
     from IPython import embed
