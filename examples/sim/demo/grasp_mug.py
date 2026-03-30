@@ -236,7 +236,7 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=5000, max_length=0.088, min_length=0.003
         ),
-        force_regenerate=True,  # force user to annotate grasp region each time
+        force_regenerate=False,  # force user to annotate grasp region each time
     )
     sim.open_window()
 

@@ -1140,8 +1140,6 @@ class RigidObject(BatchEntity):
             )
         approach_direction = F.normalize(approach_direction, dim=-1)
         if hasattr(self, "_grasp_annotator") is False:
-            self._grasp_annotator = GraspAnnotator(cfg=cfg)
-        if hasattr(self, "_hit_point_pairs") is False or cfg.force_regenerate:
             vertices = torch.tensor(
                 self._entities[0].get_vertices(),
                 dtype=torch.float32,
@@ -1156,7 +1154,13 @@ class RigidObject(BatchEntity):
                 device=self.device,
             )
             vertices = vertices * scale
-            self._hit_point_pairs = self._grasp_annotator.annotate(vertices, triangles)
+            self._grasp_annotator = GraspAnnotator(
+                vertices=vertices, triangles=triangles, cfg=cfg
+            )
+
+        # Annotate antipodal point pairs
+        if hasattr(self, "_hit_point_pairs") is False or cfg.force_regenerate:
+            self._hit_point_pairs = self._grasp_annotator.annotate()
 
         poses = self.get_local_pose(to_matrix=True)
         poses = torch.as_tensor(poses, dtype=torch.float32, device=self.device)
@@ -1177,13 +1181,7 @@ class RigidObject(BatchEntity):
             triangles = self._entities[0].get_triangles()
             scale = self._entities[0].get_body_scale()
             vertices = vertices * scale
-            GraspAnnotator.visualize_grasp_pose(
-                vertices=torch.tensor(
-                    vertices, dtype=torch.float32, device=self.device
-                ),
-                triangles=torch.tensor(
-                    triangles, dtype=torch.int32, device=self.device
-                ),
+            self._grasp_annotator.visualize_grasp_pose(
                 obj_pose=poses[0],
                 grasp_pose=grasp_poses[0],
                 open_length=open_lengths[0],

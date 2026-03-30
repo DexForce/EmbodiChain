@@ -11,7 +11,6 @@ import pickle
 import open3d as o3d
 from embodichain.utils import logger
 
-
 CONVEX_CACHE_DIR = os.path.join(
     os.path.expanduser("~"), ".cache", "embodichain_cache", "convex_decomposition"
 )
@@ -33,6 +32,7 @@ class BatchConvexCollisionChecker:
     ):
         if not os.path.isdir(CONVEX_CACHE_DIR):
             os.makedirs(CONVEX_CACHE_DIR, exist_ok=True)
+        self.device = base_mesh_verts.device
         base_mesh_verts_np = base_mesh_verts.cpu().numpy()
         base_mesh_faces_np = base_mesh_faces.cpu().numpy()
         mesh_hash = hashlib.md5(
@@ -45,6 +45,7 @@ class BatchConvexCollisionChecker:
             triangles=o3d.utility.Vector3iVector(base_mesh_faces_np),
         )
         self.mesh.compute_vertex_normals()
+
         self.cache_path = os.path.join(
             CONVEX_CACHE_DIR, f"{mesh_hash}_{max_decomposition_hulls}.pkl"
         )
@@ -58,6 +59,58 @@ class BatchConvexCollisionChecker:
         else:
             # load precomputed plane equations from cache
             self.plane_equations = pickle.load(open(self.cache_path, "rb"))
+
+    def query_batch_points(
+        self,
+        batch_points: torch.Tensor,
+        collision_threshold: float = 0.0,
+        is_visual: bool = False,
+    ):
+        n_batch = batch_points.shape[0]
+        n_points = batch_points.shape[1]
+        penetration_result = torch.zeros(size=(n_batch, n_points), device=self.device)
+        penetration_result.fill_(-float("inf"))
+        collision_result = torch.zeros(
+            size=(n_batch, n_points), dtype=torch.bool, device=self.device
+        )
+        collision_result.fill_(False)
+        for normals, offsets in self.plane_equations:
+            normals_torch = torch.tensor(normals, device=self.device)
+            offsets_torch = torch.tensor(offsets, device=self.device)
+            penetration, collides = check_collision_single_hull(
+                normals_torch,
+                offsets_torch,
+                batch_points,
+                collision_threshold,
+            )
+            penetration_result = torch.max(penetration_result, penetration)
+            collision_result = torch.logical_or(collision_result, collides)
+        is_colliding = collision_result.any(dim=-1)  # [B]
+        max_penetration = penetration_result.max(dim=-1)[0]  # [B]
+
+        if is_visual:
+            # visualize result
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            for i in range(n_batch):
+                query_points_o3d = o3d.geometry.PointCloud()
+                query_points_np = batch_points[i].cpu().numpy()
+                query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
+                query_points_color = np.zeros_like(query_points_np)
+                query_points_color[collision_result[i].cpu().numpy()] = [
+                    1.0,
+                    0,
+                    0,
+                ]  # red for colliding points
+                query_points_color[~collision_result[i].cpu().numpy()] = [
+                    0,
+                    1.0,
+                    0,
+                ]  # green for non-colliding points
+                query_points_o3d.colors = o3d.utility.Vector3dVector(query_points_color)
+                o3d.visualization.draw_geometries(
+                    [self.mesh, query_points_o3d, frame], mesh_show_back_face=True
+                )
+        return is_colliding, max_penetration
 
     def query(
         self,
@@ -98,24 +151,25 @@ class BatchConvexCollisionChecker:
 
         if cfg.debug:
             # visualize result
-            query_points_o3d = o3d.geometry.PointCloud()
-            query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
-            query_points_o3d.transform(poses[-1].to("cpu").numpy())
-            query_points_color = np.zeros_like(query_points_np)
-            query_points_color[collision_result[-1].cpu().numpy()] = [
-                1.0,
-                0,
-                0,
-            ]  # red for colliding points
-            query_points_color[~collision_result[-1].cpu().numpy()] = [
-                0,
-                1.0,
-                0,
-            ]  # green for non-colliding points
-            query_points_o3d.colors = o3d.utility.Vector3dVector(query_points_color)
-            o3d.visualization.draw_geometries(
-                [self.mesh, query_points_o3d], mesh_show_back_face=True
-            )
+            for i in range(n_batch):
+                query_points_o3d = o3d.geometry.PointCloud()
+                query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
+                query_points_o3d.transform(poses[i].to("cpu").numpy())
+                query_points_color = np.zeros_like(query_points_np)
+                query_points_color[collision_result[i].cpu().numpy()] = [
+                    1.0,
+                    0,
+                    0,
+                ]  # red for colliding points
+                query_points_color[~collision_result[i].cpu().numpy()] = [
+                    0,
+                    1.0,
+                    0,
+                ]  # green for non-colliding points
+                query_points_o3d.colors = o3d.utility.Vector3dVector(query_points_color)
+                o3d.visualization.draw_geometries(
+                    [self.mesh, query_points_o3d], mesh_show_back_face=True
+                )
         return is_colliding, max_penetration
 
     @staticmethod
@@ -310,23 +364,21 @@ def transform_points_batch(
 if __name__ == "__main__":
     from embodichain.data import get_data_path
 
-    bottle_a_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
-    bottle_b_path = get_data_path("ScannedBottle/yibao_processed.ply")
+    mug_path = get_data_path("CoffeeCup/cup.ply")
+    mug_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
+    mug_mesh = trimesh.load(mug_path, force="mesh", process=False)
+    verts = torch.tensor(mug_mesh.vertices, dtype=torch.float32)
+    faces = torch.tensor(mug_mesh.faces, dtype=torch.int32)
+    collision_checker = BatchConvexCollisionChecker(
+        verts, faces, max_decomposition_hulls=16
+    )
 
-    bottle_a_mesh = trimesh.load(bottle_a_path)
-    bottle_b_mesh = trimesh.load(bottle_b_path)
-    bottle_a_verts = torch.tensor(bottle_a_mesh.vertices, dtype=torch.float32)
-    bottle_a_faces = torch.tensor(bottle_a_mesh.faces, dtype=torch.int64)
-    bottle_b_verts = torch.tensor(bottle_b_mesh.vertices, dtype=torch.float32)
-    bottle_b_faces = torch.tensor(bottle_b_mesh.faces, dtype=torch.int64)
-
-    collision_checker = BatchConvexCollisionChecker(bottle_a_verts, bottle_a_faces)
     poses = torch.tensor(
         [
             [
                 [1, 0, 0, 0],
                 [0, 1, 0, 0],
-                [0, 0, 1, 1.0],
+                [0, 0, 1, 0.05],
                 [0, 0, 0, 1],
             ],
             [
@@ -337,13 +389,26 @@ if __name__ == "__main__":
             ],
         ]
     )
-    check_cfg = BatchConvexCollisionCheckerCfg(
-        debug=False,
-        n_query_mesh_samples=32768,
-        collsion_threshold=-0.003,
+    from scipy.spatial.transform import Rotation
+
+    rot = Rotation.from_euler("xyz", [12, 3, 32], degrees=True).as_matrix()
+    poses[0, :3, :3] = torch.tensor(rot, dtype=torch.float32)
+    poses[1, :3, :3] = torch.tensor(rot, dtype=torch.float32)
+
+    obj_path = get_data_path("ScannedBottle/yibao_processed.ply")
+    obj_mesh = trimesh.load(obj_path, force="mesh", process=False)
+    obj_verts = torch.tensor(obj_mesh.vertices, dtype=torch.float32)
+    obj_faces = torch.tensor(obj_mesh.faces, dtype=torch.int32)
+    test_pc = transform_points_batch(obj_verts, poses)
+
+    collision_checker.query_batch_points(
+        test_pc, collision_threshold=0.003, is_visual=True
     )
-    collisions, penetrations = collision_checker.query(
-        bottle_b_verts, bottle_b_faces, poses, cfg=check_cfg
+    collision_checker.query(
+        obj_verts,
+        obj_faces,
+        poses,
+        cfg=BatchConvexCollisionCheckerCfg(
+            debug=True, n_query_mesh_samples=32768, collsion_threshold=0.000
+        ),
     )
-    print("Collisions:", collisions)
-    print("Penetrations:", penetrations)

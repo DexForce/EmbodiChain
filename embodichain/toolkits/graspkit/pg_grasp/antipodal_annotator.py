@@ -32,6 +32,10 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
 )
+from .gripper_collision_checker import (
+    SimpleGripperCollisionChecker,
+    SimpleGripperCollisionCfg,
+)
 import hashlib
 import torch.nn.functional as F
 import tempfile
@@ -55,32 +59,43 @@ class SelectResult:
 
 
 class GraspAnnotator:
-    def __init__(self, cfg: GraspAnnotatorCfg = GraspAnnotatorCfg()) -> None:
-        self.cfg = cfg
-        self.antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)
-
-    def annotate(self, vertices: torch.Tensor, triangles: torch.Tensor):
-        cache_path = self._get_cache_dir(vertices, triangles)
-        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
-            logger.log_info(
-                f"Found existing antipodal retult. Loading cached antipodal pairs from {cache_path}"
-            )
-            hit_point_pairs = torch.tensor(
-                np.load(cache_path), dtype=torch.float32, device=vertices.device
-            )
-            return hit_point_pairs
-        else:
-            logger.log_info(
-                f"[Viser] *****Annotate grasp region in http://localhost:{self.cfg.viser_port}"
-            )
-
+    def __init__(
+        self,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        cfg: GraspAnnotatorCfg = GraspAnnotatorCfg(),
+    ) -> None:
+        self.device = vertices.device
+        self.vertices = vertices
+        self.triangles = triangles
         self.mesh = trimesh.Trimesh(
             vertices=vertices.to("cpu").numpy(),
             faces=triangles.to("cpu").numpy(),
             process=False,
             force="mesh",
         )
-        self.device = vertices.device
+        self._collision_checker = SimpleGripperCollisionChecker(
+            object_mesh_verts=vertices,
+            object_mesh_faces=triangles,
+            cfg=SimpleGripperCollisionCfg(),
+        )
+        self.cfg = cfg
+        self.antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)
+
+    def annotate(self):
+        cache_path = self._get_cache_dir(self.vertices, self.triangles)
+        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
+            logger.log_info(
+                f"Found existing antipodal retult. Loading cached antipodal pairs from {cache_path}"
+            )
+            hit_point_pairs = torch.tensor(
+                np.load(cache_path), dtype=torch.float32, device=self.device
+            )
+            return hit_point_pairs
+        else:
+            logger.log_info(
+                f"[Viser] *****Annotate grasp region in http://localhost:{self.cfg.viser_port}"
+            )
 
         server = viser.ViserServer(port=self.cfg.viser_port)
         server.gui.configure_theme(brand_color=(130, 0, 150))
@@ -362,56 +377,93 @@ class GraspAnnotator:
         """
         origin_points = hit_point_pairs[:, 0, :]
         hit_points = hit_point_pairs[:, 1, :]
-        print("origin_points dtype:", origin_points.dtype)
-        print("object_pose dtype:", object_pose.dtype)
         origin_points_ = self._apply_transform(origin_points, object_pose)
         hit_points_ = self._apply_transform(hit_points, object_pose)
         centers = (origin_points_ + hit_points_) / 2
         center = centers.mean(dim=0)
 
-        # get best grasp pose
+        # filter perpendicular antipodal point
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
         cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
         positive_angle = torch.abs(torch.acos(cos_angle))
-        antipodal_length = torch.norm(hit_points_ - origin_points_, dim=-1)
-        length_cost = 1 - antipodal_length / antipodal_length.max()
+        valid_mask = (
+            positive_angle - torch.pi / 2
+        ).abs() <= self.cfg.max_deviation_angle
+        valid_grasp_x = grasp_x[valid_mask]
+        valid_centers = centers[valid_mask]
+
+        # compute grasp poses using antipodal point pairs and approach direction
+        valid_grasp_poses = GraspAnnotator._grasp_pose_from_approach_direction(
+            valid_grasp_x, approach_direction, valid_centers
+        )
+        valid_open_lengths = torch.norm(
+            origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
+        )
+        # select non-collide grasp poses
+
+        is_colliding, max_penetration = self._collision_checker.query(
+            object_pose, valid_grasp_poses, valid_open_lengths
+        )
+
+        # get best grasp pose
+        valid_grasp_poses = valid_grasp_poses[~is_colliding]
+        valid_open_lengths = valid_open_lengths[~is_colliding]
+        valid_centers = valid_centers[~is_colliding]
+        valid_grasp_x = F.normalize(valid_grasp_poses[:, :3, 0], dim=-1)
+
+        cos_angle = torch.clamp(
+            (valid_grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0
+        )
+        positive_angle = torch.abs(torch.acos(cos_angle))
         angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
-        center_distance = torch.norm(centers - center, dim=-1)
+        center_distance = torch.norm(valid_centers - center, dim=-1)
         center_cost = center_distance / center_distance.max()
+        length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.4 * angle_cost + 0.3 * length_cost + 0.3 * center_cost
         best_idx = torch.argmin(total_cost)
-
-        best_open_length = torch.norm(hit_points_[best_idx] - origin_points_[best_idx])
-        best_grasp_x = grasp_x[best_idx]
-        best_grasp_center = centers[best_idx]
-        best_grasp_y = torch.cross(approach_direction, best_grasp_x, dim=0)
-        best_grasp_y = F.normalize(best_grasp_y, dim=-1)
-        best_grasp_z = torch.cross(best_grasp_x, best_grasp_y, dim=0)
-        best_grasp_z = F.normalize(best_grasp_z, dim=-1)
-        grasp_pose = torch.eye(4, device=hit_point_pairs.device, dtype=torch.float32)
-        grasp_pose[:3, 0] = best_grasp_x
-        grasp_pose[:3, 1] = best_grasp_y
-        grasp_pose[:3, 2] = best_grasp_z
-        grasp_pose[:3, 3] = best_grasp_center
-        return grasp_pose, best_open_length
+        best_grasp_pose = valid_grasp_poses[best_idx]
+        best_open_length = valid_open_lengths[best_idx]
+        return best_grasp_pose, best_open_length
 
     @staticmethod
+    def _grasp_pose_from_approach_direction(
+        grasp_x: torch.Tensor, approach_direction: torch.Tensor, center: torch.Tensor
+    ):
+        approach_direction_repeat = approach_direction[None, :].repeat(
+            grasp_x.shape[0], 1
+        )
+        grasp_y = torch.cross(approach_direction_repeat, grasp_x, dim=-1)
+        grasp_y = F.normalize(grasp_y, dim=-1)
+        grasp_z = torch.cross(grasp_x, grasp_y, dim=-1)
+        grasp_z = F.normalize(grasp_z, dim=-1)
+        grasp_poses = (
+            torch.eye(4, device=grasp_x.device, dtype=torch.float32)
+            .unsqueeze(0)
+            .repeat(grasp_x.shape[0], 1, 1)
+        )
+        grasp_poses[:, :3, 0] = grasp_x
+        grasp_poses[:, :3, 1] = grasp_y
+        grasp_poses[:, :3, 2] = grasp_z
+        grasp_poses[:, :3, 3] = center
+        return grasp_poses
+
     def visualize_grasp_pose(
-        vertices: torch.Tensor,
-        triangles: torch.Tensor,
+        self,
         obj_pose: torch.Tensor,
         grasp_pose: torch.Tensor,
         open_length: float,
     ):
         mesh = o3d.geometry.TriangleMesh(
-            vertices=o3d.utility.Vector3dVector(vertices.to("cpu").numpy()),
-            triangles=o3d.utility.Vector3iVector(triangles.to("cpu").numpy()),
+            vertices=o3d.utility.Vector3dVector(self.vertices.to("cpu").numpy()),
+            triangles=o3d.utility.Vector3iVector(self.triangles.to("cpu").numpy()),
         )
         mesh.compute_vertex_normals()
         mesh.paint_uniform_color([0.3, 0.6, 0.3])
         mesh.transform(obj_pose.to("cpu").numpy())
         vertices_ = torch.tensor(
-            np.asarray(mesh.vertices), device=vertices.device, dtype=vertices.dtype
+            np.asarray(mesh.vertices),
+            device=self.vertices.device,
+            dtype=self.vertices.dtype,
         )
         mesh_scale = (vertices_.max(dim=0)[0] - vertices_.min(dim=0)[0]).max().item()
         groud_plane = o3d.geometry.TriangleMesh.create_cylinder(
