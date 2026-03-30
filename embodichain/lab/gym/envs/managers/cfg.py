@@ -58,6 +58,16 @@ class FunctorCfg:
         in the :class:`SceneEntityCfg` object.
     """
 
+    extra: dict[str, Any] = dict()
+    """Extra metadata about the functor. Defaults to an empty dict.
+
+    This can be used to store additional configuration information such as the output shape
+    of observation functors, which can be used for pre-allocating buffers.
+
+    For observation functors, common keys include:
+        - ``shape``: A tuple defining the output shape of the functor (excluding num_envs dimension).
+    """
+
 
 @configclass
 class EventCfg(FunctorCfg):
