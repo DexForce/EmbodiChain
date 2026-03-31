@@ -110,7 +110,7 @@ class MyRobot(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "MyRobot.zip"),
             "<md5_checksum>",
         )
-        prefix = "MyRobot"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(prefix, data_descriptor, path)
 ```
