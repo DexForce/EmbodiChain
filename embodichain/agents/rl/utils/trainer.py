@@ -96,7 +96,8 @@ class Trainer:
         use_raw_obs = getattr(self.policy, "use_raw_obs", False)
         action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
         use_action_chunk = getattr(self.policy, "use_action_chunk", False)
-        if use_action_chunk and action_chunk_size > 0:
+        execute_full_chunk = bool(getattr(self.policy, "execute_full_chunk", False))
+        if use_action_chunk and action_chunk_size > 0 and not execute_full_chunk:
             self.buffer_size = (
                 (self.buffer_size + action_chunk_size - 1)
                 // action_chunk_size

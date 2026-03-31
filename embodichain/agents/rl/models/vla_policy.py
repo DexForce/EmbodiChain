@@ -175,18 +175,29 @@ class VLAPolicy(Policy):
                 chunks_env.append(chunk_i)
             action_chunk_env = torch.cat(chunks_env, dim=0)
 
-        action_chunk_env = action_chunk_env.to(self.device, dtype=torch.float32)
-        action = action_chunk_env[:, 0]
+        mean_chunk = action_chunk_env.to(self.device, dtype=torch.float32)
 
+        if deterministic:
+            noisy_chunk = mean_chunk
+            log_prob = torch.zeros(
+                mean_chunk.shape[0], device=self.device, dtype=torch.float32
+            )
+        else:
+            sigma = self.gaussian_sigma
+            noise = torch.randn_like(mean_chunk) * sigma
+            noisy_chunk = mean_chunk + noise
+            log_prob = (
+                -0.5 * noise.pow(2).sum(-1).mean(-1) / (sigma * sigma + 1e-8)
+            )
+
+        action = noisy_chunk[:, 0]
         tensordict["action"] = action
-        tensordict["sample_log_prob"] = torch.zeros(
-            action.shape[0], device=self.device, dtype=torch.float32
-        )
+        tensordict["sample_log_prob"] = log_prob
         tensordict["value"] = torch.zeros(
             action.shape[0], device=self.device, dtype=torch.float32
         )
         if self.use_action_chunk:
-            tensordict["action_chunk"] = action_chunk_env
+            tensordict["action_chunk"] = noisy_chunk
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
