@@ -528,7 +528,7 @@ class CartPole(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "cart_pole.zip"),
             "9d185eb18b19f9c95153e01943c5b0a2",
         )
-        prefix = "cart_pole"
+        prefix = "CartPole"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
