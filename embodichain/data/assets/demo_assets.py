@@ -34,7 +34,7 @@ class ScoopIceNewEnv(EmbodiChainDataset):
             ),
             "e92734a9de0f64be33a11fbda0fbd3b6",
         )
-        prefix = "ScoopIceNewEnv"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -46,6 +46,6 @@ class MultiW1Data(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, demo_assets, "multi_w1_demo.zip"),
             "984e8fa3aa05cb36a1fd973a475183ed",
         )
-        prefix = "MultiW1Data"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(prefix, data_descriptor, path)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Dict, Tuple, Type, Any
 import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .base import BaseAlgorithm
 from .common import compute_gae
@@ -35,7 +36,14 @@ def get_registered_algo_names() -> list[str]:
     return list(_ALGO_REGISTRY.keys())
 
 
-def build_algo(name: str, cfg_kwargs: Dict[str, float], policy, device: torch.device):
+def build_algo(
+    name: str,
+    cfg_kwargs: Dict[str, float],
+    policy,
+    device: torch.device,
+    *,
+    distributed: bool = False,
+):
     key = name.lower()
     if key not in _ALGO_REGISTRY:
         raise ValueError(
@@ -43,6 +51,19 @@ def build_algo(name: str, cfg_kwargs: Dict[str, float], policy, device: torch.de
         )
     CfgCls, AlgoCls = _ALGO_REGISTRY[key]
     cfg = CfgCls(device=str(device), **cfg_kwargs)
+    if distributed:
+        if not (
+            torch.distributed.is_available() and torch.distributed.is_initialized()
+        ):
+            raise RuntimeError(
+                "Distributed training requested (distributed=True), but "
+                "torch.distributed is not initialized. Please call "
+                "torch.distributed.init_process_group() before building the "
+                "algorithm, or set distributed=False."
+            )
+        policy = DDP(
+            policy, device_ids=[device.index] if device.index is not None else None
+        )
     return AlgoCls(cfg, policy)
 
 

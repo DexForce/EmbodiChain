@@ -75,6 +75,7 @@ def initialize_simulation(args):
         sim_device="cuda",
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
+        num_envs=args.num_envs,
     )
     sim = SimulationManager(config)
 
@@ -186,7 +187,7 @@ def press_cow(sim: SimulationManager, robot: Robot):
     )
     interp_trajectory = interp_trajectory[0]
     for qpos in interp_trajectory:
-        robot.set_qpos(qpos.unsqueeze(0), joint_ids=arm_ids)
+        robot.set_qpos(qpos.unsqueeze(0).repeat(sim.num_envs, 1), joint_ids=arm_ids)
         sim.update(step=5)
 
 
