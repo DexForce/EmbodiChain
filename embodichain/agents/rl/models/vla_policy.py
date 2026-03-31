@@ -186,9 +186,7 @@ class VLAPolicy(Policy):
             sigma = self.gaussian_sigma
             noise = torch.randn_like(mean_chunk) * sigma
             noisy_chunk = mean_chunk + noise
-            log_prob = (
-                -0.5 * noise.pow(2).sum(-1).mean(-1) / (sigma * sigma + 1e-8)
-            )
+            log_prob = -0.5 * noise.pow(2).sum(-1).mean(-1) / (sigma * sigma + 1e-8)
 
         action = noisy_chunk[:, 0]
         tensordict["action"] = action
@@ -255,7 +253,11 @@ class VLAPolicy(Policy):
                 gt_chunk = stored_chunks[i]
                 pred_chunk = pred_chunk_env[0]
                 min_len = min(gt_chunk.shape[-1], pred_chunk.shape[-1])
-                mse = ((gt_chunk[..., :min_len] - pred_chunk[..., :min_len]).pow(2)).sum(-1).mean(-1)
+                mse = (
+                    ((gt_chunk[..., :min_len] - pred_chunk[..., :min_len]).pow(2))
+                    .sum(-1)
+                    .mean(-1)
+                )
             else:
                 action_gt = tensordict["action"][i]
                 pred = pred_chunk_env[0, step_in_chunk]

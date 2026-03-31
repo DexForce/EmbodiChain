@@ -431,7 +431,9 @@ class Trainer:
                                 sub_actions
                             )
 
-                        obs, reward, term_i, trunc_i, info = self.eval_env.step(action_in)
+                        obs, reward, term_i, trunc_i, info = self.eval_env.step(
+                            action_in
+                        )
                         if use_raw_obs:
                             obs_td = dict_to_tensordict(obs, self.device)
                         else:
