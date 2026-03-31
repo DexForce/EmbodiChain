@@ -22,6 +22,7 @@ from .rigid_object_group import (
     RigidObjectGroupCfg,
 )
 from .soft_object import SoftObject, SoftBodyData, SoftObjectCfg
+from .cloth_object import ClothObject, ClothBodyData, ClothObjectCfg
 from .articulation import Articulation, ArticulationData, ArticulationCfg
 from .robot import Robot, RobotCfg
 from .light import Light, LightCfg

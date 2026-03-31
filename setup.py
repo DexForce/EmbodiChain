@@ -108,6 +108,7 @@ def main():
 
     data_files = []
     data_files += get_data_files_of_a_directory("embodichain", ignore_py=False)
+    data_files += get_data_files_of_a_directory("configs", target_dir="configs")
 
     cmdclass = {"clean": CleanCommand}
     if BuildExtension is not None:
