@@ -854,7 +854,8 @@ def build_env_cfg_from_args(
     """
     from embodichain.utils.utility import load_json
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
-    from embodichain.lab.sim import RenderCfg, SimulationManagerCfg
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
 
     gym_config = load_json(args.gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
