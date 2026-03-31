@@ -196,9 +196,14 @@ class Trainer:
             """Callback called at each step during rollout collection."""
             reward = tensordict["reward"]
             done = tensordict["done"]
+            step_repeat = tensordict.get(
+                "step_repeat",
+                torch.ones_like(reward, dtype=torch.float32, device=self.device),
+            )
+            step_repeat_int = step_repeat.to(dtype=torch.int32)
             # Episode stats
             self.curr_ret += reward
-            self.curr_len += 1
+            self.curr_len += step_repeat_int
             done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
             if done_idx.numel() > 0:
                 finished_ret = self.curr_ret[done_idx].detach().cpu().tolist()
@@ -209,7 +214,7 @@ class Trainer:
                 self.curr_len[done_idx] = 0
 
             if not self.distributed:
-                self.global_step += tensordict.batch_size[0]
+                self.global_step += int(step_repeat_int.sum().item())
 
             if self.rank == 0 and isinstance(info, dict):
                 rewards_dict = info.get("rewards")
@@ -245,7 +250,10 @@ class Trainer:
                     "Call torch.distributed.init_process_group(...) before creating "
                     "or using Trainer(distributed=True, ...)."
                 )
-            local_delta = self.env.num_envs * self.buffer_size
+            if "step_repeat" in rollout.keys():
+                local_delta = int(rollout["step_repeat"][:, :-1].sum().item())
+            else:
+                local_delta = self.env.num_envs * self.buffer_size
             delta_tensor = torch.tensor(
                 [local_delta], dtype=torch.int64, device=self.device
             )
@@ -359,6 +367,7 @@ class Trainer:
         use_action_chunk = getattr(self.policy, "use_action_chunk", False)
         action_chunk_size = getattr(self.policy, "action_chunk_size", 1)
         effective_use_action_chunk = use_action_chunk and action_chunk_size > 0
+        execute_full_chunk = bool(getattr(self.policy, "execute_full_chunk", False))
 
         if hasattr(self.eval_env, "set_rollout_buffer"):
             self.eval_env.set_rollout_buffer(self.buffer.buffer)
@@ -383,6 +392,71 @@ class Trainer:
             step_in_chunk = 0
 
             while not done_mask.all():
+                if execute_full_chunk and effective_use_action_chunk:
+                    action_td = TensorDict(
+                        {"obs": obs_td},
+                        batch_size=[num_envs],
+                        device=self.device,
+                    )
+                    action_td = self.policy.get_action(action_td, deterministic=True)
+                    chunk = action_td.get("action_chunk")
+                    if chunk is None:
+                        raise ValueError(
+                            "execute_full_chunk=True requires policy to provide 'action_chunk'."
+                        )
+
+                    reward_sum = torch.zeros(
+                        num_envs, dtype=torch.float32, device=self.device
+                    )
+                    terminated = torch.zeros(
+                        num_envs, dtype=torch.bool, device=self.device
+                    )
+                    truncated = torch.zeros(
+                        num_envs, dtype=torch.bool, device=self.device
+                    )
+                    executed_substeps = 0
+                    info = {}
+
+                    for sub_idx in range(action_chunk_size):
+                        sub_actions = chunk[:, sub_idx]
+                        am: ActionManager | None = getattr(
+                            self.eval_env, "action_manager", None
+                        )
+                        if am is None:
+                            action_in = sub_actions
+                        else:
+                            action_in = am.convert_policy_action_to_env_action(
+                                sub_actions
+                            )
+
+                        obs, reward, term_i, trunc_i, info = self.eval_env.step(action_in)
+                        if use_raw_obs:
+                            obs_td = dict_to_tensordict(obs, self.device)
+                        else:
+                            obs_td = (
+                                flatten_dict_observation(obs)
+                                if isinstance(obs, TensorDict)
+                                else obs
+                            )
+
+                        still_running = ~done_mask
+                        reward_sum[still_running] += reward[still_running].float()
+                        step_count[still_running] += 1
+                        terminated |= term_i
+                        truncated |= trunc_i
+                        done_mask |= term_i | trunc_i
+                        executed_substeps += 1
+
+                        if hasattr(self, "eval_event_manager"):
+                            if "interval" in self.eval_event_manager.available_modes:
+                                self.eval_event_manager.apply(mode="interval")
+
+                        if done_mask.all():
+                            break
+
+                    cumulative_reward += reward_sum
+                    continue
+
                 if effective_use_action_chunk and (
                     cached_chunk is None or step_in_chunk == 0
                 ):

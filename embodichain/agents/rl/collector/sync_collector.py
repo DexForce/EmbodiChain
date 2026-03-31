@@ -105,7 +105,10 @@ class SyncCollector(BaseCollector):
         use_action_chunk = (
             getattr(self.policy, "use_action_chunk", False) and action_chunk_size > 0
         )
+        # Execute a full predicted action chunk inside one logical rollout step.
+        execute_full_chunk = bool(getattr(self.policy, "execute_full_chunk", False))
         cached_chunk = None
+        chunk_cursor = 0
 
         if use_action_chunk:
             rollout.chunk_step = torch.zeros(
@@ -114,6 +117,13 @@ class SyncCollector(BaseCollector):
                 dtype=torch.long,
                 device=self.device,
             )
+        rollout["step_repeat"] = torch.ones(
+            self.env.num_envs,
+            num_steps + 1,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        rollout["step_repeat"][:, -1] = 0.0
 
         if use_raw_obs and raw_obs_list is not None:
             raw_obs_list[0] = self.obs_td
@@ -122,11 +132,98 @@ class SyncCollector(BaseCollector):
             rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
 
         for step_idx in range(num_steps):
-            step_in_chunk = step_idx % action_chunk_size if use_action_chunk else 0
+            if execute_full_chunk and use_action_chunk:
+                if use_raw_obs and raw_obs_list is not None:
+                    step_td = TensorDict(
+                        {"obs": raw_obs_list[step_idx]},
+                        batch_size=[rollout.batch_size[0]],
+                        device=self.device,
+                    )
+                else:
+                    step_td = TensorDict(
+                        {"obs": rollout["obs"][:, step_idx]},
+                        batch_size=[rollout.batch_size[0]],
+                        device=self.device,
+                    )
+                step_td = self.policy.get_action(step_td)
+                chunk = step_td.get("action_chunk")
+                if chunk is None:
+                    logger.log_error(
+                        "execute_full_chunk=True requires policy to provide 'action_chunk'.",
+                        ValueError,
+                    )
 
-            # At chunk boundary, or cached invalidated by env reset, we need a new chunk
+                reward_sum = torch.zeros(
+                    self.env.num_envs, dtype=torch.float32, device=self.device
+                )
+                terminated = torch.zeros(
+                    self.env.num_envs, dtype=torch.bool, device=self.device
+                )
+                truncated = torch.zeros(
+                    self.env.num_envs, dtype=torch.bool, device=self.device
+                )
+                env_info = {}
+                next_obs_td = None
+
+                executed_substeps = 0
+                # Execute the whole chunk sequentially
+                for sub_idx in range(action_chunk_size):
+                    sub_action = chunk[:, sub_idx]
+                    next_obs, reward, term_i, trunc_i, env_info = self.env.step(
+                        self._to_action_dict(sub_action)
+                    )
+                    executed_substeps += 1
+                    next_obs_td = dict_to_tensordict(next_obs, self.device)
+                    reward_sum += reward.to(self.device).float()
+                    terminated |= term_i.to(self.device)
+                    truncated |= trunc_i.to(self.device)
+
+                    # Stop chunk execution when any env reaches terminal/truncated.
+                    if (term_i | trunc_i).any():
+                        break
+
+                if next_obs_td is None:
+                    logger.log_error(
+                        "Chunk execution produced no environment transition.",
+                        RuntimeError,
+                    )
+
+                if use_action_chunk:
+                    rollout.chunk_step[:, step_idx] = 0
+                rollout["step_repeat"][:, step_idx] = float(executed_substeps)
+
+                self._write_step(
+                    rollout=rollout,
+                    step_idx=step_idx,
+                    step_td=step_td,
+                )
+                if not self._supports_shared_rollout:
+                    self._write_env_step(
+                        rollout=rollout,
+                        step_idx=step_idx,
+                        reward=reward_sum,
+                        terminated=terminated,
+                        truncated=truncated,
+                    )
+                if use_raw_obs and raw_obs_list is not None:
+                    raw_obs_list[step_idx + 1] = next_obs_td
+                    rollout["obs"][:, step_idx + 1] = flatten_dict_observation(
+                        next_obs_td
+                    )
+                else:
+                    rollout["obs"][:, step_idx + 1] = flatten_dict_observation(
+                        next_obs_td
+                    )
+
+                if on_step_callback is not None:
+                    on_step_callback(rollout[:, step_idx], env_info)
+
+                self.obs_td = next_obs_td
+                continue
+
+            # Execute a predicted chunk sequentially
             need_new_chunk = use_action_chunk and (
-                step_in_chunk == 0 or cached_chunk is None
+                cached_chunk is None or chunk_cursor >= action_chunk_size
             )
 
             if need_new_chunk:
@@ -146,9 +243,10 @@ class SyncCollector(BaseCollector):
                 cached_chunk = step_td["action_chunk"]
                 action = step_td["action"]
                 effective_step_in_chunk = 0
+                chunk_cursor = 1
             elif use_action_chunk and cached_chunk is not None:
-                action = cached_chunk[:, step_in_chunk]
-                effective_step_in_chunk = step_in_chunk
+                action = cached_chunk[:, chunk_cursor]
+                effective_step_in_chunk = chunk_cursor
                 step_td = TensorDict(
                     {
                         "action": action,
@@ -162,6 +260,7 @@ class SyncCollector(BaseCollector):
                     batch_size=[rollout.batch_size[0]],
                     device=self.device,
                 )
+                chunk_cursor += 1
             else:
                 if use_raw_obs and raw_obs_list is not None:
                     step_td = TensorDict(
@@ -184,9 +283,7 @@ class SyncCollector(BaseCollector):
             next_obs_td = dict_to_tensordict(next_obs, self.device)
             if use_action_chunk:
                 rollout.chunk_step[:, step_idx] = effective_step_in_chunk
-                # Invalidate cached_chunk on any env reset to avoid using old chunk for new episode
-                if (terminated | truncated).any():
-                    cached_chunk = None
+            rollout["step_repeat"][:, step_idx] = 1.0
             self._write_step(
                 rollout=rollout,
                 step_idx=step_idx,

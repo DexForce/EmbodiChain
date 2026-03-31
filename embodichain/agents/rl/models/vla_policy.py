@@ -65,6 +65,7 @@ class VLAPolicy(Policy):
 
         self.use_action_chunk = True
         self.action_chunk_size = self.action_horizon
+        self.execute_full_chunk = bool(self.vla_cfg.get("execute_full_chunk", True))
         self._env = None
 
     def set_env(self, env) -> None:

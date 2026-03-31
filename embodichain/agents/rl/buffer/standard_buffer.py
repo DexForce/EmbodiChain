@@ -161,7 +161,14 @@ class RolloutBuffer:
 
     def _clear_dynamic_fields(self) -> None:
         """Drop algorithm-added fields before reusing the shared rollout."""
-        for key in ("advantage", "return", "seq_mask", "seq_return", "entropy"):
+        for key in (
+            "advantage",
+            "return",
+            "seq_mask",
+            "seq_return",
+            "entropy",
+            "step_repeat",
+        ):
             if key in self._rollout.keys():
                 del self._rollout[key]
         if self.use_raw_obs and hasattr(self._rollout, "raw_obs"):
