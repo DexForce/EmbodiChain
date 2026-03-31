@@ -212,9 +212,9 @@ class Gizmo:
         self._proxy_cube = self._create_proxy_cube(
             camera_pos, camera_rot_matrix, "Camera"
         )
-        # New API uses set_flush_localpose_callback
+        # New API uses set_transform_flush_callback
         try:
-            self._gizmo.set_flush_localpose_callback(self._proxy_gizmo_callback)
+            self._gizmo.set_transform_flush_callback(self._proxy_gizmo_callback)
         except Exception as e:
             logger.log_warning(f"Failed to set gizmo callback for camera: {e}")
 
@@ -300,7 +300,7 @@ class Gizmo:
 
         # Create proxy cube and set callback (use new callback API)
         self._proxy_cube = self._create_proxy_cube(ee_pos, ee_rot_matrix, "Robot")
-        self._gizmo.set_flush_localpose_callback(self._proxy_gizmo_callback)
+        self._gizmo.set_transform_flush_callback(self._proxy_gizmo_callback)
 
     def _update_robot_ik(self, target_transform: torch.Tensor):
         """Update robot joints using IK to reach target transform"""
@@ -362,7 +362,7 @@ class Gizmo:
             tgt_node = self.target._entities[0].node
             self._gizmo.follow(tgt_node)
             # set callback (localpose-style)
-            self._gizmo.set_flush_localpose_callback(create_gizmo_callback())
+            self._gizmo.set_transform_flush_callback(create_gizmo_callback())
 
         elif self._target_type == "robot":
             # Robot: create proxy object at end-effector position
@@ -386,7 +386,7 @@ class Gizmo:
     def set_transform_callback(self, callback: Callable):
         """Set callback for gizmo transform events (translation/rotation)."""
         self._callback = callback
-        self._gizmo.set_flush_localpose_callback(callback)
+        self._gizmo.set_transform_flush_callback(callback)
 
     def set_world_pose(self, pose):
         """Set gizmo's world pose."""
