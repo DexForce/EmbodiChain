@@ -44,7 +44,7 @@ class BaseArticulationTest:
         art_path = get_data_path(ART_PATH)
         assert os.path.isfile(art_path)
 
-        cfg_dict = {"fpath": art_path}
+        cfg_dict = {"fpath": art_path, "drive_pros": {"drive_type": "force"}}
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
