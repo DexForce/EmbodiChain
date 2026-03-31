@@ -124,6 +124,7 @@ class Trainer:
             action_dim=action_dim,
             device=self.device,
             use_raw_obs=use_raw_obs,
+            action_chunk_size=action_chunk_size if use_action_chunk else 0,
         )
         self.collector = SyncCollector(
             env=self.env,

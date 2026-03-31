@@ -41,6 +41,7 @@ class RolloutBuffer:
         action_dim: int,
         device: torch.device,
         use_raw_obs: bool = False,
+        action_chunk_size: int = 0,
     ) -> None:
         self.num_envs = num_envs
         self.rollout_len = rollout_len
@@ -48,6 +49,7 @@ class RolloutBuffer:
         self.action_dim = action_dim
         self.device = device
         self.use_raw_obs = use_raw_obs
+        self.action_chunk_size = action_chunk_size
         self._rollout = self._allocate_rollout()
         self._is_full = False
 
@@ -157,6 +159,15 @@ class RolloutBuffer:
             batch_size=[self.num_envs, self.rollout_len + 1],
             device=self.device,
         )
+        if self.action_chunk_size > 0:
+            td["action_chunk"] = torch.zeros(
+                self.num_envs,
+                self.rollout_len + 1,
+                self.action_chunk_size,
+                self.action_dim,
+                dtype=torch.float32,
+                device=self.device,
+            )
         return td
 
     def _clear_dynamic_fields(self) -> None:
@@ -186,6 +197,8 @@ class RolloutBuffer:
         self._rollout["done"][:, last_idx].fill_(False)
         self._rollout["terminated"][:, last_idx].fill_(False)
         self._rollout["truncated"][:, last_idx].fill_(False)
+        if "action_chunk" in self._rollout.keys():
+            self._rollout["action_chunk"][:, last_idx].zero_()
 
     def _validate_rollout_layout(self, rollout: TensorDict) -> None:
         """Validate the expected tensor shapes for the shared rollout."""

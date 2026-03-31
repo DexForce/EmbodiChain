@@ -65,6 +65,9 @@ def transition_view(rollout: TensorDict, flatten: bool = False) -> TensorDict:
     if hasattr(rollout, "chunk_step") and rollout.chunk_step is not None:
         td["chunk_step"] = rollout.chunk_step
 
+    if "action_chunk" in rollout.keys():
+        td["action_chunk"] = rollout["action_chunk"][:, :-1]
+
     if flatten:
         return td.reshape(num_envs * time_dim)
     return td

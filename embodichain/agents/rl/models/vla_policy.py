@@ -65,7 +65,7 @@ class VLAPolicy(Policy):
 
         self.use_action_chunk = True
         self.action_chunk_size = self.action_horizon
-        self.execute_full_chunk = bool(self.vla_cfg.get("execute_full_chunk", True))
+        self.execute_full_chunk = True
         self._env = None
 
     def set_env(self, env) -> None:
@@ -87,6 +87,20 @@ class VLAPolicy(Policy):
             },
         )
         self._vla_model, self._action_indices, self._prepare_batch_fn = backend
+        self._freeze_encoders()
+
+    def _freeze_encoders(self) -> None:
+        """Freeze vision encoders to avoid catastrophic forgetting"""
+        if self._vla_model is None:
+            return
+        encoders = getattr(self._vla_model, "encoders", None)
+        if encoders is not None:
+            for param in encoders.parameters():
+                param.requires_grad_(False)
+        privilege_estimators = getattr(self._vla_model, "privilege_estimators", None)
+        if privilege_estimators is not None:
+            for param in privilege_estimators.parameters():
+                param.requires_grad_(False)
 
     def _vla_chunk_to_env_chunk(
         self, action_chunk: torch.Tensor, env=None
@@ -183,7 +197,7 @@ class VLAPolicy(Policy):
     def evaluate_actions(
         self, tensordict: TensorDict, rollout=None, **kwargs
     ) -> TensorDict:
-        """Compute log_prob via Gaussian proxy"""
+        """Compute log_prob via Gaussian proxy for GRPO policy gradient."""
         b = tensordict.batch_size[0]
         env = getattr(self, "_env", None)
         if env is None:
@@ -204,17 +218,17 @@ class VLAPolicy(Policy):
         sigma = self.gaussian_sigma
         log_probs = []
         self._load_vla()
-        self._vla_model.eval()
+
+        stored_chunks = tensordict.get("action_chunk", None)
+        use_full_chunk = stored_chunks is not None
 
         for i in range(b):
             idx = int(indices[i].item())
             env_idx = idx // time_dim
             step_idx = idx % time_dim
             step_in_chunk = int(chunk_step[i].item())
-            # Action came from chunk predicted at chunk start
             chunk_start_idx = max(0, step_idx - step_in_chunk)
             obs_i = raw_obs[chunk_start_idx][env_idx]
-            action_gt = tensordict["action"][i]
 
             batch_i = self._prepare_batch_fn(obs_i, env)
             vla_chunk = self._vla_model.predict_action(
@@ -225,16 +239,26 @@ class VLAPolicy(Policy):
                 use_fix_aug=False,
             )
             pred_chunk_env = self._vla_chunk_to_env_chunk(vla_chunk, env=env)
-            pred = pred_chunk_env[0, step_in_chunk]
-            if pred.shape[-1] != action_gt.shape[-1]:
-                pred = pred[: action_gt.shape[-1]]
-            mse = ((action_gt - pred).pow(2)).sum(-1)
+
+            if use_full_chunk:
+                gt_chunk = stored_chunks[i]
+                pred_chunk = pred_chunk_env[0]
+                min_len = min(gt_chunk.shape[-1], pred_chunk.shape[-1])
+                mse = ((gt_chunk[..., :min_len] - pred_chunk[..., :min_len]).pow(2)).sum(-1).mean(-1)
+            else:
+                action_gt = tensordict["action"][i]
+                pred = pred_chunk_env[0, step_in_chunk]
+                if pred.shape[-1] != action_gt.shape[-1]:
+                    pred = pred[: action_gt.shape[-1]]
+                mse = ((action_gt - pred).pow(2)).sum(-1)
+
             log_prob = -0.5 * mse / (sigma * sigma + 1e-8)
             log_probs.append(log_prob)
 
         log_probs = torch.stack(log_probs)
+        effective_dim = self.action_dim * (self.action_horizon if use_full_chunk else 1)
         entropy = (
-            0.5 * self.action_dim * (1 + np.log(2 * np.pi) + 2 * np.log(sigma + 1e-8))
+            0.5 * effective_dim * (1 + np.log(2 * np.pi) + 2 * np.log(sigma + 1e-8))
         )
         entropy = torch.full((b,), entropy, device=self.device, dtype=torch.float32)
 

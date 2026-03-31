@@ -42,7 +42,10 @@ class SyncCollector(BaseCollector):
         self.policy = policy
         self.device = device
         self.reset_every_rollout = reset_every_rollout
-        self._supports_shared_rollout = hasattr(self.env, "set_rollout_buffer")
+        execute_full_chunk = bool(getattr(self.policy, "execute_full_chunk", False))
+        self._supports_shared_rollout = (
+            hasattr(self.env, "set_rollout_buffer") and not execute_full_chunk
+        )
         self.obs_td = self._reset_env()
 
     @torch.no_grad()
@@ -348,6 +351,8 @@ class SyncCollector(BaseCollector):
         rollout["action"][:, step_idx] = step_td["action"]
         rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
         rollout["value"][:, step_idx] = step_td["value"]
+        if "action_chunk" in rollout.keys() and "action_chunk" in step_td.keys():
+            rollout["action_chunk"][:, step_idx] = step_td["action_chunk"]
 
     def _write_env_step(
         self,
