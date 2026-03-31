@@ -1114,7 +1114,7 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
-    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg()
+    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="none")
     """Properties to define the drive mechanism of a joint."""
 
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
