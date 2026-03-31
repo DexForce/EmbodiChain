@@ -14,19 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Allow ``python -m embodichain.data`` to invoke the download CLI."""
 
-import os
-from pathlib import Path
+from embodichain.data.download import main
 
-EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://hf-mirror.com/datasets/dexforce/embodichain_data/resolve/main/"
-)
-EMBODICHAIN_DEFAULT_DATA_ROOT = os.environ.get(
-    "EMBODICHAIN_DATA_ROOT", str(Path.home() / ".cache" / "embodichain_data")
-)
-EMBODICHAIN_DEFAULT_DATASET_ROOT = os.environ.get(
-    "EMBODICHAIN_DATASET_ROOT", str(Path.home() / ".cache" / "embodichain_datasets")
-)
-EMBODICHAIN_DEFAULT_DATABASE_ROOT = str(
-    Path.home() / ".cache" / "embodichain" / "database"
-)
+main()

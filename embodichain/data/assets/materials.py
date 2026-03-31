@@ -39,7 +39,7 @@ class SimResources(EmbodiChainDataset):
             ),
             "53c054b3ae0857416dc52632eb562c12",
         )
-        prefix = "SimResources"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -109,7 +109,7 @@ class CocoBackground(EmbodiChainDataset):
             ),
             "fda82404a317281263bd5849e9eb31a1",
         )
-        prefix = "CocoBackground"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)

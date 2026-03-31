@@ -48,6 +48,7 @@ Table of Contents
    :caption: Resources
    :glob:
 
+   resources/assets.md
    resources/robot/index*
    resources/task/index*
    resources/roadmap.md

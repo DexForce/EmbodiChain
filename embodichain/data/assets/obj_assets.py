@@ -35,7 +35,7 @@ class ShopTableSimple(EmbodiChainDataset):
             ),
             "e3061ee024de7840f773b70140dcd43f",
         )
-        prefix = "ShopTableSimple"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -49,7 +49,7 @@ class CircleTableSimple(EmbodiChainDataset):
             ),
             "42ad2be8cd0caddcf9bfbf106b7783f3",
         )
-        prefix = "CircleTableSimple"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -61,7 +61,7 @@ class PlasticBin(o3d.data.DownloadDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "plastic_bin.zip"),
             "21e00083689a4a3c4e4ae3fd89c61e55",
         )
-        prefix = "PlasticBin"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -73,7 +73,7 @@ class Chair(o3d.data.DownloadDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "chair.zip"),
             "2a971a92e0956e72f262308a1054dc73",
         )
-        prefix = "Chair"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -87,7 +87,7 @@ class ContainerMetal(EmbodiChainDataset):
             ),
             "ceafb87f8177609f87aaa6779fcbb9a3",
         )
-        prefix = "ContainerMetal"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -101,7 +101,7 @@ class SimpleBoxDrawer(EmbodiChainDataset):
             ),
             "966b648bca16823ee91525847c183973",
         )
-        prefix = "SimpleBoxDrawer"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -113,7 +113,7 @@ class AdrianoTable(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "adriano_table.zip"),
             "8453583a9a1a9d04d50268f8a3da554f",
         )
-        prefix = "AdrianoTable"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -125,7 +125,7 @@ class CoffeeCup(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "CoffeeCup.zip"),
             "f05fce385826414c15e19df3b75dc886",
         )
-        prefix = "CoffeeCup"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -139,7 +139,7 @@ class SlidingBoxDrawer(EmbodiChainDataset):
             ),
             "b03d9006503d27b75ddeb06d31b2c7a5",
         )
-        prefix = "SlidingBoxDrawer"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -151,7 +151,7 @@ class AluminumTable(o3d.data.DownloadDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "AluminumTable.glb"),
             "02991d36ca9b70f019ed330a61143aa9",
         )
-        prefix = "AluminumTable"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -163,7 +163,7 @@ class ToyDuck(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "ToyDuck.zip"),
             "2f5c00ba487edf34ad668f7257c0264e",
         )
-        prefix = "ToyDuck"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -175,7 +175,7 @@ class PaperCup(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "PaperCup.zip"),
             "359d13af8c5f31ad3226d8994a1a7198",
         )
-        prefix = "PaperCup"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -187,7 +187,7 @@ class ChainRainSec(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "lianguijie.zip"),
             "2387589040a4d3f2676b622362452242",
         )
-        prefix = "ChainRainSec"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -199,7 +199,7 @@ class TableWare(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "tableware.zip"),
             "403e340fc0e4996c002ee774f89cd236",
         )
-        prefix = "TableWare"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -211,7 +211,7 @@ class ScannedBottle(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "ScannedBottle.zip"),
             "d2b2d4deb7b463a734af099f7624b4af",
         )
-        prefix = "ScannedBottle"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -223,7 +223,7 @@ class SugarBox(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "sugar_box_usd.zip"),
             "a1bc5075512cedecd08af4f9c3e8f636",
         )
-        prefix = "SugarBox"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
