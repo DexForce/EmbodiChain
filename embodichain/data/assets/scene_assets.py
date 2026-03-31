@@ -50,7 +50,7 @@ class SceneData(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, scene_assets, "SceneData.zip"),
             "fb46e4694cc88886fc785704e891a68a",
         )
-        prefix = "SceneData"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(prefix, data_descriptor, path)
 
@@ -61,7 +61,7 @@ class EmptyRoom(o3d.data.DownloadDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, scene_assets, "empty_room.zip"),
             "612ffead4fac95114bec2e3812469f96",
         )
-        prefix = "EmptyRoom"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
