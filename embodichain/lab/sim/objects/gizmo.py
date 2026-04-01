@@ -195,8 +195,8 @@ class Gizmo:
         proxy_cube.set_location(position[0], position[1], position[2])
         proxy_cube.set_rotation_euler(euler[0], euler[1], euler[2])
 
-        # Connect gizmo to proxy cube
-        self._gizmo.node.update_gizmo_follow(proxy_cube.node)
+        # Connect gizmo to proxy cube.
+        self._gizmo.follow(proxy_cube.node)
 
         logger.log_info(f"{name} gizmo proxy created at position: {position}")
         return proxy_cube
@@ -212,40 +212,55 @@ class Gizmo:
         self._proxy_cube = self._create_proxy_cube(
             camera_pos, camera_rot_matrix, "Camera"
         )
-        self._gizmo.node.set_flush_transform_callback(self._proxy_gizmo_callback)
+        # New API uses set_transform_flush_callback
+        try:
+            self._gizmo.set_transform_flush_callback(self._proxy_gizmo_callback)
+        except Exception as e:
+            logger.log_warning(f"Failed to set gizmo callback for camera: {e}")
 
-    def _proxy_gizmo_callback(self, node, translation, rotation, flag):
-        """Generic callback for proxy-based gizmo: only updates proxy cube transform, defers actual updates"""
+    def _proxy_gizmo_callback(self, *args):
+        """Generic callback for proxy-based gizmo.
+
+        Supports both old signature: (node, translation, rotation, flag)
+        and new signature: (node, local_pose, flag) where local_pose is a 4x4 matrix.
+        Updates the proxy cube transform and sets `_pending_target_transform`.
+        """
+        # New API callback signature: (node, local_pose, flag)
+        if len(args) != 3:
+            return
+        node, local_pose, flag = args
         if node is None:
             return
 
-        # Check if proxy cube still exists (not destroyed)
+        # Check if proxy cube still exists
         if not hasattr(self, "_proxy_cube") or self._proxy_cube is None:
             return
 
-        # Update proxy cube transform
-        if flag == (TransformMask.TRANSFORM_LOCAL | TransformMask.TRANSFORM_T):
-            node.set_translation(translation)
-        elif flag == (TransformMask.TRANSFORM_LOCAL | TransformMask.TRANSFORM_R):
-            node.set_rotation_rpy(rotation)
+            # convert to numpy 4x4 matrix
+        if isinstance(local_pose, torch.Tensor):
+            lp = local_pose.cpu().numpy()
+        else:
+            lp = np.asarray(local_pose)
 
-        # Mark that target needs to be updated, save target transform
-        proxy_pos = self._proxy_cube.get_location()
-        proxy_rot = self._proxy_cube.get_rotation_euler()
+        if lp.shape != (4, 4):
+            return
+
+        trans = lp[:3, 3]
+        rot_mat = lp[:3, :3]
+        euler = R.from_matrix(rot_mat).as_euler("xyz", degrees=False)
+
+        self._proxy_cube.set_location(float(trans[0]), float(trans[1]), float(trans[2]))
+        self._proxy_cube.set_rotation_euler(
+            float(euler[0]), float(euler[1]), float(euler[2])
+        )
+
+        # Build pending target transform (1,4,4)
         target_transform = torch.eye(4, dtype=torch.float32)
         target_transform[:3, 3] = torch.tensor(
-            [proxy_pos[0], proxy_pos[1], proxy_pos[2]], dtype=torch.float32
+            [trans[0], trans[1], trans[2]], dtype=torch.float32
         )
-        target_transform[:3, :3] = torch.tensor(
-            R.from_euler("xyz", proxy_rot).as_matrix(), dtype=torch.float32
-        )
-        # Ensure _pending_target_transform is (1, 4, 4)
-        if isinstance(target_transform, torch.Tensor) and target_transform.shape == (
-            4,
-            4,
-        ):
-            target_transform = target_transform.unsqueeze(0)
-        self._pending_target_transform = target_transform
+        target_transform[:3, :3] = torch.tensor(rot_mat, dtype=torch.float32)
+        self._pending_target_transform = target_transform.unsqueeze(0)
 
     def _update_camera_pose(self, target_transform: torch.Tensor):
         """Update camera pose to match target transform"""
@@ -283,9 +298,9 @@ class Gizmo:
         ee_pos = ee_pose[:3, 3].cpu().numpy()
         ee_rot_matrix = ee_pose[:3, :3].cpu().numpy()
 
-        # Create proxy cube and set callback
+        # Create proxy cube and set callback (use new callback API)
         self._proxy_cube = self._create_proxy_cube(ee_pos, ee_rot_matrix, "Robot")
-        self._gizmo.node.set_flush_transform_callback(self._proxy_gizmo_callback)
+        self._gizmo.set_transform_flush_callback(self._proxy_gizmo_callback)
 
     def _update_robot_ik(self, target_transform: torch.Tensor):
         """Update robot joints using IK to reach target transform"""
@@ -343,9 +358,12 @@ class Gizmo:
     def _setup_gizmo_follow(self):
         """Setup gizmo based on target type"""
         if self._target_type == "rigidobject":
-            # RigidObject: direct node access through MeshObject
-            self._gizmo.node.update_gizmo_follow(self.target._entities[0].node)
-            self._gizmo.node.set_flush_transform_callback(create_gizmo_callback())
+            # RigidObject: direct node access through MeshObject — use follow/attach
+            tgt_node = self.target._entities[0].node
+            self._gizmo.follow(tgt_node)
+            # set callback (localpose-style)
+            self._gizmo.set_transform_flush_callback(create_gizmo_callback())
+
         elif self._target_type == "robot":
             # Robot: create proxy object at end-effector position
             self._setup_robot_gizmo()
@@ -362,48 +380,45 @@ class Gizmo:
     def detach(self):
         """Detach gizmo from current element."""
         self.target = None
-        # Use detach_parent to properly disconnect gizmo
-        try:
-            self._gizmo.node.detach_parent()
-        except Exception as e:
-            logger.log_warning(f"Failed to detach gizmo parent: {e}")
+        # Detach gizmo using new API
+        self._gizmo.detach_parent()
 
     def set_transform_callback(self, callback: Callable):
         """Set callback for gizmo transform events (translation/rotation)."""
         self._callback = callback
-        self._gizmo.node.set_flush_transform_callback(callback)
+        self._gizmo.set_transform_flush_callback(callback)
 
     def set_world_pose(self, pose):
         """Set gizmo's world pose."""
-        self._gizmo.node.set_world_pose(pose)
+        self._gizmo.set_world_pose(pose)
 
     def set_local_pose(self, pose):
         """Set gizmo's local pose."""
-        self._gizmo.node.set_local_pose(pose)
+        self._gizmo.set_local_pose(pose)
 
     def set_line_width(self, width: float):
         """Set gizmo line width."""
-        self._gizmo.node.set_line_width(width)
+        self._gizmo.set_line_width(width)
 
     def enable_collision(self, enabled: bool):
         """Enable or disable gizmo collision."""
-        self._gizmo.node.enable_collision(enabled)
+        self._gizmo.enable_collision(enabled)
 
     def get_world_pose(self):
         """Get gizmo's world pose."""
-        return self._gizmo.node.get_world_pose()
+        return self._gizmo.get_world_pose()
 
     def get_local_pose(self):
         """Get gizmo's local pose."""
-        return self._gizmo.node.get_local_pose()
+        return self._gizmo.get_local_pose()
 
     def get_name(self):
         """Get gizmo node name."""
-        return self._gizmo.node.get_name()
+        return self._gizmo.get_name()
 
     def get_parent(self):
         """Get gizmo's parent node."""
-        return self._gizmo.node.get_parent()
+        return self._gizmo.get_parent()
 
     def toggle_visibility(self) -> bool:
         """
@@ -419,8 +434,8 @@ class Gizmo:
         self._is_visible = not self._is_visible
 
         # Apply the visibility setting to the gizmo node
-        if self._gizmo and hasattr(self._gizmo, "node"):
-            self._gizmo.node.set_visible(self._is_visible)
+        if self._gizmo:
+            self._gizmo.set_visible(self._is_visible)
 
         return self._is_visible
 
@@ -434,8 +449,8 @@ class Gizmo:
         self._is_visible = visible
 
         # Apply the visibility setting to the gizmo node
-        if self._gizmo and hasattr(self._gizmo, "node"):
-            self._gizmo.node.set_visible(self._is_visible)
+        if self._gizmo:
+            self._gizmo.set_visible(self._is_visible)
 
     def is_visible(self) -> bool:
         """
@@ -449,7 +464,9 @@ class Gizmo:
     def update(self):
         """Synchronize gizmo with target's current transform, and handle IK solving here."""
         if self._target_type == "rigidobject":
-            self._gizmo.node.update_gizmo_follow(self.target._entities[0].node)
+            tgt_node = self.target._entities[0].node
+            self._gizmo.follow(tgt_node)
+
         elif self._target_type == "robot":
             # If there is a pending target, solve IK and clear it
             if (
@@ -514,7 +531,7 @@ class Gizmo:
                     and self._gizmo
                     and hasattr(self._gizmo, "node")
                 ):
-                    self._gizmo.node.detach_parent()
+                    self._gizmo.detach_parent()
                 # Then remove the proxy cube
                 self._env.remove_actor(self._proxy_cube)
                 logger.log_info("Successfully removed proxy cube from environment")
