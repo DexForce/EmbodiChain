@@ -3,7 +3,7 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-The {class}`~objects.SoftObject` class represents deformable entities (e.g., cloth, sponges, soft robotics) in EmbodiChain. Unlike rigid bodies, soft objects are defined by vertices and meshes rather than a single rigid pose.
+The {class}`~objects.SoftObject` class represents deformable entities (e.g. sponges, soft robotics) in EmbodiChain. Unlike rigid bodies, soft objects are defined by vertices and meshes rather than a single rigid pose.
 
 ## Configuration
 
