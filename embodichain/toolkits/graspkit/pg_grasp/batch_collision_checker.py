@@ -28,6 +28,7 @@ import open3d as o3d
 from embodichain.utils import logger
 from embodichain.utils.warp import convex_signed_distance_kernel
 import warp as wp
+
 from embodichain.utils.device_utils import standardize_device_string
 
 CONVEX_CACHE_DIR = os.path.join(
@@ -144,7 +145,7 @@ class BatchConvexCollisionChecker:
             plane_equations_wp = wp.from_torch(plane_equations)
             plane_equation_counts_wp = wp.from_torch(plane_equation_counts)
             batch_points_wp = wp.from_torch(batch_points)
-        
+
         if is_cpu:
             wp_device = standardize_device_string(torch.device("cuda"))
         else:
@@ -166,7 +167,6 @@ class BatchConvexCollisionChecker:
             device=wp_device,
         )
         point_convex_signed_distance = wp.to_torch(point_convex_signed_distance_wp)
-        # import ipdb; ipdb.set_trace()
         point_signed_distance = point_convex_signed_distance.min(
             dim=-1
         ).values  # [n_pose, n_point]
@@ -439,8 +439,10 @@ if __name__ == "__main__":
 
     mug_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
     mug_mesh = trimesh.load(mug_path, force="mesh", process=False)
-    verts = torch.tensor(mug_mesh.vertices, dtype=torch.float32)
-    faces = torch.tensor(mug_mesh.faces, dtype=torch.int32)
+    verts = torch.tensor(
+        mug_mesh.vertices, dtype=torch.float32, device=torch.device("cuda")
+    )
+    faces = torch.tensor(mug_mesh.faces, dtype=torch.int32, device=torch.device("cuda"))
     collision_checker = BatchConvexCollisionChecker(
         verts, faces, max_decomposition_hulls=16
     )
@@ -459,28 +461,31 @@ if __name__ == "__main__":
                 [0, 0, -1, 0],
                 [0, 0, 0, 1],
             ],
-        ]
+        ],
+        device=torch.device("cuda"),
     )
     from scipy.spatial.transform import Rotation
 
+    wp.init()
+
     rot = Rotation.from_euler("xyz", [12, 3, 32], degrees=True).as_matrix()
-    poses[0, :3, :3] = torch.tensor(rot, dtype=torch.float32)
-    poses[1, :3, :3] = torch.tensor(rot, dtype=torch.float32)
+    poses[0, :3, :3] = torch.tensor(
+        rot, dtype=torch.float32, device=torch.device("cuda")
+    )
+    poses[1, :3, :3] = torch.tensor(
+        rot, dtype=torch.float32, device=torch.device("cuda")
+    )
 
     obj_path = get_data_path("ScannedBottle/yibao_processed.ply")
     obj_mesh = trimesh.load(obj_path, force="mesh", process=False)
-    obj_verts = torch.tensor(obj_mesh.vertices, dtype=torch.float32)
-    obj_faces = torch.tensor(obj_mesh.faces, dtype=torch.int32)
+    obj_verts = torch.tensor(
+        obj_mesh.vertices, dtype=torch.float32, device=torch.device("cuda")
+    )
+    obj_faces = torch.tensor(
+        obj_mesh.faces, dtype=torch.int32, device=torch.device("cuda")
+    )
     test_pc = transform_points_batch(obj_verts, poses)
 
     collision_checker.query_batch_points(
         test_pc, collision_threshold=0.003, is_visual=True
     )
-    # collision_checker.query(
-    #     obj_verts,
-    #     obj_faces,
-    #     poses,
-    #     cfg=BatchConvexCollisionCheckerCfg(
-    #         debug=True, n_query_mesh_samples=32768, collsion_threshold=0.000
-    #     ),
-    # )

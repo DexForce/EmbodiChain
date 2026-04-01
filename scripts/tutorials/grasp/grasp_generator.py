@@ -253,8 +253,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     gripper_collision_cfg = SimpleGripperCollisionCfg(
-        max_open_length=0.088, finger_length=0.078,
-        point_sample_dense=0.012
+        max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
     )
     grasp_xpos = mug.get_grasp_pose(
         approach_direction=torch.tensor(
