@@ -206,14 +206,18 @@ class VLAPolicy(Policy):
 
         if deterministic:
             noisy_chunk = mean_chunk
-            log_prob = torch.zeros(
-                mean_chunk.shape[0], device=self.device, dtype=torch.float32
+            per_step_log_prob = torch.zeros(
+                mean_chunk.shape[0],
+                mean_chunk.shape[1],
+                device=self.device,
+                dtype=torch.float32,
             )
         else:
             sigma = self.gaussian_sigma
             noise = torch.randn_like(mean_chunk) * sigma
             noisy_chunk = mean_chunk + noise
-            log_prob = -0.5 * noise.pow(2).sum(-1).mean(-1) / (sigma * sigma + 1e-8)
+            per_step_log_prob = -0.5 * noise.pow(2).sum(-1) / (sigma * sigma + 1e-8)
+        log_prob = per_step_log_prob.mean(dim=-1)
 
         action = noisy_chunk[:, 0]
         tensordict["action"] = action
@@ -223,6 +227,8 @@ class VLAPolicy(Policy):
         )
         if self.use_action_chunk:
             tensordict["action_chunk"] = noisy_chunk
+            tensordict["action_chunk_log_prob"] = per_step_log_prob
+            tensordict["action_chunk_value"] = torch.zeros_like(per_step_log_prob)
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
@@ -244,6 +250,8 @@ class VLAPolicy(Policy):
         raw_obs = getattr(rollout, "raw_obs", None)
         chunk_step = tensordict.get("chunk_step", None)
         indices = tensordict.get("_indices", None)
+        execute_full_chunk = tensordict.get("execute_full_chunk", None)
+        step_repeat = tensordict.get("step_repeat", None)
         if raw_obs is None or chunk_step is None or indices is None:
             raise ValueError(
                 "VLAPolicy.evaluate_actions requires rollout.raw_obs, chunk_step, and _indices. "
@@ -256,7 +264,12 @@ class VLAPolicy(Policy):
         self._load_vla()
 
         stored_chunks = tensordict.get("action_chunk", None)
-        use_full_chunk = stored_chunks is not None
+        use_stored_chunks = stored_chunks is not None
+        execute_full_chunk_mask = (
+            execute_full_chunk.bool()
+            if execute_full_chunk is not None
+            else torch.zeros((b,), device=self.device, dtype=torch.bool)
+        )
 
         for i in range(b):
             idx = int(indices[i].item())
@@ -276,12 +289,19 @@ class VLAPolicy(Policy):
             )
             pred_chunk_env = self._vla_chunk_to_env_chunk(vla_chunk, env=env)
 
-            if use_full_chunk:
+            if use_stored_chunks and bool(execute_full_chunk_mask[i].item()):
                 gt_chunk = stored_chunks[i]
                 pred_chunk = pred_chunk_env[0]
-                min_len = min(gt_chunk.shape[-1], pred_chunk.shape[-1])
+                executed_len = int(
+                    step_repeat[i].item()
+                    if step_repeat is not None
+                    else gt_chunk.shape[0]
+                )
+                executed_len = max(
+                    1, min(executed_len, gt_chunk.shape[0], pred_chunk.shape[0])
+                )
                 mse = (
-                    ((gt_chunk[..., :min_len] - pred_chunk[..., :min_len]).pow(2))
+                    ((gt_chunk[:executed_len] - pred_chunk[:executed_len]).pow(2))
                     .sum(-1)
                     .mean(-1)
                 )
@@ -296,11 +316,20 @@ class VLAPolicy(Policy):
             log_probs.append(log_prob)
 
         log_probs = torch.stack(log_probs)
-        effective_dim = self.action_dim * (self.action_horizon if use_full_chunk else 1)
+        if step_repeat is not None:
+            chunk_lengths = step_repeat.to(
+                device=self.device, dtype=torch.float32
+            ).clamp_min(1.0)
+        else:
+            chunk_lengths = torch.ones((b,), device=self.device, dtype=torch.float32)
+        effective_dim = torch.where(
+            execute_full_chunk_mask,
+            chunk_lengths * float(self.action_dim),
+            torch.full((b,), float(self.action_dim), device=self.device),
+        )
         entropy = (
             0.5 * effective_dim * (1 + np.log(2 * np.pi) + 2 * np.log(sigma + 1e-8))
         )
-        entropy = torch.full((b,), entropy, device=self.device, dtype=torch.float32)
 
         return TensorDict(
             {

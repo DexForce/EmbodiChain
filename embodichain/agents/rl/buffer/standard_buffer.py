@@ -44,6 +44,12 @@ class RolloutBuffer:
         action_chunk_size: int = 0,
         store_flat_obs: bool = True,
     ) -> None:
+        if use_raw_obs and store_flat_obs:
+            raise ValueError(
+                "RolloutBuffer does not support storing flat observations when "
+                "use_raw_obs=True. Set store_flat_obs=False for raw-observation "
+                "policies."
+            )
         self.num_envs = num_envs
         self.rollout_len = rollout_len
         self.obs_dim = obs_dim
@@ -184,6 +190,7 @@ class RolloutBuffer:
             "seq_return",
             "entropy",
             "step_repeat",
+            "execute_full_chunk",
         ):
             if key in self._rollout.keys():
                 del self._rollout[key]

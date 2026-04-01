@@ -60,7 +60,15 @@ def transition_view(rollout: TensorDict, flatten: bool = False) -> TensorDict:
         device=rollout.device,
     )
 
-    for key in ("advantage", "return", "seq_mask", "seq_return", "entropy"):
+    for key in (
+        "advantage",
+        "return",
+        "seq_mask",
+        "seq_return",
+        "entropy",
+        "step_repeat",
+        "execute_full_chunk",
+    ):
         if key in rollout.keys():
             td[key] = rollout[key][:, :-1]
 

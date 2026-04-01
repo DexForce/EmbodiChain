@@ -277,14 +277,34 @@ class _FakePolicyActionChunk:
         row0 = obs[:, : self.action_dim] * 0.1
         row1 = obs[:, : self.action_dim] * 0.2
         chunk = torch.stack([row0, row1], dim=1)
+        chunk_log_prob = torch.stack(
+            [
+                torch.full(
+                    (obs.shape[0],), 0.25, device=obs.device, dtype=torch.float32
+                ),
+                torch.full(
+                    (obs.shape[0],), 0.75, device=obs.device, dtype=torch.float32
+                ),
+            ],
+            dim=1,
+        )
+        chunk_value = torch.stack(
+            [
+                torch.full(
+                    (obs.shape[0],), 1.0, device=obs.device, dtype=torch.float32
+                ),
+                torch.full(
+                    (obs.shape[0],), 2.0, device=obs.device, dtype=torch.float32
+                ),
+            ],
+            dim=1,
+        )
         tensordict["action_chunk"] = chunk
         tensordict["action"] = chunk[:, 0]
-        tensordict["sample_log_prob"] = torch.zeros(
-            obs.shape[0], device=obs.device, dtype=torch.float32
-        )
-        tensordict["value"] = torch.zeros(
-            obs.shape[0], device=obs.device, dtype=torch.float32
-        )
+        tensordict["sample_log_prob"] = chunk_log_prob[:, 0]
+        tensordict["value"] = chunk_value[:, 0]
+        tensordict["action_chunk_log_prob"] = chunk_log_prob
+        tensordict["action_chunk_value"] = chunk_value
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
@@ -315,17 +335,28 @@ class _FakePolicyExecuteFullChunk:
         t = self.action_chunk_size
         base = obs[:, : self.action_dim] * 0.1
         chunk = base.unsqueeze(1).expand(n, t, -1).clone()
+        chunk_log_prob = torch.tensor(
+            [0.2, 0.4, 0.6], device=obs.device, dtype=torch.float32
+        ).expand(n, -1)
         tensordict["action_chunk"] = chunk
         tensordict["action"] = chunk[:, 0]
-        tensordict["sample_log_prob"] = torch.zeros(
-            n, device=obs.device, dtype=torch.float32
-        )
+        tensordict["sample_log_prob"] = chunk_log_prob.mean(dim=1)
         tensordict["value"] = torch.zeros(n, device=obs.device, dtype=torch.float32)
+        tensordict["action_chunk_log_prob"] = chunk_log_prob
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
         tensordict["value"] = tensordict["obs"].mean(dim=-1)
         return tensordict
+
+
+class _FakeEnvTerminateOnFirstChunkStep(_FakeEnv):
+    """Environment that terminates after the first executed chunk substep."""
+
+    def step(self, action):
+        next_obs, reward, terminated, truncated, info = super().step(action)
+        terminated = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        return next_obs, reward, terminated, truncated, info
 
 
 def test_collector_populates_raw_obs_buffer():
@@ -415,6 +446,16 @@ def test_collector_chunk_step_alternates_for_sequential_action_chunk():
     assert torch.all(rollout["step_repeat"][:, :-1] == 1.0)
     assert torch.allclose(rollout["action_chunk"][:, 1], rollout["action_chunk"][:, 0])
     assert torch.allclose(rollout["action_chunk"][:, 3], rollout["action_chunk"][:, 2])
+    expected_log_prob = torch.tensor([0.25, 0.75, 0.25, 0.75], device=device).expand(
+        num_envs, -1
+    )
+    expected_value = torch.tensor([1.0, 2.0, 1.0, 2.0], device=device).expand(
+        num_envs, -1
+    )
+    assert torch.allclose(
+        rollout["sample_log_prob"][:, :rollout_len], expected_log_prob
+    )
+    assert torch.allclose(rollout["value"][:, :rollout_len], expected_value)
 
 
 def test_collector_execute_full_chunk_sets_step_repeat_and_action_chunk():
@@ -460,3 +501,60 @@ def test_collector_execute_full_chunk_sets_step_repeat_and_action_chunk():
     assert torch.all(rollout.chunk_step[:, :rollout_len] == 0)
     assert torch.all(rollout["step_repeat"][:, :rollout_len] == float(chunk_t))
     assert torch.all(rollout["step_repeat"][:, -1] == 0.0)
+
+
+def test_execute_full_chunk_masks_unexecuted_suffix_on_early_done():
+    device = torch.device("cpu")
+    num_envs = 2
+    rollout_len = 1
+    obs_dim = 5
+    action_dim = 2
+
+    env = _FakeEnvTerminateOnFirstChunkStep(
+        num_envs=num_envs,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+    )
+    policy = _FakePolicyExecuteFullChunk(
+        obs_dim=obs_dim, action_dim=action_dim, device=device
+    )
+    collector = SyncCollector(env=env, policy=policy, device=device)
+    buffer = RolloutBuffer(
+        num_envs=num_envs,
+        rollout_len=rollout_len,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+        action_chunk_size=policy.action_chunk_size,
+    )
+
+    rollout = collector.collect(
+        num_steps=rollout_len,
+        rollout=buffer.start_rollout(),
+    )
+
+    assert torch.all(rollout["step_repeat"][:, 0] == 1.0)
+    assert torch.all(rollout["action_chunk"][:, 0, 1:] == 0.0)
+    assert torch.allclose(
+        rollout["sample_log_prob"][:, 0],
+        torch.full((num_envs,), 0.2, dtype=torch.float32, device=device),
+    )
+
+
+def test_rollout_buffer_rejects_raw_and_flat_obs_storage_together():
+    device = torch.device("cpu")
+    try:
+        RolloutBuffer(
+            num_envs=1,
+            rollout_len=1,
+            obs_dim=4,
+            action_dim=2,
+            device=device,
+            use_raw_obs=True,
+            store_flat_obs=True,
+        )
+    except ValueError as exc:
+        assert "store_flat_obs=False" in str(exc)
+    else:
+        raise AssertionError("Expected raw+flat rollout buffer configuration to fail.")

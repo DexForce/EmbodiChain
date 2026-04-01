@@ -111,6 +111,10 @@ class SyncCollector(BaseCollector):
         # Execute a full predicted action chunk inside one logical rollout step.
         execute_full_chunk = bool(getattr(self.policy, "execute_full_chunk", False))
         cached_chunk = None
+        cached_chunk_log_prob = None
+        cached_chunk_value = None
+        cached_chunk_log_prob_scalar = None
+        cached_chunk_value_scalar = None
         chunk_cursor = 0
 
         if use_action_chunk:
@@ -127,6 +131,12 @@ class SyncCollector(BaseCollector):
             device=self.device,
         )
         rollout["step_repeat"][:, -1] = 0.0
+        rollout["execute_full_chunk"] = torch.full(
+            (self.env.num_envs, num_steps + 1),
+            fill_value=execute_full_chunk,
+            dtype=torch.bool,
+            device=self.device,
+        )
 
         self._store_observation(
             rollout=rollout,
@@ -143,12 +153,7 @@ class SyncCollector(BaseCollector):
                     step_idx=step_idx,
                 )
                 step_td = self.policy.get_action(step_td)
-                chunk = step_td.get("action_chunk")
-                if chunk is None:
-                    logger.log_error(
-                        "execute_full_chunk=True requires policy to provide 'action_chunk'.",
-                        ValueError,
-                    )
+                chunk = self._require_action_chunk(step_td, action_chunk_size)
 
                 reward_sum = torch.zeros(
                     self.env.num_envs, dtype=torch.float32, device=self.device
@@ -188,6 +193,7 @@ class SyncCollector(BaseCollector):
                 if use_action_chunk:
                     rollout.chunk_step[:, step_idx] = 0
                 rollout["step_repeat"][:, step_idx] = float(executed_substeps)
+                self._finalize_execute_full_chunk_step(step_td, executed_substeps)
 
                 self._write_step(
                     rollout=rollout,
@@ -227,7 +233,23 @@ class SyncCollector(BaseCollector):
                     step_idx=step_idx,
                 )
                 step_td = self.policy.get_action(step_td)
-                cached_chunk = step_td["action_chunk"]
+                cached_chunk = self._require_action_chunk(step_td, action_chunk_size)
+                cached_chunk_log_prob = self._get_chunk_stat(
+                    step_td, "action_chunk_log_prob"
+                )
+                cached_chunk_value = self._get_chunk_stat(step_td, "action_chunk_value")
+                cached_chunk_log_prob_scalar = step_td["sample_log_prob"]
+                cached_chunk_value_scalar = step_td["value"]
+                step_td["sample_log_prob"] = self._resolve_chunk_stat(
+                    chunk_stat=cached_chunk_log_prob,
+                    fallback=cached_chunk_log_prob_scalar,
+                    step_idx=0,
+                )
+                step_td["value"] = self._resolve_chunk_stat(
+                    chunk_stat=cached_chunk_value,
+                    fallback=cached_chunk_value_scalar,
+                    step_idx=0,
+                )
                 action = step_td["action"]
                 effective_step_in_chunk = 0
                 chunk_cursor = 1
@@ -238,11 +260,15 @@ class SyncCollector(BaseCollector):
                     {
                         "action": action,
                         "action_chunk": cached_chunk,
-                        "sample_log_prob": torch.zeros(
-                            action.shape[0], device=self.device, dtype=torch.float32
+                        "sample_log_prob": self._resolve_chunk_stat(
+                            chunk_stat=cached_chunk_log_prob,
+                            fallback=cached_chunk_log_prob_scalar,
+                            step_idx=chunk_cursor,
                         ),
-                        "value": torch.zeros(
-                            action.shape[0], device=self.device, dtype=torch.float32
+                        "value": self._resolve_chunk_stat(
+                            chunk_stat=cached_chunk_value,
+                            fallback=cached_chunk_value_scalar,
+                            step_idx=chunk_cursor,
                         ),
                     },
                     batch_size=[rollout.batch_size[0]],
@@ -410,6 +436,79 @@ class SyncCollector(BaseCollector):
                 )
             rollout["obs"][:, step_idx] = flatten_dict_observation(obs_td)
 
+    def _require_action_chunk(
+        self, step_td: TensorDict, action_chunk_size: int
+    ) -> torch.Tensor:
+        """Return a validated action chunk from the policy output."""
+        chunk = step_td.get("action_chunk")
+        if chunk is None:
+            logger.log_error(
+                "Action-chunk policy did not return 'action_chunk'. "
+                f"policy={type(self.policy).__name__}, expected chunk length={action_chunk_size}.",
+                ValueError,
+            )
+        expected_shape = (
+            step_td.batch_size[0],
+            action_chunk_size,
+            self.policy.action_dim,
+        )
+        if tuple(chunk.shape) != expected_shape:
+            logger.log_error(
+                "Policy-produced 'action_chunk' shape mismatch: "
+                f"expected {expected_shape}, got {tuple(chunk.shape)}.",
+                ValueError,
+            )
+        return chunk
+
+    def _get_chunk_stat(self, step_td: TensorDict, key: str) -> torch.Tensor | None:
+        """Read an optional per-substep chunk statistic from the policy output."""
+        stat = step_td.get(key)
+        if stat is None:
+            return None
+        if stat.dim() != 2 or stat.shape[0] != step_td.batch_size[0]:
+            logger.log_error(
+                f"Policy-produced '{key}' must have shape [batch, chunk].",
+                ValueError,
+            )
+        return stat
+
+    def _resolve_chunk_stat(
+        self,
+        chunk_stat: torch.Tensor | None,
+        fallback: torch.Tensor,
+        step_idx: int,
+    ) -> torch.Tensor:
+        """Resolve the scalar statistic to store for one chunk substep."""
+        if chunk_stat is None:
+            return fallback
+        if step_idx >= chunk_stat.shape[1]:
+            logger.log_error(
+                f"Chunk statistic lookup out of range: step_idx={step_idx}, "
+                f"chunk_len={chunk_stat.shape[1]}.",
+                ValueError,
+            )
+        return chunk_stat[:, step_idx]
+
+    def _finalize_execute_full_chunk_step(
+        self, step_td: TensorDict, executed_substeps: int
+    ) -> None:
+        """Mask unexecuted chunk suffixes and align scalar stats to the executed prefix."""
+        chunk = step_td.get("action_chunk")
+        if chunk is None:
+            return
+        if executed_substeps < chunk.shape[1]:
+            masked_chunk = chunk.clone()
+            masked_chunk[:, executed_substeps:].zero_()
+            step_td["action_chunk"] = masked_chunk
+        if "action_chunk_log_prob" in step_td.keys():
+            step_td["sample_log_prob"] = step_td["action_chunk_log_prob"][
+                :, :executed_substeps
+            ].mean(dim=1)
+        if "action_chunk_value" in step_td.keys():
+            step_td["value"] = step_td["action_chunk_value"][
+                :, :executed_substeps
+            ].mean(dim=1)
+
     def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
         """Validate rollout layout expected by the collector."""
         num_envs = self.env.num_envs
@@ -461,3 +560,46 @@ class SyncCollector(BaseCollector):
                     f"expected {expected_shape}, got {actual_shape}.",
                     ValueError,
                 )
+        action_chunk_size = int(getattr(self.policy, "action_chunk_size", 0) or 0)
+        use_action_chunk = bool(
+            getattr(self.policy, "use_action_chunk", False) and action_chunk_size > 0
+        )
+        if "action_chunk" in rollout.keys():
+            if not use_action_chunk:
+                logger.log_error(
+                    "Preallocated rollout field 'action_chunk' is present, but the "
+                    "current policy is not configured to use action chunks.",
+                    ValueError,
+                )
+            expected_action_chunk_shape = (
+                num_envs,
+                time_plus_one,
+                action_chunk_size,
+                self.policy.action_dim,
+            )
+            actual_action_chunk_shape = tuple(rollout["action_chunk"].shape)
+            if actual_action_chunk_shape != expected_action_chunk_shape:
+                logger.log_error(
+                    "Preallocated rollout field 'action_chunk' shape mismatch: "
+                    f"expected {expected_action_chunk_shape}, got {actual_action_chunk_shape}.",
+                    ValueError,
+                )
+        if hasattr(rollout, "chunk_step"):
+            chunk_step_shape = tuple(rollout.chunk_step.shape)
+            expected_chunk_step_shape = (num_envs, num_steps)
+            if chunk_step_shape != expected_chunk_step_shape:
+                logger.log_error(
+                    "Preallocated rollout attribute 'chunk_step' shape mismatch: "
+                    f"expected {expected_chunk_step_shape}, got {chunk_step_shape}.",
+                    ValueError,
+                )
+        for key in ("step_repeat", "execute_full_chunk"):
+            if key in rollout.keys():
+                actual_shape = tuple(rollout[key].shape)
+                expected_shape = (num_envs, time_plus_one)
+                if actual_shape != expected_shape:
+                    logger.log_error(
+                        f"Preallocated rollout field '{key}' shape mismatch: "
+                        f"expected {expected_shape}, got {actual_shape}.",
+                        ValueError,
+                    )
