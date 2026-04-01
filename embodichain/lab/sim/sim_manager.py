@@ -518,7 +518,7 @@ class SimulationManager:
             for i in range(step):
                 self._world.update(physics_dt)
 
-            if self.sim_config.render_cfg.is_legacy:
+            if not self.is_rt_enabled:
                 self._sync_gpu_data()
 
         else:
