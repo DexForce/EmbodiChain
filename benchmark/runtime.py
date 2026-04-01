@@ -292,16 +292,16 @@ def evaluate_checkpoint(
                 device=device,
             )
             action_td = policy.get_action(action_td, deterministic=True)
-            action_type = (
-                env.action_manager.action_type
-                if getattr(env, "action_manager", None)
-                else getattr(env, "action_type", "delta_qpos")
-            )
+            action_manager = getattr(env, "action_manager", None)
+            if action_manager is None:
+                action_in = action_td["action"]
+            else:
+                action_in = action_manager.convert_policy_action_to_env_action(
+                    action_td["action"]
+                )
 
             step_start = time.perf_counter()
-            obs, reward, terminated, truncated, info = env.step(
-                {action_type: action_td["action"]}
-            )
+            obs, reward, terminated, truncated, info = env.step(action_in)
             env_step_time += time.perf_counter() - step_start
             env_step_count += env.num_envs
 
