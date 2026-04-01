@@ -68,9 +68,11 @@ class BenchmarkRunner:
         cfg = deep_update(task_spec["base_config"], algorithm_spec["config"])
         cfg["trainer"]["exp_name"] = f"{task_name}_{algorithm_name}_seed{seed}"
         cfg["trainer"]["seed"] = seed
-        cfg["trainer"]["enable_eval"] = True
-        cfg["trainer"]["eval_freq"] = int(self.protocol["evaluation_interval"])
-        cfg["trainer"]["num_eval_episodes"] = int(self.protocol["evaluation_episodes"])
+        train_eval_enabled = bool(task_spec.get("train_eval_enabled", True))
+        cfg["trainer"]["enable_eval"] = train_eval_enabled
+        if train_eval_enabled:
+            cfg["trainer"]["eval_freq"] = int(self.protocol["evaluation_interval"])
+            cfg["trainer"]["num_eval_episodes"] = int(self.protocol["evaluation_episodes"])
         cfg["trainer"]["iterations"] = int(self.protocol["iterations"])
         cfg["trainer"]["buffer_size"] = int(self.protocol["buffer_size"])
         cfg["trainer"]["num_envs"] = int(self.protocol["num_envs"])

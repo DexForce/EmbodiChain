@@ -1,6 +1,7 @@
 name: push_cube
 env_id: PushCubeRL
 success_threshold: 0.6
+train_eval_enabled: false
 base_config:
   trainer:
     gym_config: configs/agents/rl/push_cube/gym_config.json

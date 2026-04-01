@@ -203,9 +203,12 @@ class Trainer:
                 if log_dict and self.use_wandb:
                     wandb.log(log_dict, step=self.global_step)
 
+        rollout = self.buffer.start_rollout()
+        if hasattr(self.env, "set_rollout_buffer"):
+            self.env.set_rollout_buffer(rollout)
         rollout = self.collector.collect(
             num_steps=self.buffer_size,
-            rollout=self.buffer.start_rollout(),
+            rollout=rollout,
             on_step_callback=on_step,
         )
         self.buffer.add(rollout)
@@ -345,7 +348,8 @@ class Trainer:
         episode_successes = []
         metric_values: dict[str, list[float]] = {}
 
-        self.eval_env.set_rollout_buffer(self.buffer.buffer)
+        # Evaluation does not consume the training rollout buffer; binding it here can
+        # overflow the shared RL buffer when eval episodes are longer than buffer_size.
         for _ in range(num_episodes):
             # Reset and initialize episode tracking
             obs, _ = self.eval_env.reset()
