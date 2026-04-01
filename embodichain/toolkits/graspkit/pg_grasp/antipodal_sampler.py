@@ -25,7 +25,8 @@ from embodichain.utils import logger
 
 @dataclass
 class AntipodalSamplerCfg:
-    """ Configuration for AntipodalSampler."""
+    """Configuration for AntipodalSampler."""
+
     n_sample: int = 20000
     """surface point sample number"""
     max_angle: float = np.pi / 12
@@ -37,7 +38,8 @@ class AntipodalSamplerCfg:
 
 
 class AntipodalSampler:
-    """ AntipodalSampler samples antipodal point pairs on a given mesh. It uses Open3D's raycasting functionality to find points on the mesh that are visible along the negative normal direction from uniformly sampled points on the mesh surface. The sampler can also apply a random disturbance to the ray direction to increase the diversity of sampled antipodal points. The resulting antipodal point pairs can be used for grasp generation and annotation tasks."""
+    """AntipodalSampler samples antipodal point pairs on a given mesh. It uses Open3D's raycasting functionality to find points on the mesh that are visible along the negative normal direction from uniformly sampled points on the mesh surface. The sampler can also apply a random disturbance to the ray direction to increase the diversity of sampled antipodal points. The resulting antipodal point pairs can be used for grasp generation and annotation tasks."""
+
     def __init__(
         self,
         cfg: AntipodalSamplerCfg = AntipodalSamplerCfg(),
