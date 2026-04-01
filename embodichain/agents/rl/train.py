@@ -214,10 +214,8 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
-    sample_obs, _ = env.reset()
-    sample_obs_td = dict_to_tensordict(sample_obs, device)
-    obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
-    flat_obs_space = env.flattened_observation_space
+    obs_dim = None
+    flat_obs_space = None
 
     # Create evaluation environment only if enabled
     eval_env = None
@@ -246,6 +244,10 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         )
     # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic/actor_only)
     if policy_name.lower() == "actor_critic":
+        sample_obs, _ = env.reset()
+        sample_obs_td = dict_to_tensordict(sample_obs, device)
+        obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
+        flat_obs_space = env.flattened_observation_space
         actor_cfg = policy_block.get("actor")
         critic_cfg = policy_block.get("critic")
         if actor_cfg is None or critic_cfg is None:
@@ -265,6 +267,10 @@ def train_from_config(config_path: str, distributed: bool | None = None):
             critic=critic,
         )
     elif policy_name.lower() == "actor_only":
+        sample_obs, _ = env.reset()
+        sample_obs_td = dict_to_tensordict(sample_obs, device)
+        obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
+        flat_obs_space = env.flattened_observation_space
         actor_cfg = policy_block.get("actor")
         if actor_cfg is None:
             raise ValueError(

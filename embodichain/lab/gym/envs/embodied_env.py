@@ -547,7 +547,6 @@ class EmbodiedEnv(BaseEnv):
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
         """Infer whether the rollout buffer is expert recording or RL training data."""
         if {
-            "obs",
             "action",
             "reward",
             "done",

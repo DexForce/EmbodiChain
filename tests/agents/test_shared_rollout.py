@@ -231,7 +231,7 @@ class _FakePolicyRawObs:
     use_raw_obs = True
 
     def __init__(self, obs_dim: int, action_dim: int, device: torch.device) -> None:
-        self.obs_dim = obs_dim
+        self.obs_dim = 0
         self.action_dim = action_dim
         self.device = device
 
@@ -350,24 +350,29 @@ def test_collector_populates_raw_obs_buffer():
         action_dim=action_dim,
         device=device,
         use_raw_obs=True,
+        store_flat_obs=False,
     )
 
     rollout = collector.collect(
         num_steps=rollout_len,
         rollout=buffer.start_rollout(),
     )
+    buffer.add(rollout)
+    stored = buffer.get(flatten=False)
 
-    assert hasattr(rollout, "raw_obs")
-    assert len(rollout.raw_obs) == rollout_len + 1
+    assert "obs" not in stored.keys()
+    assert hasattr(stored, "raw_obs")
+    assert len(stored.raw_obs) == rollout_len + 1
     for t in range(rollout_len + 1):
-        assert rollout.raw_obs[t] is not None
-        assert rollout.raw_obs[t].batch_size == torch.Size([num_envs])
+        assert stored.raw_obs[t] is not None
+        assert stored.raw_obs[t].batch_size == torch.Size([num_envs])
+        assert torch.allclose(
+            stored.raw_obs[t]["agent"]["state"],
+            torch.full((num_envs, obs_dim), float(t), dtype=torch.float32),
+        )
     assert torch.allclose(
-        rollout["obs"][:, 0], torch.zeros(num_envs, obs_dim, dtype=torch.float32)
-    )
-    assert torch.allclose(
-        rollout["obs"][:, -1],
-        torch.full((num_envs, obs_dim), float(rollout_len), dtype=torch.float32),
+        stored["value"][:, -1],
+        torch.full((num_envs,), float(rollout_len), dtype=torch.float32),
     )
 
 

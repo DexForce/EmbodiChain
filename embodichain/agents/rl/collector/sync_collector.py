@@ -128,26 +128,20 @@ class SyncCollector(BaseCollector):
         )
         rollout["step_repeat"][:, -1] = 0.0
 
-        if use_raw_obs and raw_obs_list is not None:
-            raw_obs_list[0] = self.obs_td
-            rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
-        else:
-            rollout["obs"][:, 0] = flatten_dict_observation(self.obs_td)
+        self._store_observation(
+            rollout=rollout,
+            raw_obs_list=raw_obs_list,
+            step_idx=0,
+            obs_td=self.obs_td,
+        )
 
         for step_idx in range(num_steps):
             if execute_full_chunk and use_action_chunk:
-                if use_raw_obs and raw_obs_list is not None:
-                    step_td = TensorDict(
-                        {"obs": raw_obs_list[step_idx]},
-                        batch_size=[rollout.batch_size[0]],
-                        device=self.device,
-                    )
-                else:
-                    step_td = TensorDict(
-                        {"obs": rollout["obs"][:, step_idx]},
-                        batch_size=[rollout.batch_size[0]],
-                        device=self.device,
-                    )
+                step_td = self._policy_input_tensordict(
+                    rollout=rollout,
+                    raw_obs_list=raw_obs_list,
+                    step_idx=step_idx,
+                )
                 step_td = self.policy.get_action(step_td)
                 chunk = step_td.get("action_chunk")
                 if chunk is None:
@@ -208,15 +202,12 @@ class SyncCollector(BaseCollector):
                         terminated=terminated,
                         truncated=truncated,
                     )
-                if use_raw_obs and raw_obs_list is not None:
-                    raw_obs_list[step_idx + 1] = next_obs_td
-                    rollout["obs"][:, step_idx + 1] = flatten_dict_observation(
-                        next_obs_td
-                    )
-                else:
-                    rollout["obs"][:, step_idx + 1] = flatten_dict_observation(
-                        next_obs_td
-                    )
+                self._store_observation(
+                    rollout=rollout,
+                    raw_obs_list=raw_obs_list,
+                    step_idx=step_idx + 1,
+                    obs_td=next_obs_td,
+                )
 
                 if on_step_callback is not None:
                     on_step_callback(rollout[:, step_idx], env_info)
@@ -230,18 +221,11 @@ class SyncCollector(BaseCollector):
             )
 
             if need_new_chunk:
-                if use_raw_obs and raw_obs_list is not None:
-                    step_td = TensorDict(
-                        {"obs": raw_obs_list[step_idx]},
-                        batch_size=[rollout.batch_size[0]],
-                        device=self.device,
-                    )
-                else:
-                    step_td = TensorDict(
-                        {"obs": rollout["obs"][:, step_idx]},
-                        batch_size=[rollout.batch_size[0]],
-                        device=self.device,
-                    )
+                step_td = self._policy_input_tensordict(
+                    rollout=rollout,
+                    raw_obs_list=raw_obs_list,
+                    step_idx=step_idx,
+                )
                 step_td = self.policy.get_action(step_td)
                 cached_chunk = step_td["action_chunk"]
                 action = step_td["action"]
@@ -266,18 +250,11 @@ class SyncCollector(BaseCollector):
                 )
                 chunk_cursor += 1
             else:
-                if use_raw_obs and raw_obs_list is not None:
-                    step_td = TensorDict(
-                        {"obs": raw_obs_list[step_idx]},
-                        batch_size=[rollout.batch_size[0]],
-                        device=self.device,
-                    )
-                else:
-                    step_td = TensorDict(
-                        {"obs": rollout["obs"][:, step_idx]},
-                        batch_size=[rollout.batch_size[0]],
-                        device=self.device,
-                    )
+                step_td = self._policy_input_tensordict(
+                    rollout=rollout,
+                    raw_obs_list=raw_obs_list,
+                    step_idx=step_idx,
+                )
                 step_td = self.policy.get_action(step_td)
                 action = step_td["action"]
 
@@ -301,11 +278,12 @@ class SyncCollector(BaseCollector):
                     terminated=terminated,
                     truncated=truncated,
                 )
-            if use_raw_obs and raw_obs_list is not None:
-                raw_obs_list[step_idx + 1] = next_obs_td
-                rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
-            else:
-                rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
+            self._store_observation(
+                rollout=rollout,
+                raw_obs_list=raw_obs_list,
+                step_idx=step_idx + 1,
+                obs_td=next_obs_td,
+            )
 
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
@@ -319,12 +297,14 @@ class SyncCollector(BaseCollector):
         """Populate the bootstrap value for the final observed state."""
         use_raw_obs = getattr(self.policy, "use_raw_obs", False)
         raw_obs_list = getattr(rollout, "raw_obs", None) if use_raw_obs else None
-        if use_raw_obs and raw_obs_list is not None:
-            final_obs = raw_obs_list[-1]
-        else:
-            final_obs = rollout["obs"][:, -1]
         last_next_td = TensorDict(
-            {"obs": final_obs},
+            {
+                "obs": self._policy_obs_at(
+                    rollout=rollout,
+                    raw_obs_list=raw_obs_list,
+                    step_idx=rollout.batch_size[1] - 1,
+                )
+            },
             batch_size=[rollout.batch_size[0]],
             device=self.device,
         )
@@ -370,31 +350,99 @@ class SyncCollector(BaseCollector):
         rollout["terminated"][:, step_idx] = terminated.to(self.device)
         rollout["truncated"][:, step_idx] = truncated.to(self.device)
 
+    def _policy_input_tensordict(
+        self,
+        rollout: TensorDict,
+        raw_obs_list: list[TensorDict | None] | None,
+        step_idx: int,
+    ) -> TensorDict:
+        """Build the policy input TensorDict for a rollout step."""
+        obs = self._policy_obs_at(
+            rollout=rollout,
+            raw_obs_list=raw_obs_list,
+            step_idx=step_idx,
+        )
+        return TensorDict(
+            {"obs": obs},
+            batch_size=[rollout.batch_size[0]],
+            device=self.device,
+        )
+
+    def _policy_obs_at(
+        self,
+        rollout: TensorDict,
+        raw_obs_list: list[TensorDict | None] | None,
+        step_idx: int,
+    ) -> TensorDict | torch.Tensor:
+        """Read the observation representation expected by the current policy."""
+        if raw_obs_list is not None:
+            obs = raw_obs_list[step_idx]
+            if obs is None:
+                logger.log_error(
+                    f"Missing raw observation at rollout step {step_idx}.",
+                    RuntimeError,
+                )
+            return obs
+        if "obs" not in rollout.keys():
+            logger.log_error(
+                "Collector requires rollout['obs'] for policies that do not use raw "
+                "observations.",
+                ValueError,
+            )
+        return rollout["obs"][:, step_idx]
+
+    def _store_observation(
+        self,
+        rollout: TensorDict,
+        raw_obs_list: list[TensorDict | None] | None,
+        step_idx: int,
+        obs_td: TensorDict,
+    ) -> None:
+        """Write the current observation into whichever rollout views are enabled."""
+        if raw_obs_list is not None:
+            raw_obs_list[step_idx] = obs_td
+        if "obs" in rollout.keys():
+            if raw_obs_list is not None:
+                logger.log_error(
+                    "Rollout should not allocate flat observations when raw observation "
+                    "storage is enabled.",
+                    ValueError,
+                )
+            rollout["obs"][:, step_idx] = flatten_dict_observation(obs_td)
+
     def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
         """Validate rollout layout expected by the collector."""
         num_envs = self.env.num_envs
         time_plus_one = num_steps + 1
         policy_obs_dim = int(getattr(self.policy, "obs_dim", 0) or 0)
-        obs_shape = tuple(rollout["obs"].shape)
-        if policy_obs_dim > 0:
-            expected_obs = (num_envs, time_plus_one, policy_obs_dim)
-            if obs_shape != expected_obs:
-                logger.log_error(
-                    f"Preallocated rollout field 'obs' shape mismatch: "
-                    f"expected {expected_obs}, got {obs_shape}.",
-                    ValueError,
-                )
-        else:
-            if (
-                len(obs_shape) != 3
-                or obs_shape[0] != num_envs
-                or obs_shape[1] != time_plus_one
-            ):
-                logger.log_error(
-                    f"Preallocated rollout field 'obs' shape mismatch: "
-                    f"expected ({num_envs}, {time_plus_one}, *), got {obs_shape}.",
-                    ValueError,
-                )
+        has_flat_obs = "obs" in rollout.keys()
+        if has_flat_obs:
+            obs_shape = tuple(rollout["obs"].shape)
+            if policy_obs_dim > 0:
+                expected_obs = (num_envs, time_plus_one, policy_obs_dim)
+                if obs_shape != expected_obs:
+                    logger.log_error(
+                        f"Preallocated rollout field 'obs' shape mismatch: "
+                        f"expected {expected_obs}, got {obs_shape}.",
+                        ValueError,
+                    )
+            else:
+                if (
+                    len(obs_shape) != 3
+                    or obs_shape[0] != num_envs
+                    or obs_shape[1] != time_plus_one
+                ):
+                    logger.log_error(
+                        f"Preallocated rollout field 'obs' shape mismatch: "
+                        f"expected ({num_envs}, {time_plus_one}, *), got {obs_shape}.",
+                        ValueError,
+                    )
+        elif not getattr(self.policy, "use_raw_obs", False):
+            logger.log_error(
+                "Preallocated rollout TensorDict must contain 'obs' when "
+                "policy.use_raw_obs=False.",
+                ValueError,
+            )
 
         expected_shapes = {
             "action": (num_envs, time_plus_one, self.policy.action_dim),

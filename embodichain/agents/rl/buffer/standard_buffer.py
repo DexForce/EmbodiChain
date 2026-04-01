@@ -42,6 +42,7 @@ class RolloutBuffer:
         device: torch.device,
         use_raw_obs: bool = False,
         action_chunk_size: int = 0,
+        store_flat_obs: bool = True,
     ) -> None:
         self.num_envs = num_envs
         self.rollout_len = rollout_len
@@ -50,6 +51,7 @@ class RolloutBuffer:
         self.device = device
         self.use_raw_obs = use_raw_obs
         self.action_chunk_size = action_chunk_size
+        self.store_flat_obs = store_flat_obs
         self._rollout = self._allocate_rollout()
         self._is_full = False
 
@@ -103,15 +105,18 @@ class RolloutBuffer:
 
     def _allocate_rollout(self) -> TensorDict:
         """Preallocate rollout storage with uniform `[num_envs, time + 1]` shape."""
+        rollout_tensors = {}
+        if self.store_flat_obs:
+            rollout_tensors["obs"] = torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                self.obs_dim,
+                dtype=torch.float32,
+                device=self.device,
+            )
         td = TensorDict(
             {
-                "obs": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    self.obs_dim,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
+                **rollout_tensors,
                 "action": torch.empty(
                     self.num_envs,
                     self.rollout_len + 1,
@@ -203,7 +208,6 @@ class RolloutBuffer:
     def _validate_rollout_layout(self, rollout: TensorDict) -> None:
         """Validate the expected tensor shapes for the shared rollout."""
         expected_shapes = {
-            "obs": (self.num_envs, self.rollout_len + 1, self.obs_dim),
             "action": (self.num_envs, self.rollout_len + 1, self.action_dim),
             "sample_log_prob": (self.num_envs, self.rollout_len + 1),
             "value": (self.num_envs, self.rollout_len + 1),
@@ -212,6 +216,12 @@ class RolloutBuffer:
             "terminated": (self.num_envs, self.rollout_len + 1),
             "truncated": (self.num_envs, self.rollout_len + 1),
         }
+        if self.store_flat_obs:
+            expected_shapes["obs"] = (
+                self.num_envs,
+                self.rollout_len + 1,
+                self.obs_dim,
+            )
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:
@@ -219,3 +229,8 @@ class RolloutBuffer:
                     f"Rollout field '{key}' shape mismatch: expected {expected_shape}, "
                     f"got {actual_shape}."
                 )
+        if not self.store_flat_obs and "obs" in rollout.keys():
+            raise ValueError(
+                "RolloutBuffer configured with store_flat_obs=False must not contain "
+                "a preallocated 'obs' field."
+            )

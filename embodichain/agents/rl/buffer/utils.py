@@ -42,18 +42,20 @@ def transition_view(rollout: TensorDict, flatten: bool = False) -> TensorDict:
     """
     action = rollout["action"][:, :-1]
     num_envs, time_dim = action.shape[:2]
+    transition_fields = {
+        "action": action,
+        "sample_log_prob": rollout["sample_log_prob"][:, :-1],
+        "value": rollout["value"][:, :-1],
+        "next_value": rollout["value"][:, 1:],
+        "reward": rollout["reward"][:, :-1],
+        "done": rollout["done"][:, :-1],
+        "terminated": rollout["terminated"][:, :-1],
+        "truncated": rollout["truncated"][:, :-1],
+    }
+    if "obs" in rollout.keys():
+        transition_fields["obs"] = rollout["obs"][:, :-1]
     td = TensorDict(
-        {
-            "obs": rollout["obs"][:, :-1],
-            "action": action,
-            "sample_log_prob": rollout["sample_log_prob"][:, :-1],
-            "value": rollout["value"][:, :-1],
-            "next_value": rollout["value"][:, 1:],
-            "reward": rollout["reward"][:, :-1],
-            "done": rollout["done"][:, :-1],
-            "terminated": rollout["terminated"][:, :-1],
-            "truncated": rollout["truncated"][:, :-1],
-        },
+        transition_fields,
         batch_size=[num_envs, time_dim],
         device=rollout.device,
     )

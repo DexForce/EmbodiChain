@@ -90,9 +90,12 @@ class Trainer:
             raise RuntimeError("Env must expose num_envs for trainer statistics.")
         obs_dim = getattr(self.policy, "obs_dim", None)
         action_dim = getattr(self.policy, "action_dim", None)
-        if obs_dim is None or action_dim is None:
-            raise RuntimeError("Policy must expose obs_dim and action_dim.")
         use_raw_obs = getattr(self.policy, "use_raw_obs", False)
+        store_flat_obs = not use_raw_obs
+        if action_dim is None or (store_flat_obs and obs_dim is None):
+            raise RuntimeError(
+                "Policy must expose action_dim and flat-observation metadata."
+            )
         action_chunk_size = getattr(self.policy, "action_chunk_size", 0)
         use_action_chunk = getattr(self.policy, "use_action_chunk", False)
         execute_full_chunk = bool(getattr(self.policy, "execute_full_chunk", False))
@@ -103,27 +106,18 @@ class Trainer:
                 * action_chunk_size
             )
 
-        if use_raw_obs:
-            try:
-                sample_obs = self.env.observation_space.sample()
-                obs_td = self._obs_to_tensordict(sample_obs)
-                flat_obs = flatten_dict_observation(obs_td)
-                obs_dim = int(
-                    flat_obs.shape[-1]
-                    if isinstance(flat_obs, torch.Tensor)
-                    else np.asarray(flat_obs).shape[-1]
-                )
-            except Exception:
-                obs_dim = max(1, obs_dim)
+        if not store_flat_obs:
+            obs_dim = int(obs_dim or 0)
 
         self.buffer = RolloutBuffer(
             num_envs=num_envs,
             rollout_len=self.buffer_size,
-            obs_dim=obs_dim,
+            obs_dim=int(obs_dim),
             action_dim=action_dim,
             device=self.device,
             use_raw_obs=use_raw_obs,
             action_chunk_size=action_chunk_size if use_action_chunk else 0,
+            store_flat_obs=store_flat_obs,
         )
         self.collector = SyncCollector(
             env=self.env,
