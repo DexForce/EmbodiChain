@@ -21,7 +21,7 @@ import time
 from typing import List, Tuple, Union
 from dexsim.kit.meshproc import convex_decomposition_coacd
 import hashlib
-from dataclasses import dataclass
+from embodichain.utils import configclass
 import os
 import pickle
 import open3d as o3d
@@ -35,7 +35,7 @@ CONVEX_CACHE_DIR = os.path.join(
 )
 
 
-@dataclass
+@configclass
 class BatchConvexCollisionCheckerCfg:
     """Configuration for BatchConvexCollisionChecker."""
 
@@ -134,10 +134,21 @@ class BatchConvexCollisionChecker:
         device: torch.device,
         collision_threshold: float = -0.003,
     ):
-        plane_equations_wp = wp.from_torch(plane_equations)
-        plane_equation_counts_wp = wp.from_torch(plane_equation_counts)
-        batch_points_wp = wp.from_torch(batch_points)
-
+        # always use cuda for batch grasp pose query
+        is_cpu = device == torch.device("cpu")
+        if is_cpu:
+            plane_equations_wp = wp.from_torch(plane_equations.to("cuda"))
+            plane_equation_counts_wp = wp.from_torch(plane_equation_counts.to("cuda"))
+            batch_points_wp = wp.from_torch(batch_points.to("cuda"))
+        else:
+            plane_equations_wp = wp.from_torch(plane_equations)
+            plane_equation_counts_wp = wp.from_torch(plane_equation_counts)
+            batch_points_wp = wp.from_torch(batch_points)
+        
+        if is_cpu:
+            wp_device = standardize_device_string(torch.device("cuda"))
+        else:
+            wp_device = standardize_device_string(device)
         n_pose = batch_points.shape[0]
         n_point = batch_points.shape[1]
         n_convex = plane_equations.shape[0]
@@ -145,14 +156,14 @@ class BatchConvexCollisionChecker:
             shape=(n_pose, n_point, n_convex),
             value=-float("inf"),
             dtype=float,
-            device=standardize_device_string(device),
+            device=wp_device,
         )  # [n_pose, n_point, n_convex]
         wp.launch(
             kernel=convex_signed_distance_kernel,
             dim=(n_pose, n_point, n_convex),
             inputs=(batch_points_wp, plane_equations_wp, plane_equation_counts_wp),
             outputs=(point_convex_signed_distance_wp,),
-            device=standardize_device_string(device),
+            device=wp_device,
         )
         point_convex_signed_distance = wp.to_torch(point_convex_signed_distance_wp)
         # import ipdb; ipdb.set_trace()
@@ -160,7 +171,10 @@ class BatchConvexCollisionChecker:
             dim=-1
         ).values  # [n_pose, n_point]
         is_point_collide = point_signed_distance <= collision_threshold
-        return point_signed_distance, is_point_collide
+        if is_cpu:
+            return point_signed_distance.to("cpu"), is_point_collide.to("cpu")
+        else:
+            return point_signed_distance, is_point_collide
 
     def query_batch_points(
         self,
@@ -423,7 +437,6 @@ def transform_points_batch(
 if __name__ == "__main__":
     from embodichain.data import get_data_path
 
-    mug_path = get_data_path("CoffeeCup/cup.ply")
     mug_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
     mug_mesh = trimesh.load(mug_path, force="mesh", process=False)
     verts = torch.tensor(mug_mesh.vertices, dtype=torch.float32)
@@ -463,11 +476,11 @@ if __name__ == "__main__":
     collision_checker.query_batch_points(
         test_pc, collision_threshold=0.003, is_visual=True
     )
-    collision_checker.query(
-        obj_verts,
-        obj_faces,
-        poses,
-        cfg=BatchConvexCollisionCheckerCfg(
-            debug=True, n_query_mesh_samples=32768, collsion_threshold=0.000
-        ),
-    )
+    # collision_checker.query(
+    #     obj_verts,
+    #     obj_faces,
+    #     poses,
+    #     cfg=BatchConvexCollisionCheckerCfg(
+    #         debug=True, n_query_mesh_samples=32768, collsion_threshold=0.000
+    #     ),
+    # )

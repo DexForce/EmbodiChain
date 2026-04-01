@@ -46,6 +46,9 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_annotator import (
     GraspAnnotatorCfg,
     AntipodalSamplerCfg,
 )
+from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
+    SimpleGripperCollisionCfg,
+)
 
 
 def parse_arguments():
@@ -238,7 +241,7 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
         ),
-        force_regenerate=True,  # force user to annotate grasp region each time
+        force_regenerate=False,  # force user to annotate grasp region each time
     )
     sim.open_window()
 
@@ -248,12 +251,18 @@ if __name__ == "__main__":
     # 3. press 'Confirm Selection' to finish grasp region selection.
 
     start_time = time.time()
+
+    gripper_collision_cfg = SimpleGripperCollisionCfg(
+        max_open_length=0.088, finger_length=0.078,
+        point_sample_dense=0.012
+    )
     grasp_xpos = mug.get_grasp_pose(
         approach_direction=torch.tensor(
             [0, 0, -1], dtype=torch.float32, device=sim.device
         ),  # gripper approach direction in the world frame
         cfg=grasp_cfg,
-        is_visual=True,  # visualize selected grasp pose finally
+        gripper_collision_cfg=gripper_collision_cfg,
+        is_visual=False,  # visualize selected grasp pose finally
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")

@@ -39,6 +39,9 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_annotator import (
     GraspAnnotator,
     GraspAnnotatorCfg,
 )
+from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
+    SimpleGripperCollisionCfg,
+)
 import torch.nn.functional as F
 
 
@@ -1130,7 +1133,8 @@ class RigidObject(BatchEntity):
 
     def get_grasp_pose(
         self,
-        cfg: GraspAnnotatorCfg,
+        cfg: GraspAnnotatorCfg = GraspAnnotatorCfg(),
+        gripper_collision_cfg: SimpleGripperCollisionCfg = SimpleGripperCollisionCfg(),
         approach_direction: torch.Tensor = None,
         is_visual: bool = False,
     ) -> torch.Tensor:
@@ -1155,7 +1159,10 @@ class RigidObject(BatchEntity):
             )
             vertices = vertices * scale
             self._grasp_annotator = GraspAnnotator(
-                vertices=vertices, triangles=triangles, cfg=cfg
+                vertices=vertices,
+                triangles=triangles,
+                cfg=cfg,
+                gripper_collision_cfg=gripper_collision_cfg,
             )
 
         # Annotate antipodal point pairs

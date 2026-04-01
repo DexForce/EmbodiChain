@@ -16,29 +16,30 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from embodichain.utils import configclass
+
 from typing import Sequence
 from .batch_collision_checker import BatchConvexCollisionChecker
 import torch
 
 
-@dataclass
+@configclass
 class SimpleGripperCollisionCfg:
     """Configuration for the SimpleGripperCollisionChecker. This class defines various parameters related to the gripper geometry, point cloud generation, and collision checking process. Users can customize these parameters based on the specific gripper being modeled and the requirements of the application."""
 
     max_open_length: float = 0.1
     """ Maximum opening length of the gripper fingers. This should be set according to the specific gripper being modeled, and it defines the maximum distance between the two fingers when fully open."""
-    finger_length: float = 0.16
-    """ Length of the gripper fingers from the root to the tip. This should be set according to the specific gripper being modeled, and it defines how far the fingers extend from the gripper root frame."""
+    finger_length: float = 0.08
+    """ Length of the gripper fingers from the root to the tip, in z axis. This should be set according to the specific gripper being modeled, and it defines how far the fingers extend from the gripper root frame."""
     y_thickness: float = 0.03
     """ Thickness of the gripper along the Y-axis (the axis perpendicular to the finger opening direction). This should be set according to the specific gripper being modeled, and it defines the width of the gripper's main body and fingers in the Y direction."""
     x_thickness: float = 0.01
     """ Thickness of the gripper along the X-axis (the axis parallel to the finger opening direction). This should be set according to the specific gripper being modeled, and it defines the thickness of the fingers and the root in the X direction."""
-    root_z_width: float = 0.06
+    root_z_width: float = 0.08
     """ Width of the gripper root along the Z-axis (the axis along the finger length direction). This should be set according to the specific gripper being modeled, and it defines how far the root extends along the Z direction."""
     device = torch.device("cpu")
     """ Device on which the gripper point cloud will be generated and processed. This should be set according to the computational resources available and the requirements of the application. For example, if using a GPU for collision checking, this should be set to torch.device('cuda'). """
-    rough_dense: float = 0.015
+    point_sample_dense: float = 0.01
     """ Approximate number of points per unit length for the gripper point cloud. Higher values will yield denser point clouds, which can improve collision checking accuracy but also increase computational cost. This should be set based on the desired balance between accuracy and efficiency for the specific application."""
     max_decomposition_hulls: int = 16
     """ Maximum number of convex hulls to decompose the object mesh into for collision checking. This should be set based on the complexity of the object geometry and the desired accuracy of collision checking. More hulls can provide a tighter approximation of the object shape but will increase computational cost."""
@@ -69,17 +70,17 @@ class SimpleGripperCollisionChecker:
                 self.cfg.y_thickness,
                 self.cfg.root_z_width,
             ),
-            dense=self.cfg.rough_dense,
+            dense=self.cfg.point_sample_dense,
             device=self.device,
         )
         self.left_template = box_surface_grid(
             size=(self.cfg.x_thickness, self.cfg.y_thickness, self.cfg.finger_length),
-            dense=self.cfg.rough_dense,
+            dense=self.cfg.point_sample_dense,
             device=self.device,
         )
         self.right_template = box_surface_grid(
             size=(self.cfg.x_thickness, self.cfg.y_thickness, self.cfg.finger_length),
-            dense=self.cfg.rough_dense,
+            dense=self.cfg.point_sample_dense,
             device=self.device,
         )
 
