@@ -207,7 +207,11 @@ def main(args: argparse.Namespace) -> None:
         sim.destroy()
 
 
-if __name__ == "__main__":
+def cli():
+    """Command-line interface for asset preview.
+
+    Parses CLI arguments and launches the preview workflow.
+    """
     parser = argparse.ArgumentParser(
         description="Preview a USD or mesh asset in the EmbodiChain simulation."
     )
@@ -298,3 +302,7 @@ if __name__ == "__main__":
         args.uid = os.path.splitext(os.path.basename(args.asset_path))[0]
 
     main(args)
+
+
+if __name__ == "__main__":
+    cli()

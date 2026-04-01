@@ -322,7 +322,7 @@ class SimulationManager:
         This allows creating a new instance with different configuration.
         """
         if instance_id in cls._instances:
-            logger.log_info(f"Resetting SimulationManager instance {instance_id}.")
+            logger.log_debug(f"Resetting SimulationManager instance {instance_id}.")
             del cls._instances[instance_id]
 
     @classmethod
