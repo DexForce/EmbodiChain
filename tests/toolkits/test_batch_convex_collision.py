@@ -21,6 +21,7 @@ from embodichain.toolkits.graspkit.pg_grasp.batch_collision_checker import (
     BatchConvexCollisionCheckerCfg,
 )
 from embodichain.utils.math import transform_points_mat
+import warp as wp
 
 
 def batch_convex_collision_query(device=torch.device("cuda")):
