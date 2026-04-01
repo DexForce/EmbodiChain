@@ -20,27 +20,7 @@ from embodichain.toolkits.graspkit.pg_grasp.batch_collision_checker import (
     BatchConvexCollisionChecker,
     BatchConvexCollisionCheckerCfg,
 )
-from embodichain.utils.warp import convex_signed_distance_kernel
-import warp as wp
-
-
-def transform_points_batch(
-    points: torch.Tensor, poses: torch.Tensor  # [P, 3]  # [B, 4, 4]
-) -> torch.Tensor:
-    """
-    Apply a batch of rigid transforms to a point cloud.
-
-    Args:
-        points: [P, 3] source point cloud.
-        poses: [B, 4, 4] batch of homogeneous transformation matrices.
-
-    Returns:
-        transformed: [B, P, 3] transformed point cloud for each pose.
-    """
-    R = poses[:, :3, :3]  # [B, 3, 3]
-    t = poses[:, :3, 3]  # [B, 3]
-    transformed = torch.einsum("bij, pj -> bpi", R, points) + t.unsqueeze(1)
-    return transformed
+from embodichain.utils.math import transform_points_mat
 
 
 def batch_convex_collision_query(device=torch.device("cuda")):
@@ -79,7 +59,7 @@ def batch_convex_collision_query(device=torch.device("cuda")):
     obj_mesh = trimesh.load(obj_path, force="mesh", process=False)
     obj_verts = torch.tensor(obj_mesh.vertices, dtype=torch.float32, device=device)
     obj_faces = torch.tensor(obj_mesh.faces, dtype=torch.int32, device=device)
-    test_pc = transform_points_batch(obj_verts, poses)
+    test_pc = transform_points_mat(obj_verts, poses)
 
     is_pose_collide, pose_surface_distance = collision_checker.query_batch_points(
         test_pc, collision_threshold=0.003, is_visual=False

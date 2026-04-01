@@ -28,7 +28,7 @@ import open3d as o3d
 from embodichain.utils import logger
 from embodichain.utils.warp import convex_signed_distance_kernel
 import warp as wp
-
+from embodichain.utils.math import transform_points_mat
 from embodichain.utils.device_utils import standardize_device_string
 
 CONVEX_CACHE_DIR = os.path.join(
@@ -255,7 +255,7 @@ class BatchConvexCollisionChecker:
             penetration, collides = check_collision_single_hull(
                 normals_torch,
                 offsets_torch,
-                transform_points_batch(query_points, poses),
+                transform_points_mat(query_points, poses),
                 cfg.collsion_threshold,
             )
             penetration_result = torch.max(penetration_result, penetration)
@@ -413,79 +413,3 @@ def check_collision_single_hull(
     collides = penetration > threshold  # [B, P]
 
     return penetration, collides
-
-
-def transform_points_batch(
-    points: torch.Tensor, poses: torch.Tensor  # [P, 3]  # [B, 4, 4]
-) -> torch.Tensor:
-    """
-    Apply a batch of rigid transforms to a point cloud.
-
-    Args:
-        points: [P, 3] source point cloud.
-        poses: [B, 4, 4] batch of homogeneous transformation matrices.
-
-    Returns:
-        transformed: [B, P, 3] transformed point cloud for each pose.
-    """
-    R = poses[:, :3, :3]  # [B, 3, 3]
-    t = poses[:, :3, 3]  # [B, 3]
-    transformed = torch.einsum("bij, pj -> bpi", R, points) + t.unsqueeze(1)
-    return transformed
-
-
-if __name__ == "__main__":
-    from embodichain.data import get_data_path
-
-    mug_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
-    mug_mesh = trimesh.load(mug_path, force="mesh", process=False)
-    verts = torch.tensor(
-        mug_mesh.vertices, dtype=torch.float32, device=torch.device("cuda")
-    )
-    faces = torch.tensor(mug_mesh.faces, dtype=torch.int32, device=torch.device("cuda"))
-    collision_checker = BatchConvexCollisionChecker(
-        verts, faces, max_decomposition_hulls=16
-    )
-
-    poses = torch.tensor(
-        [
-            [
-                [1, 0, 0, 0],
-                [0, 1, 0, 0],
-                [0, 0, 1, 0.05],
-                [0, 0, 0, 1],
-            ],
-            [
-                [1, 0, 0, 0.05],
-                [0, -1, 0, 0],
-                [0, 0, -1, 0],
-                [0, 0, 0, 1],
-            ],
-        ],
-        device=torch.device("cuda"),
-    )
-    from scipy.spatial.transform import Rotation
-
-    wp.init()
-
-    rot = Rotation.from_euler("xyz", [12, 3, 32], degrees=True).as_matrix()
-    poses[0, :3, :3] = torch.tensor(
-        rot, dtype=torch.float32, device=torch.device("cuda")
-    )
-    poses[1, :3, :3] = torch.tensor(
-        rot, dtype=torch.float32, device=torch.device("cuda")
-    )
-
-    obj_path = get_data_path("ScannedBottle/yibao_processed.ply")
-    obj_mesh = trimesh.load(obj_path, force="mesh", process=False)
-    obj_verts = torch.tensor(
-        obj_mesh.vertices, dtype=torch.float32, device=torch.device("cuda")
-    )
-    obj_faces = torch.tensor(
-        obj_mesh.faces, dtype=torch.int32, device=torch.device("cuda")
-    )
-    test_pc = transform_points_batch(obj_verts, poses)
-
-    collision_checker.query_batch_points(
-        test_pc, collision_threshold=0.003, is_visual=True
-    )

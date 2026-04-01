@@ -21,7 +21,7 @@ from embodichain.utils import configclass
 from typing import Sequence
 from .batch_collision_checker import BatchConvexCollisionChecker
 import torch
-
+from embodichain.utils.math import transform_points_mat
 
 @configclass
 class SimpleGripperCollisionCfg:
@@ -112,9 +112,9 @@ class SimpleGripperCollisionChecker:
             right_finger_poses[:, :3, 0] * open_lengths_repeat
         )
 
-        root_pc = transform_points_batch(self.root_template, root_grasp_poses)
-        left_pc = transform_points_batch(self.left_template, left_finger_poses)
-        right_pc = transform_points_batch(self.right_template, right_finger_poses)
+        root_pc = transform_points_mat(self.root_template, root_grasp_poses)
+        left_pc = transform_points_mat(self.left_template, left_finger_poses)
+        right_pc = transform_points_mat(self.right_template, right_finger_poses)
         gripper_pc = torch.cat([root_pc, left_pc, right_pc], dim=1)
         return gripper_pc
 
@@ -136,24 +136,6 @@ class SimpleGripperCollisionChecker:
             gripper_pc, collision_threshold=collision_threshold, is_visual=is_visual
         )
 
-
-def transform_points_batch(
-    points: torch.Tensor, poses: torch.Tensor  # [P, 3]  # [B, 4, 4]
-) -> torch.Tensor:
-    """
-    Apply a batch of rigid transforms to a point cloud.
-
-    Args:
-        points: [P, 3] source point cloud.
-        poses: [B, 4, 4] batch of homogeneous transformation matrices.
-
-    Returns:
-        transformed: [B, P, 3] transformed point cloud for each pose.
-    """
-    R = poses[:, :3, :3]  # [B, 3, 3]
-    t = poses[:, :3, 3]  # [B, 3]
-    transformed = torch.einsum("bij, pj -> bpi", R, points) + t.unsqueeze(1)
-    return transformed
 
 
 def box_surface_grid(
