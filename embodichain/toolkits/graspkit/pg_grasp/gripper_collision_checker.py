@@ -23,6 +23,7 @@ from .batch_collision_checker import BatchConvexCollisionChecker
 import torch
 from embodichain.utils.math import transform_points_mat
 
+
 @configclass
 class SimpleGripperCollisionCfg:
     """Configuration for the SimpleGripperCollisionChecker. This class defines various parameters related to the gripper geometry, point cloud generation, and collision checking process. Users can customize these parameters based on the specific gripper being modeled and the requirements of the application."""
@@ -135,7 +136,6 @@ class SimpleGripperCollisionChecker:
         return self._checker.query_batch_points(
             gripper_pc, collision_threshold=collision_threshold, is_visual=is_visual
         )
-
 
 
 def box_surface_grid(
