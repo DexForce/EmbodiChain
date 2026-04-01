@@ -19,11 +19,11 @@ import torch.nn.functional as F
 import numpy as np
 import open3d as o3d
 import open3d.core as o3c
-from dataclasses import dataclass
+from embodichain.utils import configclass
 from embodichain.utils import logger
 
 
-@dataclass
+@configclass
 class AntipodalSamplerCfg:
     """Configuration for AntipodalSampler."""
 

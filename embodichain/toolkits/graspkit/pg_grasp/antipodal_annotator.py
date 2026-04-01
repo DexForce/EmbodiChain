@@ -27,7 +27,7 @@ import trimesh
 import viser
 import viser.transforms as tf
 from embodichain.utils import logger
-from dataclasses import dataclass
+from embodichain.utils import configclass
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
@@ -51,7 +51,7 @@ class GraspAnnotatorCfg:
     max_deviation_angle: float = np.pi / 12
 
 
-@dataclass
+@configclass
 class SelectResult:
     vertex_indices: np.ndarray | None = None
     face_indices: np.ndarray | None = None
@@ -67,6 +67,7 @@ class GraspAnnotator:
         vertices: torch.Tensor,
         triangles: torch.Tensor,
         cfg: GraspAnnotatorCfg = GraspAnnotatorCfg(),
+        gripper_collision_cfg: SimpleGripperCollisionCfg = SimpleGripperCollisionCfg(),
     ) -> None:
         """Initialize the GraspAnnotator with the given mesh vertices, triangles, and configuration.
         Args:
@@ -86,7 +87,7 @@ class GraspAnnotator:
         self._collision_checker = SimpleGripperCollisionChecker(
             object_mesh_verts=vertices,
             object_mesh_faces=triangles,
-            cfg=SimpleGripperCollisionCfg(),
+            cfg=gripper_collision_cfg,
         )
         self.cfg = cfg
         self.antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)

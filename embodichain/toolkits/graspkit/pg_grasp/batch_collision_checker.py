@@ -136,10 +136,21 @@ class BatchConvexCollisionChecker:
         device: torch.device,
         collision_threshold: float = -0.003,
     ):
-        plane_equations_wp = wp.from_torch(plane_equations)
-        plane_equation_counts_wp = wp.from_torch(plane_equation_counts)
-        batch_points_wp = wp.from_torch(batch_points)
+        # always use cuda for batch grasp pose query
+        is_cpu = device == torch.device("cpu")
+        if is_cpu:
+            plane_equations_wp = wp.from_torch(plane_equations.to("cuda"))
+            plane_equation_counts_wp = wp.from_torch(plane_equation_counts.to("cuda"))
+            batch_points_wp = wp.from_torch(batch_points.to("cuda"))
+        else:
+            plane_equations_wp = wp.from_torch(plane_equations)
+            plane_equation_counts_wp = wp.from_torch(plane_equation_counts)
+            batch_points_wp = wp.from_torch(batch_points)
 
+        if is_cpu:
+            wp_device = standardize_device_string(torch.device("cuda"))
+        else:
+            wp_device = standardize_device_string(device)
         n_pose = batch_points.shape[0]
         n_point = batch_points.shape[1]
         n_convex = plane_equations.shape[0]
@@ -147,22 +158,24 @@ class BatchConvexCollisionChecker:
             shape=(n_pose, n_point, n_convex),
             value=-float("inf"),
             dtype=float,
-            device=standardize_device_string(device),
+            device=wp_device,
         )  # [n_pose, n_point, n_convex]
         wp.launch(
             kernel=convex_signed_distance_kernel,
             dim=(n_pose, n_point, n_convex),
             inputs=(batch_points_wp, plane_equations_wp, plane_equation_counts_wp),
             outputs=(point_convex_signed_distance_wp,),
-            device=standardize_device_string(device),
+            device=wp_device,
         )
         point_convex_signed_distance = wp.to_torch(point_convex_signed_distance_wp)
-        # import ipdb; ipdb.set_trace()
         point_signed_distance = point_convex_signed_distance.min(
             dim=-1
         ).values  # [n_pose, n_point]
         is_point_collide = point_signed_distance <= collision_threshold
-        return point_signed_distance, is_point_collide
+        if is_cpu:
+            return point_signed_distance.to("cpu"), is_point_collide.to("cpu")
+        else:
+            return point_signed_distance, is_point_collide
 
     def query_batch_points(
         self,
@@ -243,7 +256,7 @@ class BatchConvexCollisionChecker:
             penetration, collides = check_collision_single_hull(
                 normals_torch,
                 offsets_torch,
-                transform_points_batch(query_points, poses),
+                transform_points_mat(query_points, poses),
                 cfg.collsion_threshold,
             )
             penetration_result = torch.max(penetration_result, penetration)
@@ -401,75 +414,3 @@ def check_collision_single_hull(
     collides = penetration > threshold  # [B, P]
 
     return penetration, collides
-
-
-def transform_points_batch(
-    points: torch.Tensor, poses: torch.Tensor  # [P, 3]  # [B, 4, 4]
-) -> torch.Tensor:
-    """
-    Apply a batch of rigid transforms to a point cloud.
-
-    Args:
-        points: [P, 3] source point cloud.
-        poses: [B, 4, 4] batch of homogeneous transformation matrices.
-
-    Returns:
-        transformed: [B, P, 3] transformed point cloud for each pose.
-    """
-    R = poses[:, :3, :3]  # [B, 3, 3]
-    t = poses[:, :3, 3]  # [B, 3]
-    transformed = torch.einsum("bij, pj -> bpi", R, points) + t.unsqueeze(1)
-    return transformed
-
-
-if __name__ == "__main__":
-    from embodichain.data import get_data_path
-
-    mug_path = get_data_path("CoffeeCup/cup.ply")
-    mug_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
-    mug_mesh = trimesh.load(mug_path, force="mesh", process=False)
-    verts = torch.tensor(mug_mesh.vertices, dtype=torch.float32)
-    faces = torch.tensor(mug_mesh.faces, dtype=torch.int32)
-    collision_checker = BatchConvexCollisionChecker(
-        verts, faces, max_decomposition_hulls=16
-    )
-
-    poses = torch.tensor(
-        [
-            [
-                [1, 0, 0, 0],
-                [0, 1, 0, 0],
-                [0, 0, 1, 0.05],
-                [0, 0, 0, 1],
-            ],
-            [
-                [1, 0, 0, 0.05],
-                [0, -1, 0, 0],
-                [0, 0, -1, 0],
-                [0, 0, 0, 1],
-            ],
-        ]
-    )
-    from scipy.spatial.transform import Rotation
-
-    rot = Rotation.from_euler("xyz", [12, 3, 32], degrees=True).as_matrix()
-    poses[0, :3, :3] = torch.tensor(rot, dtype=torch.float32)
-    poses[1, :3, :3] = torch.tensor(rot, dtype=torch.float32)
-
-    obj_path = get_data_path("ScannedBottle/yibao_processed.ply")
-    obj_mesh = trimesh.load(obj_path, force="mesh", process=False)
-    obj_verts = torch.tensor(obj_mesh.vertices, dtype=torch.float32)
-    obj_faces = torch.tensor(obj_mesh.faces, dtype=torch.int32)
-    test_pc = transform_points_batch(obj_verts, poses)
-
-    collision_checker.query_batch_points(
-        test_pc, collision_threshold=0.003, is_visual=True
-    )
-    collision_checker.query(
-        obj_verts,
-        obj_faces,
-        poses,
-        cfg=BatchConvexCollisionCheckerCfg(
-            debug=True, n_query_mesh_samples=32768, collsion_threshold=0.000
-        ),
-    )
