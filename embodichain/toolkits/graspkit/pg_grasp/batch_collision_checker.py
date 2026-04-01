@@ -37,7 +37,7 @@ CONVEX_CACHE_DIR = os.path.join(
 
 @dataclass
 class BatchConvexCollisionCheckerCfg:
-    """ Configuration for BatchConvexCollisionChecker."""
+    """Configuration for BatchConvexCollisionChecker."""
 
     collsion_threshold: float = 0.0
     """ Collision threshold in meters. A point is considered colliding if its signed distance to the hull interior is <= this threshold. This allows for a margin of error in collision checking, where a small positive threshold can be used to consider points near the surface as colliding, and a small negative threshold can be used to allow for slight penetration without considering it a collision."""
@@ -48,7 +48,7 @@ class BatchConvexCollisionCheckerCfg:
 
 
 class BatchConvexCollisionChecker:
-    """ BatchConvexCollisionChecker performs efficient collision checking between a batch of query point clouds and a convex decomposition of a mesh. The convex decomposition is represented by plane equations of the convex hulls, which are precomputed and cached for efficiency. The collision checking is done by computing the signed distance from each query point to the convex hulls using the plane equations, and determining if any points are colliding based on a specified collision threshold. This class can be used"""
+    """BatchConvexCollisionChecker performs efficient collision checking between a batch of query point clouds and a convex decomposition of a mesh. The convex decomposition is represented by plane equations of the convex hulls, which are precomputed and cached for efficiency. The collision checking is done by computing the signed distance from each query point to the convex hulls using the plane equations, and determining if any points are colliding based on a specified collision threshold. This class can be used"""
 
     def __init__(
         self,
@@ -56,7 +56,7 @@ class BatchConvexCollisionChecker:
         base_mesh_faces: torch.Tensor,
         max_decomposition_hulls: int = 32,
     ):
-        """ Initialize the BatchConvexCollisionChecker by performing convex decomposition on the input mesh and extracting plane equations for the convex hulls. The plane equations are cached to disk to avoid redundant computation in future runs.
+        """Initialize the BatchConvexCollisionChecker by performing convex decomposition on the input mesh and extracting plane equations for the convex hulls. The plane equations are cached to disk to avoid redundant computation in future runs.
         Args:
             base_mesh_verts: [N, 3] vertex positions of the input mesh.
             base_mesh_faces: [M, 3] triangle indices of the input mesh.
@@ -168,13 +168,14 @@ class BatchConvexCollisionChecker:
         collision_threshold: float = 0.0,
         is_visual: bool = False,
     ) -> torch.Tensor:
-        """ Query collision status for a batch of point clouds. The collision status is determined by checking if the signed distance from any point in the cloud to the convex hulls is less than or equal to the specified collision threshold.
+        """Query collision status for a batch of point clouds. The collision status is determined by checking if the signed distance from any point in the cloud to the convex hulls is less than or equal to the specified collision threshold.
         Args:
             batch_points: [B, n_point, 3] batch of point clouds to query for collision status.
             collision_threshold: Collision threshold in meters. A point is considered colliding if its signed distance to the hull interior is <= this threshold. This allows for a margin of error in collision checking, where a small positive threshold can be used to consider points near the surface as colliding, and a small negative threshold can be used to allow for slight penetration without considering it a collision.
             is_visual: Whether to visualize the collision checking results for debugging purposes. If set to True, the code will generate visualizations of the query points colored by their collision status (e.g., red for colliding points and green for non-colliding points) along with the original mesh. This can help in understanding and verifying the collision checking process, especially during development and testing.
         Returns:
-            is_pose_collide: [B, ] boolean tensor indicating whether each point cloud in the"""
+            is_pose_collide: [B, ] boolean tensor indicating whether each point cloud in the
+        """
         n_batch = batch_points.shape[0]
         point_signed_distance, is_point_collide = (
             BatchConvexCollisionChecker.batch_point_convex_query(

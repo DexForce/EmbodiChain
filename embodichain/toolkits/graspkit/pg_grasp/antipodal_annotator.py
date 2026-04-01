@@ -59,8 +59,8 @@ class SelectResult:
 
 
 class GraspAnnotator:
-    """GraspAnnotator provides functionality to annotate antipodal grasp regions on a given object mesh. It allows users to interactively select regions on the mesh and generates antipodal point pairs for grasping based on the selected region. The annotator also includes a collision checker to filter out infeasible grasp poses and can visualize the generated grasp poses in a 3D viewer.
-    """
+    """GraspAnnotator provides functionality to annotate antipodal grasp regions on a given object mesh. It allows users to interactively select regions on the mesh and generates antipodal point pairs for grasping based on the selected region. The annotator also includes a collision checker to filter out infeasible grasp poses and can visualize the generated grasp poses in a 3D viewer."""
+
     def __init__(
         self,
         vertices: torch.Tensor,
