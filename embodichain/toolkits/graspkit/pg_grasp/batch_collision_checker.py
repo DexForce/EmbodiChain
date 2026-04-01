@@ -17,25 +17,27 @@
 import trimesh
 import numpy as np
 import torch
+import warp as wp
 import time
-from typing import List, Tuple, Union
-from dexsim.kit.meshproc import convex_decomposition_coacd
 import hashlib
-from dataclasses import dataclass
 import os
 import pickle
 import open3d as o3d
+
+from typing import List, Tuple, Union
+from dexsim.kit.meshproc import convex_decomposition_coacd
+
 from embodichain.utils import logger
 from embodichain.utils.warp import convex_signed_distance_kernel
-import warp as wp
 from embodichain.utils.device_utils import standardize_device_string
+from embodichain.utils import configclass
 
 CONVEX_CACHE_DIR = os.path.join(
     os.path.expanduser("~"), ".cache", "embodichain_cache", "convex_decomposition"
 )
 
 
-@dataclass
+@configclass
 class BatchConvexCollisionCheckerCfg:
     """Configuration for BatchConvexCollisionChecker."""
 

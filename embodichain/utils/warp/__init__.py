@@ -31,4 +31,4 @@ from .kinematics.interpolate import (
     interpolate_along_distance,
 )
 
-from .collision_checker.convex_query import convex_signed_distance_kernel
+from .collision.convex_query import convex_signed_distance_kernel

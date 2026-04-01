@@ -15,16 +15,14 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates the creation and simulation of a robot with a soft object,
-and performs a pressing task in a simulated environment.
+This script demonstrates the creation and simulation of a robot that grasps a rigid mug
+in a simulated environment using the SimulationManager and grasp planning utilities.
 """
 
 import argparse
 import numpy as np
 import time
 import torch
-
-from dexsim.utility.path import get_resources_data_path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
@@ -41,7 +39,6 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     URDFCfg,
 )
-from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_annotator import (
     GraspAnnotatorCfg,
     AntipodalSamplerCfg,
@@ -68,7 +65,7 @@ def parse_arguments():
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda",
+        default="cpu",
         help="device to run the environment on, e.g., 'cpu' or 'cuda'",
     )
     return parser.parse_args()
@@ -89,7 +86,6 @@ def initialize_simulation(args) -> SimulationManager:
         sim_device=args.device,
         enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
-        num_envs=args.num_envs,
         arena_space=2.5,
     )
     sim = SimulationManager(config)

@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 import warp as wp
-from typing import Any
 
 
 @wp.kernel(enable_backward=False)

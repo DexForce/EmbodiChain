@@ -32,6 +32,7 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
 )
+from embodichain.utils import configclass
 from .gripper_collision_checker import (
     SimpleGripperCollisionChecker,
     SimpleGripperCollisionCfg,
@@ -41,7 +42,7 @@ import torch.nn.functional as F
 import tempfile
 
 
-@dataclass
+@configclass
 class GraspAnnotatorCfg:
     viser_port: int = 15531
     use_largest_connected_component: bool = False
