@@ -70,7 +70,7 @@ def build_policy(
 
     Built-in MLP policies still resolve flattened `obs_dim` / `action_dim`, while
     custom policies may accept richer `obs_space` / `action_space` inputs.
-    For vla_policy, pass env to enable set_env and _load_vla initialization.
+    For vla_policy, pass env so set_env can run; VLA weights load lazily on first use.
     """
     name = policy_block["name"].lower()
 
@@ -130,10 +130,9 @@ def build_policy(
         if env is None:
             raise ValueError(
                 "VLAPolicy requires an 'env' argument to be passed to build_policy "
-                "so that set_env and _load_vla can be called before use."
+                "so that set_env can be called before use."
             )
         policy.set_env(env)
-        policy._load_vla()
     return policy
 
 

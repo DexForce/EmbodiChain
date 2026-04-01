@@ -51,4 +51,9 @@ trainer.save_checkpoint()
 - The event mechanism can be used for automated experiments, data collection, and environment reset.
 - Logging and monitoring help analyze training progress and tune hyperparameters.
 
+## API References
+- VLA backend lookup: `embodichain.agents.rl.vla_registry.get_vla_backend()`
+- VLA backend listing: `embodichain.agents.rl.vla_registry.get_registered_vla_backend_names()`
+- VLA backend creation: `embodichain.agents.rl.vla_registry.create_vla_backend()`
+
 ---

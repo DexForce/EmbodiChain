@@ -253,6 +253,7 @@ class SyncCollector(BaseCollector):
                 step_td = TensorDict(
                     {
                         "action": action,
+                        "action_chunk": cached_chunk,
                         "sample_log_prob": torch.zeros(
                             action.shape[0], device=self.device, dtype=torch.float32
                         ),
@@ -371,16 +372,38 @@ class SyncCollector(BaseCollector):
 
     def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
         """Validate rollout layout expected by the collector."""
-        obs_dim = rollout["obs"].shape[-1]
+        num_envs = self.env.num_envs
+        time_plus_one = num_steps + 1
+        policy_obs_dim = int(getattr(self.policy, "obs_dim", 0) or 0)
+        obs_shape = tuple(rollout["obs"].shape)
+        if policy_obs_dim > 0:
+            expected_obs = (num_envs, time_plus_one, policy_obs_dim)
+            if obs_shape != expected_obs:
+                logger.log_error(
+                    f"Preallocated rollout field 'obs' shape mismatch: "
+                    f"expected {expected_obs}, got {obs_shape}.",
+                    ValueError,
+                )
+        else:
+            if (
+                len(obs_shape) != 3
+                or obs_shape[0] != num_envs
+                or obs_shape[1] != time_plus_one
+            ):
+                logger.log_error(
+                    f"Preallocated rollout field 'obs' shape mismatch: "
+                    f"expected ({num_envs}, {time_plus_one}, *), got {obs_shape}.",
+                    ValueError,
+                )
+
         expected_shapes = {
-            "obs": (self.env.num_envs, num_steps + 1, obs_dim),
-            "action": (self.env.num_envs, num_steps + 1, self.policy.action_dim),
-            "sample_log_prob": (self.env.num_envs, num_steps + 1),
-            "value": (self.env.num_envs, num_steps + 1),
-            "reward": (self.env.num_envs, num_steps + 1),
-            "done": (self.env.num_envs, num_steps + 1),
-            "terminated": (self.env.num_envs, num_steps + 1),
-            "truncated": (self.env.num_envs, num_steps + 1),
+            "action": (num_envs, time_plus_one, self.policy.action_dim),
+            "sample_log_prob": (num_envs, time_plus_one),
+            "value": (num_envs, time_plus_one),
+            "reward": (num_envs, time_plus_one),
+            "done": (num_envs, time_plus_one),
+            "terminated": (num_envs, time_plus_one),
+            "truncated": (num_envs, time_plus_one),
         }
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)

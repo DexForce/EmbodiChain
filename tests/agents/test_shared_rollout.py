@@ -223,3 +223,235 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
         env.close()
         if SimulationManager.is_instantiated():
             SimulationManager.get_instance().destroy()
+
+
+class _FakePolicyRawObs:
+    """Policy that reads nested env observations (collector passes raw_obs slices)."""
+
+    use_raw_obs = True
+
+    def __init__(self, obs_dim: int, action_dim: int, device: torch.device) -> None:
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
+        self.device = device
+
+    def train(self) -> None:
+        pass
+
+    def get_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        obs = tensordict["obs"]
+        flat = obs["agent"]["state"]
+        tensordict["action"] = flat[:, : self.action_dim] * 0.25
+        tensordict["sample_log_prob"] = flat.sum(dim=-1) * 0.1
+        tensordict["value"] = flat.mean(dim=-1)
+        return tensordict
+
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
+        obs = tensordict["obs"]
+        flat = obs["agent"]["state"]
+        tensordict["value"] = flat.mean(dim=-1)
+        return tensordict
+
+
+class _FakePolicyActionChunk:
+    """Policy that emits a fixed-length action chunk (sequential env steps per chunk)."""
+
+    use_action_chunk = True
+    action_chunk_size = 2
+    execute_full_chunk = False
+
+    def __init__(self, obs_dim: int, action_dim: int, device: torch.device) -> None:
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
+        self.device = device
+
+    def train(self) -> None:
+        pass
+
+    def get_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        obs = tensordict["obs"]
+        row0 = obs[:, : self.action_dim] * 0.1
+        row1 = obs[:, : self.action_dim] * 0.2
+        chunk = torch.stack([row0, row1], dim=1)
+        tensordict["action_chunk"] = chunk
+        tensordict["action"] = chunk[:, 0]
+        tensordict["sample_log_prob"] = torch.zeros(
+            obs.shape[0], device=obs.device, dtype=torch.float32
+        )
+        tensordict["value"] = torch.zeros(
+            obs.shape[0], device=obs.device, dtype=torch.float32
+        )
+        return tensordict
+
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
+        tensordict["value"] = tensordict["obs"].mean(dim=-1)
+        return tensordict
+
+
+class _FakePolicyExecuteFullChunk:
+    """Policy that runs an entire chunk inside one logical rollout step."""
+
+    use_action_chunk = True
+    action_chunk_size = 3
+    execute_full_chunk = True
+
+    def __init__(self, obs_dim: int, action_dim: int, device: torch.device) -> None:
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
+        self.device = device
+
+    def train(self) -> None:
+        pass
+
+    def get_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        obs = tensordict["obs"]
+        n = obs.shape[0]
+        t = self.action_chunk_size
+        base = obs[:, : self.action_dim] * 0.1
+        chunk = base.unsqueeze(1).expand(n, t, -1).clone()
+        tensordict["action_chunk"] = chunk
+        tensordict["action"] = chunk[:, 0]
+        tensordict["sample_log_prob"] = torch.zeros(
+            n, device=obs.device, dtype=torch.float32
+        )
+        tensordict["value"] = torch.zeros(n, device=obs.device, dtype=torch.float32)
+        return tensordict
+
+    def get_value(self, tensordict: TensorDict) -> TensorDict:
+        tensordict["value"] = tensordict["obs"].mean(dim=-1)
+        return tensordict
+
+
+def test_collector_populates_raw_obs_buffer():
+    device = torch.device("cpu")
+    num_envs = 2
+    rollout_len = 3
+    obs_dim = 5
+    action_dim = 2
+
+    env = _FakeEnv(
+        num_envs=num_envs,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+    )
+    policy = _FakePolicyRawObs(obs_dim=obs_dim, action_dim=action_dim, device=device)
+    collector = SyncCollector(env=env, policy=policy, device=device)
+    buffer = RolloutBuffer(
+        num_envs=num_envs,
+        rollout_len=rollout_len,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+        use_raw_obs=True,
+    )
+
+    rollout = collector.collect(
+        num_steps=rollout_len,
+        rollout=buffer.start_rollout(),
+    )
+
+    assert hasattr(rollout, "raw_obs")
+    assert len(rollout.raw_obs) == rollout_len + 1
+    for t in range(rollout_len + 1):
+        assert rollout.raw_obs[t] is not None
+        assert rollout.raw_obs[t].batch_size == torch.Size([num_envs])
+    assert torch.allclose(
+        rollout["obs"][:, 0], torch.zeros(num_envs, obs_dim, dtype=torch.float32)
+    )
+    assert torch.allclose(
+        rollout["obs"][:, -1],
+        torch.full((num_envs, obs_dim), float(rollout_len), dtype=torch.float32),
+    )
+
+
+def test_collector_chunk_step_alternates_for_sequential_action_chunk():
+    device = torch.device("cpu")
+    num_envs = 2
+    rollout_len = 4
+    obs_dim = 5
+    action_dim = 2
+
+    env = _FakeEnv(
+        num_envs=num_envs,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+    )
+    policy = _FakePolicyActionChunk(
+        obs_dim=obs_dim, action_dim=action_dim, device=device
+    )
+    collector = SyncCollector(env=env, policy=policy, device=device)
+    buffer = RolloutBuffer(
+        num_envs=num_envs,
+        rollout_len=rollout_len,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+        action_chunk_size=policy.action_chunk_size,
+    )
+
+    rollout = collector.collect(
+        num_steps=rollout_len,
+        rollout=buffer.start_rollout(),
+    )
+
+    assert hasattr(rollout, "chunk_step")
+    expected = torch.tensor([0, 1, 0, 1], dtype=torch.long, device=device).expand(
+        num_envs, -1
+    )
+    assert torch.equal(rollout.chunk_step, expected)
+    assert torch.all(rollout["step_repeat"][:, :-1] == 1.0)
+    assert torch.allclose(rollout["action_chunk"][:, 1], rollout["action_chunk"][:, 0])
+    assert torch.allclose(rollout["action_chunk"][:, 3], rollout["action_chunk"][:, 2])
+
+
+def test_collector_execute_full_chunk_sets_step_repeat_and_action_chunk():
+    device = torch.device("cpu")
+    num_envs = 2
+    rollout_len = 2
+    obs_dim = 5
+    action_dim = 2
+    chunk_t = 3
+
+    env = _FakeEnv(
+        num_envs=num_envs,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+    )
+    policy = _FakePolicyExecuteFullChunk(
+        obs_dim=obs_dim, action_dim=action_dim, device=device
+    )
+    assert policy.action_chunk_size == chunk_t
+    collector = SyncCollector(env=env, policy=policy, device=device)
+    buffer = RolloutBuffer(
+        num_envs=num_envs,
+        rollout_len=rollout_len,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        device=device,
+        action_chunk_size=chunk_t,
+    )
+
+    rollout = collector.collect(
+        num_steps=rollout_len,
+        rollout=buffer.start_rollout(),
+    )
+
+    assert "action_chunk" in rollout.keys()
+    assert rollout["action_chunk"].shape == (
+        num_envs,
+        rollout_len + 1,
+        chunk_t,
+        action_dim,
+    )
+    assert torch.all(rollout.chunk_step[:, :rollout_len] == 0)
+    assert torch.all(rollout["step_repeat"][:, :rollout_len] == float(chunk_t))
+    assert torch.all(rollout["step_repeat"][:, -1] == 0.0)

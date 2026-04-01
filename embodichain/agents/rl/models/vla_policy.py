@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -60,8 +61,8 @@ class VLAPolicy(Policy):
             self.action_dim = int(action_space.shape[-1])
         else:
             self.action_dim = 14
-        self.obs_dim = 0  # VLA uses raw ob
-        self.use_raw_obs = True  # Tell collector to pass raw ob
+        self.obs_dim = 0  # VLA uses raw observations
+        self.use_raw_obs = True  # Tell collector to pass raw observations
 
         self.use_action_chunk = True
         self.action_chunk_size = self.action_horizon
@@ -75,8 +76,9 @@ class VLAPolicy(Policy):
     def _load_vla(self) -> None:
         if self._vla_model is not None:
             return
+        backend_name = str(self.vla_cfg.get("backend", "dexforce_vla")).lower()
         backend = create_vla_backend(
-            "dexforce_vla",
+            backend_name,
             model_path=self.model_path,
             device=self.device,
             action_horizon=self.action_horizon,
@@ -88,6 +90,11 @@ class VLAPolicy(Policy):
         )
         self._vla_model, self._action_indices, self._prepare_batch_fn = backend
         self._freeze_encoders()
+
+    def parameters(self, recurse: bool = True):
+        """Expose trainable parameters, lazily loading VLA backend if needed."""
+        self._load_vla()
+        return super().parameters(recurse=recurse)
 
     def _freeze_encoders(self) -> None:
         """Freeze vision encoders to avoid catastrophic forgetting"""
@@ -128,6 +135,32 @@ class VLAPolicy(Policy):
                     step = torch.cat([step, pad], dim=-1)
         return step
 
+    def _infer_batch_size(self, obs: Any) -> int:
+        """Infer leading batch size from TensorDict / mapping / tensor observations."""
+        if hasattr(obs, "batch_size") and len(obs.batch_size) > 0:
+            return int(obs.batch_size[0])
+        if isinstance(obs, Mapping):
+            robot = obs.get("robot")
+            if isinstance(robot, Mapping):
+                q = robot.get("qpos")
+                if hasattr(q, "shape") and len(q.shape) > 0:
+                    return int(q.shape[0])
+        return 1
+
+    def _slice_obs_item(self, obs: Any, index: int) -> Any:
+        """Slice one environment sample from a batched observation structure."""
+        if hasattr(obs, "batch_size") and len(obs.batch_size) > 0:
+            return obs[index]
+        if isinstance(obs, Mapping):
+            return {
+                key: self._slice_obs_item(value, index) for key, value in obs.items()
+            }
+        if torch.is_tensor(obs):
+            if obs.dim() == 0:
+                return obs
+            return obs[index]
+        return obs
+
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
     ) -> TensorDict:
@@ -142,13 +175,7 @@ class VLAPolicy(Policy):
 
         self._load_vla()
         self._vla_model.eval()
-        if hasattr(obs, "batch_size") and len(obs.batch_size) > 0:
-            batch_size = int(obs.batch_size[0])
-        elif isinstance(obs, dict) and "robot" in obs and "qpos" in obs["robot"]:
-            q = obs["robot"]["qpos"]
-            batch_size = q.shape[0] if hasattr(q, "shape") and len(q.shape) > 0 else 1
-        else:
-            batch_size = 1
+        batch_size = self._infer_batch_size(obs)
         if batch_size == 1:
             batch = self._prepare_batch_fn(obs, env)
             vla_chunk = self._vla_model.predict_action(
@@ -162,7 +189,7 @@ class VLAPolicy(Policy):
         else:
             chunks_env = []
             for i in range(batch_size):
-                obs_i = obs[i] if hasattr(obs, "__getitem__") else obs
+                obs_i = self._slice_obs_item(obs, i)
                 batch_i = self._prepare_batch_fn(obs_i, env)
                 vla_chunk = self._vla_model.predict_action(
                     batch_i,

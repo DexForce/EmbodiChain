@@ -183,8 +183,12 @@ def randomize_camera_extrinsics(
         ).repeat(num_instance, 1)
         if pos_range:
             random_value = sample_uniform(
-                lower=torch.tensor(pos_range[0], device=env.device),
-                upper=torch.tensor(pos_range[1], device=env.device),
+                lower=torch.tensor(
+                    pos_range[0], dtype=torch.float32, device=env.device
+                ),
+                upper=torch.tensor(
+                    pos_range[1], dtype=torch.float32, device=env.device
+                ),
                 size=(num_instance, 3),
                 device=env.device,
             )
@@ -199,8 +203,12 @@ def randomize_camera_extrinsics(
             init_euler = torch.stack(euler_xyz_from_quat(init_quat_np), dim=1)
             # 2. Sample perturbation for euler angles
             random_value = sample_uniform(
-                lower=torch.tensor(euler_range[0], device=env.device),
-                upper=torch.tensor(euler_range[1], device=env.device),
+                lower=torch.tensor(
+                    euler_range[0], dtype=torch.float32, device=env.device
+                ),
+                upper=torch.tensor(
+                    euler_range[1], dtype=torch.float32, device=env.device
+                ),
                 size=(num_instance, 3),
                 device=env.device,
             )
@@ -231,8 +239,12 @@ def randomize_camera_extrinsics(
 
         if eye_range:
             eye_delta = sample_uniform(
-                lower=torch.tensor(eye_range[0], device=env.device),
-                upper=torch.tensor(eye_range[1], device=env.device),
+                lower=torch.tensor(
+                    eye_range[0], dtype=torch.float32, device=env.device
+                ),
+                upper=torch.tensor(
+                    eye_range[1], dtype=torch.float32, device=env.device
+                ),
                 size=(num_instance, 3),
                 device=env.device,
             )
@@ -242,8 +254,12 @@ def randomize_camera_extrinsics(
 
         if target_range:
             target_delta = sample_uniform(
-                lower=torch.tensor(target_range[0], device=env.device),
-                upper=torch.tensor(target_range[1], device=env.device),
+                lower=torch.tensor(
+                    target_range[0], dtype=torch.float32, device=env.device
+                ),
+                upper=torch.tensor(
+                    target_range[1], dtype=torch.float32, device=env.device
+                ),
                 size=(num_instance, 3),
                 device=env.device,
             )
@@ -253,8 +269,8 @@ def randomize_camera_extrinsics(
 
         if up_range:
             up_delta = sample_uniform(
-                lower=torch.tensor(up_range[0], device=env.device),
-                upper=torch.tensor(up_range[1], device=env.device),
+                lower=torch.tensor(up_range[0], dtype=torch.float32, device=env.device),
+                upper=torch.tensor(up_range[1], dtype=torch.float32, device=env.device),
                 size=(num_instance, 3),
                 device=env.device,
             )
@@ -316,8 +332,8 @@ def randomize_light(
             .repeat(num_instance, 1)
         )
         random_value = sample_uniform(
-            lower=torch.tensor(position_range[0]),
-            upper=torch.tensor(position_range[1]),
+            lower=torch.tensor(position_range[0], dtype=torch.float32),
+            upper=torch.tensor(position_range[1], dtype=torch.float32),
             size=new_pos.shape,
         )
         new_pos += random_value
@@ -326,8 +342,8 @@ def randomize_light(
     if color_range:
         color = torch.zeros((num_instance, 3), dtype=torch.float32)
         random_value = sample_uniform(
-            lower=torch.tensor(color_range[0]),
-            upper=torch.tensor(color_range[1]),
+            lower=torch.tensor(color_range[0], dtype=torch.float32),
+            upper=torch.tensor(color_range[1], dtype=torch.float32),
             size=color.shape,
         )
         color += random_value
@@ -341,8 +357,8 @@ def randomize_light(
             .repeat(num_instance, 1)
         )
         random_value = sample_uniform(
-            lower=torch.tensor(intensity_range[0]),
-            upper=torch.tensor(intensity_range[1]),
+            lower=torch.tensor(intensity_range[0], dtype=torch.float32),
+            upper=torch.tensor(intensity_range[1], dtype=torch.float32),
             size=new_intensity.shape,
         )
         new_intensity += random_value
@@ -377,8 +393,8 @@ def randomize_emission_light(
     if color_range:
         color = torch.zeros((1, 3), dtype=torch.float32)
         random_value = sample_uniform(
-            lower=torch.tensor(color_range[0]),
-            upper=torch.tensor(color_range[1]),
+            lower=torch.tensor(color_range[0], dtype=torch.float32),
+            upper=torch.tensor(color_range[1], dtype=torch.float32),
             size=color.shape,
         )
         color += random_value
@@ -450,8 +466,8 @@ def randomize_camera_intrinsics(
     # Randomize focal length x (fx)
     if focal_x_range:
         random_value = sample_uniform(
-            lower=torch.tensor(focal_x_range[0]),
-            upper=torch.tensor(focal_x_range[1]),
+            lower=torch.tensor(focal_x_range[0], dtype=torch.float32),
+            upper=torch.tensor(focal_x_range[1], dtype=torch.float32),
             size=(num_instance,),
         )
         new_intrinsics[:, 0] += random_value
@@ -459,8 +475,8 @@ def randomize_camera_intrinsics(
     # Randomize focal length y (fy)
     if focal_y_range:
         random_value = sample_uniform(
-            lower=torch.tensor(focal_y_range[0]),
-            upper=torch.tensor(focal_y_range[1]),
+            lower=torch.tensor(focal_y_range[0], dtype=torch.float32),
+            upper=torch.tensor(focal_y_range[1], dtype=torch.float32),
             size=(num_instance,),
         )
         new_intrinsics[:, 1] += random_value
@@ -468,8 +484,8 @@ def randomize_camera_intrinsics(
     # Randomize principal point x (cx)
     if cx_range:
         random_value = sample_uniform(
-            lower=torch.tensor(cx_range[0]),
-            upper=torch.tensor(cx_range[1]),
+            lower=torch.tensor(cx_range[0], dtype=torch.float32),
+            upper=torch.tensor(cx_range[1], dtype=torch.float32),
             size=(num_instance,),
         )
         new_intrinsics[:, 2] += random_value
@@ -477,8 +493,8 @@ def randomize_camera_intrinsics(
     # Randomize principal point y (cy)
     if cy_range:
         random_value = sample_uniform(
-            lower=torch.tensor(cy_range[0]),
-            upper=torch.tensor(cy_range[1]),
+            lower=torch.tensor(cy_range[0], dtype=torch.float32),
+            upper=torch.tensor(cy_range[1], dtype=torch.float32),
             size=(num_instance,),
         )
         new_intrinsics[:, 3] += random_value

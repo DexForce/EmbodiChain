@@ -29,7 +29,6 @@ from typing import Dict
 from embodichain.lab.gym.envs.managers.action_manager import ActionManager
 from embodichain.agents.rl.buffer import RolloutBuffer
 from embodichain.agents.rl.collector import SyncCollector
-from embodichain.agents.rl.utils import dict_to_tensordict
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from .helper import flatten_dict_observation
 
@@ -106,9 +105,8 @@ class Trainer:
 
         if use_raw_obs:
             try:
-                reset_out = self.env.reset()
-                sample_obs = reset_out[0] if isinstance(reset_out, tuple) else reset_out
-                obs_td = dict_to_tensordict(sample_obs, self.device)
+                sample_obs = self.env.observation_space.sample()
+                obs_td = self._obs_to_tensordict(sample_obs)
                 flat_obs = flatten_dict_observation(obs_td)
                 obs_dim = int(
                     flat_obs.shape[-1]
@@ -143,6 +141,17 @@ class Trainer:
         self.curr_len = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
 
     # ---- lightweight helpers for dense logging ----
+    def _obs_to_tensordict(self, obs) -> TensorDict:
+        """Normalize observation to TensorDict on trainer device."""
+        if isinstance(obs, TensorDict):
+            return obs.to(self.device)
+        if isinstance(obs, dict):
+            return TensorDict.from_dict(obs, device=self.device)
+        raise TypeError(
+            f"Unsupported raw observation type: {type(obs)!r}. "
+            "Expected TensorDict or dict."
+        )
+
     @staticmethod
     def _mean_scalar(x) -> float:
         if hasattr(x, "detach"):
@@ -376,7 +385,7 @@ class Trainer:
         for _ in range(num_episodes):
             obs, _ = self.eval_env.reset()
             if use_raw_obs:
-                obs_td = dict_to_tensordict(obs, self.device)
+                obs_td = self._obs_to_tensordict(obs)
             else:
                 obs_td = flatten_dict_observation(obs)
             num_envs = (
@@ -435,7 +444,7 @@ class Trainer:
                             action_in
                         )
                         if use_raw_obs:
-                            obs_td = dict_to_tensordict(obs, self.device)
+                            obs_td = self._obs_to_tensordict(obs)
                         else:
                             obs_td = (
                                 flatten_dict_observation(obs)
@@ -499,7 +508,7 @@ class Trainer:
 
                 obs, reward, terminated, truncated, info = self.eval_env.step(action_in)
                 if use_raw_obs:
-                    obs_td = dict_to_tensordict(obs, self.device)
+                    obs_td = self._obs_to_tensordict(obs)
                 else:
                     obs_td = (
                         flatten_dict_observation(obs)
