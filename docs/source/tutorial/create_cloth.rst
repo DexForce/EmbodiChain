@@ -63,8 +63,7 @@ The grid mesh generated earlier is saved to disk and then passed to :meth:`Simul
 .. literalinclude:: ../../../scripts/tutorials/sim/create_cloth.py
    :language: python
    :start-at:     cloth_verts, cloth_faces = create_2d_grid_mesh
-   :end-at:         )
-   :end-before:     padding_box_cfg
+   :end-at:         padding_box_cfg = RigidObjectCfg
 
 Adding a rigid body for interaction
 -------------------------------------

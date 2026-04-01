@@ -515,6 +515,15 @@ class EmbodiedEnv(BaseEnv):
                         env_ids=successful_env_ids.nonzero(as_tuple=True)[0],
                     )
 
+        # Save recorded camera data before resetting
+        if self.cfg.events and self.event_manager is not None:
+            from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+            for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+                for functor_cfg in mode_cfgs:
+                    if isinstance(functor_cfg.func, record_camera_data):
+                        functor_cfg.func.save_and_clear()
+
         # Clear episode buffers and reset success status for environments being reset
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
