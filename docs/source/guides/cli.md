@@ -1,7 +1,6 @@
 # CLI Reference
 
-EmbodiChain provides command-line tools for common tasks.
-All CLIs are invoked via ``python -m <module>``.
+EmbodiChain provides a unified CLI via ``python -m embodichain <subcommand>``.
 
 ---
 
@@ -34,19 +33,19 @@ Preview a USD or mesh asset in the simulation without writing code.
 
 ```bash
 # Preview a rigid object
-python -m embodichain.preview_asset \
+python -m embodichain preview-asset \
     --asset_path /path/to/sugar_box.usda \
     --asset_type rigid \
     --preview
 
 # Preview an articulation
-python -m embodichain.preview_asset \
+python -m embodichain preview-asset \
     --asset_path /path/to/robot.usd \
     --asset_type articulation \
     --preview
 
 # Headless check (no render window)
-python -m embodichain.preview_asset \
+python -m embodichain preview-asset \
     --asset_path /path/to/asset.usda \
     --headless
 ```
@@ -84,20 +83,20 @@ Launch a Gymnasium environment for data generation or interactive preview.
 
 ```bash
 # Run an environment with a gym config file
-python -m embodichain.run_env --gym_config path/to/config.json
+python -m embodichain run-env --gym_config path/to/config.json
 
 # Run with multiple environments on GPU
-python -m embodichain.run_env \
+python -m embodichain run-env \
     --gym_config config.json \
     --num_envs 4 \
     --device cuda \
     --gpu_id 0
 
 # Preview mode for interactive development
-python -m embodichain.run_env --gym_config config.json --preview
+python -m embodichain run-env --gym_config config.json --preview
 
 # Headless execution
-python -m embodichain.run_env --gym_config config.json --headless
+python -m embodichain run-env --gym_config config.json --headless
 ```
 
 ### Arguments
