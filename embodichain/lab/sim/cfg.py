@@ -44,11 +44,11 @@ from .shapes import ShapeCfg, MeshCfg
 
 @configclass
 class RenderCfg:
-    renderer: Literal["legacy", "hybrid", "fast-rt"] = "hybrid"
+    renderer: Literal["legacy", "hybrid", "fast-rt"] = "legacy"
     """Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', and 'fast-rt'.
     
     Note: 
-    - 'legacy' is the traditional rasterization-based renderer.
+    - 'legacy' is the traditional rasterization-based renderer and the default for backward compatibility.
     - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering, 
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
