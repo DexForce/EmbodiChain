@@ -897,6 +897,9 @@ class Articulation(BatchEntity):
                 logger.log_error(
                     f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
                 )
+            # TODO: in manual physics mode, the update should be explicitly called after
+            # setting the pose to synchronize the state to renderer.
+            self._world.update(0.001)
 
         else:
             if pose.dim() == 2 and pose.shape[1] == 7:
@@ -1492,7 +1495,9 @@ class Articulation(BatchEntity):
                 self._world.sync_poses_gpu_to_cpu(
                     link_pose=CudaArray(link_pose),
                     articulation_gpu_indices=CudaArray(indices),
-                )
+                )        
+        else:
+            self._world.update(0.001)
 
     def _set_default_joint_drive(self) -> None:
         """Set default joint drive parameters based on the configuration."""
