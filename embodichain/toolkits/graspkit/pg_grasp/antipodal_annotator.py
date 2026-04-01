@@ -240,11 +240,13 @@ class GraspAnnotator:
         return hit_point_pairs
 
     def _get_cache_dir(self, vertices: torch.Tensor, triangles: torch.Tensor):
+        from embodichain.lab.sim.sim_manager import GRASP_ANNOTATOR_CACHE_DIR
+
         vert_bytes = vertices.to("cpu").numpy().tobytes()
         face_bytes = triangles.to("cpu").numpy().tobytes()
         md5_hash = hashlib.md5(vert_bytes + face_bytes).hexdigest()
         cache_path = os.path.join(
-            tempfile.gettempdir(), f"antipodal_cache_{md5_hash}.npy"
+            GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{md5_hash}.npy"
         )
         return cache_path
 

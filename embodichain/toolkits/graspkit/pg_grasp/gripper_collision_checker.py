@@ -26,26 +26,60 @@ from embodichain.utils.math import transform_points_mat
 
 @configclass
 class SimpleGripperCollisionCfg:
-    """Configuration for the SimpleGripperCollisionChecker. This class defines various parameters related to the gripper geometry, point cloud generation, and collision checking process. Users can customize these parameters based on the specific gripper being modeled and the requirements of the application."""
+    """Configuration for the SimpleGripperCollisionChecker. This class defines various parameters related to the
+    gripper geometry, point cloud generation, and collision checking process. Users can customize these parameters
+    based on the specific gripper being modeled and the requirements of the application.
+    """
 
     max_open_length: float = 0.1
-    """ Maximum opening length of the gripper fingers. This should be set according to the specific gripper being modeled, and it defines the maximum distance between the two fingers when fully open."""
+    """ Maximum opening length of the gripper fingers. This should be set according to the specific gripper being modeled, 
+    and it defines the maximum distance between the two fingers when fully open.
+    """
+
     finger_length: float = 0.08
-    """ Length of the gripper fingers from the root to the tip, in z axis. This should be set according to the specific gripper being modeled, and it defines how far the fingers extend from the gripper root frame."""
+    """ Length of the gripper fingers from the root to the tip, in z axis. This should be set according to the specific 
+    gripper being modeled, and it defines how far the fingers extend from the gripper root frame.
+    """
+
     y_thickness: float = 0.03
-    """ Thickness of the gripper along the Y-axis (the axis perpendicular to the finger opening direction). This should be set according to the specific gripper being modeled, and it defines the width of the gripper's main body and fingers in the Y direction."""
+    """ Thickness of the gripper along the Y-axis (the axis perpendicular to the finger opening direction). This should 
+    be set according to the specific gripper being modeled, and it defines the width of the gripper's main body and fingers 
+    in the Y direction.
+    """
+
     x_thickness: float = 0.01
-    """ Thickness of the gripper along the X-axis (the axis parallel to the finger opening direction). This should be set according to the specific gripper being modeled, and it defines the thickness of the fingers and the root in the X direction."""
+    """ Thickness of the gripper along the X-axis (the axis parallel to the finger opening direction). This should 
+    be set according to the specific gripper being modeled, and it defines the thickness of the fingers and the root 
+    in the X direction.
+    """
+
     root_z_width: float = 0.08
-    """ Width of the gripper root along the Z-axis (the axis along the finger length direction). This should be set according to the specific gripper being modeled, and it defines how far the root extends along the Z direction."""
+    """ Width of the gripper root along the Z-axis (the axis along the finger length direction). This should be set 
+    according to the specific gripper being modeled, and it defines how far the root extends along the Z direction.
+    """
+
     device = torch.device("cpu")
-    """ Device on which the gripper point cloud will be generated and processed. This should be set according to the computational resources available and the requirements of the application. For example, if using a GPU for collision checking, this should be set to torch.device('cuda'). """
+    """ Device on which the gripper point cloud will be generated and processed. This should be set according to 
+    the computational resources available and the requirements of the application. For example, if using a GPU for collision 
+    checking, this should be set to torch.device('cuda'). 
+    """
+
     point_sample_dense: float = 0.01
-    """ Approximate number of points per unit length for the gripper point cloud. Higher values will yield denser point clouds, which can improve collision checking accuracy but also increase computational cost. This should be set based on the desired balance between accuracy and efficiency for the specific application."""
+    """ Approximate number of points per unit length for the gripper point cloud. Higher values will yield denser point 
+    clouds, which can improve collision checking accuracy but also increase computational cost. This should be set based 
+    on the desired balance between accuracy and efficiency for the specific application.
+    """
+
     max_decomposition_hulls: int = 16
-    """ Maximum number of convex hulls to decompose the object mesh into for collision checking. This should be set based on the complexity of the object geometry and the desired accuracy of collision checking. More hulls can provide a tighter approximation of the object shape but will increase computational cost."""
+    """ Maximum number of convex hulls to decompose the object mesh into for collision checking. This should be set based 
+    on the complexity of the object geometry and the desired accuracy of collision checking. More hulls can provide a tighter 
+    approximation of the object shape but will increase computational cost.
+    """
+
     open_check_margin: float = 0.01
-    """ Additional margin added to the gripper open length when checking for collisions. This can help account for uncertainties in the gripper pose or object geometry, and can be set based on the specific requirements of the application."""
+    """ Additional margin added to the gripper open length when checking for collisions. This can help account for 
+    uncertainties in the gripper pose or object geometry, and can be set based on the specific requirements of the application.
+    """
 
 
 class SimpleGripperCollisionChecker:

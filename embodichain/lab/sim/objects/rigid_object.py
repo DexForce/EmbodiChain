@@ -1170,7 +1170,6 @@ class RigidObject(BatchEntity):
             self._hit_point_pairs = self._grasp_annotator.annotate()
 
         poses = self.get_local_pose(to_matrix=True)
-        poses = torch.as_tensor(poses, dtype=torch.float32, device=self.device)
         grasp_poses: tuple[torch.Tensor] = []
         open_lengths: tuple[torch.Tensor] = []
         for pose in poses:
