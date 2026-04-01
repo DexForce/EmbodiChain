@@ -80,6 +80,7 @@ Configured via {class}`~cfg.RigidObjectCfg`.
 | `attrs` | `RigidBodyAttributesCfg` | `RigidBodyAttributesCfg()` | Physical attributes. |
 | `body_type` | `Literal` | `"dynamic"` | "dynamic", "kinematic", or "static". |
 | `max_convex_hull_num` | `int` | `1` | Max convex hulls for decomposition (CoACD). |
+| `sdf_resolution` | `int` | `0` | Resolution for signed distance field. In most cases, a resolution of around 250 produces good results; resolutions exceeding 1000 are rarely necessary.|
 | `body_scale` | `tuple` | `(1.0, 1.0, 1.0)` | Scale of the rigid body. |
 
 ### Rigid Body Attributes
@@ -126,6 +127,7 @@ Configured via `LightCfg`.
 
 sim_rigid_object.md
 sim_rigid_object_group.md
+sim_cloth.md
 sim_soft_object.md
 sim_articulation.md
 sim_robot.md

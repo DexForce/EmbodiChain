@@ -41,6 +41,7 @@ This is the official list of EmbodiChain developers and contributors. We sincere
 * Kehuan Zeng
 * GuiLong Li
 * Chen Yang
+* Lizhe Chen
 
 
 

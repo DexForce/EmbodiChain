@@ -792,6 +792,41 @@ class Robot(Articulation):
         # Initialize control groups
         self._control_groups = self._extract_control_groups()
 
+    def set_joint_drive(
+        self,
+        stiffness: torch.Tensor | None = None,
+        damping: torch.Tensor | None = None,
+        max_effort: torch.Tensor | None = None,
+        max_velocity: torch.Tensor | None = None,
+        friction: torch.Tensor | None = None,
+        drive_type: str = "force",
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set the drive properties for the robot.
+           Different from Articulation, default drive type is 'force' instead of 'none'
+
+        Args:
+            stiffness (torch.Tensor): The stiffness of the joint drive with shape (len(env_ids), len(joint_ids)).
+            damping (torch.Tensor): The damping of the joint drive with shape (len(env_ids), len(joint_ids)).
+            max_effort (torch.Tensor): The maximum effort of the joint drive with shape (len(env_ids), len(joint_ids)).
+            max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
+            friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
+            drive_type (str, optional): The type of drive to apply. Defaults to "force".
+            joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
+            env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
+        """
+        super().set_joint_drive(
+            stiffness=stiffness,
+            damping=damping,
+            max_effort=max_effort,
+            max_velocity=max_velocity,
+            friction=friction,
+            drive_type=drive_type,
+            joint_ids=joint_ids,
+            env_ids=env_ids,
+        )
+
     def _set_default_joint_drive(self) -> None:
         """Set default joint drive parameters based on the configuration."""
         import numbers
@@ -851,7 +886,7 @@ class Robot(Articulation):
             drive_type = getattr(drive_pros, "drive_type", "force")
 
         # Apply drive parameters to all articulations in the batch
-        self.set_drive(
+        self.set_joint_drive(
             stiffness=self.default_joint_stiffness,
             damping=self.default_joint_damping,
             max_effort=self.default_joint_max_effort,

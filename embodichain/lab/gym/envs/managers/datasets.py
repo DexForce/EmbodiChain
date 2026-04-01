@@ -31,8 +31,7 @@ from tensordict import TensorDict
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.lab.gym.utils.misc import is_stereocam
-from embodichain.utils.utility import get_right_name
-from embodichain.data.enum import JointType
+from embodichain.lab.sim.sensors import Camera, ContactSensor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
 
@@ -93,8 +92,6 @@ class LeRobotRecorder(Functor):
         self.extra = params.get("extra", {})
 
         # Experimental parameters for extra episode info saving.
-        self.extra_episode_info = self.extra.get("episode_info", {})
-        self.extra_episode_info_buffer = {}
         self.use_videos = params.get("use_videos", False)
 
         # LeRobot dataset instance
@@ -177,7 +174,6 @@ class LeRobotRecorder(Functor):
             episode_extra_info = extra_info.copy()
             self.total_time += current_episode_time
             episode_extra_info["total_time"] = self.total_time
-            self._save_extra_episode_meta_info(env_id)
 
             try:
                 for obs, action in tqdm.tqdm(
@@ -198,28 +194,6 @@ class LeRobotRecorder(Functor):
                 self.curr_episode += 1
             except Exception as e:
                 logger.log_error(f"Failed to save episode {env_id}: {e}")
-
-    def _save_extra_episode_meta_info(self, env_id: int) -> None:
-        """Save extra episode meta info for a specific environment ID."""
-
-        curr_extra_episode_info = {}
-        if self.extra_episode_info:
-            for key, attr_list in self.extra_episode_info.items():
-                if key == "rigid_object_physics_attributes":
-                    rigid_obj_list = self._env.sim.get_rigid_object_uid_list()
-                    for obj_uid in rigid_obj_list:
-                        curr_extra_episode_info[obj_uid] = {}
-                        obj = self._env.sim.get_rigid_object(obj_uid)
-                        for attr in attr_list:
-                            if attr == "mass":
-                                curr_extra_episode_info[obj_uid]["mass"] = round(
-                                    obj.get_mass(env_ids=[env_id]).squeeze_().item(), 5
-                                )
-
-        self.extra_episode_info_buffer[self.curr_episode] = curr_extra_episode_info
-        self._update_dataset_info(
-            {"extra_episode_info": self.extra_episode_info_buffer}
-        )
 
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
@@ -331,55 +305,136 @@ class LeRobotRecorder(Functor):
 
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
-                is_stereo = is_stereocam(sensor)
 
-                for frame_name, space in value.items():
-                    # TODO: Support depth (uint16) and mask (also uint16 or uint8)
-                    if frame_name not in ["color", "color_right"]:
-                        logger.log_error(
-                            f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
-                        )
+                if isinstance(sensor, Camera):
+                    is_stereo = is_stereocam(sensor)
 
-                    features[f"{sensor_name}.{frame_name}"] = {
-                        "dtype": "video" if self.use_videos else "image",
-                        "shape": (sensor.cfg.height, sensor.cfg.width, 3),
-                        "names": ["height", "width", "channel"],
-                    }
+                    for frame_name, space in value.items():
+                        # TODO: Support depth (uint16) and mask (also uint16 or uint8)
+                        if frame_name not in ["color", "color_right"]:
+                            logger.log_error(
+                                f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
+                            )
 
-                    if is_stereo:
-                        features[f"{sensor_name}.{frame_name}_right"] = {
+                        features[f"{sensor_name}.{frame_name}"] = {
                             "dtype": "video" if self.use_videos else "image",
                             "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                             "names": ["height", "width", "channel"],
                         }
 
-        # TODO: The extra observation features are supposed to be defined in a flattened way in the observation space.
-        # Lerobot requires a flat feature dict, so we may need to support nested dicts to flatten dict conversion in the future.
+                        if is_stereo:
+                            features[f"{sensor_name}.{frame_name}_right"] = {
+                                "dtype": "video" if self.use_videos else "image",
+                                "shape": (sensor.cfg.height, sensor.cfg.width, 3),
+                                "names": ["height", "width", "channel"],
+                            }
+                elif isinstance(sensor, ContactSensor):
+                    for frame_name, space in value.items():
+                        features[f"{sensor_name}.{frame_name}"] = {
+                            "dtype": str(space.dtype),
+                            "shape": space.shape,
+                            "names": frame_name,
+                        }
+
         # Add any extra features specified in observation space excluding 'robot' and 'sensor'
         for key, space in self._env.single_observation_space.items():
             if key in ["robot", "sensor"]:
                 continue
 
             if isinstance(space, gym.spaces.Dict):
-                logger.log_warning(
-                    f"Nested Dict observation space for key '{key}' is not directly supported. "
-                    f"Please flatten it or specify features manually. Skipping '{key}'."
-                )
+                # Handle nested Dict observation spaces (e.g., physics attributes)
+                self._add_nested_features(features, key, space)
                 continue
 
-            names = key
-            if "vel" in key:
-                names = ["lin_x", "lin_y", "lin_z", "ang_x", "ang_y", "ang_z"]
-            elif "pose" in key:
-                names = ["x", "y", "z", "qw", "qx", "qy", "qz"]
-
-            features[f"observation.{key}"] = {
+            features[key] = {
                 "dtype": str(space.dtype),
                 "shape": space.shape,
-                "names": names,
+                "names": key,
             }
 
+        self._modify_feature_names(features)
         return features
+
+    def _add_nested_features(
+        self, features: Dict, key: str, space: gym.spaces.Dict
+    ) -> None:
+        """Add features from nested Dict observation space.
+
+        This recursively processes nested observation spaces and adds them to the features dict.
+        For example, physics attributes stored as 'object_physics' with sub-keys
+        (mass, friction, damping, inertia, body_scale) will be flattened to:
+        - observation.object_physics.mass
+        - observation.object_physics.friction
+        - observation.object_physics.damping
+        - observation.object_physics.inertia
+        - observation.object_physics.body_scale
+
+        Args:
+            features: The features dict to update.
+            key: The top-level key of the nested space.
+            space: The nested Dict observation space.
+        """
+        for sub_key, sub_space in space.spaces.items():
+            if isinstance(sub_space, gym.spaces.Dict):
+                # Recursively handle deeper nesting
+                self._add_nested_features(features, f"{key}.{sub_key}", sub_space)
+            else:
+                feature_name = f"observation.{key}.{sub_key}"
+                # Handle empty shapes for scalar values (e.g., mass, friction, damping)
+                # LeRobot requires non-empty shapes, so convert () to (1,)
+                shape = sub_space.shape if sub_space.shape else (1,)
+                features[feature_name] = {
+                    "dtype": str(sub_space.dtype),
+                    "shape": shape,
+                    "names": sub_key,
+                }
+
+    def _modify_feature_names(self, features: dict[str, Any]) -> None:
+        """Get feature names for an observation based on its functor config.
+
+        Note:
+            The `space` parameter is kept for API consistency but not used
+            directly, as the feature names are derived from the functor config
+            and entity properties.
+
+        For observations generated by `get_object_uid`, returns meaningful names:
+        - RigidObject: object UID names
+        - Articulation/Robot: link names
+
+        Args:
+            key: The observation space key.
+            space: The observation space.
+
+        Returns:
+            A list of feature names for the observation.
+        """
+        from embodichain.lab.gym.envs.managers.observations import get_object_uid
+        from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
+
+        # Change the features shape if is ()
+        for key, feature in features.items():
+            if feature["shape"] == ():
+                features[key]["shape"] = (1,)
+
+        # Add extra observation in `add` mode based on functor config
+        if "add" in self._env.observation_manager.active_functors:
+            for functor_name in self._env.observation_manager.active_functors["add"]:
+                functor_cfg = self._env.observation_manager.get_functor_cfg(
+                    functor_name=functor_name
+                )
+                if functor_cfg.func == get_object_uid:
+                    obs_key = functor_cfg.name
+                    asset_uid = functor_cfg.params["entity_cfg"].uid
+                    asset = self._env.sim.get_asset(asset_uid)
+                    if isinstance(asset, RigidObject):
+                        features[obs_key]["names"] = asset_uid
+                    elif isinstance(asset, (Articulation, Robot)):
+                        link_names = asset.link_names
+                        features[obs_key]["names"] = link_names
+                    else:
+                        logger.log_warning(
+                            f"Asset with UID '{asset_uid}' is not RigidObject, Articulation or Robot. Cannot assign feature names based on asset properties."
+                        )
 
     def _convert_frame_to_lerobot(
         self, obs: TensorDict, action: TensorDict | torch.Tensor, task: str
@@ -402,16 +457,29 @@ class LeRobotRecorder(Functor):
             # Add images
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
-                is_stereo = is_stereocam(sensor)
 
-                color_data = obs["sensor"][sensor_name]["color"]
-                color_img = color_data[:, :, :3].cpu()
-                frame[f"{sensor_name}.color"] = color_img
+                if isinstance(sensor, Camera):
+                    is_stereo = is_stereocam(sensor)
 
-                if is_stereo:
-                    color_right_data = obs["sensor"][sensor_name]["color_right"]
-                    color_right_img = color_right_data[:, :, :3].cpu()
-                    frame[f"{sensor_name}.color_right"] = color_right_img
+                    color_data = obs["sensor"][sensor_name]["color"]
+                    color_img = color_data[:, :, :3].cpu()
+                    frame[f"{sensor_name}.color"] = color_img
+
+                    if is_stereo:
+                        color_right_data = obs["sensor"][sensor_name]["color_right"]
+                        color_right_img = color_right_data[:, :, :3].cpu()
+                        frame[f"{sensor_name}.color_right"] = color_right_img
+                elif isinstance(sensor, ContactSensor):
+                    for frame_name in value.keys():
+                        frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][
+                            sensor_name
+                        ][
+                            frame_name
+                        ].cpu()  # Debug here to inspect contact sensor data
+                else:
+                    logger.log_warning(
+                        f"Unsupported sensor type for '{sensor_name}' when converting to LeRobot format. Currently only support Camera and ContactSensor."
+                    )
 
         # Add state
         frame["observation.qpos"] = obs["robot"]["qpos"].cpu()
@@ -423,14 +491,21 @@ class LeRobotRecorder(Functor):
             if key in ["robot", "sensor"]:
                 continue
 
-            frame[f"observation.{key}"] = obs[key].cpu()
+            value = obs[key]
+            if isinstance(value, TensorDict):
+                # Handle nested TensorDict (e.g., physics attributes)
+                self._add_nested_obs_to_frame(frame, key, value)
+            else:
+                if value.shape == ():
+                    value = value.unsqueeze(0)
+                frame[key] = value.cpu()
 
         # Add action.
         if isinstance(action, torch.Tensor):
             action_data = action.cpu()
         elif isinstance(action, TensorDict):
             # Extract qpos from action dict
-            action_tensor = action.get("qpos", action.get("delta_qpos", None))
+            action_tensor = action.get("qpos", None)
             if action_tensor is None:
                 # Fallback to first tensor value
                 for v in action.values():
@@ -444,6 +519,36 @@ class LeRobotRecorder(Functor):
         frame["action"] = action_data
 
         return frame
+
+    def _add_nested_obs_to_frame(
+        self, frame: Dict, key: str, nested_obs: TensorDict
+    ) -> None:
+        """Add nested observation data to frame dict.
+
+        This recursively processes nested TensorDict observations and adds them to the frame dict.
+        For example, physics attributes stored as 'object_physics' with sub-keys
+        (mass, friction, damping, inertia, body_scale) will be flattened to:
+        - observation.object_physics.mass
+        - observation.object_physics.friction
+        - observation.object_physics.damping
+        - observation.object_physics.inertia
+        - observation.object_physics.body_scale
+
+        Args:
+            frame: The frame dict to update.
+            key: The top-level key of nested observation.
+            nested_obs: The nested TensorDict observation.
+        """
+        for sub_key, sub_value in nested_obs.items():
+            if isinstance(sub_value, TensorDict):
+                # Recursively handle deeper nesting
+                self._add_nested_obs_to_frame(frame, f"{key}.{sub_key}", sub_value)
+            else:
+                value = sub_value.cpu()
+                # Handle 0D tensors (scalars) - convert to 1D for LeRobot compatibility
+                if isinstance(value, torch.Tensor) and value.ndim == 0:
+                    value = value.unsqueeze(0)
+                frame[f"observation.{key}.{sub_key}"] = value
 
     def _update_dataset_info(self, updates: dict) -> bool:
         """Update dataset metadata."""

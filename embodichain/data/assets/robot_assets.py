@@ -58,7 +58,7 @@ class CobotMagicArm(EmbodiChainDataset):
             ),
             "14af3e84b74193680899a59fc74e8337",
         )
-        prefix = "CobotMagicArm"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -87,7 +87,7 @@ class RidgeBack(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "RidgeBack.zip"),
             "f03e1a6f4c781ad8957a88bdb010e9b6",
         )
-        prefix = "RidgeBack"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -118,7 +118,7 @@ class UnitreeH1(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UnitreeH1.zip"),
             "339417cef5051a912693f3c64d29dddc",
         )
-        prefix = "UnitreeH1"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -146,7 +146,7 @@ class UnitreeH1Usd(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "H1_usd.zip"),
             "9fc19f8c8b4a49398ec661e6ea9877ee",
         )
-        prefix = "UnitreeH1Usd"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -177,7 +177,7 @@ class ABB(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ABB.zip"),
             "ea6df4983982606c43387783e5fb8c05",
         )
-        prefix = "ABB"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -208,7 +208,7 @@ class Motoman(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Motoman.zip"),
             "ee5f16cfce34d8e2cb996fcff8a25986",
         )
-        prefix = "Motoman"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -239,7 +239,7 @@ class KUKA(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "KUKA.zip"),
             "da7a2dfd0db3f486e407f038d25c7537",
         )
-        prefix = "KUKA"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -270,7 +270,7 @@ class Fanuc(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Fanuc.zip"),
             "0a1c562f4719f7cdc1b24545fec4a301",
         )
-        prefix = "Fanuc"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -311,7 +311,7 @@ class UniversalRobots(EmbodiChainDataset):
             ),
             "4dd4ee5a86125364a9e8cbcd4aafc31a",
         )
-        prefix = "UniversalRobots"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -342,7 +342,7 @@ class Rokae(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Rokae.zip"),
             "fbfb852d6139e94b7c422771542f988f",
         )
-        prefix = "Rokae"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -378,7 +378,7 @@ class Franka(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV2.zip"),
             "f0675b9da98126bc3d4e18c98ef5e06c",
         )
-        prefix = "Franka"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -407,7 +407,7 @@ class Agile(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Agile.zip"),
             "fd47d7ab8a4d13960fd76e59544ba836",
         )
-        prefix = "Agile"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -438,7 +438,7 @@ class Hans(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Hans.zip"),
             "c867c406e3dffd6982fd0a15e7dc7e29",
         )
-        prefix = "Hans"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -467,7 +467,7 @@ class Aubo(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Aubo.zip"),
             "2574649cd199c11267cc0f4aeac65557",
         )
-        prefix = "Aubo"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -496,7 +496,7 @@ class RainbowY1(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "RainbowY1.zip"),
             "5979a3aaadb5de6488b13765d523564f",
         )
-        prefix = "RainbowY1"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -528,7 +528,7 @@ class CartPole(EmbodiChainDataset):
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "cart_pole.zip"),
             "9d185eb18b19f9c95153e01943c5b0a2",
         )
-        prefix = "cart_pole"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
@@ -554,10 +554,10 @@ class ARX5(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5.zip"),
-            "da207ba65e21577aa8e8f349af63e608",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5_2.zip"),
+            "6fc1d6a5a35b7926ba6325c0d20f5bc3",
         )
-        prefix = "ARX5"
+        prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)

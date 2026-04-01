@@ -337,13 +337,8 @@ class EmbodiedEnv(BaseEnv):
 
         if self.cfg.actions:
             self.action_manager = ActionManager(self.cfg.actions, self)
-            # Override action space to match ActionManager output dim (e.g. EefPoseTerm uses 6/7D)
-            self.single_action_space = gym.spaces.Box(
-                low=-np.inf,
-                high=np.inf,
-                shape=(self.action_manager.total_action_dim,),
-                dtype=np.float32,
-            )
+            # Override action space to match ActionManager output dim.
+            self.single_action_space = self.action_manager.single_action_space
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -448,12 +443,12 @@ class EmbodiedEnv(BaseEnv):
                         action=action,
                         rewards=rewards,
                     )
-                self.current_rollout_step += 1
             else:
                 logger.log_warning(
                     f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
                         Data will not be recorded in the rollout buffer."
                 )
+            self.current_rollout_step += 1
 
         # Update success status for all environments where episode is done
         if "success" in info:
@@ -520,6 +515,15 @@ class EmbodiedEnv(BaseEnv):
                         env_ids=successful_env_ids.nonzero(as_tuple=True)[0],
                     )
 
+        # Save recorded camera data before resetting
+        if self.cfg.events and self.event_manager is not None:
+            from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+            for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+                for functor_cfg in mode_cfgs:
+                    if isinstance(functor_cfg.func, record_camera_data):
+                        functor_cfg.func.save_and_clear()
+
         # Clear episode buffers and reset success status for environments being reset
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
@@ -530,6 +534,11 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="reset", env_ids=env_ids)
+
+        # reset observation manager for environments that need a reset
+        # This clears any cached data in observation functors (e.g., physics attributes)
+        if self.cfg.observations:
+            self.observation_manager.reset(env_ids=env_ids)
 
         # reset reward manager for environments that need a reset
         if self.cfg.rewards:
@@ -592,10 +601,10 @@ class EmbodiedEnv(BaseEnv):
     ) -> None:
         """Write environment-side fields into an externally managed RL rollout buffer."""
         buffer_device = self.rollout_buffer.device
-        self.rollout_buffer["reward"][:, self.current_rollout_step].copy_(
+        self.rollout_buffer["reward"][: self.num_envs, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )
-        self.rollout_buffer["done"][:, self.current_rollout_step].copy_(
+        self.rollout_buffer["done"][: self.num_envs, self.current_rollout_step].copy_(
             dones.to(buffer_device), non_blocking=True
         )
         terminateds = (
@@ -608,12 +617,12 @@ class EmbodiedEnv(BaseEnv):
             if truncateds is not None
             else torch.zeros_like(dones, dtype=torch.bool)
         )
-        self.rollout_buffer["terminated"][:, self.current_rollout_step].copy_(
-            terminateds.to(buffer_device), non_blocking=True
-        )
-        self.rollout_buffer["truncated"][:, self.current_rollout_step].copy_(
-            truncateds.to(buffer_device), non_blocking=True
-        )
+        self.rollout_buffer["terminated"][
+            : self.num_envs, self.current_rollout_step
+        ].copy_(terminateds.to(buffer_device), non_blocking=True)
+        self.rollout_buffer["truncated"][
+            : self.num_envs, self.current_rollout_step
+        ].copy_(truncateds.to(buffer_device), non_blocking=True)
 
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
@@ -704,8 +713,13 @@ class EmbodiedEnv(BaseEnv):
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Delegate to ActionManager when configured."""
         if self.action_manager is not None:
-            return self.action_manager.process_action(action)
+            return self.action_manager.process_action(action, mode="pre")
         return super()._preprocess_action(action)
+
+    def _postprocess_action(self, action):
+        if self.action_manager is not None:
+            return self.action_manager.process_action(action, mode="post")
+        return super()._postprocess_action(action)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Setup the robot in the environment.

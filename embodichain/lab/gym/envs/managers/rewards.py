@@ -21,6 +21,7 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING
 
+from embodichain.lab.sim.types import EnvAction
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 def distance_between_objects(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_entity_cfg: SceneEntityCfg = None,
@@ -92,7 +93,7 @@ def distance_between_objects(
 def joint_velocity_penalty(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     robot_uid: str = "robot",
     joint_ids: slice | list[int] | None = None,
@@ -146,7 +147,7 @@ def joint_velocity_penalty(
 def action_smoothness_penalty(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
 ) -> torch.Tensor:
     """Penalize large action changes between consecutive timesteps.
@@ -173,46 +174,20 @@ def action_smoothness_penalty(
     """
     # Extract current action tensor
     if isinstance(action, torch.Tensor):
-        current_action_tensor = action
-    elif isinstance(action, dict):
-        # Extract from dict
-        current_action_tensor = None
-        for key in ["qpos", "qvel", "qf"]:
-            if key in action:
-                current_action_tensor = action[key]
-                break
-        if current_action_tensor is None:
-            return torch.zeros(env.num_envs, device=env.device)
+        current_action = action
     else:
-        return torch.zeros(env.num_envs, device=env.device)
+        current_action = action["qpos"]
 
     # Get previous action from buffer for each environment
-    penalty = torch.zeros(env.num_envs, device=env.device)
-
-    for env_id in range(env.num_envs):
-        action_buffer = env.episode_action_buffer[env_id]
-
-        if len(action_buffer) > 0:
-            # Get previous action (last in buffer)
-            prev_action = action_buffer[-1]
-
-            # Extract tensor from previous action
-            if isinstance(prev_action, torch.Tensor):
-                prev_action_tensor = prev_action
-            elif isinstance(prev_action, dict):
-                prev_action_tensor = None
-                for key in ["qpos", "qvel", "qf"]:
-                    if key in prev_action:
-                        prev_action_tensor = prev_action[key]
-                        break
-            else:
-                prev_action_tensor = None
-
-            if prev_action_tensor is not None:
-                # Compute difference and penalty
-                action_diff = current_action_tensor[env_id] - prev_action_tensor
-                penalty[env_id] = -torch.norm(action_diff)
-        # else: first step, no penalty (already zero)
+    if env.current_rollout_step == 0:
+        penalty = torch.zeros(env.num_envs, device=env.device)
+    else:
+        dones = env.rollout_buffer["done"][: env.num_envs, env.current_rollout_step - 1]
+        pre_action = env.rollout_buffer["action"][
+            : env.num_envs, env.current_rollout_step - 1
+        ]
+        penalty = -torch.norm(current_action - pre_action, dim=-1)
+        penalty[dones] = 0.0
 
     return penalty
 
@@ -220,7 +195,7 @@ def action_smoothness_penalty(
 def joint_limit_penalty(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     robot_uid: str = "robot",
     joint_ids: slice | list[int] = slice(None),
@@ -286,7 +261,7 @@ def joint_limit_penalty(
 def orientation_alignment(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_entity_cfg: SceneEntityCfg = None,
@@ -341,7 +316,7 @@ def orientation_alignment(
 def success_reward(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
 ) -> torch.Tensor:
     """Sparse bonus reward when task succeeds.
@@ -389,7 +364,7 @@ def success_reward(
 def reaching_behind_object(
     env: EmbodiedEnv,
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     object_cfg: SceneEntityCfg = None,
     target_pose_key: str = "goal_pose",
@@ -480,7 +455,7 @@ def reaching_behind_object(
 def distance_to_target(
     env: "EmbodiedEnv",
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_pose_key: str = "target_pose",
@@ -557,7 +532,7 @@ def distance_to_target(
 def incremental_distance_to_target(
     env: "EmbodiedEnv",
     obs: dict,
-    action: torch.Tensor | dict,
+    action: EnvAction,
     info: dict,
     source_entity_cfg: SceneEntityCfg = None,
     target_pose_key: str = "target_pose",

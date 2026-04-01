@@ -83,6 +83,7 @@ class record_camera_data(Functor):
         if getattr(env.sim, "is_rt_enabled", False):
             env.add_camera_group_id(self.camera.group_id)
 
+        self._save_path = cfg.params.get("save_path", "./outputs/videos")
         self._current_episode = 0
         self._frames: List[np.ndarray] = []
 
@@ -124,6 +125,21 @@ class record_camera_data(Functor):
 
         return result
 
+    def save_and_clear(self) -> None:
+        """Save recorded frames as video and clear the buffer.
+
+        This method is called from :meth:`EmbodiedEnv._initialize_episode` to ensure
+        frames are saved before the episode is reset. This avoids the issue where the
+        final episode's frames are lost because the save previously relied on detecting
+        a reset inside :meth:`__call__`.
+        """
+        if len(self._frames) > 0:
+            video_name = f"episode_{self._current_episode}_{self._name}"
+            images_to_video(self._frames, self._save_path, video_name, fps=20)
+
+            self._current_episode += 1
+            self._frames = []
+
     def __call__(
         self,
         env: EmbodiedEnv,
@@ -142,15 +158,6 @@ class record_camera_data(Functor):
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
     ):
-        # TODO: the current implementation will lost the final episode frames recording.
-        # Check if the frames should be saved for the current episode
-        if env.elapsed_steps.sum().item() == len(env_ids) and len(self._frames) > 0:
-            video_name = f"episode_{self._current_episode}_{self._name}"
-            images_to_video(self._frames, save_path, video_name, fps=20)
-
-            self._current_episode += 1
-            self._frames = []
-
         self.camera.update(fetch_only=self.camera.is_rt_enabled)
         data = self.camera.get_data()
         rgb = data["color"]
@@ -169,6 +176,10 @@ class record_camera_data_async(record_camera_data):
         self._num_envs = min(4, getattr(env, "num_envs", 1))
         self._frames_list = [[] for _ in range(self._num_envs)]
         self._ep_idx = [0 for _ in range(self._num_envs)]
+
+    def save_and_clear(self) -> None:
+        """No-op for the async variant; saving is handled inside :meth:`__call__`."""
+        pass
 
     def __call__(
         self,

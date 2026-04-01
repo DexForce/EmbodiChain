@@ -19,7 +19,16 @@ import numpy as np
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.sim.planners.motion_generator import MotionGenerator
+from embodichain.lab.sim.planners import (
+    MotionGenerator,
+    MotionGenCfg,
+    MotionGenOptions,
+    ToppraPlannerCfg,
+    ToppraPlanOptions,
+    PlanState,
+    MoveType,
+    MovePart,
+)
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.utils import logger
 
@@ -89,20 +98,12 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             qpos=init_left_arm_qpos, name="left_arm", to_matrix=True
         )
 
-        motion_gen_right = MotionGenerator(
-            robot=self.robot,
-            uid="right_arm",
-            planner_type="toppra",
-            default_velocity=0.2,
-            default_acceleration=0.5,
+        motion_cfg = MotionGenCfg(
+            planner_cfg=ToppraPlannerCfg(
+                robot_uid=self.robot.uid,
+            )
         )
-        motion_gen_left = MotionGenerator(
-            robot=self.robot,
-            uid="left_arm",
-            planner_type="toppra",
-            default_velocity=0.2,
-            default_acceleration=0.5,
-        )
+        self.motion_generator = MotionGenerator(cfg=motion_cfg)
 
         gripper_open = torch.tensor(
             [0.05, 0.05], dtype=torch.float32, device=self.device
@@ -149,20 +150,32 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             gripper_state: torch.Tensor,
             arm_ids,
             eef_ids,
-            motion_gen: MotionGenerator,
+            control_part: str,
         ):
-            qpos_list = [
-                qpos_start[0].detach().cpu().numpy(),
-                qpos_end[0].detach().cpu().numpy(),
-            ]
-            out_qpos_list, _ = motion_gen.create_discrete_trajectory(
-                qpos_list=qpos_list,
-                is_linear=False,
-                sample_method=TrajectorySampleMethod.QUANTITY,
-                sample_num=num_steps,
-                is_use_current_qpos=False,
+            options = MotionGenOptions(
+                control_part=control_part,
+                plan_opts=ToppraPlanOptions(
+                    constraints={
+                        "velocity": 0.2,
+                        "acceleration": 0.5,
+                    },
+                    sample_method=TrajectorySampleMethod.QUANTITY,
+                    sample_interval=num_steps,
+                ),
             )
-            for qpos_item in out_qpos_list:
+            # Joint space trajectory
+            target_states = [
+                PlanState(qpos=qpos_start[0], move_type=MoveType.JOINT_MOVE),
+                PlanState(
+                    qpos=qpos_end[0],
+                    move_type=MoveType.JOINT_MOVE,
+                ),
+            ]
+            plan_result = self.motion_generator.generate(
+                target_states=target_states, options=options
+            )
+
+            for qpos_item in plan_result.positions:
                 qpos = torch.as_tensor(
                     qpos_item, dtype=torch.float32, device=self.device
                 )
@@ -188,7 +201,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             arm_ids,
             eef_ids,
             arm_name: str,
-            motion_gen: MotionGenerator,
             tag: str,
         ):
             pick = init_arm_xpos.clone()
@@ -211,14 +223,14 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
 
             # execution segments: seed -> pick(open gripper) -> lift -> place(close gripper)
             _append_move_for_arm(
-                seed_qpos, q_pick, 20, gripper_open, arm_ids, eef_ids, motion_gen
+                seed_qpos, q_pick, 20, gripper_open, arm_ids, eef_ids, arm_name
             )
             _append_hold(q_pick, 5, gripper_close, arm_ids, eef_ids)  # close gripper
             _append_move_for_arm(
-                q_pick, q_lift, 20, gripper_close, arm_ids, eef_ids, motion_gen
+                q_pick, q_lift, 20, gripper_close, arm_ids, eef_ids, arm_name
             )
             _append_move_for_arm(
-                q_lift, q_place, 30, gripper_close, arm_ids, eef_ids, motion_gen
+                q_lift, q_place, 30, gripper_close, arm_ids, eef_ids, arm_name
             )
             _append_hold(q_place, 5, gripper_open, arm_ids, eef_ids)  # open gripper
 
@@ -234,7 +246,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             right_arm_ids,
             right_eef_ids,
             "right_arm",
-            motion_gen_right,
             "red",
         )
 
@@ -250,7 +261,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             left_arm_ids,
             left_eef_ids,
             "left_arm",
-            motion_gen_left,
             "blue",
         )
 
