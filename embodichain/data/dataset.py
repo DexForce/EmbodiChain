@@ -153,8 +153,16 @@ def get_data_class(dataset_name: str, extra_modules: list[str] | None = None):
 def get_data_path(data_path_in_config: str) -> str:
     """Get the absolute path of the data file.
 
+    Resolution order:
+        1. If ``data_path_in_config`` is an absolute path, return it directly.
+        2. If a matching file/directory exists under ``EMBODICHAIN_DEFAULT_DATA_ROOT``
+           (which can be overridden via the ``EMBODICHAIN_DATA_ROOT`` environment
+           variable), return that path.
+        3. Otherwise, resolve via the registered data-class download mechanism.
+
     Args:
-        data_path_in_config (str): The dataset path in the format "${dataset_name}/subpath".
+        data_path_in_config (str): The dataset path in the format
+            ``"dataset_name/subpath"``.
 
     Returns:
         str: The absolute path of the data file.
@@ -162,11 +170,18 @@ def get_data_path(data_path_in_config: str) -> str:
     if os.path.isabs(data_path_in_config):
         return data_path_in_config
 
+    # Try resolving under the user-configurable data root first
+    from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+
+    local_path = os.path.join(EMBODICHAIN_DEFAULT_DATA_ROOT, data_path_in_config)
+    if os.path.exists(local_path):
+        return local_path
+
+    # Fall back to the data-class download mechanism
     split_str = data_path_in_config.split("/")
     dataset_name = split_str[0]
     sub_path = os.path.join(*split_str[1:])
 
-    # Use the optimized get_data_class function
     data_class = get_data_class(dataset_name)
     data_obj = data_class()
     data_dir = data_obj.extract_dir

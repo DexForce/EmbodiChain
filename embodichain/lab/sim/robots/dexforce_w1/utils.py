@@ -43,12 +43,12 @@ all = [
 
 class ChassisManager:
     def __init__(self):
-        self.urdf_paths = {
-            DexforceW1Version.V021: get_data_path("DexforceW1ChassisV021/chassis.urdf"),
+        self._urdf_rel_paths = {
+            DexforceW1Version.V021: "DexforceW1ChassisV021/chassis.urdf",
         }
 
     def get_urdf(self, version=DexforceW1Version.V021):
-        return self.urdf_paths[version]
+        return get_data_path(self._urdf_rel_paths[version])
 
     def get_config(self, version=DexforceW1Version.V021):
         return {
@@ -61,13 +61,13 @@ class ChassisManager:
 
 class TorsoManager:
     def __init__(self):
-        self.urdf_paths = {
-            DexforceW1Version.V021: get_data_path("DexforceW1TorsoV021/torso.urdf"),
+        self._urdf_rel_paths = {
+            DexforceW1Version.V021: "DexforceW1TorsoV021/torso.urdf",
         }
         self.joint_names = ["ANKLE", "KNEE", "BUTTOCK", "WAIST"]
 
     def get_urdf(self, version=DexforceW1Version.V021):
-        return self.urdf_paths[version]
+        return get_data_path(self._urdf_rel_paths[version])
 
     def get_config(self, version=DexforceW1Version.V021):
         return {
@@ -80,13 +80,13 @@ class TorsoManager:
 
 class HeadManager:
     def __init__(self):
-        self.urdf_paths = {
-            DexforceW1Version.V021: get_data_path("DexforceW1HeadV021/head.urdf"),
+        self._urdf_rel_paths = {
+            DexforceW1Version.V021: "DexforceW1HeadV021/head.urdf",
         }
         self.joint_names = ["NECK1", "NECK2"]
 
     def get_urdf(self, version=DexforceW1Version.V021):
-        return self.urdf_paths[version]
+        return get_data_path(self._urdf_rel_paths[version])
 
     def get_config(self, version=DexforceW1Version.V021):
         return {
@@ -99,12 +99,12 @@ class HeadManager:
 
 class EyesManager:
     def __init__(self):
-        self.urdf_paths = {
-            DexforceW1Version.V021: get_data_path("DexforceW1EyesV021/eyes.urdf"),
+        self._urdf_rel_paths = {
+            DexforceW1Version.V021: "DexforceW1EyesV021/eyes.urdf",
         }
 
     def get_urdf(self, version=DexforceW1Version.V021):
-        return self.urdf_paths[version]
+        return get_data_path(self._urdf_rel_paths[version])
 
     def get_config(self, version=DexforceW1Version.V021):
         return {
@@ -117,31 +117,31 @@ class EyesManager:
 
 class ArmManager:
     def __init__(self):
-        self.urdf_paths = {
+        self._urdf_rel_paths = {
             (
                 DexforceW1ArmKind.ANTHROPOMORPHIC,
                 DexforceW1ArmSide.LEFT,
                 DexforceW1Version.V021,
-            ): get_data_path("DexforceW1LeftArm1V021/left_arm.urdf"),
+            ): "DexforceW1LeftArm1V021/left_arm.urdf",
             (
                 DexforceW1ArmKind.ANTHROPOMORPHIC,
                 DexforceW1ArmSide.RIGHT,
                 DexforceW1Version.V021,
-            ): get_data_path("DexforceW1RightArm1V021/right_arm.urdf"),
+            ): "DexforceW1RightArm1V021/right_arm.urdf",
             (
                 DexforceW1ArmKind.INDUSTRIAL,
                 DexforceW1ArmSide.LEFT,
                 DexforceW1Version.V021,
-            ): get_data_path("DexforceW1LeftArm2V021/left_arm.urdf"),
+            ): "DexforceW1LeftArm2V021/left_arm.urdf",
             (
                 DexforceW1ArmKind.INDUSTRIAL,
                 DexforceW1ArmSide.RIGHT,
                 DexforceW1Version.V021,
-            ): get_data_path("DexforceW1RightArm2V021/right_arm.urdf"),
+            ): "DexforceW1RightArm2V021/right_arm.urdf",
         }
 
     def get_urdf(self, kind, side, version=DexforceW1Version.V021):
-        return self.urdf_paths[(kind, side, version)]
+        return get_data_path(self._urdf_rel_paths[(kind, side, version)])
 
     def get_config(self, kind, side, version=DexforceW1Version.V021):
         prefix = "LEFT" if side == DexforceW1ArmSide.LEFT else "RIGHT"
@@ -155,37 +155,37 @@ class ArmManager:
 
 class HandManager:
     def __init__(self):
-        self.urdf_paths = {
+        self._urdf_rel_paths = {
             (
                 DexforceW1HandBrand.BRAINCO_HAND,
                 DexforceW1ArmSide.LEFT,
                 DexforceW1Version.V021,
-            ): get_data_path("BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"),
+            ): "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf",
             (
                 DexforceW1HandBrand.BRAINCO_HAND,
                 DexforceW1ArmSide.RIGHT,
                 DexforceW1Version.V021,
-            ): get_data_path("BrainCoHandRevo1/BrainCoRightHand/BrainCoRightHand.urdf"),
+            ): "BrainCoHandRevo1/BrainCoRightHand/BrainCoRightHand.urdf",
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER,
                 DexforceW1ArmSide.LEFT,
                 DexforceW1Version.V021,
-            ): get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf"),
+            ): "DH_PGC_140_50/DH_PGC_140_50.urdf",
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER,
                 DexforceW1ArmSide.RIGHT,
                 DexforceW1Version.V021,
-            ): get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf"),
+            ): "DH_PGC_140_50/DH_PGC_140_50.urdf",
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER_M,
                 DexforceW1ArmSide.LEFT,
                 DexforceW1Version.V021,
-            ): get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf"),
+            ): "DH_PGC_140_50_M/DH_PGC_140_50_M.urdf",
             (
                 DexforceW1HandBrand.DH_PGC_GRIPPER_M,
                 DexforceW1ArmSide.RIGHT,
                 DexforceW1Version.V021,
-            ): get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf"),
+            ): "DH_PGC_140_50_M/DH_PGC_140_50_M.urdf",
         }
 
     def get_config(
@@ -242,7 +242,7 @@ class HandManager:
         side: DexforceW1ArmSide,
         version: DexforceW1Version = DexforceW1Version.V021,
     ):
-        return self.urdf_paths[(brand, side, version)]
+        return get_data_path(self._urdf_rel_paths[(brand, side, version)])
 
     def get_attach_xpos(
         self,
