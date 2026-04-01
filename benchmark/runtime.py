@@ -111,6 +111,77 @@ def _build_env_cfg(
     return gym_config_data, gym_env_cfg
 
 
+def _allocate_eval_rollout_buffer(env, policy, device: torch.device) -> TensorDict:
+    """Allocate a small RL-style rollout buffer for evaluation-only environments."""
+    rollout_len = 2
+    return TensorDict(
+        {
+            "obs": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                policy.obs_dim,
+                dtype=torch.float32,
+                device=device,
+            ),
+            "action": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                policy.action_dim,
+                dtype=torch.float32,
+                device=device,
+            ),
+            "sample_log_prob": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                dtype=torch.float32,
+                device=device,
+            ),
+            "value": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                dtype=torch.float32,
+                device=device,
+            ),
+            "reward": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                dtype=torch.float32,
+                device=device,
+            ),
+            "done": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "terminated": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "truncated": torch.zeros(
+                env.num_envs,
+                rollout_len + 1,
+                dtype=torch.bool,
+                device=device,
+            ),
+        },
+        batch_size=[env.num_envs, rollout_len + 1],
+        device=device,
+    )
+
+
+def _compact_eval_rollout_buffer(env, rollout_buffer: TensorDict) -> None:
+    """Keep only the previous transition needed by rollout-dependent eval rewards."""
+    if getattr(env, "current_rollout_step", 0) < 2:
+        return
+    for key in ("action", "reward", "done", "terminated", "truncated"):
+        rollout_buffer[key][:, 0].copy_(rollout_buffer[key][:, 1])
+        rollout_buffer[key][:, 1:].zero_()
+    env.current_rollout_step = 1
+
+
 def build_policy_from_env(policy_block: dict[str, Any], env, device: torch.device):
     """Build a policy using the current environment spaces."""
     sample_obs, _ = env.reset()
@@ -266,6 +337,9 @@ def evaluate_checkpoint(
     try:
         env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
         policy = build_policy_from_env(policy_block, env, device)
+        eval_rollout_buffer = None
+        if hasattr(env, "set_rollout_buffer"):
+            eval_rollout_buffer = _allocate_eval_rollout_buffer(env, policy, device)
 
         checkpoint = torch.load(checkpoint_path, map_location=device)
         policy.load_state_dict(checkpoint["policy"])
@@ -283,6 +357,8 @@ def evaluate_checkpoint(
         env_step_count = 0
         env_step_time = 0.0
 
+        if eval_rollout_buffer is not None:
+            env.set_rollout_buffer(eval_rollout_buffer)
         obs, _ = env.reset()
         while completed < target_episodes:
             flat_obs = flatten_dict_observation(obs)
@@ -300,6 +376,11 @@ def evaluate_checkpoint(
                     action_td["action"]
                 )
 
+            if eval_rollout_buffer is not None:
+                _compact_eval_rollout_buffer(env, eval_rollout_buffer)
+                eval_rollout_buffer["action"][:, env.current_rollout_step].copy_(
+                    action_td["action"]
+                )
             step_start = time.perf_counter()
             obs, reward, terminated, truncated, info = env.step(action_in)
             env_step_time += time.perf_counter() - step_start
