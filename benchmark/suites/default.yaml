@@ -7,7 +7,6 @@ algorithms:
 seeds:
   - 0
   - 1
-  - 2
 protocol:
   device: cuda:0
   headless: true

@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import deep_update, load_algorithm_spec, load_suite_spec, load_task_spec
-from .leaderboard import build_leaderboard
 from .metrics import (
     aggregate_runs,
+    build_leaderboard,
     compute_final_metric_stable,
     compute_steps_to_threshold_first_hit,
     compute_steps_to_threshold_sustained,
