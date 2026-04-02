@@ -41,13 +41,13 @@ The parsed arguments are passed to ``initialize_simulation``, which builds a :cl
 Annotating and computing grasp poses
 -------------------------------------
 
-Grasp generation is performed by :meth:`objects.RigidObject.get_grasp_pose`, which internally runs an antipodal sampler on the object mesh. A :class:`toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
+Grasp generation is performed by :class:`toolkits.graspkit.pg_grasp.GraspGenerator`, which runs an antipodal sampler on the object mesh. The mesh data (vertices and triangles) is extracted from the :class:`objects.RigidObject` via its accessor methods. A :class:`toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
 
 1. Open the visualization in a browser at the reported port (e.g. ``http://localhost:11801``).
 2. Use *Rect Select Region* to highlight the area of the object that should be grasped.
 3. Click *Confirm Selection* to finalize the region.
 
-The function returns a batch of ``(N_envs, 4, 4)`` homogeneous transformation matrices representing candidate grasp frames in the world coordinate system.
+For each environment, a grasp pose is computed by calling :meth:`toolkits.graspkit.pg_grasp.GraspGenerator.get_grasp_poses` with the object pose and desired approach direction. The result is a ``(4, 4)`` homogeneous transformation matrix representing the grasp frame in world coordinates.
 
 For each grasp pose, gripper approach direction in world coordinate is required to compute the antipodal grasp. In this tutorial, we use a fixed approach direction (straight down in world frame) for simplicity, but it can be customized based on the task or object geometry.
 

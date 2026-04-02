@@ -41,6 +41,11 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     GripperCollisionCfg,
 )
 
+GRASP_ANNOTATOR_CACHE_DIR = (
+    Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
+)
+GRASP_ANNOTATOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 __all__ = ["GraspGenerator", "GraspGeneratorCfg"]
 
@@ -386,8 +391,6 @@ class GraspGenerator:
         return self._hit_point_pairs
 
     def _get_cache_dir(self, vertices: torch.Tensor, triangles: torch.Tensor):
-        from embodichain.lab.sim.sim_manager import GRASP_ANNOTATOR_CACHE_DIR
-
         vert_bytes = vertices.to("cpu").numpy().tobytes()
         face_bytes = triangles.to("cpu").numpy().tobytes()
         md5_hash = hashlib.md5(vert_bytes + face_bytes).hexdigest()
@@ -584,6 +587,7 @@ class GraspGenerator:
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         is_visual: bool = False,
+        visualize: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Get grasp pose given approach direction.
 
@@ -600,6 +604,8 @@ class GraspGenerator:
             approach_direction: ``(3,)`` unit vector representing the desired
                 approach direction of the gripper in the world frame.
             is_visual: If ``True``, enable visual collision checking.
+            visualize: If ``True``, visualize the best grasp pose using Open3D
+                after computation.
 
         Returns:
             A tuple ``(best_grasp_pose, best_open_length)`` where
@@ -667,6 +673,12 @@ class GraspGenerator:
         best_idx = torch.argmin(total_cost)
         best_grasp_pose = valid_grasp_poses[best_idx]
         best_open_length = valid_open_lengths[best_idx]
+        if visualize:
+            self.visualize_grasp_pose(
+                obj_pose=object_pose,
+                grasp_pose=best_grasp_pose,
+                open_length=best_open_length.item(),
+            )
         return best_grasp_pose, best_open_length
 
     @staticmethod

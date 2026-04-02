@@ -35,7 +35,6 @@ SIM_CACHE_DIR = Path.home() / ".cache" / "embodichain_cache"
 MATERIAL_CACHE_DIR = SIM_CACHE_DIR / "mat_cache"
 CONVEX_DECOMP_DIR = SIM_CACHE_DIR / "convex_decomposition"
 REACHABLE_XPOS_DIR = SIM_CACHE_DIR / "robot_reachable_xpos"
-GRASP_ANNOTATOR_CACHE_DIR = SIM_CACHE_DIR / "grasp_annotator_cache"
 
 from dexsim.types import (
     Backend,
@@ -90,7 +89,6 @@ __all__ = [
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
     "REACHABLE_XPOS_DIR",
-    "GRASP_ANNOTATOR_CACHE_DIR",
 ]
 
 

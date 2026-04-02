@@ -35,13 +35,6 @@ from embodichain.lab.sim.utility import is_rt_enabled
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
-from embodichain.toolkits.graspkit.pg_grasp import (
-    GraspGenerator,
-    GraspGeneratorCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
-)
 
 
 @dataclass
@@ -1155,66 +1148,3 @@ class RigidObject(BatchEntity):
             arenas = [env]
         for i, entity in enumerate(self._entities):
             arenas[i].remove_actor(entity)
-
-    def get_grasp_pose(
-        self,
-        cfg: GraspGeneratorCfg = GraspGeneratorCfg(),
-        gripper_collision_cfg: GripperCollisionCfg = GripperCollisionCfg(),
-        approach_direction: torch.Tensor = None,
-        is_visual: bool = False,
-    ) -> torch.Tensor:
-        if approach_direction is None:
-            approach_direction = torch.tensor(
-                [0, 0, -1], dtype=torch.float32, device=self.device
-            )
-        approach_direction = torch.nn.functional.normalize(approach_direction, dim=-1)
-        if hasattr(self, "_grasp_annotator") is False:
-            vertices = torch.tensor(
-                self._entities[0].get_vertices(),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            triangles = torch.tensor(
-                self._entities[0].get_triangles(), dtype=torch.int32, device=self.device
-            )
-            scale = torch.tensor(
-                self._entities[0].get_body_scale(),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            vertices = vertices * scale
-            self._grasp_annotator = GraspGenerator(
-                vertices=vertices,
-                triangles=triangles,
-                cfg=cfg,
-                gripper_collision_cfg=gripper_collision_cfg,
-            )
-
-        # Annotate antipodal point pairs
-        if hasattr(self, "_hit_point_pairs") is False or cfg.force_regenerate:
-            self._hit_point_pairs = self._grasp_annotator.annotate()
-
-        poses = self.get_local_pose(to_matrix=True)
-        grasp_poses: tuple[torch.Tensor] = []
-        open_lengths: tuple[torch.Tensor] = []
-        for pose in poses:
-            grasp_pose, open_length = self._grasp_annotator.get_grasp_poses(
-                self._hit_point_pairs, pose, approach_direction, is_visual=False
-            )
-            grasp_poses.append(grasp_pose)
-            open_lengths.append(open_length)
-        grasp_poses = torch.cat(
-            [grasp_pose.unsqueeze(0) for grasp_pose in grasp_poses], dim=0
-        )
-
-        if is_visual:
-            vertices = self._entities[0].get_vertices()
-            triangles = self._entities[0].get_triangles()
-            scale = self._entities[0].get_body_scale()
-            vertices = vertices * scale
-            self._grasp_annotator.visualize_grasp_pose(
-                obj_pose=poses[0],
-                grasp_pose=grasp_poses[0],
-                open_length=open_lengths[0].item(),
-            )
-        return grasp_poses

@@ -40,6 +40,7 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    GraspGenerator,
     GraspGeneratorCfg,
     AntipodalSamplerCfg,
 )
@@ -251,14 +252,32 @@ if __name__ == "__main__":
     gripper_collision_cfg = GripperCollisionCfg(
         max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
     )
-    grasp_xpos = mug.get_grasp_pose(
-        approach_direction=torch.tensor(
-            [0, 0, -1], dtype=torch.float32, device=sim.device
-        ),  # gripper approach direction in the world frame
+
+    # Extract mesh data from the mug and create grasp generator
+    vertices = mug.get_vertices(env_ids=[0], scale=True)[0]
+    triangles = mug.get_triangles(env_ids=[0])[0]
+    grasp_generator = GraspGenerator(
+        vertices=vertices,
+        triangles=triangles,
         cfg=grasp_cfg,
         gripper_collision_cfg=gripper_collision_cfg,
-        is_visual=False,  # visualize selected grasp pose finally
     )
+
+    # Annotate grasp region (populates internal antipodal point pairs)
+    grasp_generator.annotate()
+
+    # Compute grasp poses per environment
+    approach_direction = torch.tensor(
+        [0, 0, -1], dtype=torch.float32, device=sim.device
+    )
+    poses = mug.get_local_pose(to_matrix=True)
+    grasp_xpos_list = []
+    for pose in poses:
+        grasp_pose, _ = grasp_generator.get_grasp_poses(
+            pose, approach_direction, visualize=False
+        )
+        grasp_xpos_list.append(grasp_pose.unsqueeze(0))
+    grasp_xpos = torch.cat(grasp_xpos_list, dim=0)
     cost_time = time.time() - start_time
     logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 
