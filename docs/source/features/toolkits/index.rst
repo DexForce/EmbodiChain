@@ -7,4 +7,5 @@ ToolKits
 
    convex_decomposition <convex_decomposition.md>
    urdf_assembly <urdf_assembly.md>
+   grasp_generator
    
