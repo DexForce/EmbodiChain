@@ -216,10 +216,6 @@ class SimulationManager:
         self._window: Windows | None = None
         self._is_registered_window_control = False
 
-        fps = int(1.0 / sim_config.physics_dt)
-        self._world.set_physics_fps(fps)
-
-        self._world.set_time_scale(1.0)
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
