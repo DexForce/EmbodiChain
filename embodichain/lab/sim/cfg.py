@@ -44,7 +44,7 @@ from .shapes import ShapeCfg, MeshCfg
 
 @configclass
 class RenderCfg:
-    renderer: Literal["legacy", "hybrid", "fast-rt"] = "legacy"
+    renderer: Literal["legacy", "hybrid", "fast-rt"] = "hybrid"
     """Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', and 'fast-rt'.
     
     Note: 
