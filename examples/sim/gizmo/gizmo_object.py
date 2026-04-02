@@ -113,6 +113,7 @@ def run_simulation(sim: SimulationManager):
         sim.init_gpu_physics()
 
     step_count = 0
+    gizmo_enabled = True
     try:
         last_time = time.time()
         last_step = 0

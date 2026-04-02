@@ -63,7 +63,7 @@ def parse_arguments():
         "--enable_rt", action="store_true", help="Enable ray tracing rendering"
     )
     parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of parallel environments"
+        "--num_envs", type=int, default=1, help="Number of parallel environments"
     )
     return parser.parse_args()
 

@@ -1227,7 +1227,7 @@ class Articulation(BatchEntity):
         max_effort: torch.Tensor | None = None,
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
-        drive_type: str = "force",
+        drive_type: str = "none",
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
     ) -> None:
