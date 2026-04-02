@@ -153,7 +153,8 @@ class Trainer:
         return out
 
     def train(self, total_timesteps: int) -> Dict[str, Any]:
-        print(f"Start training, total steps: {total_timesteps}")
+        if self.rank == 0:
+            print(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
@@ -204,8 +205,6 @@ class Trainer:
                     wandb.log(log_dict, step=self.global_step)
 
         rollout = self.buffer.start_rollout()
-        if hasattr(self.env, "set_rollout_buffer"):
-            self.env.set_rollout_buffer(rollout)
         rollout = self.collector.collect(
             num_steps=self.buffer_size,
             rollout=rollout,
@@ -317,20 +316,21 @@ class Trainer:
                     float(np.mean(self.len_window)),
                     self.global_step,
                 )
-        # console
-        print(
-            f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
-        )
+        # console and external logging are rank-0 only in distributed mode.
+        if self.rank == 0:
+            print(
+                f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
+            )
 
-        # wandb (mirror TB logs)
-        if self.use_wandb:
-            log_dict = {f"train/{k}": v for k, v in losses.items()}
-            log_dict["charts/SPS"] = sps
-            if not np.isnan(avgR):
-                log_dict["charts/episode_reward_avg_100"] = float(avgR)
-            if not np.isnan(avgL):
-                log_dict["charts/episode_length_avg_100"] = float(avgL)
-            wandb.log(log_dict, step=self.global_step)
+            # wandb (mirror TB logs)
+            if self.use_wandb:
+                log_dict = {f"train/{k}": v for k, v in losses.items()}
+                log_dict["charts/SPS"] = sps
+                if not np.isnan(avgR):
+                    log_dict["charts/episode_reward_avg_100"] = float(avgR)
+                if not np.isnan(avgL):
+                    log_dict["charts/episode_length_avg_100"] = float(avgL)
+                wandb.log(log_dict, step=self.global_step)
 
     @torch.no_grad()
     def _eval_once(self, num_episodes: int = 5) -> Dict[str, float]:
@@ -458,7 +458,7 @@ class Trainer:
                 summary[f"eval/metrics/{key}"] = float(np.mean(values))
         self.eval_history.append(summary)
         self.last_eval_metrics = summary
-        if self.use_wandb:
+        if self.rank == 0 and self.use_wandb:
             log_dict = {
                 key: value
                 for key, value in summary.items()
@@ -468,8 +468,10 @@ class Trainer:
                 wandb.log(log_dict, step=self.global_step)
         return summary
 
-    def save_checkpoint(self) -> str:
+    def save_checkpoint(self) -> str | None:
         # minimal model-only checkpoint; trainer/algorithm states can be added
+        if self.rank != 0:
+            return None
         path = f"{self.checkpoint_dir}/{self.exp_name}_step_{self.global_step}.pt"
         policy_state = (
             self.policy.module.state_dict()
