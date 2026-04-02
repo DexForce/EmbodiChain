@@ -6,4 +6,5 @@ How-to Guides
    :hidden:
 
    add_robot
-   
+   cli
+
