@@ -127,6 +127,7 @@ Configured via `LightCfg`.
 
 sim_rigid_object.md
 sim_rigid_object_group.md
+sim_cloth.md
 sim_soft_object.md
 sim_articulation.md
 sim_robot.md

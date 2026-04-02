@@ -1150,7 +1150,7 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
-    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg()
+    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="none")
     """Properties to define the drive mechanism of a joint."""
 
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
@@ -1209,6 +1209,9 @@ class RobotCfg(ArticulationCfg):
 
     """Configuration for a robot asset in the simulation.
     """
+
+    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="force")
+    """Properties to define the drive mechanism of a joint."""
 
     control_parts: Dict[str, List[str]] | None = None
     """Control parts is the mapping from part name to joint names.
