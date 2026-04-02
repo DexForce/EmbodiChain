@@ -38,28 +38,57 @@ The parsed arguments are passed to ``initialize_simulation``, which builds a :cl
    :start-at: def initialize_simulation(args) -> SimulationManager:
    :end-at: return sim
 
+Creating a robot and a target object
+------------------------------------
+
+A UR10 arm with a parallel-jaw gripper is created via :meth:`SimulationManager.add_robot`. The gripper URDF and drive properties are configured so that the arm joints and finger joints can be controlled independently.
+
+.. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
+   :language: python
+   :start-at: def create_robot(sim: SimulationManager
+   :end-at: return sim.add_robot(cfg=cfg)
+
+The target object (a mug) is loaded as a :class:`objects.RigidObject` from a PLY mesh file:
+
+.. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
+   :language: python
+   :start-at: def create_mug(sim: SimulationManager):
+   :end-at: return mug
+
 Annotating and computing grasp poses
 -------------------------------------
 
-Grasp generation is performed by :class:`toolkits.graspkit.pg_grasp.GraspGenerator`, which runs an antipodal sampler on the object mesh. The mesh data (vertices and triangles) is extracted from the :class:`objects.RigidObject` via its accessor methods. A :class:`toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
+Grasp generation is performed by :class:`~embodichain.toolkits.graspkit.pg_grasp.GraspGenerator`, which runs an antipodal sampler on the object mesh. The mesh data (vertices and triangles) is extracted from the :class:`objects.RigidObject` via its accessor methods. A :class:`~embodichain.toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
 
 1. Open the visualization in a browser at the reported port (e.g. ``http://localhost:11801``).
 2. Use *Rect Select Region* to highlight the area of the object that should be grasped.
 3. Click *Confirm Selection* to finalize the region.
 
-For each environment, a grasp pose is computed by calling :meth:`toolkits.graspkit.pg_grasp.GraspGenerator.get_grasp_poses` with the object pose and desired approach direction. The result is a ``(4, 4)`` homogeneous transformation matrix representing the grasp frame in world coordinates.
+After annotation, antipodal point pairs are cached to disk and automatically reused unless ``force_regenerate`` is set.
 
-For each grasp pose, gripper approach direction in world coordinate is required to compute the antipodal grasp. In this tutorial, we use a fixed approach direction (straight down in world frame) for simplicity, but it can be customized based on the task or object geometry.
+For each environment, a grasp pose is computed by calling :meth:`~embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.get_grasp_poses` with the object pose and desired approach direction. The result is a ``(4, 4)`` homogeneous transformation matrix representing the grasp frame in world coordinates. Set ``visualize=True`` to open an Open3D window showing the selected grasp on the object.
+
+The approach direction is the unit vector along which the gripper approaches the object. In this tutorial, we use a fixed approach direction (straight down in world frame) for simplicity, but it can be customized based on the task or object geometry.
 
 .. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
    :language: python
-   :start-at: # get mug grasp pose
+   :start-at: gripper_collision_cfg = GripperCollisionCfg(
    :end-at: logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
+
+Building and executing the grasp trajectory
+-------------------------------------------
+
+Once a grasp pose is obtained, a waypoint trajectory is built that moves the arm from its rest configuration to an approach pose (offset above the grasp), down to the grasp pose, closes the fingers, lifts, and returns. The trajectory is interpolated for smooth motion and executed step-by-step in the simulation loop.
+
+.. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
+   :language: python
+   :start-at: def get_grasp_traj(sim: SimulationManager
+   :end-at: return interp_trajectory
 
 Configuring GraspGeneratorCfg
 ------------------------------
 
-:class:`toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls the overall grasp annotation workflow. The key parameters are listed below.
+:class:`~embodichain.toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls the overall grasp annotation workflow. The key parameters are listed below.
 
 .. list-table:: GraspGeneratorCfg parameters
    :header-rows: 1
@@ -84,7 +113,7 @@ Configuring GraspGeneratorCfg
      - ``π / 12``
      - Maximum allowed angle (in radians) between the specified approach direction and the axis connecting an antipodal point pair. Pairs that deviate more than this threshold are discarded.
 
-The ``antipodal_sampler_cfg`` field accepts an :class:`toolkits.graspkit.pg_grasp.AntipodalSamplerCfg` instance, which controls how antipodal point pairs are sampled on the mesh surface.
+The ``antipodal_sampler_cfg`` field accepts an :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalSamplerCfg` instance, which controls how antipodal point pairs are sampled on the mesh surface.
 
 .. list-table:: AntipodalSamplerCfg parameters
    :header-rows: 1
@@ -107,9 +136,9 @@ The ``antipodal_sampler_cfg`` field accepts an :class:`toolkits.graspkit.pg_gras
      - Minimum allowed distance (in metres) between an antipodal pair. Pairs closer together than this value are discarded to avoid degenerate or self-intersecting grasps.
 
 Configuring GripperCollisionCfg
---------------------------------------
+-------------------------------
 
-:class:`toolkits.graspkit.pg_grasp.GripperCollisionCfg` models the geometry of a parallel-jaw gripper as a point cloud and is used to filter out grasp candidates that would collide with the object. All length parameters are in metres.
+:class:`~embodichain.toolkits.graspkit.pg_grasp.GripperCollisionCfg` models the geometry of a parallel-jaw gripper as a point cloud and is used to filter out grasp candidates that would collide with the object. All length parameters are in metres.
 
 .. list-table:: GripperCollisionCfg parameters
    :header-rows: 1
