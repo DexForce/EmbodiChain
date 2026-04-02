@@ -16,9 +16,9 @@
 import torch
 from embodichain.data import get_data_path
 import trimesh
-from embodichain.toolkits.graspkit.pg_grasp.batch_collision_checker import (
-    BatchConvexCollisionChecker,
-    BatchConvexCollisionCheckerCfg,
+from embodichain.toolkits.graspkit.pg_grasp.collision_checker import (
+    ConvexCollisionChecker,
+    ConvexCollisionCheckerCfg,
 )
 from embodichain.utils.math import transform_points_mat
 import warp as wp
@@ -29,9 +29,7 @@ def batch_convex_collision_query(device=torch.device("cuda")):
     mug_mesh = trimesh.load(mug_path, force="mesh", process=False)
     verts = torch.tensor(mug_mesh.vertices, dtype=torch.float32, device=device)
     faces = torch.tensor(mug_mesh.faces, dtype=torch.int32, device=device)
-    collision_checker = BatchConvexCollisionChecker(
-        verts, faces, max_decomposition_hulls=16
-    )
+    collision_checker = ConvexCollisionChecker(verts, faces, max_decomposition_hulls=16)
 
     poses = torch.tensor(
         [

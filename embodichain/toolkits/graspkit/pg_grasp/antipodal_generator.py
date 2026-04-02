@@ -18,14 +18,17 @@ import os
 import argparse
 import open3d as o3d
 import time
-from pathlib import Path
-from typing import Any, cast
 import torch
 import numpy as np
 import trimesh
+import hashlib
+import torch.nn.functional as F
 
 import viser
 import viser.transforms as tf
+from pathlib import Path
+from typing import Any, cast
+
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
@@ -33,47 +36,100 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSamplerCfg,
 )
 from embodichain.utils import configclass
-from .gripper_collision_checker import (
-    SimpleGripperCollisionChecker,
-    SimpleGripperCollisionCfg,
+from embodichain.toolkits.graspkit.pg_grasp import (
+    GripperCollisionChecker,
+    GripperCollisionCfg,
 )
-import hashlib
-import torch.nn.functional as F
-import tempfile
+
+
+__all__ = ["GraspGenerator", "GraspGeneratorCfg"]
 
 
 @configclass
-class GraspAnnotatorCfg:
+class GraspGeneratorCfg:
+    """Configuration for :class:`GraspGenerator`.
+
+    Controls the interactive grasp region annotation workflow, including the
+    browser-based visualizer settings, antipodal sampling parameters, and
+    grasp-pose filtering thresholds.
+    """
+
     viser_port: int = 15531
+    """Port used by the Viser browser-based visualizer for interactive grasp
+    region annotation."""
+
     use_largest_connected_component: bool = False
+    """When ``True``, only the largest connected component of the selected mesh
+    region is retained. Useful for meshes that contain disconnected fragments
+    or when selecting a local feature such as a handle."""
+
     antipodal_sampler_cfg: AntipodalSamplerCfg = AntipodalSamplerCfg()
+    """Nested configuration for the antipodal point sampler. Controls the
+    number of sampled surface points, ray perturbation angle, and gripper jaw
+    distance limits. See :class:`AntipodalSamplerCfg` for details."""
+
     force_regenerate: bool = False
+    """When ``True``, the user is required to annotate the grasp region every
+    time, bypassing any cached results from a previous run."""
+
     max_deviation_angle: float = np.pi / 12
+    """Maximum allowed angle (in radians) between the specified approach
+    direction and the axis connecting an antipodal point pair. Pairs that
+    deviate more than this threshold from perpendicular to the approach are
+    discarded during grasp pose computation."""
 
 
-@configclass
-class SelectResult:
-    vertex_indices: np.ndarray | None = None
-    face_indices: np.ndarray | None = None
-    vertices: np.ndarray | None = None
-    faces: np.ndarray | None = None
+class GraspGenerator:
+    """Antipodal grasp-pose generator for parallel-jaw grippers.
 
+    Given an object mesh, ``GraspGenerator`` produces feasible grasp poses
+    through a three-stage pipeline:
 
-class GraspAnnotator:
-    """GraspAnnotator provides functionality to annotate antipodal grasp regions on a given object mesh. It allows users to interactively select regions on the mesh and generates antipodal point pairs for grasping based on the selected region. The annotator also includes a collision checker to filter out infeasible grasp poses and can visualize the generated grasp poses in a 3D viewer."""
+    1. **Antipodal sampling** — Surface points are uniformly sampled and
+       rays are cast along (and near) the inward normal to find antipodal
+       point pairs on opposite sides of the mesh (:meth:`generate`).
+       Alternatively, an interactive Viser-based annotator lets a human
+       select the graspable region (:meth:`annotate`).
+    2. **Pose construction** — For each antipodal pair, a 6-DoF grasp
+       frame is built so that the gripper opening aligns with the pair axis
+       and the approach direction is consistent with a user-specified
+       vector (:meth:`get_grasp_poses`).
+    3. **Filtering & ranking** — Grasp candidates that would cause the
+       gripper to collide with the object are discarded.  Surviving poses
+       are scored by a weighted cost that penalises angular deviation from
+       the approach direction, narrow opening length, and distance to the
+       mesh centroid.
+
+    Antipodal pairs are cached to disk (keyed on mesh geometry) and
+    automatically reused across sessions unless ``force_regenerate`` is set.
+
+    Typical usage::
+
+        generator = GraspGenerator(vertices, triangles, cfg=cfg)
+
+        # Programmatic: sample on the whole mesh or a sub-region
+        generator.generate()                       # whole mesh
+        generator.generate(face_indices=some_idx)  # specific faces
+
+        # Interactive: pick region in a browser UI
+        generator.annotate()
+
+        # Then compute the best grasp pose
+        pose, open_length = generator.get_grasp_poses(object_pose, approach_dir)
+    """
 
     def __init__(
         self,
         vertices: torch.Tensor,
         triangles: torch.Tensor,
-        cfg: GraspAnnotatorCfg = GraspAnnotatorCfg(),
-        gripper_collision_cfg: SimpleGripperCollisionCfg = SimpleGripperCollisionCfg(),
+        cfg: GraspGeneratorCfg = GraspGeneratorCfg(),
+        gripper_collision_cfg: GripperCollisionCfg = GripperCollisionCfg(),
     ) -> None:
-        """Initialize the GraspAnnotator with the given mesh vertices, triangles, and configuration.
+        """Initialize the GraspGenerator with the given mesh vertices, triangles, and configuration.
         Args:
             vertices (torch.Tensor): A tensor of shape (V, 3) representing the vertex positions of the mesh.
             triangles (torch.Tensor): A tensor of shape (F, 3) representing the triangle indices of the mesh.
-            cfg (GraspAnnotatorCfg, optional): Configuration for the grasp annotator. Defaults to GraspAnnotatorCfg().
+            cfg (GraspGeneratorCfg, optional): Configuration for the grasp annotator. Defaults to GraspGeneratorCfg().
         """
         self.device = vertices.device
         self.vertices = vertices
@@ -84,32 +140,108 @@ class GraspAnnotator:
             process=False,
             force="mesh",
         )
-        self._collision_checker = SimpleGripperCollisionChecker(
+        self._collision_checker = GripperCollisionChecker(
             object_mesh_verts=vertices,
             object_mesh_faces=triangles,
             cfg=gripper_collision_cfg,
         )
         self.cfg = cfg
-        self.antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)
+        self._antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)
+        self._hit_point_pairs: torch.Tensor | None = None
+
+        # Load cached antipodal pairs for the whole mesh if available.
+        cache_path = self._get_cache_dir(self.vertices, self.triangles)
+        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
+            logger.log_info(f"Found cached antipodal pairs at {cache_path}. Loading.")
+            self._hit_point_pairs = torch.tensor(
+                np.load(cache_path), dtype=torch.float32, device=self.device
+            )
+
+    def generate(
+        self,
+        vertex_indices: torch.Tensor | None = None,
+        face_indices: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Generate antipodal point pairs for grasping on the given mesh region.
+
+        Exactly one of ``vertex_indices`` or ``face_indices`` must be provided
+        to define the grasp region.  When both are ``None``, the whole mesh is
+        used.
+
+        Results are cached to disk and reused when ``force_regenerate`` is
+        ``False``.
+
+        Args:
+            vertex_indices: 1-D ``torch.Tensor`` of vertex indices defining the
+                grasp region.
+            face_indices: 1-D ``torch.Tensor`` of face indices defining the
+                grasp region.
+
+        Raises:
+            ValueError: If both ``vertex_indices`` and ``face_indices`` are
+                provided at the same time.
+
+        Returns:
+            torch.Tensor: A tensor of shape ``(N, 2, 3)`` representing N
+                antipodal point pairs.  Each pair consists of a hit point and
+                its corresponding surface point.
+        """
+        if vertex_indices is not None and face_indices is not None:
+            raise ValueError(
+                "Only one of vertex_indices or face_indices should be provided, not both."
+            )
+
+        if vertex_indices is None and face_indices is None:
+            sub_vertices = self.vertices
+            sub_faces = self.triangles
+        else:
+            if face_indices is not None:
+                face_idx_np = face_indices.cpu().numpy()
+            else:
+                vertex_idx_np = vertex_indices.cpu().numpy()
+                vertex_mask = np.zeros(self.mesh.vertices.shape[0], dtype=bool)
+                vertex_mask[vertex_idx_np] = True
+                face_all = cast(np.ndarray, self.mesh.faces)
+                face_idx_np = np.flatnonzero(np.all(vertex_mask[face_all], axis=1))
+            (
+                _,
+                _,
+                sub_vertices_np,
+                sub_faces_np,
+            ) = GraspGenerator._extract_selection_from_faces(
+                self.mesh, face_idx_np, self.cfg.use_largest_connected_component
+            )
+            if sub_vertices_np is None:
+                return torch.empty(0, 2, 3, dtype=torch.float32, device=self.device)
+            sub_vertices = torch.as_tensor(
+                sub_vertices_np, dtype=torch.float32, device=self.device
+            )
+            sub_faces = torch.as_tensor(
+                sub_faces_np, dtype=torch.int64, device=self.device
+            )
+
+        cache_path = self._get_cache_dir(sub_vertices, sub_faces)
+        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
+            logger.log_info(f"Found cached antipodal pairs at {cache_path}")
+            return torch.tensor(
+                np.load(cache_path), dtype=torch.float32, device=self.device
+            )
+
+        self._hit_point_pairs = self._antipodal_sampler.sample(sub_vertices, sub_faces)
+        self._save_cache(cache_path, self._hit_point_pairs)
+        return self._hit_point_pairs
 
     def annotate(self) -> torch.Tensor:
         """Annotate antipodal grasp region on the mesh and return sampled antipodal point pairs.
+
         Returns:
-            torch.Tensor: A tensor of shape (N, 2, 3) representing N antipodal point pairs. Each pair consists of a hit point and its corresponding surface point.
+            torch.Tensor: A tensor of shape (N, 2, 3) representing N antipodal point pairs.
+                Each pair consists of a hit point and its corresponding surface point.
         """
-        cache_path = self._get_cache_dir(self.vertices, self.triangles)
-        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
-            logger.log_info(
-                f"Found existing antipodal retult. Loading cached antipodal pairs from {cache_path}"
-            )
-            hit_point_pairs = torch.tensor(
-                np.load(cache_path), dtype=torch.float32, device=self.device
-            )
-            return hit_point_pairs
-        else:
-            logger.log_info(
-                f"[Viser] *****Annotate grasp region in http://localhost:{self.cfg.viser_port}"
-            )
+
+        logger.log_info(
+            f"[Viser] *****Annotate grasp region in http://localhost:{self.cfg.viser_port}"
+        )
 
         server = viser.ViserServer(port=self.cfg.viser_port)
         server.gui.configure_theme(brand_color=(130, 0, 150))
@@ -117,7 +249,10 @@ class GraspAnnotator:
 
         mesh_handle = server.scene.add_mesh_trimesh(name="/mesh", mesh=self.mesh)
         selected_overlay: viser.GlbHandle | None = None
-        selection: SelectResult = SelectResult()
+        sel_vertex_indices: np.ndarray | None = None
+        sel_face_indices: np.ndarray | None = None
+        sel_vertices: np.ndarray | None = None
+        sel_faces: np.ndarray | None = None
 
         hit_point_pairs = None
         return_flag = False
@@ -126,7 +261,10 @@ class GraspAnnotator:
         def _(client: viser.ClientHandle) -> None:
             nonlocal mesh_handle
             nonlocal selected_overlay
-            nonlocal selection
+            nonlocal sel_vertex_indices
+            nonlocal sel_face_indices
+            nonlocal sel_vertices
+            nonlocal sel_faces
 
             # client.camera.position = np.array([0.0, 0.0, -0.5])
             # client.camera.wxyz = np.array([1.0, 0.0, 0.0, 0.0])
@@ -144,11 +282,14 @@ class GraspAnnotator:
                 def _(event: viser.ScenePointerEvent) -> None:
                     nonlocal mesh_handle
                     nonlocal selected_overlay
-                    nonlocal selection
+                    nonlocal sel_vertex_indices
+                    nonlocal sel_face_indices
+                    nonlocal sel_vertices
+                    nonlocal sel_faces
                     nonlocal hit_point_pairs
                     client.scene.remove_pointer_callback()
 
-                    proj, depth = GraspAnnotator._project_vertices_to_screen(
+                    proj, depth = GraspGenerator._project_vertices_to_screen(
                         cast(np.ndarray, self.mesh.vertices),
                         mesh_handle,
                         event.client.camera,
@@ -164,20 +305,24 @@ class GraspAnnotator:
                         depth > 1e-6
                     )
 
-                    selection = GraspAnnotator._extract_selection(
+                    (
+                        sel_vertex_indices,
+                        sel_face_indices,
+                        sel_vertices,
+                        sel_faces,
+                    ) = GraspGenerator._extract_selection_from_vertex_mask(
                         self.mesh, vertex_mask, self.cfg.use_largest_connected_component
                     )
-                    if selection.vertices is None:
+                    if sel_vertices is None:
                         logger.log_warning("[Selection] No vertices selected.")
                         return
 
                     color_mesh = self.mesh.copy()
-                    used_vertex_indices = selection.vertex_indices
                     vertex_colors = np.tile(
                         np.array([[0.85, 0.85, 0.85, 1.0]]),
                         (self.mesh.vertices.shape[0], 1),
                     )
-                    vertex_colors[used_vertex_indices] = np.array(
+                    vertex_colors[sel_vertex_indices] = np.array(
                         [0.56, 0.17, 0.92, 1.0]
                     )
                     color_mesh.visual.vertex_colors = vertex_colors  # type: ignore
@@ -188,8 +333,8 @@ class GraspAnnotator:
                     if selected_overlay is not None:
                         selected_overlay.remove()
                     selected_mesh = trimesh.Trimesh(
-                        vertices=selection.vertices,
-                        faces=selection.faces,
+                        vertices=sel_vertices,
+                        faces=sel_faces,
                         process=False,
                     )
                     selected_mesh.visual.face_colors = (0.9, 0.2, 0.2, 0.65)  # type: ignore
@@ -197,14 +342,14 @@ class GraspAnnotator:
                         name="/selected", mesh=selected_mesh
                     )
                     logger.log_info(
-                        f"[Selection] Selected {selection.vertex_indices.size} vertices and {selection.face_indices.size} faces."
+                        f"[Selection] Selected {sel_vertex_indices.size} vertices and {sel_face_indices.size} faces."
                     )
 
-                    hit_point_pairs = self.antipodal_sampler.sample(
-                        torch.tensor(selection.vertices, device=self.device),
-                        torch.tensor(selection.faces, device=self.device),
+                    hit_point_pairs = self._antipodal_sampler.sample(
+                        torch.tensor(sel_vertices, device=self.device),
+                        torch.tensor(sel_faces, device=self.device),
                     )
-                    extended_hit_point_pairs = GraspAnnotator._extend_hit_point_pairs(
+                    extended_hit_point_pairs = GraspGenerator._extend_hit_point_pairs(
                         hit_point_pairs
                     )
                     server.scene.add_line_segments(
@@ -221,23 +366,24 @@ class GraspAnnotator:
             @confirm_button.on_click
             def _(_evt: viser.GuiEvent) -> None:
                 nonlocal return_flag
-                if selection.vertices is None:
+                if sel_vertices is None:
                     logger.log_warning("[Selection] No vertex selected.")
                     return
                 else:
                     logger.log_info(
-                        f"[Selection] {selection.vertices.shape[0]}vertices selected. Generating antipodal point pairs."
+                        f"[Selection] {sel_vertices.shape[0]}vertices selected. Generating antipodal point pairs."
                     )
                     return_flag = True
 
         while True:
             if return_flag:
-                # save result to cache
                 if hit_point_pairs is not None:
+                    self._hit_point_pairs = hit_point_pairs
+                    cache_path = self._get_cache_dir(self.vertices, self.triangles)
                     self._save_cache(cache_path, hit_point_pairs)
                 break
             time.sleep(0.5)
-        return hit_point_pairs
+        return self._hit_point_pairs
 
     def _get_cache_dir(self, vertices: torch.Tensor, triangles: torch.Tensor):
         from embodichain.lab.sim.sim_manager import GRASP_ANNOTATOR_CACHE_DIR
@@ -300,59 +446,82 @@ class GraspAnnotator:
         projected = (1.0 + projected) / 2.0
         return projected, vertices_camera[:, 2]
 
-    def _extract_selection(
+    @staticmethod
+    def _extract_selection_from_vertex_mask(
         mesh: trimesh.Trimesh,
         vertex_mask: np.ndarray,
         largest_component: bool,
-    ) -> SelectResult:
-        def _largest_connected_face_component(face_ids: np.ndarray) -> np.ndarray:
-            if face_ids.size <= 1:
-                return face_ids
+    ) -> tuple[
+        np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None
+    ]:
+        """Extract a sub-mesh from *mesh* using a per-vertex boolean mask.
 
-            face_id_set = set(face_ids.tolist())
-            parent: dict[int, int] = {
-                int(face_id): int(face_id) for face_id in face_ids
-            }
+        Args:
+            mesh: The source mesh.
+            vertex_mask: Boolean array of shape ``(V,)`` indicating which
+                vertices are selected.
+            largest_component: If ``True``, keep only the largest connected
+                component among the selected faces.
 
-            def find(x: int) -> int:
-                root = x
-                while parent[root] != root:
-                    root = parent[root]
-                while parent[x] != x:
-                    x_parent = parent[x]
-                    parent[x] = root
-                    x = x_parent
-                return root
-
-            def union(a: int, b: int) -> None:
-                ra, rb = find(a), find(b)
-                if ra != rb:
-                    parent[rb] = ra
-
-            face_adjacency = cast(np.ndarray, mesh.face_adjacency)
-            for face_a, face_b in face_adjacency:
-                if int(face_a) in face_id_set and int(face_b) in face_id_set:
-                    union(int(face_a), int(face_b))
-
-            groups: dict[int, list[int]] = {}
-            for face_id in face_ids:
-                root = find(int(face_id))
-                groups.setdefault(root, []).append(int(face_id))
-
-            largest_group = max(groups.values(), key=len)
-            return np.array(largest_group, dtype=np.int32)
-
+        Returns:
+            A tuple ``(vertex_indices, face_indices, sub_vertices, sub_faces)``
+            where ``sub_vertices`` and ``sub_faces`` define the extracted
+            sub-mesh with remapped indices.  Returns ``(None, None, None, None)``
+            if no faces are selected.
+        """
         faces = cast(np.ndarray, mesh.faces)
         face_mask = np.all(vertex_mask[faces], axis=1)
-
         face_indices = np.flatnonzero(face_mask)
         if face_indices.size == 0:
-            return SelectResult()
+            return None, None, None, None
         if largest_component:
-            face_indices = _largest_connected_face_component(face_indices)
+            face_indices = GraspGenerator._largest_connected_face_component(
+                mesh, face_indices
+            )
             if face_indices.size == 0:
-                return SelectResult()
+                return None, None, None, None
+        return GraspGenerator._build_sub_mesh(mesh, face_indices)
 
+    @staticmethod
+    def _extract_selection_from_faces(
+        mesh: trimesh.Trimesh,
+        face_indices: np.ndarray,
+        largest_component: bool,
+    ) -> tuple[
+        np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None
+    ]:
+        """Extract a sub-mesh from *mesh* using face indices.
+
+        Args:
+            mesh: The source mesh.
+            face_indices: Array of face indices to include.
+            largest_component: If ``True``, keep only the largest connected
+                component among the selected faces.
+
+        Returns:
+            Same as :meth:`_extract_selection_from_vertex_mask`.
+        """
+        if face_indices.size == 0:
+            return None, None, None, None
+        if largest_component:
+            face_indices = GraspGenerator._largest_connected_face_component(
+                mesh, face_indices
+            )
+            if face_indices.size == 0:
+                return None, None, None, None
+        return GraspGenerator._build_sub_mesh(mesh, face_indices)
+
+    @staticmethod
+    def _build_sub_mesh(
+        mesh: trimesh.Trimesh,
+        face_indices: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Build a sub-mesh with remapped vertex indices from selected faces.
+
+        Returns:
+            ``(vertex_indices, face_indices, sub_vertices, sub_faces)``
+        """
+        faces = cast(np.ndarray, mesh.faces)
         selected_face_vertices = faces[face_indices]
         vertex_indices = np.unique(selected_face_vertices.reshape(-1))
 
@@ -362,12 +531,47 @@ class GraspAnnotator:
         sub_vertices = np.asarray(mesh.vertices)[vertex_indices]
         sub_faces = np.asarray(old_to_new)[selected_face_vertices]
 
-        return SelectResult(
-            vertex_indices=vertex_indices,
-            face_indices=face_indices,
-            vertices=sub_vertices,
-            faces=sub_faces,
-        )
+        return vertex_indices, face_indices, sub_vertices, sub_faces
+
+    @staticmethod
+    def _largest_connected_face_component(
+        mesh: trimesh.Trimesh,
+        face_ids: np.ndarray,
+    ) -> np.ndarray:
+        """Return the face indices of the largest connected component."""
+        if face_ids.size <= 1:
+            return face_ids
+
+        face_id_set = set(face_ids.tolist())
+        parent: dict[int, int] = {int(face_id): int(face_id) for face_id in face_ids}
+
+        def find(x: int) -> int:
+            root = x
+            while parent[root] != root:
+                root = parent[root]
+            while parent[x] != x:
+                x_parent = parent[x]
+                parent[x] = root
+                x = x_parent
+            return root
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        face_adjacency = cast(np.ndarray, mesh.face_adjacency)
+        for face_a, face_b in face_adjacency:
+            if int(face_a) in face_id_set and int(face_b) in face_id_set:
+                union(int(face_a), int(face_b))
+
+        groups: dict[int, list[int]] = {}
+        for face_id in face_ids:
+            root = find(int(face_id))
+            groups.setdefault(root, []).append(int(face_id))
+
+        largest_group = max(groups.values(), key=len)
+        return np.array(largest_group, dtype=np.int32)
 
     @staticmethod
     def _apply_transform(points: torch.Tensor, transform: torch.Tensor) -> torch.Tensor:
@@ -377,23 +581,42 @@ class GraspAnnotator:
 
     def get_grasp_poses(
         self,
-        hit_point_pairs: torch.Tensor,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         is_visual: bool = False,
-    ) -> torch.Tensor:
-        """Get grasp pose given approach direction
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get grasp pose given approach direction.
+
+        Uses the antipodal point pairs stored in ``self._hit_point_pairs``
+        (populated by :meth:`generate` or :meth:`annotate`).
+
+        TODO:
+            1. Support Top-k grasp poses selection.
+            2. Support more selection criteria.
 
         Args:
-            hit_point_pairs (torch.Tensor): (N, 2, 3) tensor of N antipodal point pairs. Each pair consists of a hit point and its corresponding surface point.
-            object_pose (torch.Tensor): (4, 4) homogeneous transformation matrix representing the pose of the object in the world frame.
-            approach_direction (torch.Tensor): (3,) unit vector representing the desired approach direction of the gripper in the world frame.
+            object_pose: ``(4, 4)`` homogeneous transformation matrix
+                representing the pose of the object in the world frame.
+            approach_direction: ``(3,)`` unit vector representing the desired
+                approach direction of the gripper in the world frame.
+            is_visual: If ``True``, enable visual collision checking.
 
         Returns:
-            torch.Tensor: (4, 4) homogeneous transformation matrix representing the grasp pose in the world frame that aligns the gripper's approach direction with the given approach_direction. Returns None if no valid grasp pose can be found.
+            A tuple ``(best_grasp_pose, best_open_length)`` where
+            ``best_grasp_pose`` is a ``(4, 4)`` homogeneous matrix and
+            ``best_open_length`` is a scalar.
+
+        Raises:
+            RuntimeError: If :meth:`generate` or :meth:`annotate` has not
+                been called yet.
         """
-        origin_points = hit_point_pairs[:, 0, :]
-        hit_points = hit_point_pairs[:, 1, :]
+        if self._hit_point_pairs is None:
+            raise RuntimeError(
+                "No antipodal point pairs available. "
+                "Call generate() or annotate() first."
+            )
+        origin_points = self._hit_point_pairs[:, 0, :]
+        hit_points = self._hit_point_pairs[:, 1, :]
         origin_points_ = self._apply_transform(origin_points, object_pose)
         hit_points_ = self._apply_transform(hit_points, object_pose)
         centers = (origin_points_ + hit_points_) / 2
@@ -412,7 +635,7 @@ class GraspAnnotator:
         valid_centers = centers[valid_mask]
 
         # compute grasp poses using antipodal point pairs and approach direction
-        valid_grasp_poses = GraspAnnotator._grasp_pose_from_approach_direction(
+        valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
             valid_grasp_x, approach_direction, valid_centers
         )
         valid_open_lengths = torch.norm(
@@ -536,43 +759,3 @@ class GraspAnnotator:
             window_name="Grasp Pose Visualization",
             mesh_show_back_face=True,
         )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Viser mesh 标注工具：框选并导出对应顶点与三角面"
-    )
-    parser.add_argument(
-        "--mesh", type=Path, required=True, help="输入 mesh 文件路径，例如 mug.obj"
-    )
-    parser.add_argument("--scale", type=float, default=1.0, help="加载后整体缩放系数")
-    parser.add_argument("--port", type=int, default=12151, help="viser 服务端口")
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("outputs/mesh_annotations"),
-        help="标注结果导出目录",
-    )
-    parser.add_argument(
-        "--largest-component",
-        action="store_true",
-        help="只保留框选结果中的最大连通块（常用于稳定提取把手等局部）",
-    )
-    args = parser.parse_args()
-
-    mesh = trimesh.load(args.mesh, process=False, force="mesh")
-    vertices = mesh.vertices * args.scale
-    triangles = mesh.faces
-    cfg = GraspAnnotatorCfg(
-        force_regenerate=True,
-    )
-    tool = GraspAnnotator(cfg=cfg)
-    hit_point_pairs = tool.annotate(
-        vertices=torch.from_numpy(vertices).float(),
-        triangles=torch.from_numpy(triangles).long(),
-    )
-    logger.log_info(f"Sample {hit_point_pairs.shape[0]} antipodal point pairs.")
-
-
-if __name__ == "__main__":
-    main()

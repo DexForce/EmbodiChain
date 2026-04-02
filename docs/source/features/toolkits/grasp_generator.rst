@@ -41,7 +41,7 @@ The parsed arguments are passed to ``initialize_simulation``, which builds a :cl
 Annotating and computing grasp poses
 -------------------------------------
 
-Grasp generation is performed by :meth:`objects.RigidObject.get_grasp_pose`, which internally runs an antipodal sampler on the object mesh. A :class:`toolkits.graspkit.pg_grasp.GraspAnnotatorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
+Grasp generation is performed by :meth:`objects.RigidObject.get_grasp_pose`, which internally runs an antipodal sampler on the object mesh. A :class:`toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
 
 1. Open the visualization in a browser at the reported port (e.g. ``http://localhost:11801``).
 2. Use *Rect Select Region* to highlight the area of the object that should be grasped.
@@ -56,12 +56,12 @@ For each grasp pose, gripper approach direction in world coordinate is required 
    :start-at: # get mug grasp pose
    :end-at: logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 
-Configuring GraspAnnotatorCfg
+Configuring GraspGeneratorCfg
 ------------------------------
 
-:class:`toolkits.graspkit.pg_grasp.GraspAnnotatorCfg` controls the overall grasp annotation workflow. The key parameters are listed below.
+:class:`toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls the overall grasp annotation workflow. The key parameters are listed below.
 
-.. list-table:: GraspAnnotatorCfg parameters
+.. list-table:: GraspGeneratorCfg parameters
    :header-rows: 1
    :widths: 25 15 60
 
@@ -106,12 +106,12 @@ The ``antipodal_sampler_cfg`` field accepts an :class:`toolkits.graspkit.pg_gras
      - ``0.001``
      - Minimum allowed distance (in metres) between an antipodal pair. Pairs closer together than this value are discarded to avoid degenerate or self-intersecting grasps.
 
-Configuring SimpleGripperCollisionCfg
+Configuring GripperCollisionCfg
 --------------------------------------
 
-:class:`toolkits.graspkit.pg_grasp.SimpleGripperCollisionCfg` models the geometry of a parallel-jaw gripper as a point cloud and is used to filter out grasp candidates that would collide with the object. All length parameters are in metres.
+:class:`toolkits.graspkit.pg_grasp.GripperCollisionCfg` models the geometry of a parallel-jaw gripper as a point cloud and is used to filter out grasp candidates that would collide with the object. All length parameters are in metres.
 
-.. list-table:: SimpleGripperCollisionCfg parameters
+.. list-table:: GripperCollisionCfg parameters
    :header-rows: 1
    :widths: 25 15 60
 

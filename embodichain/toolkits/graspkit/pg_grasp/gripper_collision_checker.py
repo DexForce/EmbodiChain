@@ -16,17 +16,22 @@
 
 from __future__ import annotations
 
-from embodichain.utils import configclass
+import torch
 
 from typing import Sequence
-from .batch_collision_checker import BatchConvexCollisionChecker
-import torch
+
+from embodichain.utils import configclass
+from embodichain.toolkits.graspkit.pg_grasp.collision_checker import (
+    ConvexCollisionChecker,
+)
 from embodichain.utils.math import transform_points_mat
+
+__all__ = ["GripperCollisionCfg", "GripperCollisionChecker", "box_surface_grid"]
 
 
 @configclass
-class SimpleGripperCollisionCfg:
-    """Configuration for the SimpleGripperCollisionChecker. This class defines various parameters related to the
+class GripperCollisionCfg:
+    """Configuration for the GripperCollisionChecker. This class defines various parameters related to the
     gripper geometry, point cloud generation, and collision checking process. Users can customize these parameters
     based on the specific gripper being modeled and the requirements of the application.
     """
@@ -82,14 +87,14 @@ class SimpleGripperCollisionCfg:
     """
 
 
-class SimpleGripperCollisionChecker:
+class GripperCollisionChecker:
     def __init__(
         self,
         object_mesh_verts: torch.Tensor,
         object_mesh_faces: torch.Tensor,
-        cfg: SimpleGripperCollisionCfg = SimpleGripperCollisionCfg(),
+        cfg: GripperCollisionCfg = GripperCollisionCfg(),
     ):
-        self._checker = BatchConvexCollisionChecker(
+        self._checker = ConvexCollisionChecker(
             base_mesh_verts=object_mesh_verts,
             base_mesh_faces=object_mesh_faces,
             max_decomposition_hulls=cfg.max_decomposition_hulls,

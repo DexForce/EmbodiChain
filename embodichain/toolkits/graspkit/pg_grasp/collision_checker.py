@@ -27,30 +27,30 @@ import open3d as o3d
 from typing import List, Tuple, Union
 from dexsim.kit.meshproc import convex_decomposition_coacd
 
-from embodichain.utils import logger
 from embodichain.utils.warp import convex_signed_distance_kernel
 from embodichain.utils.device_utils import standardize_device_string
+from embodichain.utils.math import transform_points_mat
 from embodichain.utils import configclass
 
-CONVEX_CACHE_DIR = os.path.join(
-    os.path.expanduser("~"), ".cache", "embodichain_cache", "convex_decomposition"
-)
+__all__ = ["ConvexCollisionCheckerCfg", "ConvexCollisionChecker"]
 
 
 @configclass
-class BatchConvexCollisionCheckerCfg:
-    """Configuration for BatchConvexCollisionChecker."""
+class ConvexCollisionCheckerCfg:
+    """Configuration for ConvexCollisionChecker."""
 
-    collsion_threshold: float = 0.0
+    collision_threshold: float = 0.0
     """ Collision threshold in meters. A point is considered colliding if its signed distance to the hull interior is <= this threshold. This allows for a margin of error in collision checking, where a small positive threshold can be used to consider points near the surface as colliding, and a small negative threshold can be used to allow for slight penetration without considering it a collision."""
+
     n_query_mesh_samples: int = 4096
     """ Number of points to sample from the query mesh surface for collision checking. A higher number of samples can provide a more accurate collision check at the cost of increased computation time. The optimal number may depend on the complexity of the mesh and the required precision of collision detection."""
+
     debug: bool = False
     """ Whether to visualize the collision checking results for debugging purposes. If set to True, the code will generate visualizations of the query points colored by their collision status (e.g., red for colliding points and green for non-colliding points) along with the original mesh. This can help in understanding and verifying the collision checking process, especially during development and testing."""
 
 
-class BatchConvexCollisionChecker:
-    """BatchConvexCollisionChecker performs efficient collision checking between a batch of query point clouds and a convex decomposition of a mesh. The convex decomposition is represented by plane equations of the convex hulls, which are precomputed and cached for efficiency. The collision checking is done by computing the signed distance from each query point to the convex hulls using the plane equations, and determining if any points are colliding based on a specified collision threshold. This class can be used"""
+class ConvexCollisionChecker:
+    """ConvexCollisionChecker performs efficient collision checking between a batch of query point clouds and a convex decomposition of a mesh. The convex decomposition is represented by plane equations of the convex hulls, which are precomputed and cached for efficiency. The collision checking is done by computing the signed distance from each query point to the convex hulls using the plane equations, and determining if any points are colliding based on a specified collision threshold. This class can be used"""
 
     def __init__(
         self,
@@ -58,14 +58,17 @@ class BatchConvexCollisionChecker:
         base_mesh_faces: torch.Tensor,
         max_decomposition_hulls: int = 32,
     ):
-        """Initialize the BatchConvexCollisionChecker by performing convex decomposition on the input mesh and extracting plane equations for the convex hulls. The plane equations are cached to disk to avoid redundant computation in future runs.
+        """Initialize the ConvexCollisionChecker by performing convex decomposition on the input mesh and extracting plane equations for the convex hulls. The plane equations are cached to disk to avoid redundant computation in future runs.
+
         Args:
             base_mesh_verts: [N, 3] vertex positions of the input mesh.
             base_mesh_faces: [M, 3] triangle indices of the input mesh.
             max_decomposition_hulls: maximum number of convex hulls to decompose into. A higher number allows for a more accurate approximation of the original mesh but increases computation time and memory usage. The optimal number may depend on the complexity of the mesh and the required precision of collision checking.
         """
-        if not os.path.isdir(CONVEX_CACHE_DIR):
-            os.makedirs(CONVEX_CACHE_DIR, exist_ok=True)
+        from embodichain.lab.sim import CONVEX_DECOMP_DIR
+
+        if not os.path.isdir(CONVEX_DECOMP_DIR):
+            os.makedirs(CONVEX_DECOMP_DIR, exist_ok=True)
         self.device = base_mesh_verts.device
         base_mesh_verts_np = base_mesh_verts.cpu().numpy()
         base_mesh_faces_np = base_mesh_faces.cpu().numpy()
@@ -81,7 +84,7 @@ class BatchConvexCollisionChecker:
         self.mesh.compute_vertex_normals()
 
         self.cache_path = os.path.join(
-            CONVEX_CACHE_DIR, f"{mesh_hash}_{max_decomposition_hulls}.pkl"
+            CONVEX_DECOMP_DIR, f"{mesh_hash}_{max_decomposition_hulls}.pkl"
         )
 
         if not os.path.isfile(self.cache_path):
@@ -89,7 +92,7 @@ class BatchConvexCollisionChecker:
             # [n_convex, ]: number of faces for each convex hull
 
             # generate convex hulls and extract plane equations, then cache to disk
-            plane_equations_np = BatchConvexCollisionChecker._compute_plane_equations(
+            plane_equations_np = ConvexCollisionChecker._compute_plane_equations(
                 base_mesh_verts_np, base_mesh_faces_np, max_decomposition_hulls
             )
             # pack as a single tensor
@@ -193,7 +196,7 @@ class BatchConvexCollisionChecker:
         """
         n_batch = batch_points.shape[0]
         point_signed_distance, is_point_collide = (
-            BatchConvexCollisionChecker.batch_point_convex_query(
+            ConvexCollisionChecker.batch_point_convex_query(
                 self.plane_equations["plane_equations"],
                 self.plane_equations["plane_equation_counts"],
                 batch_points,
@@ -232,7 +235,7 @@ class BatchConvexCollisionChecker:
         query_mesh_verts: torch.Tensor,
         query_mesh_faces: torch.Tensor,
         poses: torch.Tensor,
-        cfg: BatchConvexCollisionCheckerCfg = BatchConvexCollisionCheckerCfg(),
+        cfg: ConvexCollisionCheckerCfg = ConvexCollisionCheckerCfg(),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         query_mesh = trimesh.Trimesh(
             vertices=query_mesh_verts.to("cpu").numpy(),
@@ -257,7 +260,7 @@ class BatchConvexCollisionChecker:
                 normals_torch,
                 offsets_torch,
                 transform_points_mat(query_points, poses),
-                cfg.collsion_threshold,
+                cfg.collision_threshold,
             )
             penetration_result = torch.max(penetration_result, penetration)
             collision_result = torch.logical_or(collision_result, collides)

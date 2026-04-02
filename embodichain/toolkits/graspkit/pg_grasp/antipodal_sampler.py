@@ -22,6 +22,8 @@ import open3d.core as o3c
 from embodichain.utils import configclass
 from embodichain.utils import logger
 
+__all__ = ["AntipodalSamplerCfg", "AntipodalSampler"]
+
 
 @configclass
 class AntipodalSamplerCfg:
@@ -29,10 +31,18 @@ class AntipodalSamplerCfg:
 
     n_sample: int = 20000
     """surface point sample number"""
+
     max_angle: float = np.pi / 12
-    """maximum angle (in radians) to randomly disturb the ray direction for antipodal point sampling, used to increase the diversity of sampled antipodal points. Note that setting max_angle to 0 will disable the random disturbance and sample antipodal points strictly along the surface normals, which may result in less diverse antipodal points and may not be ideal for all objects or grasping scenarios."""
+    """maximum angle (in radians) to randomly disturb the ray direction for antipodal point sampling, 
+    used to increase the diversity of sampled antipodal points. Note that setting max_angle to 0 will 
+    disable the random disturbance and sample antipodal points strictly along the surface normals, 
+    which may result in less diverse antipodal points and may not be ideal for all objects or grasping 
+    scenarios.
+    """
+
     max_length: float = 0.1
     """maximum gripper open width, used to filter out antipodal points that are too far apart to be grasped"""
+
     min_length: float = 0.001
     """minimum gripper open width, used to filter out antipodal points that are too close to be grasped"""
 
@@ -241,15 +251,3 @@ class AntipodalSampler:
             window_name="Antipodal Point Pairs",
             mesh_show_back_face=True,
         )
-
-
-if __name__ == "__main__":
-    mesh_path = "/media/chenjian/_abc/project/grasp_annotator/dustpan_saa.ply"
-    mesh = o3d.t.io.read_triangle_mesh(mesh_path)
-    vertices = torch.from_numpy(mesh.vertex.positions.cpu().numpy())
-    faces = torch.from_numpy(mesh.triangle.indices.cpu().numpy())
-
-    sampler = AntipodalSampler()
-    hit_point_pairs = sampler.sample(vertices, faces)
-    sampler.visualize(hit_point_pairs)
-    print(f"Sampled {hit_point_pairs.shape[0]} antipodal points")

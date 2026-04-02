@@ -35,14 +35,13 @@ from embodichain.lab.sim.utility import is_rt_enabled
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_annotator import (
-    GraspAnnotator,
-    GraspAnnotatorCfg,
+from embodichain.toolkits.graspkit.pg_grasp import (
+    GraspGenerator,
+    GraspGeneratorCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    SimpleGripperCollisionCfg,
+    GripperCollisionCfg,
 )
-import torch.nn.functional as F
 
 
 @dataclass
@@ -957,23 +956,49 @@ class RigidObject(BatchEntity):
 
         self.body_type = body_type
 
-    def get_vertices(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+    def get_vertices(
+        self, env_ids: Sequence[int] | None = None, scale: bool = False
+    ) -> torch.Tensor:
         """
         Retrieve the vertices of the rigid objects.
 
         Args:
             env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve vertices.
                                                 If None, retrieves vertices for all instances.
+            scale (bool): Whether to multiply the vertices by the body scale. Defaults to False.
 
         Returns:
             torch.Tensor: A tensor containing the user IDs of the specified rigid objects with shape (N, num_verts, 3).
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
-        return torch.as_tensor(
+        verts = torch.as_tensor(
             np.array(
                 [self._entities[id].get_vertices() for id in ids],
             ),
             dtype=torch.float32,
+            device=self.device,
+        )
+        if scale:
+            verts = verts * self.get_body_scale(env_ids).unsqueeze_(1)
+        return verts
+
+    def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """
+        Retrieve the triangle indices of the rigid objects.
+
+        Args:
+            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve triangle indices.
+                                                If None, retrieves triangle indices for all instances.
+
+        Returns:
+            torch.Tensor: A tensor containing the triangle indices of the specified rigid objects with shape (N, num_tris, 3).
+        """
+        ids = env_ids if env_ids is not None else range(self.num_instances)
+        return torch.as_tensor(
+            np.array(
+                [self._entities[id].get_triangles() for id in ids],
+            ),
+            dtype=torch.int32,
             device=self.device,
         )
 
@@ -1133,8 +1158,8 @@ class RigidObject(BatchEntity):
 
     def get_grasp_pose(
         self,
-        cfg: GraspAnnotatorCfg = GraspAnnotatorCfg(),
-        gripper_collision_cfg: SimpleGripperCollisionCfg = SimpleGripperCollisionCfg(),
+        cfg: GraspGeneratorCfg = GraspGeneratorCfg(),
+        gripper_collision_cfg: GripperCollisionCfg = GripperCollisionCfg(),
         approach_direction: torch.Tensor = None,
         is_visual: bool = False,
     ) -> torch.Tensor:
@@ -1142,7 +1167,7 @@ class RigidObject(BatchEntity):
             approach_direction = torch.tensor(
                 [0, 0, -1], dtype=torch.float32, device=self.device
             )
-        approach_direction = F.normalize(approach_direction, dim=-1)
+        approach_direction = torch.nn.functional.normalize(approach_direction, dim=-1)
         if hasattr(self, "_grasp_annotator") is False:
             vertices = torch.tensor(
                 self._entities[0].get_vertices(),
@@ -1158,7 +1183,7 @@ class RigidObject(BatchEntity):
                 device=self.device,
             )
             vertices = vertices * scale
-            self._grasp_annotator = GraspAnnotator(
+            self._grasp_annotator = GraspGenerator(
                 vertices=vertices,
                 triangles=triangles,
                 cfg=cfg,

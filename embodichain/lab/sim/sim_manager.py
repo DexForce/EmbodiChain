@@ -90,6 +90,7 @@ __all__ = [
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
     "REACHABLE_XPOS_DIR",
+    "GRASP_ANNOTATOR_CACHE_DIR",
 ]
 
 

@@ -39,12 +39,12 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     URDFCfg,
 )
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_annotator import (
-    GraspAnnotatorCfg,
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    GraspGeneratorCfg,
     AntipodalSamplerCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    SimpleGripperCollisionCfg,
+    GripperCollisionCfg,
 )
 
 
@@ -232,7 +232,7 @@ if __name__ == "__main__":
     mug = create_mug(sim)
 
     # get mug grasp pose
-    grasp_cfg = GraspAnnotatorCfg(
+    grasp_cfg = GraspGeneratorCfg(
         viser_port=11801,
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
@@ -248,7 +248,7 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
-    gripper_collision_cfg = SimpleGripperCollisionCfg(
+    gripper_collision_cfg = GripperCollisionCfg(
         max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
     )
     grasp_xpos = mug.get_grasp_pose(
