@@ -1495,7 +1495,7 @@ class Articulation(BatchEntity):
                 self._world.sync_poses_gpu_to_cpu(
                     link_pose=CudaArray(link_pose),
                     articulation_gpu_indices=CudaArray(indices),
-                )        
+                )
         else:
             self._world.update(0.001)
 
