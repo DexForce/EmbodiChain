@@ -194,3 +194,59 @@ You can customize the run with additional arguments:
    python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --enable_rt --headless
 
 After confirming the grasp region in the browser, the script will compute a grasp pose, print the elapsed time, and then wait for you to press **Enter** before executing the full grasp trajectory in the simulation. Press **Enter** again to exit once the motion is complete.
+
+
+Grasp Annotation CLI
+~~~~~~~~~~~~~~~~~~~~
+
+EmbodiChain provides a dedicated CLI for interactively annotating grasp regions on a mesh and caching the resulting antipodal point pairs, without requiring a full simulation environment.
+
+Basic usage::
+
+   python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
+
+This will:
+
+1. Load the mesh file via ``trimesh``.
+2. Launch a browser-based annotator (default port ``15531``).
+3. Open http://localhost:15531 in your browser, use *Rect Select Region* to highlight the graspable area, then click *Confirm Selection*.
+4. Compute antipodal point pairs on the selected region and cache them to disk.
+
+Common options::
+
+   python -m embodichain annotate-grasp \
+       --mesh_path /path/to/object.ply \
+       --viser_port 15531 \
+       --n_sample 20000 \
+       --max_length 0.1 \
+       --min_length 0.001 \
+       --force_regenerate
+
+.. list-table:: CLI options
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``--mesh_path``
+     - *(required)*
+     - Path to the mesh file (``.ply``, ``.obj``, ``.stl``, etc.).
+   * - ``--viser_port``
+     - ``15531``
+     - Port for the browser-based annotation UI.
+   * - ``--n_sample``
+     - ``20000``
+     - Number of surface points to sample for antipodal pair detection.
+   * - ``--max_length``
+     - ``0.1``
+     - Maximum distance (metres) between antipodal pairs; should match the gripper's maximum opening width.
+   * - ``--min_length``
+     - ``0.001``
+     - Minimum distance (metres) between antipodal pairs; filters out degenerate pairs.
+   * - ``--force_regenerate``
+     - ``False``
+     - Force re-annotation and ignore any cached antipodal pairs.
+   * - ``--device``
+     - ``cpu``
+     - Compute device (``cpu`` or ``cuda``).

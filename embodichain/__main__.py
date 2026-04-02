@@ -20,6 +20,7 @@ Usage examples::
 
     python -m embodichain preview-asset --asset_path /path/to/asset.usda --preview
     python -m embodichain run-env --env_name my_env
+    python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
 """
 
 from __future__ import annotations
@@ -62,6 +63,17 @@ def main() -> None:
     from embodichain.lab.scripts.run_env import cli as run_env_cli
 
     run_env_parser.set_defaults(func=run_env_cli)
+
+    # -- annotate-grasp ------------------------------------------------------
+    annotate_grasp_parser = subparsers.add_parser(
+        "annotate-grasp",
+        help="Interactively annotate grasp region on a mesh.",
+    )
+    from embodichain.toolkits.graspkit.scripts.annotate_grasp import (
+        cli as annotate_grasp_cli,
+    )
+
+    annotate_grasp_parser.set_defaults(func=annotate_grasp_cli)
 
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
