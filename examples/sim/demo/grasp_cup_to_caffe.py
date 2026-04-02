@@ -270,7 +270,7 @@ def create_trajectory(
         device=sim.device,
     )
     hand_close_qpos = torch.tensor(
-        [0.1, 1.5, 0.3, 0.2, 0.3, 0.3],
+        [0.1, 1.5, 0.2, 0.3, 0.3, 0.3],
         dtype=torch.float32,
         device=sim.device,
     )
@@ -391,7 +391,7 @@ def run_simulation(
     logger.log_info(f"Executing trajectory...")
     for i in tqdm(range(n_waypoints)):
         robot.set_qpos(interp_trajectory[:, i, :], joint_ids=combine_ids)
-        sim.update(step=10)
+        sim.update(step=3)
 
 
 def apply_random_xy_perturbation(
@@ -429,6 +429,8 @@ def main():
     table = create_table(sim)
     caffe = create_caffe(sim)
     cup = create_cup(sim)
+    if args.device != "cpu":  # if run in cuda
+        sim.init_gpu_physics()
 
     # apply random perturbation
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
@@ -437,19 +439,9 @@ def main():
     if not args.headless:
         sim.open_window()
 
+    input("Press Enter to continue simulation...")
     run_simulation(sim, robot, cup, caffe)
-
-    logger.log_info("\n Press Ctrl+C to exit simulation loop.")
-    try:
-        counter = 0
-        while True:
-            counter += 1
-            sim.update(step=10)
-            if counter % 10 == 0:
-                pass
-
-    except KeyboardInterrupt:
-        logger.log_info("\n Exit")
+    input("Press Enter to exit...")
 
 
 if __name__ == "__main__":

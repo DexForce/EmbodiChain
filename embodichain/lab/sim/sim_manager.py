@@ -483,6 +483,9 @@ class SimulationManager:
 
         self._is_initialized_gpu_physics = True
 
+        # TODO: update to make sure render and physics data are synchronized.
+        self.update(step=1)
+
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
 
