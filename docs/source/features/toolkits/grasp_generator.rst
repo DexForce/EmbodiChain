@@ -64,7 +64,7 @@ Grasp generation is performed by :class:`~embodichain.toolkits.graspkit.pg_grasp
 2. Use *Rect Select Region* to highlight the area of the object that should be grasped.
 3. Click *Confirm Selection* to finalize the region.
 
-After annotation, antipodal point pairs are cached to disk and automatically reused unless ``force_regenerate`` is set.
+After annotation, antipodal point pairs are cached to disk and automatically reused unless user call `GraspGenerator.annotate()`.
 
 For each environment, a grasp pose is computed by calling :meth:`~embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.get_grasp_poses` with the object pose and desired approach direction. The result is a ``(4, 4)`` homogeneous transformation matrix representing the grasp frame in world coordinates. Set ``visualize=True`` to open an Open3D window showing the selected grasp on the object.
 
@@ -106,9 +106,6 @@ Configuring GraspGeneratorCfg
    * - ``antipodal_sampler_cfg``
      - ``AntipodalSamplerCfg()``
      - Nested configuration for the antipodal point sampler. See the table below for its parameters.
-   * - ``force_regenerate``
-     - ``False``
-     - When ``True``, the user is required to annotate the grasp region every time, bypassing any cached results from a previous run.
    * - ``max_deviation_angle``
      - ``π / 12``
      - Maximum allowed angle (in radians) between the specified approach direction and the axis connecting an antipodal point pair. Pairs that deviate more than this threshold are discarded.
@@ -162,9 +159,6 @@ Configuring GripperCollisionCfg
    * - ``root_z_width``
      - ``0.08``
      - Extent of the gripper root block along the Z-axis.
-   * - ``device``
-     - ``cpu``
-     - PyTorch device on which the gripper point cloud is generated and processed. Set to ``cuda`` when GPU-accelerated collision checking is required.
    * - ``point_sample_dense``
      - ``0.01``
      - Approximate number of sample points per unit length along each edge of the gripper point cloud. Higher values produce denser point clouds and improve collision-check accuracy at the cost of additional computation.
@@ -220,7 +214,6 @@ Common options::
        --n_sample 20000 \
        --max_length 0.1 \
        --min_length 0.001 \
-       --force_regenerate
 
 .. list-table:: CLI options
    :header-rows: 1
@@ -244,9 +237,6 @@ Common options::
    * - ``--min_length``
      - ``0.001``
      - Minimum distance (metres) between antipodal pairs; filters out degenerate pairs.
-   * - ``--force_regenerate``
-     - ``False``
-     - Force re-annotation and ignore any cached antipodal pairs.
    * - ``--device``
      - ``cpu``
      - Compute device (``cpu`` or ``cuda``).

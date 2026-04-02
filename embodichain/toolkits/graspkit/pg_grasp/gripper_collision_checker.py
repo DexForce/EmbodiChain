@@ -63,12 +63,6 @@ class GripperCollisionCfg:
     according to the specific gripper being modeled, and it defines how far the root extends along the Z direction.
     """
 
-    device = torch.device("cpu")
-    """ Device on which the gripper point cloud will be generated and processed. This should be set according to 
-    the computational resources available and the requirements of the application. For example, if using a GPU for collision 
-    checking, this should be set to torch.device('cuda'). 
-    """
-
     point_sample_dense: float = 0.01
     """ Approximate number of points per unit length for the gripper point cloud. Higher values will yield denser point 
     clouds, which can improve collision checking accuracy but also increase computational cost. This should be set based 

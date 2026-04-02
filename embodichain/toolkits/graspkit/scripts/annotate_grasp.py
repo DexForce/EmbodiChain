@@ -23,7 +23,7 @@ point pairs to the grasp-annotator cache.
 Usage examples::
 
     python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
-    python -m embodichain annotate-grasp --mesh_path mug.obj --force_regenerate
+    python -m embodichain annotate-grasp --mesh_path mug.obj
 """
 
 from __future__ import annotations
@@ -85,12 +85,6 @@ def cli() -> None:
         help="Minimum distance between antipodal pairs in metres (default: 0.001).",
     )
     parser.add_argument(
-        "--force_regenerate",
-        action="store_true",
-        default=False,
-        help="Force re-annotation, ignoring cached antipodal pairs.",
-    )
-    parser.add_argument(
         "--device",
         type=str,
         default="cpu",
@@ -114,7 +108,6 @@ def cli() -> None:
     cfg = GraspGeneratorCfg(
         viser_port=args.viser_port,
         antipodal_sampler_cfg=sampler_cfg,
-        force_regenerate=args.force_regenerate,
     )
 
     # Create generator and run annotation

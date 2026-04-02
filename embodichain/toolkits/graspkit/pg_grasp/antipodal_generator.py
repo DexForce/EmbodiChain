@@ -73,10 +73,6 @@ class GraspGeneratorCfg:
     number of sampled surface points, ray perturbation angle, and gripper jaw
     distance limits. See :class:`AntipodalSamplerCfg` for details."""
 
-    force_regenerate: bool = False
-    """When ``True``, the user is required to annotate the grasp region every
-    time, bypassing any cached results from a previous run."""
-
     max_deviation_angle: float = np.pi / 12
     """Maximum allowed angle (in radians) between the specified approach
     direction and the axis connecting an antipodal point pair. Pairs that
@@ -104,9 +100,6 @@ class GraspGenerator:
        are scored by a weighted cost that penalises angular deviation from
        the approach direction, narrow opening length, and distance to the
        mesh centroid.
-
-    Antipodal pairs are cached to disk (keyed on mesh geometry) and
-    automatically reused across sessions unless ``force_regenerate`` is set.
 
     Typical usage::
 
@@ -156,7 +149,7 @@ class GraspGenerator:
 
         # Load cached antipodal pairs for the whole mesh if available.
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
-        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
+        if os.path.exists(cache_path):
             logger.log_info(f"Found cached antipodal pairs at {cache_path}. Loading.")
             self._hit_point_pairs = torch.tensor(
                 np.load(cache_path), dtype=torch.float32, device=self.device
@@ -167,14 +160,14 @@ class GraspGenerator:
         vertex_indices: torch.Tensor | None = None,
         face_indices: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Generate antipodal point pairs for grasping on the given mesh region.
+        """
+        Generate antipodal point pairs for grasping on the given mesh region.
 
         Exactly one of ``vertex_indices`` or ``face_indices`` must be provided
         to define the grasp region.  When both are ``None``, the whole mesh is
         used.
 
-        Results are cached to disk and reused when ``force_regenerate`` is
-        ``False``.
+        Results are cached to disk.
 
         Args:
             vertex_indices: 1-D ``torch.Tensor`` of vertex indices defining the
@@ -226,7 +219,7 @@ class GraspGenerator:
             )
 
         cache_path = self._get_cache_dir(sub_vertices, sub_faces)
-        if os.path.exists(cache_path) and not self.cfg.force_regenerate:
+        if os.path.exists(cache_path):
             logger.log_info(f"Found cached antipodal pairs at {cache_path}")
             return torch.tensor(
                 np.load(cache_path), dtype=torch.float32, device=self.device
@@ -354,6 +347,8 @@ class GraspGenerator:
                         torch.tensor(sel_vertices, device=self.device),
                         torch.tensor(sel_faces, device=self.device),
                     )
+
+                    # for visualization only
                     extended_hit_point_pairs = GraspGenerator._extend_hit_point_pairs(
                         hit_point_pairs
                     )
@@ -586,8 +581,8 @@ class GraspGenerator:
         self,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
-        is_visual: bool = False,
-        visualize: bool = False,
+        visualize_collision: bool = False,
+        visualize_pose: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Get grasp pose given approach direction.
 
@@ -603,8 +598,8 @@ class GraspGenerator:
                 representing the pose of the object in the world frame.
             approach_direction: ``(3,)`` unit vector representing the desired
                 approach direction of the gripper in the world frame.
-            is_visual: If ``True``, enable visual collision checking.
-            visualize: If ``True``, visualize the best grasp pose using Open3D
+            visualize_collision: If ``True``, enable visual collision checking.
+            visualize_pose: If ``True``, visualize the best grasp pose using Open3D
                 after computation.
 
         Returns:
@@ -652,7 +647,7 @@ class GraspGenerator:
             object_pose,
             valid_grasp_poses,
             valid_open_lengths,
-            is_visual=is_visual,
+            is_visual=visualize_collision,
             collision_threshold=0.0,
         )
         # get best grasp pose
@@ -673,7 +668,7 @@ class GraspGenerator:
         best_idx = torch.argmin(total_cost)
         best_grasp_pose = valid_grasp_poses[best_idx]
         best_open_length = valid_open_lengths[best_idx]
-        if visualize:
+        if visualize_pose:
             self.visualize_grasp_pose(
                 obj_pose=object_pose,
                 grasp_pose=best_grasp_pose,

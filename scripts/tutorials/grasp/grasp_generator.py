@@ -238,7 +238,6 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
         ),
-        force_regenerate=False,  # force user to annotate grasp region each time
     )
     sim.open_window()
 
@@ -270,11 +269,11 @@ if __name__ == "__main__":
     approach_direction = torch.tensor(
         [0, 0, -1], dtype=torch.float32, device=sim.device
     )
-    poses = mug.get_local_pose(to_matrix=True)
+    obj_poses = mug.get_local_pose(to_matrix=True)
     grasp_xpos_list = []
-    for pose in poses:
+    for obj_pose in obj_poses:
         grasp_pose, _ = grasp_generator.get_grasp_poses(
-            pose, approach_direction, visualize=False
+            obj_pose, approach_direction, visualize_pose=False
         )
         grasp_xpos_list.append(grasp_pose.unsqueeze(0))
     grasp_xpos = torch.cat(grasp_xpos_list, dim=0)
