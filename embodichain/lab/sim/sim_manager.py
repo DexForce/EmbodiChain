@@ -448,28 +448,30 @@ class SimulationManager:
         if self._is_initialized_gpu_physics:
             return
 
-        # init rigid body.
-        rigid_body_num = (
-            0
-            if self._get_non_static_rigid_obj_num() == 0
-            else len(self._ps.get_gpu_rigid_indices())
-        )
-        self._rigid_body_pose = torch.zeros(
-            (rigid_body_num, 7), dtype=torch.float32, device=self.device
-        )
+        if not self.is_rt_enabled:
+            # init rigid body.
+            rigid_body_num = (
+                0
+                if self._get_non_static_rigid_obj_num() == 0
+                else len(self._ps.get_gpu_rigid_indices())
+            )
+            self._rigid_body_pose = torch.zeros(
+                (rigid_body_num, 7), dtype=torch.float32, device=self.device
+            )
 
-        # init articulation.
-        articulation_num = (
-            0
-            if len(self._articulations) == 0 and len(self._robots) == 0
-            else len(self._ps.get_gpu_articulation_indices())
-        )
-        max_link_count = self._ps.gpu_get_articulation_max_link_count()
-        self._link_pose = torch.zeros(
-            (articulation_num, max_link_count, 7),
-            dtype=torch.float32,
-            device=self.device,
-        )
+            # init articulation.
+            articulation_num = (
+                0
+                if len(self._articulations) == 0 and len(self._robots) == 0
+                else len(self._ps.get_gpu_articulation_indices())
+            )
+            max_link_count = self._ps.gpu_get_articulation_max_link_count()
+            self._link_pose = torch.zeros(
+                (articulation_num, max_link_count, 7),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
         for art in self._articulations.values():
             art.reallocate_body_data()
         for robot in self._robots.values():
@@ -545,7 +547,6 @@ class SimulationManager:
                     data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
                 )
 
-            # TODO: might be optimized.
             self._world.sync_poses_gpu_to_cpu(
                 rigid_pose=CudaArray(self._rigid_body_pose),
                 link_pose=CudaArray(self._link_pose),
@@ -677,7 +678,7 @@ class SimulationManager:
         )
 
         if self.is_rt_enabled:
-            self.set_emission_light([1.0, 1.0, 1.0], 80.0)
+            self.set_emission_light([1.0, 1.0, 1.0], 120.0)
         else:
             self.set_indirect_lighting("lab_day")
 
