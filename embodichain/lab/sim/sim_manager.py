@@ -452,7 +452,7 @@ class SimulationManager:
             # init rigid body.
             rigid_body_num = (
                 0
-                if self._get_non_static_rigid_obj_num() == 0
+                if not self.has_non_static_rigid_object()
                 else len(self._ps.get_gpu_rigid_indices())
             )
             self._rigid_body_pose = torch.zeros(
@@ -1056,17 +1056,20 @@ class SimulationManager:
             )
         return arena_offsets
 
-    def _get_non_static_rigid_obj_num(self) -> int:
-        """Get the number of non-static rigid objects in the scene.
+    def has_non_static_rigid_object(self) -> bool:
+        """Check if there is any non-static rigid object in the simulation.
 
         Returns:
-            int: The number of non-static rigid objects.
+            bool: True if there is at least one non-static rigid object, False otherwise.
         """
-        count = 0
-        for obj in self._rigid_objects.values():
-            if obj.cfg.body_type != "static":
-                count += 1
-        return count
+        for rigid_obj in self._rigid_objects.values():
+            if rigid_obj.body_type != "static":
+                return True
+
+        if len(self._rigid_object_groups) > 0:
+            return True
+
+        return False
 
     def add_articulation(
         self,
