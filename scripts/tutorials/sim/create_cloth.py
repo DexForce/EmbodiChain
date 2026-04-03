@@ -114,7 +114,7 @@ def main():
             init_rot=[0, 0, 0],
             physical_attr=ClothPhysicalAttributesCfg(
                 mass=0.01,
-                youngs=1e10,
+                youngs=1e9,
                 poissons=0.4,
                 thickness=0.04,
                 bending_stiffness=0.01,
