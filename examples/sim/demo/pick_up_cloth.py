@@ -105,18 +105,18 @@ def create_padding_box(sim: SimulationManager):
     padding_box_cfg = RigidObjectCfg(
         uid="padding_box",
         shape=CubeCfg(
-            size=[0.01, 0.04, 0.03],
+            size=[0.02, 0.07, 0.05],
         ),
         attrs=RigidBodyAttributesCfg(
             mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
+            static_friction=0.01,
+            dynamic_friction=0.00,
             restitution=0.01,
             min_position_iters=32,
             min_velocity_iters=8,
         ),
         body_type="kinematic",
-        init_pos=[0.5, 0.0, 0.01],
+        init_pos=[0.5, 0.0, 0.026],
         init_rot=[0.0, 0.0, 0.0],
     )
     padding_box = sim.add_rigid_object(cfg=padding_box_cfg)
@@ -252,7 +252,7 @@ def main():
         num_envs=args.num_envs,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        sim_device="cuda",
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
