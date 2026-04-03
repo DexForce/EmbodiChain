@@ -35,6 +35,7 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     RigidObjectCfg,
@@ -47,51 +48,7 @@ from embodichain.lab.sim.cfg import (
 import os
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 import tempfile
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments, device, and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    return parser.parse_args()
-
-
-def initialize_simulation(args):
-    """
-    Initialize the simulation environment based on the provided arguments.
-
-    Args:
-        args (argparse.Namespace): Parsed command-line arguments.
-
-    Returns:
-        SimulationManager: Configured simulation manager instance.
-    """
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device="cuda",
-        enable_rt=args.enable_rt,
-        physics_dt=1.0 / 100.0,
-        num_envs=args.num_envs,
-    )
-    sim = SimulationManager(config)
-
-    light = sim.add_light(
-        cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
-    )
-
-    return sim
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
@@ -283,8 +240,26 @@ def main():
     This function initializes the simulation, creates the robot and other objects,
     and performs the press softbody task.
     """
-    args = parse_arguments()
-    sim = initialize_simulation(args)
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args()
+    # Configure the simulation
+    sim_cfg = SimulationManagerCfg(
+        width=1920,
+        height=1080,
+        num_envs=args.num_envs,
+        headless=True,
+        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
+        sim_device=args.device,
+        render_cfg=RenderCfg(
+            renderer=args.renderer
+        ),  # Enable ray tracing for better visuals
+    )
+
+    # Create the simulation instance
+    sim = SimulationManager(sim_cfg)
 
     robot = create_robot(sim)
     cloth = create_cloth(sim)
