@@ -429,6 +429,7 @@ def main():
     table = create_table(sim)
     caffe = create_caffe(sim)
     cup = create_cup(sim)
+    sim.update(step=1)
 
     # apply random perturbation
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
