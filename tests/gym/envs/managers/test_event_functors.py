@@ -99,13 +99,49 @@ class MockRigidObjectGroup:
         pass
 
 
+class MockArticulationEntity:
+    """Mock dexsim articulation entity with per-link mass support."""
+
+    def __init__(self, link_names: list[str], default_mass: float = 1.0):
+        self._link_masses: dict[str, float] = {
+            name: default_mass for name in link_names
+        }
+
+    def get_mass(self, link_name: str | None = None) -> tuple[int, dict[str, float]]:
+        if link_name is not None:
+            return 0, {link_name: self._link_masses.get(link_name, 0.0)}
+        return 0, dict(self._link_masses)
+
+    def set_mass(self, link_name: str, mass: float) -> int:
+        self._link_masses[link_name] = mass
+        return 0
+
+
 class MockArticulation:
     """Mock articulation for event functor tests."""
 
-    def __init__(self, uid: str = "test_articulation", num_envs: int = 4):
+    def __init__(
+        self,
+        uid: str = "test_articulation",
+        num_envs: int = 4,
+        link_names: list[str] | None = None,
+    ):
         self.uid = uid
         self.num_envs = num_envs
         self.device = torch.device("cpu")
+
+        # Link names for the articulation
+        self.link_names: list[str] = link_names or [
+            "base_link",
+            "link_0",
+            "link_1",
+            "link_2",
+        ]
+
+        # Per-environment entities with mass tracking
+        self._entities = [
+            MockArticulationEntity(self.link_names) for _ in range(num_envs)
+        ]
 
         # Default pose at origin (position + quaternion)
         # Format: (N, 7) - position (3) + quaternion (4)
@@ -166,6 +202,26 @@ class MockArticulation:
     def clear_dynamics(self, env_ids=None):
         """Clear dynamics - no-op for mock."""
         pass
+
+    def get_mass(self, link_names=None, env_ids=None):
+        """Get mass of links, matching Articulation API."""
+        local_env_ids = list(range(self.num_envs)) if env_ids is None else list(env_ids)
+        if link_names is None:
+            link_names = self.link_names
+        mass_tensor = torch.zeros(
+            (len(local_env_ids), len(link_names)), dtype=torch.float32
+        )
+        for i, env_idx in enumerate(local_env_ids):
+            for j, name in enumerate(link_names):
+                mass_tensor[i, j] = self._entities[env_idx]._link_masses[name]
+        return mass_tensor
+
+    def set_mass(self, mass, link_names, env_ids=None):
+        """Set mass of links, matching Articulation API."""
+        local_env_ids = list(range(self.num_envs)) if env_ids is None else list(env_ids)
+        for i, env_idx in enumerate(local_env_ids):
+            for j, name in enumerate(link_names):
+                self._entities[env_idx]._link_masses[name] = mass[i, j].item()
 
 
 class MockSim:
@@ -259,6 +315,7 @@ from embodichain.lab.gym.envs.managers.events import (
 )
 from embodichain.lab.gym.envs.managers.randomization.physics import (
     randomize_rigid_object_mass,
+    randomize_articulation_mass,
 )
 from embodichain.lab.gym.envs.managers.randomization.spatial import (
     randomize_articulation_root_pose,
@@ -515,3 +572,138 @@ class TestRandomizeArticulationRootPose:
 
         # Check that update was called
         env.sim.update.assert_called_once_with(step=10)
+
+
+class TestRandomizeArticulationMass:
+    """Tests for randomize_articulation_mass functor."""
+
+    def test_sets_all_links_mass_in_range(self):
+        """Test that mass is randomized within range for all links."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+        mass_range = (0.5, 2.0)
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=mass_range,
+        )
+
+        # Check all links in all envs are in range using get_mass
+        masses = env.test_articulation.get_mass(env_ids=env_ids)
+        assert torch.all(masses >= 0.5)
+        assert torch.all(masses <= 2.0)
+
+    def test_sets_specific_link_with_regex(self):
+        """Test that only matched links are randomized using regex."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Set base_link mass to a known value
+        base_mass = torch.full((4, 1), 10.0)
+        env.test_articulation.set_mass(
+            base_mass, link_names=["base_link"], env_ids=env_ids
+        )
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=(0.5, 2.0),
+            link_names="link_.*",
+        )
+
+        # base_link should not be changed
+        base_masses = env.test_articulation.get_mass(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.all(base_masses == 10.0), "base_link should not be changed"
+
+        # link_0, link_1, link_2 should be randomized
+        link_masses = env.test_articulation.get_mass(
+            link_names=["link_0", "link_1", "link_2"], env_ids=env_ids
+        )
+        assert torch.all(link_masses >= 0.5)
+        assert torch.all(link_masses <= 2.0)
+
+    def test_sets_specific_link_with_list(self):
+        """Test that only matched links are randomized using a list of patterns."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Set link_2 and base_link mass to known values
+        known_mass = torch.full((4, 2), 10.0)
+        env.test_articulation.set_mass(
+            known_mass, link_names=["link_2", "base_link"], env_ids=env_ids
+        )
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=(0.5, 2.0),
+            link_names=["link_0", "link_1"],
+        )
+
+        # link_2 and base_link should not be changed
+        unchanged = env.test_articulation.get_mass(
+            link_names=["link_2", "base_link"], env_ids=env_ids
+        )
+        assert torch.all(unchanged == 10.0)
+
+        # link_0 and link_1 should be randomized
+        randomized = env.test_articulation.get_mass(
+            link_names=["link_0", "link_1"], env_ids=env_ids
+        )
+        assert torch.all(randomized >= 0.5)
+        assert torch.all(randomized <= 2.0)
+
+    def test_relative_mass_randomization(self):
+        """Test relative mass randomization adds to current mass."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Initial mass is 1.0 for all links (default)
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=(-0.5, 0.5),
+            link_names="base_link",
+            relative=True,
+        )
+
+        # Final mass for base_link should be in [0.5, 1.5]
+        masses = env.test_articulation.get_mass(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.all(masses >= 0.5)
+        assert torch.all(masses <= 1.5)
+
+    def test_handles_nonexistent_articulation(self):
+        """Test that function handles non-existent articulation gracefully."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Should not raise - function returns early for non-existent articulations
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="nonexistent"),
+            mass_range=(0.5, 2.0),
+        )
+
+    def test_handles_nonexistent_link_pattern(self):
+        """Test that function raises for non-matching link patterns."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        with pytest.raises(ValueError, match="Not all regular expressions"):
+            randomize_articulation_mass(
+                env,
+                env_ids,
+                entity_cfg=MagicMock(uid="articulation"),
+                mass_range=(0.5, 2.0),
+                link_names="nonexistent_link",
+            )

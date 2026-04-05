@@ -19,9 +19,10 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING
 
-from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.objects import Articulation, RigidObject, Robot
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.utils.math import sample_uniform
+from embodichain.utils.string import resolve_matching_names
 from embodichain.utils import logger
 
 
@@ -102,3 +103,60 @@ def randomize_rigid_object_center_of_mass(
     updated_com[:, 0:3] += sampled_com_pos_offsets
 
     rigid_object.set_com_pose(updated_com, env_ids=env_ids)
+
+
+def randomize_articulation_mass(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | list[int],
+    entity_cfg: SceneEntityCfg,
+    mass_range: tuple[float, float],
+    link_names: str | list[str] | None = None,
+    relative: bool = False,
+) -> None:
+    """Randomize the mass of articulation links in the environment.
+
+    Uses regular expression matching to select which links to randomize.
+
+    Args:
+        env (EmbodiedEnv): The environment instance.
+        env_ids (torch.Tensor | list[int]): The environment IDs to apply the randomization.
+        entity_cfg (SceneEntityCfg): The configuration for the scene entity.
+        mass_range (tuple[float, float]): The range (min, max) to sample the mass from.
+        link_names (str | list[str] | None): A regex pattern or list of regex patterns to match
+            link names. If None, all links are randomized. Defaults to None.
+        relative (bool): Whether to apply the mass change relative to the current mass.
+            Defaults to False.
+    """
+
+    if entity_cfg.uid not in env.sim.get_articulation_uid_list():
+        return
+
+    articulation: Articulation = env.sim.get_articulation(entity_cfg.uid)
+
+    # Resolve link names via regex matching
+    if link_names is not None:
+        _, matched_link_names = resolve_matching_names(
+            keys=link_names,
+            list_of_strings=articulation.link_names,
+        )
+    else:
+        matched_link_names = articulation.link_names
+
+    num_instance = len(env_ids)
+    num_links = len(matched_link_names)
+
+    # Sample masses: shape (num_instance, num_links)
+    sampled_masses = sample_uniform(
+        lower=mass_range[0], upper=mass_range[1], size=(num_instance, num_links)
+    )
+
+    if relative:
+        # Get current mass from the articulation
+        current_masses = articulation.get_mass(
+            link_names=matched_link_names, env_ids=env_ids
+        )
+        sampled_masses = current_masses + sampled_masses
+
+    articulation.set_mass(
+        sampled_masses, link_names=matched_link_names, env_ids=env_ids
+    )
