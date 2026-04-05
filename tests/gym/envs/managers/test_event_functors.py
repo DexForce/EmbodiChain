@@ -148,6 +148,10 @@ class MockArticulation:
         self._pose = torch.zeros(num_envs, 7)
         self._pose[:, 3] = 1.0  # quaternion w = 1 (identity rotation)
 
+        self.default_link_masses = torch.ones(
+            (self.num_envs, len(self.link_names)), device=self.device
+        )
+
     def _matrix_to_quat_pos(self, pose_matrix):
         """Convert 4x4 matrix to (position, quaternion) format.
 

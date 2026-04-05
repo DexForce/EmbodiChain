@@ -582,6 +582,9 @@ class Articulation(BatchEntity):
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
+        # Get default masses.
+        self.default_link_masses = self.get_mass()
+
         # Determine if we should use USD properties or cfg properties.
         if not self.cfg.use_usd_properties:
             # Set articulation configuration in DexSim

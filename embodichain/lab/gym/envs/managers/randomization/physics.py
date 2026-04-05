@@ -152,9 +152,12 @@ def randomize_articulation_mass(
 
     if relative:
         # Get current mass from the articulation
-        current_masses = articulation.get_mass(
-            link_names=matched_link_names, env_ids=env_ids
-        )
+        link_indices = [
+            articulation.link_names.index(name) for name in matched_link_names
+        ]
+        current_masses = articulation.default_link_masses.clone()[env_ids][
+            :, link_indices
+        ]
         sampled_masses = current_masses + sampled_masses
 
     articulation.set_mass(
