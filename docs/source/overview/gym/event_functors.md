@@ -17,6 +17,8 @@ This page lists all available event functors that can be used with the Event Man
   - Randomize object masses within a specified range. Supports both absolute and relative mass randomization.
 * - ``randomize_rigid_object_center_of_mass``
   - Randomize the center of mass of rigid objects by applying position offsets. Only works with dynamic objects.
+* - ``randomize_articulation_mass``
+  - Randomize articulation link masses within a specified range. Supports regex-based link selection via the ``link_names`` parameter, and both absolute and relative mass randomization.
 ```
 
 ## Visual Randomization

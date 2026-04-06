@@ -582,6 +582,9 @@ class Articulation(BatchEntity):
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
+        # Get default masses.
+        self.default_link_masses = self.get_mass()
+
         # Determine if we should use USD properties or cfg properties.
         if not self.cfg.use_usd_properties:
             # Set articulation configuration in DexSim
@@ -1227,6 +1230,73 @@ class Articulation(BatchEntity):
                 gpu_indices=indices,
                 data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
             )
+
+    def set_mass(
+        self,
+        mass: torch.Tensor,
+        link_names: Sequence[str],
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set the mass of specific links in the articulation.
+
+        Args:
+            mass (torch.Tensor): The mass values to set with shape (N, len(link_names)).
+            link_names (Sequence[str]): The names of the links to set the mass for.
+            env_ids (Sequence[int] | None, optional): Environment indices to apply the mass change. If None, applies to all environments. Defaults to None.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if len(local_env_ids) != len(mass):
+            logger.log_error(
+                f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
+            )
+
+        for link_name in link_names:
+            if link_name not in self.link_names:
+                logger.log_error(
+                    f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
+                )
+
+        for i, env_idx in enumerate(local_env_ids):
+            for j, name in enumerate(link_names):
+                self._entities[env_idx].set_mass(name, mass[i, j].item())
+
+    def get_mass(
+        self,
+        link_names: Sequence[str] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> torch.Tensor:
+        """Get the mass of specific links in the articulation.
+
+        Args:
+            link_names (Sequence[str] | None, optional): The names of the links to get the mass for. If None, gets mass for all links. Defaults to None.
+            env_ids (Sequence[int] | None, optional): Environment indices to get the mass from. If None, gets from all environments. Defaults to None.
+
+        Returns:
+            torch.Tensor: The mass of the specified links with shape (N, len(link_names)).
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if link_names is None:
+            link_names = self.link_names
+        else:
+            for link_name in link_names:
+                if link_name not in self.link_names:
+                    logger.log_error(
+                        f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
+                    )
+
+        mass_tensor = torch.zeros(
+            (len(local_env_ids), len(link_names)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        for i, env_idx in enumerate(local_env_ids):
+            for j, name in enumerate(link_names):
+                mass_tensor[i, j] = (
+                    self._entities[env_idx].get_physical_body(name).get_mass()
+                )
+        return mass_tensor
 
     def set_joint_drive(
         self,
