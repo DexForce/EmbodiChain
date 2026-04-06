@@ -488,7 +488,7 @@ def get_aligned_pose(
     rotation_axis_norm = np.linalg.norm(rotation_axis)
     if rotation_axis_norm >= 1e-5:
         rotation_axis = rotation_axis / rotation_axis_norm
-        rotation_angle = np.arccos(pose_to_change[:3, 2].dot(align_vector))
+        rotation_angle = np.arccos(pose_to_change[:3, pose_axis].dot(align_vector))
         pose_to_change[:3, :3] = (
             R.from_rotvec(rotation_axis * rotation_angle).as_matrix()
             @ pose_to_change[:3, :3]
@@ -537,7 +537,9 @@ def get_changed_pose(
                 pose_to_change, pose_change_value, *change_partition[1:]
             )
         elif change_mode == "align":
-            get_aligned_pose(pose_to_change, pose_change_value, change_partition[1])
+            pose_to_change = get_aligned_pose(
+                pose_to_change, pose_change_value, change_partition[1]
+            )
         else:
             # TODO
             log_error(f"The {change_mode} change mode haven't realized yet!")

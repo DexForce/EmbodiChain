@@ -694,7 +694,7 @@ class ActionBank:
         if hasattr(env, "affordance_datas"):
             for affordance_name, affordance_value in env.affordance_datas.items():
                 # NOTE: take only first arena's affordance data
-                if affordance_value.ndim == 3:
+                if hasattr(affordance_value, "ndim") and affordance_value.ndim == 3:
                     affordance_value = affordance_value[0]
                 if isinstance(affordance_value, torch.Tensor):
                     affordance_value = np.asarray(affordance_value.cpu())
