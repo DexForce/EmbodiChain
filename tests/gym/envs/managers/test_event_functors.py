@@ -698,6 +698,110 @@ class TestRandomizeArticulationMass:
             mass_range=(0.5, 2.0),
         )
 
+    def test_dict_mass_range_per_link(self):
+        """Test per-link mass ranges using dict-based mass_range."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Set link_2 and base_link mass to known values
+        known_mass = torch.full((4, 2), 10.0)
+        env.test_articulation.set_mass(
+            known_mass, link_names=["link_2", "base_link"], env_ids=env_ids
+        )
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range={
+                "link_0": (0.5, 1.0),
+                "link_1": (2.0, 3.0),
+            },
+        )
+
+        # link_2 and base_link should not be changed
+        unchanged = env.test_articulation.get_mass(
+            link_names=["link_2", "base_link"], env_ids=env_ids
+        )
+        assert torch.all(unchanged == 10.0)
+
+        # link_0 should be in [0.5, 1.0]
+        link_0_masses = env.test_articulation.get_mass(
+            link_names=["link_0"], env_ids=env_ids
+        )
+        assert torch.all(link_0_masses >= 0.5)
+        assert torch.all(link_0_masses <= 1.0)
+
+        # link_1 should be in [2.0, 3.0]
+        link_1_masses = env.test_articulation.get_mass(
+            link_names=["link_1"], env_ids=env_ids
+        )
+        assert torch.all(link_1_masses >= 2.0)
+        assert torch.all(link_1_masses <= 3.0)
+
+    def test_dict_mass_range_ignores_link_names(self):
+        """Test that link_names is ignored when mass_range is a dict."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Set base_link mass to a known value
+        base_mass = torch.full((4, 1), 10.0)
+        env.test_articulation.set_mass(
+            base_mass, link_names=["base_link"], env_ids=env_ids
+        )
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range={"link_0": (0.5, 1.0)},
+            link_names="base_link",  # should be ignored
+        )
+
+        # base_link should not be changed
+        base_masses = env.test_articulation.get_mass(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.all(base_masses == 10.0)
+
+        # link_0 should be randomized
+        link_0_masses = env.test_articulation.get_mass(
+            link_names=["link_0"], env_ids=env_ids
+        )
+        assert torch.all(link_0_masses >= 0.5)
+        assert torch.all(link_0_masses <= 1.0)
+
+    def test_dict_mass_range_relative(self):
+        """Test relative randomization with per-link mass ranges."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Initial mass is 1.0 for all links (default)
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range={
+                "base_link": (-0.5, 0.5),
+                "link_0": (-0.2, 0.2),
+            },
+            relative=True,
+        )
+
+        # base_link should be in [0.5, 1.5]
+        base_masses = env.test_articulation.get_mass(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.all(base_masses >= 0.5)
+        assert torch.all(base_masses <= 1.5)
+
+        # link_0 should be in [0.8, 1.2]
+        link_0_masses = env.test_articulation.get_mass(
+            link_names=["link_0"], env_ids=env_ids
+        )
+        assert torch.all(link_0_masses >= 0.8)
+        assert torch.all(link_0_masses <= 1.2)
+
     def test_handles_nonexistent_link_pattern(self):
         """Test that function raises for non-matching link patterns."""
         env = MockEnv(num_envs=4)
