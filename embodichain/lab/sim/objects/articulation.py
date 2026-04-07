@@ -664,6 +664,10 @@ class Articulation(BatchEntity):
 
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
+        # TODO: very weird that we must call update here to make sure the GPU indices are valid.
+        if device.type == "cuda":
+            self._world.update(0.001)
+
         super().__init__(cfg, entities, device)
 
         # set default collision filter
