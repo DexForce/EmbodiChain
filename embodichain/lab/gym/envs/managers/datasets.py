@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -184,7 +185,9 @@ class LeRobotRecorder(Functor):
                     frame = self._convert_frame_to_lerobot(obs, action, task)
                     self.dataset.add_frame(frame)
 
-                self.dataset.save_episode()
+                # Save episode with shape → user_ids mapping as episode-level metadata
+                shape_to_user_ids_map = self._build_shape_to_user_ids_map(env_id)
+                self._save_episode_with_metadata(shape_to_user_ids_map)
 
                 logger.log_info(
                     f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
@@ -435,6 +438,80 @@ class LeRobotRecorder(Functor):
                         logger.log_warning(
                             f"Asset with UID '{asset_uid}' is not RigidObject, Articulation or Robot. Cannot assign feature names based on asset properties."
                         )
+
+    def _build_shape_to_user_ids_map(self, env_id: int) -> Dict[str, str]:
+        """Build shape to user_ids mapping for all get_object_uid functors.
+
+        For each ``get_object_uid`` observation functor active in the environment,
+        captures the current mapping of shapes (or asset UIDs) to their integer
+        user IDs for the given environment instance.
+
+        Returns:
+            Dict mapping ``"<asset_uid>.shape_to_user_ids"`` to a JSON string
+            of the mapping for each asset.
+        """
+        from embodichain.lab.gym.envs.managers.observations import get_object_uid
+        from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
+
+        result: Dict[str, str] = {}
+
+        if "add" not in self._env.observation_manager.active_functors:
+            return result
+
+        for functor_name in self._env.observation_manager.active_functors["add"]:
+            functor_cfg = self._env.observation_manager.get_functor_cfg(
+                functor_name=functor_name
+            )
+            if functor_cfg.func != get_object_uid:
+                continue
+
+            obs_key = functor_cfg.name
+            asset_uid = functor_cfg.params["entity_cfg"].uid
+            asset = self._env.sim.get_asset(asset_uid)
+
+            if isinstance(asset, RigidObject):
+                user_id = asset.get_user_ids(env_ids=[env_id])[0].item()
+                mapping: Dict[str, int] = {asset_uid: user_id}
+            elif isinstance(asset, (Articulation, Robot)):
+                user_ids = asset.get_user_ids(env_ids=[env_id])[0]
+                link_names = asset.link_names
+                mapping = {name: uid.item() for name, uid in zip(link_names, user_ids)}
+            else:
+                continue
+
+            result[f"{asset_uid}.shape_to_user_ids"] = json.dumps(mapping)
+
+        return result
+
+    def _save_episode_with_metadata(self, episode_metadata: Dict[str, str]) -> None:
+        """Save the current episode with custom metadata in meta/episodes parquet.
+
+        This wraps ``LeRobotDataset.save_episode()`` to inject custom episode-level
+        metadata (e.g., link_names → user_ids mapping) into
+        ``meta/episodes/*.parquet``.
+
+        Args:
+            episode_metadata: Dict of column_name → value to add to the episode row.
+        """
+        if not episode_metadata:
+            self.dataset.save_episode()
+            return
+
+        original_meta_save = self.dataset.meta.save_episode
+
+        def _patched_save(
+            episode_index, episode_length, episode_tasks, episode_stats, ep_metadata
+        ):
+            ep_metadata.update(episode_metadata)
+            original_meta_save(
+                episode_index, episode_length, episode_tasks, episode_stats, ep_metadata
+            )
+
+        self.dataset.meta.save_episode = _patched_save
+        try:
+            self.dataset.save_episode()
+        finally:
+            self.dataset.meta.save_episode = original_meta_save
 
     def _convert_frame_to_lerobot(
         self, obs: TensorDict, action: TensorDict | torch.Tensor, task: str
