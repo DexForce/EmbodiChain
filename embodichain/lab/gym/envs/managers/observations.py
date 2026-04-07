@@ -358,22 +358,19 @@ def compute_semantic_mask(
     else:
         mask = obs["sensor"][entity_cfg.uid]["mask"]
 
-    left_robot_uids = torch.cat(
-        [
-            env.robot.get_user_ids(link_name)
-            for link_name in env.robot.link_names
-            if link_name.startswith("left_")
-        ],
-        -1,
-    )
-    right_robot_uids = torch.cat(
-        [
-            env.robot.get_user_ids(link_name)
-            for link_name in env.robot.link_names
-            if link_name.startswith("right_")
-        ],
-        -1,
-    )
+    left_link_indices = [
+        i
+        for i, link_name in enumerate(env.robot.link_names)
+        if link_name.startswith("left_")
+    ]
+    left_robot_uids = env.robot.user_ids[:, left_link_indices]
+
+    right_link_indices = [
+        i
+        for i, link_name in enumerate(env.robot.link_names)
+        if link_name.startswith("right_")
+    ]
+    right_robot_uids = env.robot.user_ids[:, right_link_indices]
 
     mask_exp = mask.unsqueeze(-1)
 
