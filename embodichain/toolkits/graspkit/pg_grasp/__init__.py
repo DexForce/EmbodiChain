@@ -14,8 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .antipodal import AntipodalGenerator, GraspSelectMethod
-
-__all__ = ["AntipodalGenerator", "GraspSelectMethod"]
-
-del antipodal
+from .antipodal_sampler import *
+from .collision_checker import *
+from .gripper_collision_checker import *
+from .antipodal_generator import *

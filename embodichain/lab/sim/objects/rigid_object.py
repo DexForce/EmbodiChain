@@ -946,23 +946,49 @@ class RigidObject(BatchEntity):
 
         self.body_type = body_type
 
-    def get_vertices(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+    def get_vertices(
+        self, env_ids: Sequence[int] | None = None, scale: bool = False
+    ) -> torch.Tensor:
         """
         Retrieve the vertices of the rigid objects.
 
         Args:
             env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve vertices.
                                                 If None, retrieves vertices for all instances.
+            scale (bool): Whether to multiply the vertices by the body scale. Defaults to False.
 
         Returns:
             torch.Tensor: A tensor containing the user IDs of the specified rigid objects with shape (N, num_verts, 3).
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
-        return torch.as_tensor(
+        verts = torch.as_tensor(
             np.array(
                 [self._entities[id].get_vertices() for id in ids],
             ),
             dtype=torch.float32,
+            device=self.device,
+        )
+        if scale:
+            verts = verts * self.get_body_scale(env_ids).unsqueeze_(1)
+        return verts
+
+    def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """
+        Retrieve the triangle indices of the rigid objects.
+
+        Args:
+            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve triangle indices.
+                                                If None, retrieves triangle indices for all instances.
+
+        Returns:
+            torch.Tensor: A tensor containing the triangle indices of the specified rigid objects with shape (N, num_tris, 3).
+        """
+        ids = env_ids if env_ids is not None else range(self.num_instances)
+        return torch.as_tensor(
+            np.array(
+                [self._entities[id].get_triangles() for id in ids],
+            ),
+            dtype=torch.int32,
             device=self.device,
         )
 
