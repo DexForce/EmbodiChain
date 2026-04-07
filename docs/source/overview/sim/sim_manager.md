@@ -33,9 +33,7 @@ sim_config = SimulationManagerCfg(
 | `width` | `int` | `1920` | The width of the simulation window. |
 | `height` | `int` | `1080` | The height of the simulation window. |
 | `headless` | `bool` | `False` | Whether to run the simulation in headless mode (no Window). |
-| `renderer` | `bool` | `False` | Whether to enable ray tracing rendering. |
-| `enable_denoiser` | `bool` | `True` | Whether to enable denoising for ray tracing rendering. |
-| `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when ray tracing is enabled and denoiser is False. |
+| `render_cfg` | `RenderCfg` | `RenderCfg()` | The rendering configuration parameters. |
 | `gpu_id` | `int` | `0` | The gpu index that the simulation engine will be used. Affects gpu physics device. |
 | `thread_mode` | `ThreadMode` | `RENDER_SHARE_ENGINE` | The threading mode for the simulation engine. |
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
@@ -59,6 +57,29 @@ The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parame
 | `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
 
 For more parameters and details, refer to the [PhysicsCfg](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.PhysicsCfg) documentation.
+
+### Render Configuration
+
+The {class}`~cfg.RenderCfg` class controls the rendering backend and quality settings.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `renderer` | `str` | `"hybrid"` | Renderer backend to use. Options are `'legacy'` (rasterization), `'hybrid'` (ray tracing for shadows/reflections + rasterization), and `'fast-rt'` (full ray tracing). |
+| `enable_denoiser` | `bool` | `True` | Whether to enable denoising. Only valid when `renderer` is `'hybrid'` or `'fast-rt'`. |
+| `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when `renderer` is `'hybrid'` or `'fast-rt'` and `enable_denoiser` is `False`. |
+
+```python
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
+
+sim_config = SimulationManagerCfg(
+    render_cfg=RenderCfg(
+        renderer="fast-rt",    # Use full ray tracing
+        enable_denoiser=True,  # Enable denoising
+        spp=64,                # Samples per pixel (used when denoiser is off)
+    )
+)
+```
 
 
 ## Initialization
