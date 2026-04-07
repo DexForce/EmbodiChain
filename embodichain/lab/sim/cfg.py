@@ -1121,7 +1121,9 @@ class ArticulationCfg(ObjectBaseCfg):
     """Scale of the articulation in the simulation world frame."""
 
     attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
-    """Physical attributes for all links . """
+    """Physical attributes for all links. We use default mass from the USD/URDF file if available.
+    The mass and density in attrs will only be used if specified.
+    """
 
     fix_base: bool = True
     """Whether to fix the base of the articulation.

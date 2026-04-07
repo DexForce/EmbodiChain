@@ -108,40 +108,40 @@ jobs:
         uses: actions/deploy-pages@v4
 
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: Linux
-    permissions:
-      contents: write
-      id-token: write   # PyPI Trusted Publishing
+  # release:
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: Linux
+  #   permissions:
+  #     contents: write
+  #     id-token: write   # PyPI Trusted Publishing
 
-    container: *container_template
+  #   container: *container_template
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0   
 
-      - name: (Release) Install build tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
+  #     - name: (Release) Install build tools
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install build
 
-      - name: (Release) Build sdist and wheel
-        run: |
-          python -m build --wheel
+  #     - name: (Release) Build sdist and wheel
+  #       run: |
+  #         python -m build --wheel
 
-      # - name: (Release) Create GitHub Release (draft)
-      #   uses: softprops/action-gh-release@v2
-      #   with:
-      #     draft: true
-      #     generate_release_notes: true
-      #     files: |
-      #       dist/*
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     # - name: (Release) Create GitHub Release (draft)
+  #     #   uses: softprops/action-gh-release@v2
+  #     #   with:
+  #     #     draft: true
+  #     #     generate_release_notes: true
+  #     #     files: |
+  #     #       dist/*
+  #     #   env:
+  #     #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: (Release) Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+  #     - name: (Release) Publish to PyPI
+  #       uses: pypa/gh-action-pypi-publish@release/v1
+  #       with:
+  #         password: ${{ secrets.PYPI_API_TOKEN }}
