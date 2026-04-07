@@ -98,7 +98,7 @@ def main():
             uid="h1",
             fpath=h1_path,
             build_pk_chain=False,
-            init_pos=[-0.2, -0.2, 1.0],
+            init_pos=[-0.2, -0.2, 1.05],
             use_usd_properties=False,
         )
     )
