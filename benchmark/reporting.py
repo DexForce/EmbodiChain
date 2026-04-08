@@ -95,9 +95,7 @@ def generate_markdown_report(
                 steps=_fmt(item.get("steps_to_success_threshold", float("nan"))),
                 std=_fmt(item.get("success_rate_std", float("nan"))),
                 success=_fmt(item.get("avg_success_rate", float("nan"))),
-                stable_success=_fmt(
-                    item.get("avg_success_rate_stable", float("nan"))
-                ),
+                stable_success=_fmt(item.get("avg_success_rate_stable", float("nan"))),
                 reward=_fmt(item.get("avg_final_reward", float("nan"))),
                 tasks=item.get("tasks_covered", 0),
             )
@@ -137,7 +135,9 @@ def generate_markdown_report(
             "",
         ]
     )
-    for task, task_results in _group_aggregate_results_by_task(aggregate_results).items():
+    for task, task_results in _group_aggregate_results_by_task(
+        aggregate_results
+    ).items():
         lines.extend(
             [
                 f"### {task}",
@@ -276,9 +276,7 @@ def generate_leaderboard_markdown(
                 steps=_fmt(item.get("steps_to_success_threshold", float("nan"))),
                 std=_fmt(item.get("success_rate_std", float("nan"))),
                 success=_fmt(item.get("avg_success_rate", float("nan"))),
-                stable_success=_fmt(
-                    item.get("avg_success_rate_stable", float("nan"))
-                ),
+                stable_success=_fmt(item.get("avg_success_rate_stable", float("nan"))),
                 reward=_fmt(item.get("avg_final_reward", float("nan"))),
                 tasks=item.get("tasks_covered", 0),
             )

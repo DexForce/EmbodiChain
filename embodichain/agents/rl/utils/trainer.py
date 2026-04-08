@@ -443,15 +443,15 @@ class Trainer:
 
         summary = {
             "global_step": float(self.global_step),
-            "eval/avg_reward": float(np.mean(episode_returns))
-            if episode_returns
-            else float("nan"),
-            "eval/avg_length": float(np.mean(episode_lengths))
-            if episode_lengths
-            else float("nan"),
-            "eval/success_rate": float(np.mean(episode_successes))
-            if episode_successes
-            else float("nan"),
+            "eval/avg_reward": (
+                float(np.mean(episode_returns)) if episode_returns else float("nan")
+            ),
+            "eval/avg_length": (
+                float(np.mean(episode_lengths)) if episode_lengths else float("nan")
+            ),
+            "eval/success_rate": (
+                float(np.mean(episode_successes)) if episode_successes else float("nan")
+            ),
         }
         for key, values in metric_values.items():
             if values:

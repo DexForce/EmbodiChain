@@ -25,16 +25,32 @@ def test_build_plot_artifacts_writes_svg_files(tmp_path):
             "task": "cart_pole",
             "algorithm": "ppo",
             "eval_history": [
-                {"global_step": 100.0, "eval/success_rate": 0.2, "eval/avg_reward": 1.0},
-                {"global_step": 200.0, "eval/success_rate": 0.8, "eval/avg_reward": 2.0},
+                {
+                    "global_step": 100.0,
+                    "eval/success_rate": 0.2,
+                    "eval/avg_reward": 1.0,
+                },
+                {
+                    "global_step": 200.0,
+                    "eval/success_rate": 0.8,
+                    "eval/avg_reward": 2.0,
+                },
             ],
         },
         {
             "task": "cart_pole",
             "algorithm": "grpo",
             "eval_history": [
-                {"global_step": 100.0, "eval/success_rate": 0.1, "eval/avg_reward": 0.5},
-                {"global_step": 200.0, "eval/success_rate": 0.6, "eval/avg_reward": 1.5},
+                {
+                    "global_step": 100.0,
+                    "eval/success_rate": 0.1,
+                    "eval/avg_reward": 0.5,
+                },
+                {
+                    "global_step": 200.0,
+                    "eval/success_rate": 0.6,
+                    "eval/avg_reward": 1.5,
+                },
             ],
         },
     ]

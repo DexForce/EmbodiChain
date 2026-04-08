@@ -83,7 +83,9 @@ def compute_steps_to_threshold_sustained(
 
     consecutive_hits = 0
     first_step_in_window: int | None = None
-    for step_value, metric_value in _iter_valid_threshold_points(eval_history, metric_key):
+    for step_value, metric_value in _iter_valid_threshold_points(
+        eval_history, metric_key
+    ):
         if metric_value >= threshold:
             consecutive_hits += 1
             if first_step_in_window is None:
@@ -132,7 +134,9 @@ def aggregate_runs(run_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "steps_to_success_threshold_first_hit",
         }
         for step_key in step_keys:
-            steps = [int(run[step_key]) for run in runs if isinstance(run.get(step_key), int)]
+            steps = [
+                int(run[step_key]) for run in runs if isinstance(run.get(step_key), int)
+            ]
             if steps:
                 summary[f"{step_key}_mean"] = mean(steps)
                 summary[f"{step_key}_std"] = pstdev(steps) if len(steps) > 1 else 0.0
@@ -206,19 +210,19 @@ def build_leaderboard(
             {
                 "algorithm": algorithm,
                 "score": score,
-                "steps_to_success_threshold": mean(steps_values)
-                if steps_values
-                else float("nan"),
-                "success_rate_std": pstdev(run_success_values)
-                if len(run_success_values) > 1
-                else 0.0,
-                "avg_success_rate": mean(success_values)
-                if success_values
-                else float("nan"),
+                "steps_to_success_threshold": (
+                    mean(steps_values) if steps_values else float("nan")
+                ),
+                "success_rate_std": (
+                    pstdev(run_success_values) if len(run_success_values) > 1 else 0.0
+                ),
+                "avg_success_rate": (
+                    mean(success_values) if success_values else float("nan")
+                ),
                 "avg_success_rate_stable": score,
-                "avg_final_reward": mean(reward_values)
-                if reward_values
-                else float("nan"),
+                "avg_final_reward": (
+                    mean(reward_values) if reward_values else float("nan")
+                ),
                 "tasks_covered": len(items),
                 "tasks": task_scores,
                 "tasks_raw": raw_task_scores,
@@ -227,9 +231,11 @@ def build_leaderboard(
 
     leaderboard.sort(
         key=lambda item: (
-            -(item["score"])
-            if isinstance(item["score"], float) and not isnan(item["score"])
-            else float("inf"),
+            (
+                -(item["score"])
+                if isinstance(item["score"], float) and not isnan(item["score"])
+                else float("inf")
+            ),
             item["algorithm"],
         )
     )

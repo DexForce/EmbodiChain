@@ -72,7 +72,9 @@ class BenchmarkRunner:
         cfg["trainer"]["enable_eval"] = train_eval_enabled
         if train_eval_enabled:
             cfg["trainer"]["eval_freq"] = int(self.protocol["evaluation_interval"])
-            cfg["trainer"]["num_eval_episodes"] = int(self.protocol["evaluation_episodes"])
+            cfg["trainer"]["num_eval_episodes"] = int(
+                self.protocol["evaluation_episodes"]
+            )
         cfg["trainer"]["iterations"] = int(self.protocol["iterations"])
         cfg["trainer"]["buffer_size"] = int(self.protocol["buffer_size"])
         cfg["trainer"]["num_envs"] = int(self.protocol["num_envs"])
@@ -95,7 +97,9 @@ class BenchmarkRunner:
         return self.output_root / "runs" / task_name / algorithm_name / f"seed_{seed}"
 
     @staticmethod
-    def _job_key(task_name: str, algorithm_name: str, seed: int) -> tuple[str, str, int]:
+    def _job_key(
+        task_name: str, algorithm_name: str, seed: int
+    ) -> tuple[str, str, int]:
         return (task_name, algorithm_name, int(seed))
 
     @staticmethod
@@ -161,9 +165,9 @@ class BenchmarkRunner:
         run_config = self._load_json_artifact(run_dir / "run_config.json")
         if run_config is None:
             return False
-        return self._protocol_from_run_config(run_config) == self._expected_protocol_for_job(
-            task_name, algorithm_name, seed
-        )
+        return self._protocol_from_run_config(
+            run_config
+        ) == self._expected_protocol_for_job(task_name, algorithm_name, seed)
 
     def _load_existing_training_record(
         self,
@@ -219,7 +223,9 @@ class BenchmarkRunner:
                 merged[key] = record
         return [
             merged[key]
-            for key in sorted(merged.keys(), key=lambda item: (item[0], item[1], item[2]))
+            for key in sorted(
+                merged.keys(), key=lambda item: (item[0], item[1], item[2])
+            )
         ]
 
     def run_training(self, skip_existing: bool = False) -> list[dict[str, Any]]:
@@ -233,9 +239,11 @@ class BenchmarkRunner:
             }
         for task_name, algorithm_name, seed in self._iter_jobs():
             run_dir = self._run_dir(task_name, algorithm_name, seed)
-            if skip_existing and self._job_key(
-                task_name, algorithm_name, seed
-            ) in existing_result_keys:
+            if (
+                skip_existing
+                and self._job_key(task_name, algorithm_name, seed)
+                in existing_result_keys
+            ):
                 continue
             if skip_existing:
                 existing_training = self._load_existing_training_record(

@@ -52,7 +52,9 @@ def resolve_device(device_str: str) -> torch.device:
     if device.type == "cuda":
         if not torch.cuda.is_available():
             raise ValueError("CUDA requested but no CUDA device is available.")
-        index = device.index if device.index is not None else torch.cuda.current_device()
+        index = (
+            device.index if device.index is not None else torch.cuda.current_device()
+        )
         if index < 0 or index >= torch.cuda.device_count():
             raise ValueError(f"CUDA device index {index} is out of range.")
         torch.cuda.set_device(index)
@@ -274,9 +276,9 @@ def train_with_config(
             use_wandb=False,
             eval_env=eval_env,
             event_cfg=_parse_event_cfg(events_dict.get("train", {})),
-            eval_event_cfg=_parse_event_cfg(events_dict.get("eval", {}))
-            if enable_eval
-            else {},
+            eval_event_cfg=(
+                _parse_event_cfg(events_dict.get("eval", {})) if enable_eval else {}
+            ),
             num_eval_episodes=int(trainer_cfg.get("num_eval_episodes", 5)),
         )
 
@@ -298,8 +300,8 @@ def train_with_config(
 
     peak_gpu_memory_mb = 0.0
     if device.type == "cuda":
-        peak_gpu_memory_mb = (
-            torch.cuda.max_memory_allocated(device=device) / (1024.0 * 1024.0)
+        peak_gpu_memory_mb = torch.cuda.max_memory_allocated(device=device) / (
+            1024.0 * 1024.0
         )
 
     summary.update(
@@ -347,7 +349,9 @@ def evaluate_checkpoint(
 
         target_episodes = int(num_episodes)
         completed = 0
-        cumulative_reward = torch.zeros(env.num_envs, dtype=torch.float32, device=device)
+        cumulative_reward = torch.zeros(
+            env.num_envs, dtype=torch.float32, device=device
+        )
         step_count = torch.zeros(env.num_envs, dtype=torch.int32, device=device)
 
         returns: list[float] = []
@@ -417,7 +421,9 @@ def evaluate_checkpoint(
         "success_rate": float(np.mean(successes)) if successes else float("nan"),
         "environment_fps": float(env_step_count / max(env_step_time, 1e-6)),
         "metrics": {
-            key: float(np.mean(values)) for key, values in metric_values.items() if values
+            key: float(np.mean(values))
+            for key, values in metric_values.items()
+            if values
         },
     }
 
