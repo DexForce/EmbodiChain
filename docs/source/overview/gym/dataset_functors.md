@@ -9,12 +9,22 @@ This page lists all available dataset functors that can be used with the Dataset
 
 ```{list-table} Dataset Recording Functors
 :header-rows: 1
-:widths: 30 70
+:widths: 25 75
 
 * - Functor Name
   - Description
-* - ``LeRobotRecorder``
+* - {class}`~datasets.LeRobotRecorder`
   - Records episodes in LeRobot dataset format. Handles observation-action pair recording, format conversion, and episode saving. Requires LeRobot package to be installed.
+
+    ```json
+    {"func": "LeRobotRecorder", "mode": "save",
+     "params": {"robot_meta": {"robot_type": "CobotMagic", "control_freq": 25},
+                "instruction": {"lang": "Pour water from bottle to cup"},
+                "extra": {"scene_type": "Commercial",
+                          "task_description": "Pour water",
+                          "data_type": "sim"},
+                "use_videos": true}}
+    ```
 ```
 
 ## LeRobotRecorder

@@ -172,7 +172,12 @@ def preview(env: gymnasium.Env) -> None:
     exit(0)
 
 
-if __name__ == "__main__":
+def cli():
+    """Command-line interface for environment runner.
+
+    Parses CLI arguments, builds the environment config, and launches
+    the data generation or preview workflow.
+    """
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
@@ -187,3 +192,7 @@ if __name__ == "__main__":
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 
     main(args, env, gym_config)
+
+
+if __name__ == "__main__":
+    cli()

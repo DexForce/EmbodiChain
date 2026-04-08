@@ -9,58 +9,112 @@ This page lists all available reward functors that can be used with the Reward M
 
 ```{list-table} Distance-Based Reward Functors
 :header-rows: 1
-:widths: 30 70
+:widths: 25 75
 
 * - Functor Name
   - Description
-* - ``distance_between_objects``
+* - {func}`~rewards.distance_between_objects`
   - Reward based on distance between two rigid objects. Supports either linear negative distance or exponential Gaussian-shaped reward. Higher when objects are closer.
-* - ``distance_to_target``
+
+    ```json
+    {"func": "distance_between_objects", "weight": 0.5,
+     "params": {"source_entity_cfg": {"uid": "bottle"},
+                "target_entity_cfg": {"uid": "cup"},
+                "exponential": true, "sigma": 0.2}}
+    ```
+* - {func}`~rewards.distance_to_target`
   - Reward based on absolute distance to a virtual target pose. Uses target pose stored in env by randomize_target_pose event. Can use exponential or linear reward, and supports XY-only distance.
-* - ``incremental_distance_to_target``
+
+    ```json
+    {"func": "distance_to_target", "weight": 1.0,
+     "params": {"entity_cfg": {"uid": "bottle"},
+                "target_pose_key": "goal_pose",
+                "exponential": true, "sigma": 0.3}}
+    ```
+* - {func}`~rewards.incremental_distance_to_target`
   - Incremental reward for progress toward a virtual target pose. Rewards getting closer compared to previous timestep. Uses tanh shaping and supports asymmetric weighting for approach vs. retreat.
+
+    ```json
+    {"func": "incremental_distance_to_target", "weight": 1.0,
+     "params": {"source_entity_cfg": {"uid": "bottle"},
+                "target_pose_key": "goal_pose",
+                "tanh_scale": 10.0, "positive_weight": 2.0,
+                "negative_weight": 0.5, "use_xy_only": true}}
+    ```
 ```
 
 ## Alignment Rewards
 
 ```{list-table} Alignment Reward Functors
 :header-rows: 1
-:widths: 30 70
+:widths: 25 75
 
 * - Functor Name
   - Description
-* - ``orientation_alignment``
+* - {func}`~rewards.orientation_alignment`
   - Reward rotational alignment between two rigid objects. Uses rotation matrix trace to measure alignment. Ranges from -1 to 1 (1.0 = perfect alignment).
+
+    ```json
+    {"func": "orientation_alignment", "weight": 0.5,
+     "params": {"source_entity_cfg": {"uid": "bottle"},
+                "target_entity_cfg": {"uid": "cup"}}}
+    ```
 ```
 
 ## Task-Specific Rewards
 
 ```{list-table} Task-Specific Reward Functors
 :header-rows: 1
-:widths: 30 70
+:widths: 25 75
 
 * - Functor Name
   - Description
-* - ``reaching_behind_object``
+* - {func}`~rewards.reaching_behind_object`
   - Reward for positioning end-effector behind object for pushing. Encourages reaching a position behind the object along the object-to-goal direction.
-* - ``success_reward``
+
+    ```json
+    {"func": "reaching_behind_object", "weight": 1.0,
+     "params": {"robot_uid": "CobotMagic", "part_name": "left_arm",
+                "object_cfg": {"uid": "bottle"},
+                "target_cfg": {"uid": "cup"}}}
+    ```
+* - {func}`~rewards.success_reward`
   - Sparse bonus reward when task succeeds. Reads success status from info['success'] which should be set by the environment.
+
+    ```json
+    {"func": "success_reward", "weight": 10.0, "params": {}}
+    ```
 ```
 
 ## Penalty Rewards
 
 ```{list-table} Penalty Reward Functors
 :header-rows: 1
-:widths: 30 70
+:widths: 25 75
 
 * - Functor Name
   - Description
-* - ``joint_velocity_penalty``
+* - {func}`~rewards.joint_velocity_penalty`
   - Penalize high joint velocities to encourage smooth motion. Computes L2 norm of joint velocities and returns negative value as penalty.
-* - ``action_smoothness_penalty``
+
+    ```json
+    {"func": "joint_velocity_penalty", "weight": 0.001,
+     "params": {"robot_uid": "CobotMagic", "part_name": "left_arm"}}
+    ```
+* - {func}`~rewards.action_smoothness_penalty`
   - Penalize large action changes between consecutive timesteps. Encourages smooth control commands. Reads previous action from env.episode_action_buffer.
-* - ``joint_limit_penalty``
+
+    ```json
+    {"func": "action_smoothness_penalty", "weight": 0.01, "params": {}}
+    ```
+* - {func}`~rewards.joint_limit_penalty`
   - Penalize robot joints that are close to their position limits. Prevents joints from reaching physical limits. Penalty increases as joints approach limits within a margin.
+
+    ```json
+    {"func": "joint_limit_penalty", "weight": 0.01,
+     "params": {"robot_uid": "CobotMagic", "part_name": "left_arm",
+                "margin": 0.1}}
+    ```
 ```
 
 ## Usage Example

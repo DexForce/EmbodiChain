@@ -1206,6 +1206,25 @@ def transform_points(
     return points_batch
 
 
+def transform_points_mat(
+    points: torch.Tensor, poses: torch.Tensor  # [P, 3]  # [B, 4, 4]
+) -> torch.Tensor:
+    """
+    Apply a batch of rigid transforms to a point cloud.
+
+    Args:
+        points: [P, 3] source point cloud.
+        poses: [B, 4, 4] batch of homogeneous transformation matrices.
+
+    Returns:
+        transformed: [B, P, 3] transformed point cloud for each pose.
+    """
+    R = poses[:, :3, :3]  # [B, 3, 3]
+    t = poses[:, :3, 3]  # [B, 3]
+    transformed = torch.einsum("bij, pj -> bpi", R, points) + t.unsqueeze(1)
+    return transformed
+
+
 """
 Projection operations.
 """
