@@ -31,7 +31,7 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
-    def setup_simulation(self, sim_device, renderer="legacy"):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
@@ -78,13 +78,13 @@ class CameraTest:
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Position data shape mismatch"
         assert data["mask"].shape == (NUM_ENVS, 480, 640), "Mask data shape mismatch"
 
@@ -145,34 +145,33 @@ class CameraTest:
 class TestCameraRaster(CameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cpu", "hybrid"
         )
 
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cuda","hybrid"
         )
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cpu", "hybrid"
         )
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cuda","hybrid"
         )
 
 
 if __name__ == "__main__":
     test = CameraTest()
     test.setup_simulation(
-        "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
-    )
+            "cpu", "hybrid")
     test.test_attach_to_parent()

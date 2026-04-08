@@ -43,7 +43,7 @@ class BaseUsdTest:
             headless=True,
             sim_device=sim_device,
             num_envs=NUM_ARENAS,
-            render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy"),
+            render_cfg=RenderCfg(renderer="hybrid"),
         )
         self.sim = SimulationManager(config)
 

@@ -21,7 +21,7 @@ import numpy as np
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.cfg import RobotCfg,RenderCfg
 from embodichain.data import get_data_path
 
 from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
@@ -130,7 +130,7 @@ class BaseRobotSolverTest:
 
     def setup_simulation(self, solver_type: str, device: str = "cpu"):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=device)
+        config = SimulationManagerCfg(headless=True, render_cfg=RenderCfg(renderer="hybrid") , sim_device=device)
         self.sim = SimulationManager(config)
 
         # Load robot URDF file
