@@ -1,6 +1,6 @@
 {   
     "id": "PourWater-v3",
-    "max_episodes": 10,
+    "max_episodes": 500,
     "max_episode_steps": 300,
     "env": {
         "events": {
@@ -203,59 +203,6 @@
                 "params": {
                     "joint_ids": [6, 13]
                 }
-            },
-            "bottle_pose": {
-                "func": "get_rigid_object_pose",
-                "mode": "add",
-                "name": "bottle_pose",
-                "params": {
-                    "entity_cfg": {"uid": "bottle"}
-                }
-            },
-            "cup_pose": {
-                "func": "get_rigid_object_pose",
-                "mode": "add",
-                "name": "cup_pose",
-                "params": {
-                    "entity_cfg": {"uid": "cup"}
-                }
-            },
-            "cam_high_semantic_mask_l": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_high/semantic_mask_l",
-                "params": {
-                    "entity_cfg": {"uid": "cam_high"},
-                    "foreground_uids": ["bottle", "cup"]
-                }
-            },
-            "cam_high_semantic_mask_r": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_high/semantic_mask_r",
-                "params": {
-                    "entity_cfg": {"uid": "cam_high"},
-                    "foreground_uids": ["bottle", "cup"],
-                    "is_right": true
-                }
-            },
-            "cam_left_semantic_mask": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_left_wrist/semantic_mask_l",
-                "params": {
-                    "entity_cfg": {"uid": "cam_left_wrist"},
-                    "foreground_uids": ["bottle", "cup"]
-                }
-            },
-            "cam_right_semantic_mask": {
-                "func": "compute_semantic_mask",
-                "mode": "add",
-                "name": "sensor/cam_right_wrist/semantic_mask_l",
-                "params": {
-                    "entity_cfg": {"uid": "cam_right_wrist"},
-                    "foreground_uids": ["bottle", "cup"]
-                }
             }
         },
         "dataset": {
@@ -293,8 +240,7 @@
             "uid": "cam_high",
             "width": 960,
             "height": 540,
-            "enable_mask": true,
-            "enable_depth": true,
+            "enable_depth": false,
             "left_to_right_pos": [0.059684025824163614, 0, 0],
             "intrinsics": [453.851402686215, 453.8347628855552, 469.827725021235, 258.6656181845155],
             "intrinsics_right": [453.4536601653505, 453.3306024582175, 499.13697412367776, 297.7176248477935],
@@ -309,7 +255,6 @@
             "uid": "cam_right_wrist",
             "width": 640,
             "height": 480,
-            "enable_mask": true,
             "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
             "extrinsics": {
                 "parent": "right_link6",
@@ -322,7 +267,6 @@
             "uid": "cam_left_wrist",
             "width": 640,
             "height": 480,
-            "enable_mask": true,
             "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
             "extrinsics": {
                 "parent": "left_link6",
