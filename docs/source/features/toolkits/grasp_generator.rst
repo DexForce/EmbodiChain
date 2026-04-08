@@ -24,7 +24,7 @@ The Code Explained
 Configuring the simulation
 --------------------------
 
-Command-line arguments are parsed with ``argparse`` to select the number of parallel environments, the compute device, and optional rendering features such as ray tracing and headless mode.
+Command-line arguments are parsed with ``argparse`` to select the number of parallel environments, the compute device, and optional rendering features such as renderer backend and headless mode.
 
 .. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
    :language: python
@@ -185,7 +185,7 @@ You can customize the run with additional arguments:
 
 .. code-block:: bash
 
-   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --enable_rt --headless
+   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --renderer <legacy|hybrid|fast-rt> --headless
 
 After confirming the grasp region in the browser, the script will compute a grasp pose, print the elapsed time, and then wait for you to press **Enter** before executing the full grasp trajectory in the simulation. Press **Enter** again to exit once the motion is complete.
 

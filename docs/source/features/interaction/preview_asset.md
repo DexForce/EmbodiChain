@@ -75,7 +75,7 @@ asset.set_root_pose(pos=[0, 0, 1.0], rot=[0, 0, 0])
 | `--fix_base`         | Fix the base of articulations                                      | `True`               |
 | `--sim_device`       | Simulation device                                                  | `cpu`                |
 | `--headless`         | Run without rendering window                                       | `False`              |
-| `--enable_rt`        | Enable ray tracing                                                 | `False`              |
+| `--renderer`         | Renderer backend: `legacy`, `hybrid`, or `fast-rt`                 | `hybrid`             |
 | `--preview`          | Enter interactive embed mode after loading                         | `False`              |
 
 ## Examples
