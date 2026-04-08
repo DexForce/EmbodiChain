@@ -67,8 +67,8 @@ def build_sim_cfg(args: argparse.Namespace):
     )
 
 
-def load_asset(sim: SimulationManager, args: argparse.Namespace):
-    """Load the asset into the simulation.
+def load_assets(sim: SimulationManager, args: argparse.Namespace):
+    """Load one or more assets into the simulation.
 
     If ``--asset_type`` is not specified and the file is USD, the script will
     inspect the USD stage for articulation roots to decide between articulation
@@ -79,7 +79,7 @@ def load_asset(sim: SimulationManager, args: argparse.Namespace):
         args: Parsed CLI arguments.
 
     Returns:
-        The loaded asset object (RigidObject or Articulation).
+        list: Loaded asset objects (RigidObject or Articulation).
     """
     from embodichain.lab.sim.cfg import (
         ArticulationCfg,
@@ -95,57 +95,82 @@ def load_asset(sim: SimulationManager, args: argparse.Namespace):
     )
     sim.add_light(light_cfg)
 
-    asset_path = args.asset_path
-    asset_type = args.asset_type
-    # check suffix for asset, if is urdf, then treat as articulation, otherwise treat as rigid object
-    if os.path.splitext(asset_path)[1].lower() == ".urdf":
-        log_info(
-            "URDF file detected. Setting asset type to 'articulation' automatically.",
-            color="green",
-        )
-        asset_type = "articulation"
-
-    uid = args.uid
+    asset_paths = args.asset_path
     init_pos = tuple(args.init_pos)
     init_rot = tuple(args.init_rot)
+    spacing = float(args.asset_spacing)
 
-    # --- load the asset --------------------------------------------------
-    if asset_type == "articulation":
-        log_info("Loading asset as articulation ...", color="green")
-        cfg = ArticulationCfg(
-            uid=uid,
-            fpath=asset_path,
-            init_pos=init_pos,
-            init_rot=init_rot,
-            fix_base=args.fix_base,
-            use_usd_properties=args.use_usd_properties,
+    loaded_assets = []
+    for idx, asset_path in enumerate(asset_paths):
+        asset_type = args.asset_type
+        # URDF is always loaded as articulation.
+        if os.path.splitext(asset_path)[1].lower() == ".urdf":
+            log_info(
+                f"URDF file detected for {asset_path}. "
+                "Setting asset type to 'articulation' automatically.",
+                color="green",
+            )
+            asset_type = "articulation"
+
+        if args.uid is None:
+            base_uid = os.path.splitext(os.path.basename(asset_path))[0]
+        else:
+            base_uid = args.uid
+        uid = base_uid if len(asset_paths) == 1 else f"{base_uid}_{idx}"
+
+        asset_init_pos = (
+            init_pos[0] + idx * spacing,
+            init_pos[1],
+            init_pos[2],
         )
-        return sim.add_articulation(cfg)
-    else:
-        log_info("Loading asset as rigid object ...", color="green")
-        cfg = RigidObjectCfg(
-            uid=uid,
-            shape=MeshCfg(fpath=asset_path),
-            init_pos=init_pos,
-            init_rot=init_rot,
-            body_type=args.body_type,
-            use_usd_properties=args.use_usd_properties,
-        )
-        return sim.add_rigid_object(cfg)
+
+        # --- load the asset --------------------------------------------------
+        if asset_type == "articulation":
+            log_info(
+                f"Loading asset as articulation: {asset_path} "
+                f"(uid={uid}, pos={asset_init_pos}) ...",
+                color="green",
+            )
+            cfg = ArticulationCfg(
+                uid=uid,
+                fpath=asset_path,
+                init_pos=asset_init_pos,
+                init_rot=init_rot,
+                fix_base=args.fix_base,
+                use_usd_properties=args.use_usd_properties,
+            )
+            loaded_assets.append(sim.add_articulation(cfg))
+        else:
+            log_info(
+                f"Loading asset as rigid object: {asset_path} "
+                f"(uid={uid}, pos={asset_init_pos}) ...",
+                color="green",
+            )
+            cfg = RigidObjectCfg(
+                uid=uid,
+                shape=MeshCfg(fpath=asset_path),
+                init_pos=asset_init_pos,
+                init_rot=init_rot,
+                body_type=args.body_type,
+                use_usd_properties=args.use_usd_properties,
+            )
+            loaded_assets.append(sim.add_rigid_object(cfg))
+
+    return loaded_assets
 
 
-def preview(sim: SimulationManager, asset) -> None:
+def preview(sim: SimulationManager, assets) -> None:
     """Enter interactive preview mode.
 
     Provides a simple REPL:
 
-    * ``p`` — enter an IPython embed session with ``sim`` and ``asset`` in scope.
+    * ``p`` — enter an IPython embed session with ``sim`` and ``assets`` in scope.
     * ``s <N>`` — step the simulation *N* times (default 10).
     * ``q`` — quit.
 
     Args:
         sim: The simulation manager instance.
-        asset: The loaded asset (RigidObject or Articulation).
+        assets: Loaded assets (list of RigidObject/Articulation).
     """
     print("Press `p` to enter embed mode to interact with the asset.")
     print("Press `s <N>` to step the simulation N times (default 10).")
@@ -189,11 +214,11 @@ def main(args: argparse.Namespace) -> None:
     sim = SimulationManager(sim_cfg)
 
     try:
-        asset = load_asset(sim, args)
-        log_info(f"Asset loaded successfully: {type(asset).__name__}", color="green")
+        assets = load_assets(sim, args)
+        log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
 
         if args.preview:
-            preview(sim, asset)
+            preview(sim, assets)
         elif not args.headless:
             # Keep window open when not headless and not in preview mode
             log_info("Window open. Press Ctrl+C to exit.", color="green")
@@ -219,8 +244,9 @@ def cli():
     parser.add_argument(
         "--asset_path",
         type=str,
+        nargs="+",
         required=True,
-        help="Path to the asset file (.usd/.usda/.usdc/.obj/.stl/.glb).",
+        help="Path(s) to asset file(s) (.usd/.usda/.usdc/.obj/.stl/.glb/.urdf).",
     )
     parser.add_argument(
         "--asset_type",
@@ -233,7 +259,16 @@ def cli():
         "--uid",
         type=str,
         default=None,
-        help="Unique identifier for the asset in the scene. Derived from filename if not specified.",
+        help=(
+            "Base unique identifier for assets in the scene. If multiple assets are "
+            "provided, suffix '_<index>' is appended automatically."
+        ),
+    )
+    parser.add_argument(
+        "--asset_spacing",
+        type=float,
+        default=1.0,
+        help="Relative spacing in meters between assets along +X axis (default: 1.0).",
     )
     parser.add_argument(
         "--init_pos",
@@ -296,10 +331,6 @@ def cli():
     )
 
     args = parser.parse_args()
-
-    # Derive uid from filename if not specified
-    if args.uid is None:
-        args.uid = os.path.splitext(os.path.basename(args.asset_path))[0]
 
     main(args)
 
