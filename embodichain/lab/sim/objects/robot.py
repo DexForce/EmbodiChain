@@ -498,7 +498,8 @@ class Robot(Articulation):
                 f"Joint positions shape mismatch. Expected {solver.dof} joints, got {qpos.shape[1]}."
             )
 
-        result_matrix = solver.get_fk(qpos=qpos)
+        qpos_ = qpos.to(self.device)
+        result_matrix = solver.get_fk(qpos=qpos_)
 
         base_pose = self.get_link_pose(
             link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
@@ -633,8 +634,9 @@ class Robot(Articulation):
                 f"Joint positions shape mismatch. Expected {solver.dof} joints, got {qpos.shape[1]}."
             )
 
-        n_batch = qpos.shape[1]
-        qpos_batch = qpos.reshape(-1, solver.dof)
+        qpos_ = qpos.to(self.device)
+        n_batch = qpos_.shape[1]
+        qpos_batch = qpos_.reshape(-1, solver.dof)
         xpos_batch = solver.get_fk(qpos=qpos_batch)
 
         # get xpos from link root
