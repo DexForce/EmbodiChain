@@ -235,6 +235,44 @@ class BaseRigidObjectTest:
             duck_ang_vel, ang_vel
         ), f"Angular velocity not set correctly: expected {ang_vel}, got {duck_ang_vel}"
 
+    def test_get_acceleration(self):
+        """Test that lin_acc, ang_acc, and acc return correct shapes and values."""
+
+        # Apply a force to generate non-zero acceleration
+        force = (
+            torch.tensor([10.0, 0.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        self.duck.add_force_torque(force=force)
+        self.sim.update(0.01)
+
+        # Read back accelerations
+        duck_lin_acc = self.duck.body_data.lin_acc
+        duck_ang_acc = self.duck.body_data.ang_acc
+        duck_acc = self.duck.body_data.acc
+
+        assert duck_lin_acc.shape == (
+            NUM_ARENAS,
+            3,
+        ), f"Linear acceleration shape mismatch: expected ({NUM_ARENAS}, 3), got {duck_lin_acc.shape}"
+        assert duck_ang_acc.shape == (
+            NUM_ARENAS,
+            3,
+        ), f"Angular acceleration shape mismatch: expected ({NUM_ARENAS}, 3), got {duck_ang_acc.shape}"
+        assert duck_acc.shape == (
+            NUM_ARENAS,
+            6,
+        ), f"Concatenated acceleration shape mismatch: expected ({NUM_ARENAS}, 6), got {duck_acc.shape}"
+
+        # Verify concatenated acceleration matches individual components
+        assert torch.allclose(
+            duck_acc[:, :3], duck_lin_acc
+        ), "First 3 columns of acc should match lin_acc"
+        assert torch.allclose(
+            duck_acc[:, 3:], duck_ang_acc
+        ), "Last 3 columns of acc should match ang_acc"
+
     def test_set_visual_material(self):
         """Test that set_material correctly assigns the material to the duck."""
 
