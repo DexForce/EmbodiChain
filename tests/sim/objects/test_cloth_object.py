@@ -67,8 +67,8 @@ class BaseSoftObjectTest:
             height=1080,
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-            sim_device="cuda",
-            enable_rt=False,  # Enable ray tracing for better visuals
+            sim_device="cuda", 
+            #enable_rt=False,  # Enable ray tracing for better visuals
             num_envs=4,
             arena_space=3.0,
         )

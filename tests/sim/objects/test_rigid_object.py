@@ -29,6 +29,11 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
 
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    RigidObjectCfg
+)
+
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 CHAIR_PATH = "Chair/chair.glb"
@@ -40,7 +45,7 @@ class BaseRigidObjectTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(
+        config = SimulationManagerCfg(render_cfg=RenderCfg(renderer="hybrid"),
             headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
         )
         self.sim = SimulationManager(config)

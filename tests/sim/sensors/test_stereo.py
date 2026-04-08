@@ -25,7 +25,7 @@ NUM_ENVS = 4
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device, renderer="legacy"):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
@@ -72,13 +72,13 @@ class StereoCameraTest:
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Position data shape mismatch"
         assert data["mask"].shape == (NUM_ENVS, 480, 640, 1), "Mask data shape mismatch"
         assert data["disparity"].shape == (
@@ -148,26 +148,26 @@ class StereoCameraTest:
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cpu", "hybrid"
         )
 
 
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cuda", "hybrid"
         )
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cpu", "hybrid"
         )
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cuda", "hybrid"
         )

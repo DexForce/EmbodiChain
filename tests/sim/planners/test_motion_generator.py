@@ -33,7 +33,9 @@ from embodichain.lab.sim.planners import (
     MoveType,
     MovePart,
 )
-
+from embodichain.lab.sim.cfg import (
+    RenderCfg
+    )
 
 def to_numpy(tensor):
     if isinstance(tensor, torch.Tensor):
@@ -47,7 +49,7 @@ def to_numpy(tensor):
 class BaseTestMotionGenerator(object):
     @classmethod
     def setup_class(cls):
-        cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.config = SimulationManagerCfg(headless=True, render_cfg= RenderCfg(renderer="hybrid"),sim_device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
         cls.robot_sim.set_manual_update(False)
 

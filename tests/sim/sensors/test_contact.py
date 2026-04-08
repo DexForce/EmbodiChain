@@ -39,7 +39,7 @@ NUM_ENVS = 4
 
 
 class ContactTest:
-    def setup_simulation(self, sim_device, renderer="legacy"):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         sim_cfg = SimulationManagerCfg(
             width=1920,
             height=1080,
@@ -250,28 +250,28 @@ class ContactTest:
 class TestContactRaster(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cpu", "hybrid"
         )
 
 
 class TestContactRasterCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cuda", "hybrid"
         )
 
 
 class TestContactFastRT(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cpu", "hybrid"
         )
 
 
 class TestContactFastRTCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cuda", "hybrid"
         )
 
 
@@ -307,7 +307,5 @@ def test_contact_sensor_from_dict():
 
 if __name__ == "__main__":
     test = ContactTest()
-    test.setup_simulation(
-        "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
-    )
+    test.setup_simulation("cuda", "hybrid")
     test.test_fetch_contact()

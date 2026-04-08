@@ -17,12 +17,14 @@ from embodichain.lab.sim.planners.toppra_planner import (
 from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
-
+from embodichain.lab.sim.cfg import (
+    RenderCfg
+    )
 
 class TestToppraPlanner:
     @classmethod
     def setup_class(cls):
-        cls.sim_config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.sim_config = SimulationManagerCfg(headless=True, render_cfg=RenderCfg(renderer="hybrid"), sim_device="cpu")
         cls.sim = SimulationManager(cls.sim_config)
 
         cfg_dict = {
