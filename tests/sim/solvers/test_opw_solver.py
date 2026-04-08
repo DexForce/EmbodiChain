@@ -67,7 +67,7 @@ class BaseSolverTest:
     sim = None  # Define as a class attribute
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, render_cfg=RenderCfg(renderer="hybrid"), sim_device=sim_device)
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
         self.sim = SimulationManager(config)
         self.sim.set_manual_update(False)
 

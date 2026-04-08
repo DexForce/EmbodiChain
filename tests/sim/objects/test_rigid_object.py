@@ -45,7 +45,7 @@ class BaseRigidObjectTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(render_cfg=RenderCfg(renderer="hybrid"),
+        config = SimulationManagerCfg(
             headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
         )
         self.sim = SimulationManager(config)

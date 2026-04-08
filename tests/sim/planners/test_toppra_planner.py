@@ -24,7 +24,7 @@ from embodichain.lab.sim.cfg import (
 class TestToppraPlanner:
     @classmethod
     def setup_class(cls):
-        cls.sim_config = SimulationManagerCfg(headless=True, render_cfg=RenderCfg(renderer="hybrid"), sim_device="cpu")
+        cls.sim_config = SimulationManagerCfg(headless=True, sim_device="cpu")
         cls.sim = SimulationManager(cls.sim_config)
 
         cfg_dict = {

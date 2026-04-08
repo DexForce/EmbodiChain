@@ -49,7 +49,7 @@ def to_numpy(tensor):
 class BaseTestMotionGenerator(object):
     @classmethod
     def setup_class(cls):
-        cls.config = SimulationManagerCfg(headless=True, render_cfg= RenderCfg(renderer="hybrid"),sim_device="cpu")
+        cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
         cls.robot_sim.set_manual_update(False)
 

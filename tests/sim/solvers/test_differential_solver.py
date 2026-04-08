@@ -31,7 +31,7 @@ class BaseSolverTest:
 
     def setup_simulation(self, solver_type: str):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True,  sim_device="cpu", render_cfg=RenderCfg(renderer="hybrid"))
+        config = SimulationManagerCfg(headless=True,  sim_device="cpu")
         self.sim = SimulationManager(config)
 
         # Load robot URDF file
