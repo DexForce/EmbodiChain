@@ -120,7 +120,7 @@ METADATA = {
 class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device, renderer="legacy"):
+    def setup_simulation(self, sim_device):
         cfg: EmbodiedEnvCfg = config_to_cfg(
             METADATA, manager_modules=DEFAULT_MANAGER_MODULES
         )
@@ -128,7 +128,6 @@ class EmbodiedEnvTest:
         cfg.sim_cfg = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
-            render_cfg=RenderCfg(renderer=renderer),
         )
 
         self.env = gym.make(id=METADATA["id"], cfg=cfg)
