@@ -465,7 +465,6 @@ class LeRobotRecorder(Functor):
             if functor_cfg.func != get_object_uid:
                 continue
 
-            obs_key = functor_cfg.name
             asset_uid = functor_cfg.params["entity_cfg"].uid
             asset = self._env.sim.get_asset(asset_uid)
 
@@ -479,7 +478,7 @@ class LeRobotRecorder(Functor):
             else:
                 continue
 
-            result[f"{asset_uid}.shape_to_user_ids"] = json.dumps(mapping)
+            result[f"shape_to_user_ids/{asset_uid}"] = json.dumps(mapping)
 
         return result
 
