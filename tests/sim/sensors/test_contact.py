@@ -247,28 +247,28 @@ class ContactTest:
 class TestContactRaster(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", "hybrid"
+            "cpu"
         )
 
 
 class TestContactRasterCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", "hybrid"
+            "cuda"
         )
 
 
 class TestContactFastRT(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", "hybrid"
+            "cpu"
         )
 
 
 class TestContactFastRTCuda(ContactTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", "hybrid"
+            "cuda"
         )
 
 
@@ -303,6 +303,6 @@ def test_contact_sensor_from_dict():
 
 
 if __name__ == "__main__":
-    test = ContactTest()
-    test.setup_simulation("cuda", "hybrid")
+    test = TestContactRasterCuda()
+    test.setup_simulation("cuda")
     test.test_fetch_contact()

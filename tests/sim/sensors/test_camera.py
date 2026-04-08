@@ -143,34 +143,25 @@ class CameraTest:
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", "hybrid"
-        )
+        self.setup_simulation("cpu")
 
 
-class TestCameraRaster(CameraTest):
+class TestCameraRasterCUDA(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda","hybrid"
-        )
+        self.setup_simulation("cuda")
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", "hybrid"
-        )
+        self.setup_simulation("cpu")
 
 
-class TestCameraFastRT(CameraTest):
+class TestCameraFastRTCUDA(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda","hybrid"
-        )
+        self.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
     test = CameraTest()
-    test.setup_simulation(
-            "cpu", "hybrid")
+    test.setup_simulation("cpu")
     test.test_attach_to_parent()
