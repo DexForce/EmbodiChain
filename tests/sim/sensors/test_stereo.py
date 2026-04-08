@@ -146,27 +146,19 @@ class StereoCameraTest:
 
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", "hybrid"
-        )
+        self.setup_simulation("cpu")
 
 
-class TestStereoCameraRaster(StereoCameraTest):
+class TestStereoCameraRasterCUDA(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda", "hybrid"
-        )
+        self.setup_simulation("cuda")
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", "hybrid"
-        )
+        self.setup_simulation("cpu")
 
 
-class TestStereoCameraFastRT(StereoCameraTest):
+class TestStereoCameraFastRTCUDA(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda", "hybrid"
-        )
+        self.setup_simulation("cuda")

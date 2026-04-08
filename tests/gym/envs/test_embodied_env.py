@@ -168,7 +168,7 @@ class EmbodiedEnvTest:
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cpu"
         )
 
 
@@ -176,7 +176,7 @@ class TestCPU(EmbodiedEnvTest):
 class TestCPURT(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
+            "cpu"
         )
 
 
@@ -184,5 +184,5 @@ class TestCPURT(EmbodiedEnvTest):
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
+            "cuda"
         )
