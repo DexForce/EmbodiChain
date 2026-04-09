@@ -33,6 +33,7 @@ from embodichain.lab.sim.planners import (
     MoveType,
     MovePart,
 )
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 def to_numpy(tensor):

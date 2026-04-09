@@ -120,7 +120,7 @@ METADATA = {
 class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device, renderer="legacy"):
+    def setup_simulation(self, sim_device):
         cfg: EmbodiedEnvCfg = config_to_cfg(
             METADATA, manager_modules=DEFAULT_MANAGER_MODULES
         )
@@ -128,7 +128,6 @@ class EmbodiedEnvTest:
         cfg.sim_cfg = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
-            render_cfg=RenderCfg(renderer=renderer),
         )
 
         self.env = gym.make(id=METADATA["id"], cfg=cfg)
@@ -168,22 +167,16 @@ class EmbodiedEnvTest:
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
-        )
+        self.setup_simulation("cpu")
 
 
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestCPURT(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
-        )
+        self.setup_simulation("cpu")
 
 
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
-        )
+        self.setup_simulation("cuda")

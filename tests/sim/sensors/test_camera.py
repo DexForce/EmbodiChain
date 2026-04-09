@@ -31,12 +31,11 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
-    def setup_simulation(self, sim_device, renderer="legacy"):
+    def setup_simulation(self, sim_device):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
-            render_cfg=RenderCfg(renderer=renderer),
             num_envs=NUM_ENVS,
         )
         self.sim = SimulationManager(config)
@@ -78,13 +77,13 @@ class CameraTest:
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Position data shape mismatch"
         assert data["mask"].shape == (NUM_ENVS, 480, 640), "Mask data shape mismatch"
 
@@ -144,35 +143,25 @@ class CameraTest:
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
-        )
+        self.setup_simulation("cpu")
 
 
-class TestCameraRaster(CameraTest):
+class TestCameraRasterCUDA(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
-        )
+        self.setup_simulation("cuda")
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cpu", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
-        )
+        self.setup_simulation("cpu")
 
 
-class TestCameraFastRT(CameraTest):
+class TestCameraFastRTCUDA(CameraTest):
     def setup_method(self):
-        self.setup_simulation(
-            "cuda", render_cfg=RenderCfg(renderer="fast-rt" if True else "legacy")
-        )
+        self.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
     test = CameraTest()
-    test.setup_simulation(
-        "cpu", render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy")
-    )
+    test.setup_simulation("cpu")
     test.test_attach_to_parent()

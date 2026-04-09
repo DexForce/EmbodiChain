@@ -17,6 +17,7 @@ from embodichain.lab.sim.planners.toppra_planner import (
 from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 class TestToppraPlanner:
