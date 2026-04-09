@@ -573,6 +573,9 @@ class Articulation(BatchEntity):
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
+        if device.type == "cuda":
+            self._world.update(0.001)
+
         self._data = ArticulationData(entities=entities, ps=self._ps, device=device)
 
         self.cfg: ArticulationCfg
