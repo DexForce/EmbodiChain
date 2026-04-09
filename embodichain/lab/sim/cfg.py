@@ -242,7 +242,7 @@ class RigidBodyAttributesCfg:
     contact_offset: float = 0.002
     """Contact offset for collision detection."""
 
-    rest_offset: float = 0.001
+    rest_offset: float = 0.0
     """Rest offset for collision detection."""
 
     enable_collision: bool = True
