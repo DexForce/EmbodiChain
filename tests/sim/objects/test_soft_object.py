@@ -40,9 +40,6 @@ class BaseSoftObjectTest:
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device="cuda",
-            render_cfg=RenderCfg(
-                renderer="fast-rt" if False else "legacy"
-            ),  # Enable ray tracing for better visuals
             num_envs=4,
             arena_space=3.0,
         )

@@ -29,6 +29,8 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
 
+from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg
+
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 CHAIR_PATH = "Chair/chair.glb"
