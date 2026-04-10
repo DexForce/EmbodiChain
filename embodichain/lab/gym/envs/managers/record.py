@@ -253,8 +253,7 @@ class record_camera_data_async(record_camera_data):
 
 
 class record_viewer_window_hotkey(Functor):
-    """Register the ``r`` hotkey for recording the live viewer (see :meth:`SimulationManager.enable_window_record_hotkey`).
-    """
+    """Register the ``r`` hotkey for recording the live viewer (see :meth:`SimulationManager.enable_window_record_hotkey`)."""
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
@@ -323,5 +322,4 @@ class validation_cameras(Functor):
             camera.update()
             data = camera.get_data()
             camera_data[f"valid_rgb_{i}"] = data["color"]
-
         return camera_data
