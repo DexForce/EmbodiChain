@@ -1,0 +1,957 @@
+{
+  "task": "cart_pole",
+  "env_id": "CartPoleRL",
+  "algorithm": "grpo",
+  "seed": 1,
+  "suite": "default",
+  "protocol": {
+    "device": "cuda:0",
+    "headless": true,
+    "iterations": 100,
+    "buffer_size": 1024,
+    "num_envs": 64,
+    "num_eval_envs": 16,
+    "evaluation_interval": 200,
+    "evaluation_episodes": 20,
+    "threshold_sustain_count": 3,
+    "final_eval_window": 3,
+    "save_interval": 200
+  },
+  "train_steps": 6553600,
+  "training_fps": 5377.618228550231,
+  "peak_gpu_memory_mb": 80.76025390625,
+  "checkpoint_path": "benchmark/reports/runs/cart_pole/grpo/seed_1/checkpoints/cart_pole_grpo_seed1_step_6553600.pt",
+  "output_dir": "benchmark/reports/runs/cart_pole/grpo/seed_1",
+  "eval_history": [
+    {
+      "global_step": 1638400.0,
+      "eval/avg_reward": 32.77996826171875,
+      "eval/avg_length": 81.0,
+      "eval/success_rate": 0.0,
+      "eval/metrics/distance_to_goal": 1.5972105264663696
+    },
+    {
+      "global_step": 3276800.0,
+      "eval/avg_reward": 80.1270980834961,
+      "eval/avg_length": 129.0,
+      "eval/success_rate": 0.0,
+      "eval/metrics/distance_to_goal": 1.6320079565048218
+    },
+    {
+      "global_step": 4915200.0,
+      "eval/avg_reward": 274.9806213378906,
+      "eval/avg_length": 329.0,
+      "eval/success_rate": 0.0,
+      "eval/metrics/distance_to_goal": 1.6873254776000977
+    },
+    {
+      "global_step": 6553600.0,
+      "eval/avg_reward": 488.2957763671875,
+      "eval/avg_length": 500.0,
+      "eval/success_rate": 0.0,
+      "eval/metrics/distance_to_goal": 0.02203070931136608
+    }
+  ],
+  "train_history": [
+    {
+      "global_step": 65536.0,
+      "charts/SPS": 5131.58460880293,
+      "charts/episode_reward_avg_100": -16.44010716021061,
+      "charts/episode_length_avg_100": 17.89,
+      "train/actor_loss": -0.011408719353410682,
+      "train/entropy": 2.8360785274129166,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 131072.0,
+      "charts/SPS": 5337.574588726145,
+      "charts/episode_reward_avg_100": -16.935276557803153,
+      "charts/episode_length_avg_100": 20.73,
+      "train/actor_loss": -0.01340377057922439,
+      "train/entropy": 2.8329060297776105,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 196608.0,
+      "charts/SPS": 5414.71377616461,
+      "charts/episode_reward_avg_100": -14.25843430519104,
+      "charts/episode_length_avg_100": 18.79,
+      "train/actor_loss": -0.010445355805603409,
+      "train/entropy": 2.828817759336983,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 262144.0,
+      "charts/SPS": 5421.993924136934,
+      "charts/episode_reward_avg_100": -12.939429217576981,
+      "charts/episode_length_avg_100": 25.81,
+      "train/actor_loss": -0.009118875420085402,
+      "train/entropy": 2.824857415303792,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 327680.0,
+      "charts/SPS": 5445.532717315961,
+      "charts/episode_reward_avg_100": -12.681239598989487,
+      "charts/episode_length_avg_100": 20.27,
+      "train/actor_loss": -0.009449834212240589,
+      "train/entropy": 2.821287401915645,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 393216.0,
+      "charts/SPS": 5432.184406990386,
+      "charts/episode_reward_avg_100": -12.567122002243996,
+      "charts/episode_length_avg_100": 26.06,
+      "train/actor_loss": -0.007425555409606807,
+      "train/entropy": 2.8183822770728386,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 458752.0,
+      "charts/SPS": 5443.027094179433,
+      "charts/episode_reward_avg_100": -12.456060481071471,
+      "charts/episode_length_avg_100": 22.86,
+      "train/actor_loss": -0.003448331727437817,
+      "train/entropy": 2.820330927622994,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 524288.0,
+      "charts/SPS": 5448.804956531435,
+      "charts/episode_reward_avg_100": -13.689633660316467,
+      "charts/episode_length_avg_100": 14.23,
+      "train/actor_loss": -0.0013538518798298389,
+      "train/entropy": 2.8196219240620293,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 589824.0,
+      "charts/SPS": 5456.229624465617,
+      "charts/episode_reward_avg_100": -12.691436577439308,
+      "charts/episode_length_avg_100": 28.11,
+      "train/actor_loss": -0.0072511360559607205,
+      "train/entropy": 2.8143952368999874,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 655360.0,
+      "charts/SPS": 5478.159941657631,
+      "charts/episode_reward_avg_100": -12.943310248851777,
+      "charts/episode_length_avg_100": 29.37,
+      "train/actor_loss": -0.004808836180500051,
+      "train/entropy": 2.8113611626582715,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 720896.0,
+      "charts/SPS": 5499.095446006175,
+      "charts/episode_reward_avg_100": -12.325527221560478,
+      "charts/episode_length_avg_100": 23.88,
+      "train/actor_loss": -0.005858221107076819,
+      "train/entropy": 2.8103130358081567,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 786432.0,
+      "charts/SPS": 5514.460170690807,
+      "charts/episode_reward_avg_100": -11.265647708177566,
+      "charts/episode_length_avg_100": 25.91,
+      "train/actor_loss": -0.004457512107807496,
+      "train/entropy": 2.8100793330805827,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 851968.0,
+      "charts/SPS": 5523.657753183256,
+      "charts/episode_reward_avg_100": -10.605412143468858,
+      "charts/episode_length_avg_100": 32.34,
+      "train/actor_loss": -0.004265404730443328,
+      "train/entropy": 2.8076927913343095,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 917504.0,
+      "charts/SPS": 5522.878786574888,
+      "charts/episode_reward_avg_100": -10.469205976724625,
+      "charts/episode_length_avg_100": 20.78,
+      "train/actor_loss": -0.0028446760162529824,
+      "train/entropy": 2.8006705859292174,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 983040.0,
+      "charts/SPS": 5523.685066134026,
+      "charts/episode_reward_avg_100": -9.038317834734917,
+      "charts/episode_length_avg_100": 30.15,
+      "train/actor_loss": -0.003760876716472727,
+      "train/entropy": 2.794671726546344,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1048576.0,
+      "charts/SPS": 5535.2710963472555,
+      "charts/episode_reward_avg_100": -6.182826624512672,
+      "charts/episode_length_avg_100": 34.5,
+      "train/actor_loss": -0.004850032678296461,
+      "train/entropy": 2.7954013593791585,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1114112.0,
+      "charts/SPS": 5548.101546309405,
+      "charts/episode_reward_avg_100": -5.619103997349739,
+      "charts/episode_length_avg_100": 35.19,
+      "train/actor_loss": -0.0034082020604576475,
+      "train/entropy": 2.797861688603907,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1179648.0,
+      "charts/SPS": 5557.59612111379,
+      "charts/episode_reward_avg_100": -10.255390276312829,
+      "charts/episode_length_avg_100": 24.83,
+      "train/actor_loss": -0.002845600669130864,
+      "train/entropy": 2.79663416222855,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1245184.0,
+      "charts/SPS": 5572.384695405377,
+      "charts/episode_reward_avg_100": -6.93343151152134,
+      "charts/episode_length_avg_100": 28.47,
+      "train/actor_loss": -0.003427766719969086,
+      "train/entropy": 2.7936851772360645,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1310720.0,
+      "charts/SPS": 5583.252074775211,
+      "charts/episode_reward_avg_100": -9.964508756399155,
+      "charts/episode_length_avg_100": 20.23,
+      "train/actor_loss": -0.0033480566451033382,
+      "train/entropy": 2.789776860501597,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1376256.0,
+      "charts/SPS": 5594.071720602582,
+      "charts/episode_reward_avg_100": -7.898474074006081,
+      "charts/episode_length_avg_100": 32.36,
+      "train/actor_loss": -0.0034624296510001756,
+      "train/entropy": 2.7887850245979573,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1441792.0,
+      "charts/SPS": 5586.8720079687,
+      "charts/episode_reward_avg_100": -8.091881045103072,
+      "charts/episode_length_avg_100": 29.98,
+      "train/actor_loss": -0.0020576752229183827,
+      "train/entropy": 2.7902926611152896,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1507328.0,
+      "charts/SPS": 5594.900702519263,
+      "charts/episode_reward_avg_100": -6.04876730799675,
+      "charts/episode_length_avg_100": 31.74,
+      "train/actor_loss": -0.002368550164042943,
+      "train/entropy": 2.7880988566874865,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1572864.0,
+      "charts/SPS": 5603.0346403116655,
+      "charts/episode_reward_avg_100": -2.484007651209831,
+      "charts/episode_length_avg_100": 37.83,
+      "train/actor_loss": -0.004333717005886401,
+      "train/entropy": 2.7844307249080984,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1638400.0,
+      "charts/SPS": 5608.546523009749,
+      "charts/episode_reward_avg_100": -0.9858152627944946,
+      "charts/episode_length_avg_100": 42.48,
+      "train/actor_loss": -0.004877294362666202,
+      "train/entropy": 2.784444904706709,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1703936.0,
+      "charts/SPS": 5427.145353133914,
+      "charts/episode_reward_avg_100": -12.423139047026634,
+      "charts/episode_length_avg_100": 24.93,
+      "train/actor_loss": -0.004853793693234583,
+      "train/entropy": 2.786103802877886,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1769472.0,
+      "charts/SPS": 5436.330225400839,
+      "charts/episode_reward_avg_100": -8.705271896123886,
+      "charts/episode_length_avg_100": 27.33,
+      "train/actor_loss": -0.004071186577029304,
+      "train/entropy": 2.786418755623077,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1835008.0,
+      "charts/SPS": 5444.890244477366,
+      "charts/episode_reward_avg_100": -6.289407411813736,
+      "charts/episode_length_avg_100": 36.11,
+      "train/actor_loss": -0.0033245376770135856,
+      "train/entropy": 2.78467926469507,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1900544.0,
+      "charts/SPS": 5455.116829579979,
+      "charts/episode_reward_avg_100": -6.916510993242264,
+      "charts/episode_length_avg_100": 29.79,
+      "train/actor_loss": -0.001837946909665007,
+      "train/entropy": 2.7868343197771175,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 1966080.0,
+      "charts/SPS": 5465.932961336989,
+      "charts/episode_reward_avg_100": -6.391925020217895,
+      "charts/episode_length_avg_100": 32.93,
+      "train/actor_loss": -0.003514175428058034,
+      "train/entropy": 2.787416092649252,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2031616.0,
+      "charts/SPS": 5473.5430394209025,
+      "charts/episode_reward_avg_100": -7.141198879480362,
+      "charts/episode_length_avg_100": 32.4,
+      "train/actor_loss": -0.0035471932229406847,
+      "train/entropy": 2.785861151273682,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2097152.0,
+      "charts/SPS": 5483.224281216758,
+      "charts/episode_reward_avg_100": -2.7489114594459534,
+      "charts/episode_length_avg_100": 41.21,
+      "train/actor_loss": -0.002374062509505177,
+      "train/entropy": 2.783025286160001,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2162688.0,
+      "charts/SPS": 5495.459765845337,
+      "charts/episode_reward_avg_100": 0.4667915004491806,
+      "charts/episode_length_avg_100": 42.31,
+      "train/actor_loss": -0.002926759160231272,
+      "train/entropy": 2.780388495943614,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2228224.0,
+      "charts/SPS": 5501.574378790683,
+      "charts/episode_reward_avg_100": -7.998543891310692,
+      "charts/episode_length_avg_100": 26.08,
+      "train/actor_loss": -0.0037505015426103874,
+      "train/entropy": 2.7791685004642797,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2293760.0,
+      "charts/SPS": 5510.8908638807825,
+      "charts/episode_reward_avg_100": -7.39909268796444,
+      "charts/episode_length_avg_100": 21.56,
+      "train/actor_loss": -0.0021010916675534386,
+      "train/entropy": 2.7788796883012044,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2359296.0,
+      "charts/SPS": 5516.392435783939,
+      "charts/episode_reward_avg_100": 9.864437807798385,
+      "charts/episode_length_avg_100": 52.75,
+      "train/actor_loss": -0.0029126150371836974,
+      "train/entropy": 2.7774502087834563,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2424832.0,
+      "charts/SPS": 5525.497497392738,
+      "charts/episode_reward_avg_100": 7.643558014035225,
+      "charts/episode_length_avg_100": 52.53,
+      "train/actor_loss": -0.0032933623288671264,
+      "train/entropy": 2.7760162447075376,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2490368.0,
+      "charts/SPS": 5533.719308231143,
+      "charts/episode_reward_avg_100": -2.2905716371536253,
+      "charts/episode_length_avg_100": 34.04,
+      "train/actor_loss": -0.0036748415838225444,
+      "train/entropy": 2.7742384182707607,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2555904.0,
+      "charts/SPS": 5541.6316390173415,
+      "charts/episode_reward_avg_100": 2.400142707824707,
+      "charts/episode_length_avg_100": 42.99,
+      "train/actor_loss": -0.004104584501278916,
+      "train/entropy": 2.770699152575853,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2621440.0,
+      "charts/SPS": 5549.83886974676,
+      "charts/episode_reward_avg_100": 1.0429822343587876,
+      "charts/episode_length_avg_100": 38.9,
+      "train/actor_loss": -0.0038272788679759497,
+      "train/entropy": 2.7685467445852745,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2686976.0,
+      "charts/SPS": 5559.9232885217,
+      "charts/episode_reward_avg_100": -10.094449662566184,
+      "charts/episode_length_avg_100": 22.55,
+      "train/actor_loss": -0.0008378501403930058,
+      "train/entropy": 2.7697239086486953,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2752512.0,
+      "charts/SPS": 5566.230892276302,
+      "charts/episode_reward_avg_100": 7.715641986727714,
+      "charts/episode_length_avg_100": 54.93,
+      "train/actor_loss": -0.0028490418940582602,
+      "train/entropy": 2.7687506819292946,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2818048.0,
+      "charts/SPS": 5573.667885614319,
+      "charts/episode_reward_avg_100": 2.646225391626358,
+      "charts/episode_length_avg_100": 46.28,
+      "train/actor_loss": -0.003024114738996838,
+      "train/entropy": 2.7673627545192843,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2883584.0,
+      "charts/SPS": 5575.33986242389,
+      "charts/episode_reward_avg_100": 12.935981729626656,
+      "charts/episode_length_avg_100": 57.59,
+      "train/actor_loss": -0.002664093015109891,
+      "train/entropy": 2.76496013709206,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 2949120.0,
+      "charts/SPS": 5583.713997131207,
+      "charts/episode_reward_avg_100": 16.050461089611055,
+      "charts/episode_length_avg_100": 59.67,
+      "train/actor_loss": -0.0031135849158593883,
+      "train/entropy": 2.764485342944477,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3014656.0,
+      "charts/SPS": 5591.87399213068,
+      "charts/episode_reward_avg_100": -10.757388744354248,
+      "charts/episode_length_avg_100": 24.07,
+      "train/actor_loss": -0.0029719751358028646,
+      "train/entropy": 2.7667471054167896,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3080192.0,
+      "charts/SPS": 5599.407489177427,
+      "charts/episode_reward_avg_100": -11.837878552675248,
+      "charts/episode_length_avg_100": 20.58,
+      "train/actor_loss": -0.0016835226241807746,
+      "train/entropy": 2.7691021670725933,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3145728.0,
+      "charts/SPS": 5605.819454991553,
+      "charts/episode_reward_avg_100": -9.346284241676331,
+      "charts/episode_length_avg_100": 24.73,
+      "train/actor_loss": -0.0015652754145538197,
+      "train/entropy": 2.7685048659000966,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3211264.0,
+      "charts/SPS": 5610.978992693069,
+      "charts/episode_reward_avg_100": 10.409916011095047,
+      "charts/episode_length_avg_100": 53.69,
+      "train/actor_loss": -0.0033749115968356473,
+      "train/entropy": 2.766809384552235,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3276800.0,
+      "charts/SPS": 5618.500988824868,
+      "charts/episode_reward_avg_100": 17.891424676775934,
+      "charts/episode_length_avg_100": 63.35,
+      "train/actor_loss": -0.0042268316600427205,
+      "train/entropy": 2.764290798790772,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3342336.0,
+      "charts/SPS": 5468.952346117445,
+      "charts/episode_reward_avg_100": 8.205393429994583,
+      "charts/episode_length_avg_100": 51.18,
+      "train/actor_loss": -0.0018107289458190656,
+      "train/entropy": 2.763567595343528,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3407872.0,
+      "charts/SPS": 5477.495129691119,
+      "charts/episode_reward_avg_100": -8.485292744636535,
+      "charts/episode_length_avg_100": 24.31,
+      "train/actor_loss": -0.0026738887077968495,
+      "train/entropy": 2.762992417593299,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3473408.0,
+      "charts/SPS": 5485.6514062292945,
+      "charts/episode_reward_avg_100": 12.362486162781716,
+      "charts/episode_length_avg_100": 57.24,
+      "train/actor_loss": -0.00189142238366084,
+      "train/entropy": 2.7599025594161106,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3538944.0,
+      "charts/SPS": 5494.23231726629,
+      "charts/episode_reward_avg_100": 10.658168514966965,
+      "charts/episode_length_avg_100": 52.88,
+      "train/actor_loss": -0.0032553645960364456,
+      "train/entropy": 2.75711520593883,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3604480.0,
+      "charts/SPS": 5502.736828541187,
+      "charts/episode_reward_avg_100": 0.30719293355941774,
+      "charts/episode_length_avg_100": 40.34,
+      "train/actor_loss": -0.001253303899412714,
+      "train/entropy": 2.7531212544109165,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3670016.0,
+      "charts/SPS": 5509.909865186434,
+      "charts/episode_reward_avg_100": 24.43336484849453,
+      "charts/episode_length_avg_100": 70.73,
+      "train/actor_loss": -0.002202732070894417,
+      "train/entropy": 2.7476579849863083,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3735552.0,
+      "charts/SPS": 5518.278342726453,
+      "charts/episode_reward_avg_100": -2.368333800435066,
+      "charts/episode_length_avg_100": 32.9,
+      "train/actor_loss": -0.0029941362058451436,
+      "train/entropy": 2.744869696031671,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3801088.0,
+      "charts/SPS": 5528.403718733678,
+      "charts/episode_reward_avg_100": 31.845107967853547,
+      "charts/episode_length_avg_100": 79.45,
+      "train/actor_loss": -0.0027296194933040126,
+      "train/entropy": 2.7458197820745056,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3866624.0,
+      "charts/SPS": 5538.9147386816885,
+      "charts/episode_reward_avg_100": 33.34384842991829,
+      "charts/episode_length_avg_100": 78.39,
+      "train/actor_loss": -0.0017817759533987842,
+      "train/entropy": 2.749259461163095,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3932160.0,
+      "charts/SPS": 5550.11480113626,
+      "charts/episode_reward_avg_100": 22.567129798531532,
+      "charts/episode_length_avg_100": 67.96,
+      "train/actor_loss": -0.0024532147246523785,
+      "train/entropy": 2.754573799855494,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 3997696.0,
+      "charts/SPS": 5559.317814416638,
+      "charts/episode_reward_avg_100": 29.562330474853514,
+      "charts/episode_length_avg_100": 76.56,
+      "train/actor_loss": -0.0022687216178845127,
+      "train/entropy": 2.756587225883449,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4063232.0,
+      "charts/SPS": 5568.190074958025,
+      "charts/episode_reward_avg_100": 21.02519443154335,
+      "charts/episode_length_avg_100": 61.71,
+      "train/actor_loss": -0.002811911726017689,
+      "train/entropy": 2.7549000371891075,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4128768.0,
+      "charts/SPS": 5576.2045867178995,
+      "charts/episode_reward_avg_100": 36.19445869445801,
+      "charts/episode_length_avg_100": 84.33,
+      "train/actor_loss": -0.0017963920569931905,
+      "train/entropy": 2.7560975292489007,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4194304.0,
+      "charts/SPS": 5586.725321522654,
+      "charts/episode_reward_avg_100": 38.21787346124649,
+      "charts/episode_length_avg_100": 86.81,
+      "train/actor_loss": -0.002577712960256496,
+      "train/entropy": 2.756266959386719,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4259840.0,
+      "charts/SPS": 5595.196586663088,
+      "charts/episode_reward_avg_100": 18.995229340195657,
+      "charts/episode_length_avg_100": 59.08,
+      "train/actor_loss": -0.002874133171629681,
+      "train/entropy": 2.754220911480353,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4325376.0,
+      "charts/SPS": 5604.682102516474,
+      "charts/episode_reward_avg_100": 24.190458223819732,
+      "charts/episode_length_avg_100": 70.33,
+      "train/actor_loss": -0.002081649252108975,
+      "train/entropy": 2.756668997204975,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4390912.0,
+      "charts/SPS": 5614.71932041838,
+      "charts/episode_reward_avg_100": 16.185917524695398,
+      "charts/episode_length_avg_100": 58.09,
+      "train/actor_loss": -0.003779903719046206,
+      "train/entropy": 2.7597244986109195,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4456448.0,
+      "charts/SPS": 5624.97164814116,
+      "charts/episode_reward_avg_100": 40.77383846223354,
+      "charts/episode_length_avg_100": 90.07,
+      "train/actor_loss": -0.001132325454955072,
+      "train/entropy": 2.761095299596402,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4521984.0,
+      "charts/SPS": 5634.88601621304,
+      "charts/episode_reward_avg_100": 49.075445291996004,
+      "charts/episode_length_avg_100": 98.57,
+      "train/actor_loss": -0.002038769297858429,
+      "train/entropy": 2.7634486209754163,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4587520.0,
+      "charts/SPS": 5642.906779008329,
+      "charts/episode_reward_avg_100": 67.7878750181198,
+      "charts/episode_length_avg_100": 120.79,
+      "train/actor_loss": -0.0018929642783762342,
+      "train/entropy": 2.7655804504559156,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4653056.0,
+      "charts/SPS": 5651.239124787536,
+      "charts/episode_reward_avg_100": 47.74205952942371,
+      "charts/episode_length_avg_100": 95.64,
+      "train/actor_loss": -0.0017572690939133741,
+      "train/entropy": 2.766542931432245,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4718592.0,
+      "charts/SPS": 5660.144247872131,
+      "charts/episode_reward_avg_100": 65.07667957782745,
+      "charts/episode_length_avg_100": 118.83,
+      "train/actor_loss": -0.0022150039367822014,
+      "train/entropy": 2.768016644923707,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4784128.0,
+      "charts/SPS": 5666.761676127772,
+      "charts/episode_reward_avg_100": 91.49635788917541,
+      "charts/episode_length_avg_100": 148.35,
+      "train/actor_loss": -0.0015104733676942973,
+      "train/entropy": 2.768665603644713,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4849664.0,
+      "charts/SPS": 5676.002830170756,
+      "charts/episode_reward_avg_100": 20.599314185380937,
+      "charts/episode_length_avg_100": 64.42,
+      "train/actor_loss": -0.0016150898837318493,
+      "train/entropy": 2.7694924993952585,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4915200.0,
+      "charts/SPS": 5685.886764103277,
+      "charts/episode_reward_avg_100": 97.64356937170028,
+      "charts/episode_length_avg_100": 154.83,
+      "train/actor_loss": -0.0018064372072140486,
+      "train/entropy": 2.7686628970243983,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 4980736.0,
+      "charts/SPS": 5433.321760127267,
+      "charts/episode_reward_avg_100": 83.32265806436538,
+      "charts/episode_length_avg_100": 138.46,
+      "train/actor_loss": -0.0016874414151535368,
+      "train/entropy": 2.7706807235696447,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5046272.0,
+      "charts/SPS": 5445.949963246268,
+      "charts/episode_reward_avg_100": 88.59524087369442,
+      "charts/episode_length_avg_100": 143.09,
+      "train/actor_loss": -0.0019744066472874486,
+      "train/entropy": 2.7744478919204734,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5111808.0,
+      "charts/SPS": 5457.706672857252,
+      "charts/episode_reward_avg_100": 89.48156171560288,
+      "charts/episode_length_avg_100": 145.02,
+      "train/actor_loss": -0.0016449002397710055,
+      "train/entropy": 2.774855343122304,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5177344.0,
+      "charts/SPS": 5469.328128359551,
+      "charts/episode_reward_avg_100": 56.217427935600284,
+      "charts/episode_length_avg_100": 106.81,
+      "train/actor_loss": -0.001688822089775131,
+      "train/entropy": 2.7734932482438284,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5242880.0,
+      "charts/SPS": 5480.341129329973,
+      "charts/episode_reward_avg_100": 133.85069994449614,
+      "charts/episode_length_avg_100": 193.6,
+      "train/actor_loss": -0.001572121185634008,
+      "train/entropy": 2.773283141755169,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5308416.0,
+      "charts/SPS": 5492.84369623589,
+      "charts/episode_reward_avg_100": 182.5203307390213,
+      "charts/episode_length_avg_100": 248.22,
+      "train/actor_loss": -0.0031270553685714855,
+      "train/entropy": 2.7747857134980927,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5373952.0,
+      "charts/SPS": 5503.54257160522,
+      "charts/episode_reward_avg_100": 117.52120110034943,
+      "charts/episode_length_avg_100": 176.36,
+      "train/actor_loss": -0.0017915251523733739,
+      "train/entropy": 2.7746071003524895,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5439488.0,
+      "charts/SPS": 5515.567830124157,
+      "charts/episode_reward_avg_100": 63.23164469242096,
+      "charts/episode_length_avg_100": 112.77,
+      "train/actor_loss": -0.0011341752829949826,
+      "train/entropy": 2.7747900227627897,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5505024.0,
+      "charts/SPS": 5528.0341291727955,
+      "charts/episode_reward_avg_100": 138.69213993787764,
+      "charts/episode_length_avg_100": 193.98,
+      "train/actor_loss": -0.000897478687719907,
+      "train/entropy": 2.7759467700774025,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5570560.0,
+      "charts/SPS": 5541.271142098235,
+      "charts/episode_reward_avg_100": 118.45075079917908,
+      "charts/episode_length_avg_100": 173.75,
+      "train/actor_loss": -0.0018391722121504205,
+      "train/entropy": 2.776088138839775,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5636096.0,
+      "charts/SPS": 5554.076183039102,
+      "charts/episode_reward_avg_100": 230.11097878456115,
+      "charts/episode_length_avg_100": 290.46,
+      "train/actor_loss": -0.00069409204021606,
+      "train/entropy": 2.778135241989552,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5701632.0,
+      "charts/SPS": 5567.721917719707,
+      "charts/episode_reward_avg_100": 199.38118229627608,
+      "charts/episode_length_avg_100": 261.06,
+      "train/actor_loss": -0.001459422089500441,
+      "train/entropy": 2.7783414513603897,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5767168.0,
+      "charts/SPS": 5579.7811895908035,
+      "charts/episode_reward_avg_100": 262.8176796913147,
+      "charts/episode_length_avg_100": 317.83,
+      "train/actor_loss": -0.0010042013160388476,
+      "train/entropy": 2.7774853380156808,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5832704.0,
+      "charts/SPS": 5585.514497113706,
+      "charts/episode_reward_avg_100": 224.22176411390305,
+      "charts/episode_length_avg_100": 280.2,
+      "train/actor_loss": -0.0006144577538410203,
+      "train/entropy": 2.7752741080465495,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5898240.0,
+      "charts/SPS": 5597.514921971874,
+      "charts/episode_reward_avg_100": 360.3935072755814,
+      "charts/episode_length_avg_100": 421.15,
+      "train/actor_loss": -0.0014603073245941939,
+      "train/entropy": 2.77051624556544,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 5963776.0,
+      "charts/SPS": 5606.696720834526,
+      "charts/episode_reward_avg_100": 234.93928498864173,
+      "charts/episode_length_avg_100": 292.33,
+      "train/actor_loss": -0.0012291868401605678,
+      "train/entropy": 2.7632310166493594,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6029312.0,
+      "charts/SPS": 5614.198902483486,
+      "charts/episode_reward_avg_100": 109.66756664276123,
+      "charts/episode_length_avg_100": 161.56,
+      "train/actor_loss": -0.0016832115591086036,
+      "train/entropy": 2.760242454288791,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6094848.0,
+      "charts/SPS": 5624.785374582036,
+      "charts/episode_reward_avg_100": 276.8471474266052,
+      "charts/episode_length_avg_100": 331.61,
+      "train/actor_loss": -0.001991927284207614,
+      "train/entropy": 2.7572248536596704,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6160384.0,
+      "charts/SPS": 5633.923056993444,
+      "charts/episode_reward_avg_100": 365.54813463687896,
+      "charts/episode_length_avg_100": 428.03,
+      "train/actor_loss": -0.0006224027886877531,
+      "train/entropy": 2.7520799933556477,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6225920.0,
+      "charts/SPS": 5642.844801363425,
+      "charts/episode_reward_avg_100": 301.96245565652845,
+      "charts/episode_length_avg_100": 358.5,
+      "train/actor_loss": -0.0010369693630973623,
+      "train/entropy": 2.745895912959322,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6291456.0,
+      "charts/SPS": 5653.787539693623,
+      "charts/episode_reward_avg_100": 396.33069272994993,
+      "charts/episode_length_avg_100": 454.13,
+      "train/actor_loss": -0.0014852468995483394,
+      "train/entropy": 2.736810876140018,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6356992.0,
+      "charts/SPS": 5664.7025397487905,
+      "charts/episode_reward_avg_100": 449.76132857322693,
+      "charts/episode_length_avg_100": 502.62,
+      "train/actor_loss": -0.0011857805769170202,
+      "train/entropy": 2.7290953165102807,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6422528.0,
+      "charts/SPS": 5674.669873497709,
+      "charts/episode_reward_avg_100": 391.9506274604797,
+      "charts/episode_length_avg_100": 442.91,
+      "train/actor_loss": -0.0017236412299870066,
+      "train/entropy": 2.7185613644363507,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6488064.0,
+      "charts/SPS": 5682.9121947505155,
+      "charts/episode_reward_avg_100": 191.72108229637146,
+      "charts/episode_length_avg_100": 247.04,
+      "train/actor_loss": -0.0017389790753830022,
+      "train/entropy": 2.7092185606080625,
+      "train/approx_ref_kl": 0.0
+    },
+    {
+      "global_step": 6553600.0,
+      "charts/SPS": 5691.788339604622,
+      "charts/episode_reward_avg_100": 248.94363682746888,
+      "charts/episode_length_avg_100": 304.26,
+      "train/actor_loss": -0.0008196432177657335,
+      "train/entropy": 2.705293168003453,
+      "train/approx_ref_kl": 0.0
+    }
+  ]
+}

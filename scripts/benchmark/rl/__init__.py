@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from benchmark.scripts.run_benchmark import main
+from .runner import BenchmarkRunner
 
-
-if __name__ == "__main__":
-    main()
+__all__ = ["BenchmarkRunner"]
