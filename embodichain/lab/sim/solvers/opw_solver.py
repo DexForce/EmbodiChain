@@ -247,11 +247,11 @@ class OPWSolver(BaseSolver):
         N_SOL = 8
         DOF = 6
         n_sample = target_xpos.shape[0]
-
-        if target_xpos.shape == (4, 4):
-            target_xpos_batch = target_xpos[None, :, :]
+        target_xpos_ = target_xpos.to(self.device)
+        if target_xpos_.shape == (4, 4):
+            target_xpos_batch = target_xpos_[None, :, :]
         else:
-            target_xpos_batch = target_xpos
+            target_xpos_batch = target_xpos_
         target_xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
 
         all_qpos_wp = wp.zeros(
@@ -284,7 +284,8 @@ class OPWSolver(BaseSolver):
             return all_ik_valid, all_qpos
 
         if qpos_seed is not None:
-            qpos_seed_wp = wp.from_torch(qpos_seed.reshape(-1))
+            qpos_seed_ = qpos_seed.to(self.device)
+            qpos_seed_wp = wp.from_torch(qpos_seed_.reshape(-1))
         else:
             qpos_seed_wp = wp.zeros(
                 n_sample * DOF,
