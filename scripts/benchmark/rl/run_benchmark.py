@@ -28,7 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--algorithms", nargs="*", default=None)
     parser.add_argument("--seeds", nargs="*", type=int, default=None)
     parser.add_argument("--suite", type=str, default="default")
-    parser.add_argument("--output-root", type=str, default="benchmark/reports")
+    parser.add_argument(
+        "--output-root", type=str, default="scripts/benchmark/rl/reports"
+    )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--iterations", type=int, default=None)
     parser.add_argument("--buffer-size", type=int, default=None)
