@@ -265,6 +265,14 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer: TensorDict | None = None
         self._max_rollout_steps = 0
         self._rollout_buffer_mode: str | None = None
+
+        # Build episode observation space from episode-constant observation functors
+        self._episode_obs_space: gym.spaces.Dict | None = None
+        self.episode_obs_buffer: TensorDict | None = None
+        if self.observation_manager and self.observation_manager.has_episode_obs:
+            self._episode_obs_space = self._build_episode_obs_space()
+            self.episode_obs_buffer = self._init_episode_obs_buffer()
+
         if self.cfg.init_rollout_buffer:
             self.rollout_buffer = init_rollout_buffer_from_gym_space(
                 obs_space=self.observation_space,
@@ -540,6 +548,11 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.observations:
             self.observation_manager.reset(env_ids=env_ids)
 
+        # Capture episode-constant observations after reset events (randomization)
+        # have been applied and caches have been cleared.
+        if self.observation_manager and self.observation_manager.has_episode_obs:
+            self._capture_episode_obs(env_ids_to_process)
+
         # reset reward manager for environments that need a reset
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)
@@ -557,6 +570,99 @@ class EmbodiedEnv(BaseEnv):
         }.issubset(set(rollout_buffer.keys())):
             return "rl"
         return "expert"
+
+    def _build_episode_obs_space(self) -> gym.spaces.Dict | None:
+        """Build a gym Dict space for episode-constant observations.
+
+        Calls each episode obs functor once to determine output shapes and
+        dtypes, then converts the result to a ``gym.spaces.Dict``.
+
+        Returns:
+            A ``gym.spaces.Dict`` describing the episode observation space,
+            or ``None`` if no episode obs functors exist.
+        """
+        from embodichain.lab.gym.utils.gym_utils import convert_observation_to_space
+
+        episode_obs = self.observation_manager.compute_episode_obs()
+        if not episode_obs:
+            return None
+        return convert_observation_to_space(episode_obs, unbatched=True)
+
+    def _init_episode_obs_buffer(self) -> TensorDict:
+        """Initialize a flat TensorDict for episode-constant observations.
+
+        The buffer has shape ``[num_envs, *obs_shape]`` (no time dimension).
+
+        Returns:
+            A TensorDict pre-filled with zeros for all episode observations.
+        """
+        import numpy as np
+
+        if self._episode_obs_space is None:
+            return None
+
+        def _init_from_space(space, num_envs, device):
+            if isinstance(space, gym.spaces.Dict):
+                return TensorDict(
+                    {
+                        k: _init_from_space(v, num_envs, device)
+                        for k, v in space.spaces.items()
+                    },
+                    batch_size=[num_envs],
+                    device=device,
+                )
+            elif isinstance(space, gym.spaces.Box):
+                dtype_map = {
+                    np.dtype("float32"): torch.float32,
+                    np.dtype("float64"): torch.float64,
+                    np.dtype("int32"): torch.int32,
+                    np.dtype("int64"): torch.int64,
+                    np.dtype("uint8"): torch.uint8,
+                    np.dtype("uint16"): torch.uint16,
+                    np.dtype("bool"): torch.bool,
+                }
+                torch_dtype = dtype_map.get(space.dtype, torch.float32)
+                return torch.zeros(
+                    (num_envs, *space.shape), dtype=torch_dtype, device=device
+                )
+            return None
+
+        return _init_from_space(self._episode_obs_space, self.num_envs, self.device)
+
+    def _capture_episode_obs(self, env_ids: Sequence[int] | None) -> None:
+        """Compute and store episode-constant observations for the specified environments.
+
+        This is called during episode reset, after randomization events have
+        been applied. The values are written into the flat ``episode_obs_buffer``
+        (shape ``[num_envs, *obs_shape]``, no time dimension).
+
+        Args:
+            env_ids: Environment IDs to capture episode observations for.
+                If ``None``, all environments are updated.
+        """
+        if self.episode_obs_buffer is None:
+            return
+
+        episode_obs_data = self.observation_manager.compute_episode_obs()
+        if not episode_obs_data:
+            return
+
+        env_ids = list(range(self.num_envs)) if env_ids is None else list(env_ids)
+        buffer = self.episode_obs_buffer
+        buffer_device = buffer.device
+
+        for name, data in episode_obs_data.items():
+            if isinstance(data, TensorDict):
+                for sub_key, sub_data in data.items():
+                    target = buffer[name][sub_key]
+                    target[env_ids].copy_(
+                        sub_data[env_ids].to(buffer_device), non_blocking=True
+                    )
+            else:
+                target = buffer[name]
+                target[env_ids].copy_(
+                    data[env_ids].to(buffer_device), non_blocking=True
+                )
 
     def _write_episode_rollout_step(
         self,

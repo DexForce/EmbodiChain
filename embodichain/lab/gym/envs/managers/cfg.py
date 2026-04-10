@@ -131,6 +131,19 @@ class ObservationCfg(FunctorCfg):
     `/` is used to separate different levels of hierarchy in the observation dictionary.
     """
 
+    is_episode_obs: bool = False
+    """Whether this observation is constant throughout an episode.
+
+    When True, the observation is computed once during episode reset (after
+    randomization events) and stored in a flat per-episode buffer without a time
+    dimension, instead of at every time step. This is only valid with
+    ``mode="add"``.
+
+    Episode observations are typically physics attributes set by randomization
+    (mass, friction, damping), object UIDs, or body scales — values that don't
+    change within an episode but vary between episodes.
+    """
+
 
 @configclass
 class SceneEntityCfg:

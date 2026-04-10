@@ -104,6 +104,25 @@ class ObservationManager(ManagerBase):
         """
         return self._mode_functor_names
 
+    @property
+    def has_episode_obs(self) -> bool:
+        """Whether any observation functor is marked as episode-constant."""
+        return any(
+            cfg.is_episode_obs
+            for cfgs in self._mode_functor_cfgs.values()
+            for cfg in cfgs
+        )
+
+    @property
+    def episode_obs_functors(self) -> list[tuple[str, ObservationCfg]]:
+        """Return (name, cfg) pairs for all episode-constant observation functors."""
+        result: list[tuple[str, ObservationCfg]] = []
+        for cfgs in self._mode_functor_cfgs.values():
+            for cfg in cfgs:
+                if cfg.is_episode_obs:
+                    result.append((cfg.name, cfg))
+        return result
+
     """
     Operations.
     """
@@ -142,6 +161,10 @@ class ObservationManager(ManagerBase):
             for functor_cfg in functor_cfgs:
                 functor_cfg: ObservationCfg
 
+                # Skip episode-constant observations in per-step compute
+                if functor_cfg.is_episode_obs:
+                    continue
+
                 if mode == "modify":
                     data = fetch_data_from_dict(obs, functor_cfg.name)
                     data = functor_cfg.func(self._env, data, **functor_cfg.params)
@@ -152,6 +175,23 @@ class ObservationManager(ManagerBase):
                     logger.log_error(f"Unsupported observation mode '{mode}'.")
 
         return obs
+
+    def compute_episode_obs(self) -> dict[str, torch.Tensor]:
+        """Compute all episode-constant observations.
+
+        This method should be called once during episode reset, after
+        randomization events have been applied, to capture values that
+        remain constant throughout the episode.
+
+        Returns:
+            Dict mapping observation name to computed tensor/TensorDict.
+            Shape: (num_envs, *obs_shape) with no time dimension.
+        """
+        episode_obs: dict[str, torch.Tensor] = {}
+        for name, cfg in self.episode_obs_functors:
+            data = cfg.func(self._env, None, **cfg.params)
+            episode_obs[name] = data
+        return episode_obs
 
     def get_functor_cfg(self, functor_name: str) -> ObservationCfg:
         """Gets the configuration for the specified functor.
@@ -197,6 +237,13 @@ class ObservationManager(ManagerBase):
 
             # resolve common parameters
             self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
+
+            # validate episode obs is only used with mode="add"
+            if functor_cfg.is_episode_obs and functor_cfg.mode != "add":
+                raise ValueError(
+                    f"ObservationCfg '{functor_name}': is_episode_obs=True is only "
+                    f"supported with mode='add', got mode='{functor_cfg.mode}'."
+                )
 
             # check if mode is a new mode
             if functor_cfg.mode not in self._mode_functor_names:
