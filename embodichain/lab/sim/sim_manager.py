@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+import threading
 import dexsim
 import torch
 import numpy as np
@@ -29,6 +31,7 @@ from copy import deepcopy
 from functools import cached_property
 from typing import List, Union, Dict, Union, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
+from datetime import datetime
 
 # Global cache directories
 SIM_CACHE_DIR = Path.home() / ".cache" / "embodichain_cache"
@@ -45,6 +48,7 @@ from dexsim.types import (
     RigidBodyGPUAPIReadType,
     ArticulationGPUAPIReadType,
 )
+from dexsim.core import TASK_RETURN
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType, Windows
@@ -147,6 +151,38 @@ class SimulationManagerCfg:
     gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
     """The GPU memory configuration parameters."""
 
+    enable_window_record_hotkey: bool = True
+    """Whether to register the ``r`` hotkey for viewer recording when the window opens."""
+
+    window_record_save_path: str | None = None
+    """Optional output path for viewer recordings. If None, use the default outputs directory."""
+
+    window_record_fps: int = 20
+    """Frames per second for viewer recording."""
+
+    window_record_max_memory: int = 1024
+    """Maximum buffered recording memory in MB before auto-stopping capture."""
+
+    window_record_video_prefix: str = "viewer_record"
+    """Video file prefix used when no explicit save path is provided."""
+
+
+@dataclass
+class _WindowRecordState:
+    """Internal state for viewer-window recording."""
+
+    time_step: float
+    max_memory_bytes: int
+    output_dir: str
+    video_name: str
+    save_kwargs: dict[str, object]
+    record_camera: object | None = None
+    frames: list[np.ndarray] = field(default_factory=list)
+    current_memory_bytes: int = 0
+    last_capture_time: float = field(default_factory=time.time)
+    task_status: int = TASK_RETURN.TASK_LOOP
+    loop_handle: object | None = None
+
 
 class SimulationManager:
     r"""Global Embodied AI simulation manager.
@@ -220,6 +256,20 @@ class SimulationManager:
 
         self._window: Windows | None = None
         self._is_registered_window_control = False
+        self._window_record_state: _WindowRecordState | None = None
+        self._window_record_camera: object | None = None
+        self._window_record_hotkey_cfg: dict[str, object] | None = (
+            {
+                "save_path": sim_config.window_record_save_path,
+                "fps": sim_config.window_record_fps,
+                "max_memory": sim_config.window_record_max_memory,
+                "video_prefix": sim_config.window_record_video_prefix,
+            }
+            if sim_config.enable_window_record_hotkey
+            else None
+        )
+        self._window_record_input_control: ObjectManipulator | None = None
+        self._window_record_save_threads: list[threading.Thread] = []
 
         fps = int(1.0 / sim_config.physics_dt)
         self._world.set_physics_fps(fps)
@@ -590,11 +640,20 @@ class SimulationManager:
         self._world.open_window()
         self._window = self._world.get_windows()
         self._register_default_window_control()
+        if (
+            self._window_record_hotkey_cfg is not None
+            and self._window_record_input_control is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
         """Close the simulation window."""
+        if self.is_window_recording():
+            self.stop_window_record()
         self._world.close_window()
+        self._window = None
+        self._window_record_input_control = None
         self.is_window_opened = False
 
     def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
@@ -1699,6 +1758,230 @@ class SimulationManager:
         for control in controls:
             self._window.add_input_control(control)
 
+    def _build_window_record_output(
+        self, save_path: str | None, video_prefix: str
+    ) -> tuple[str, str]:
+        """Resolve the output directory and file name for viewer recording."""
+        if save_path is None:
+            output_dir = os.path.join(os.getcwd(), "outputs", "videos")
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            video_name = f"{video_prefix}_{timestamp}"
+        else:
+            output_dir = os.path.dirname(save_path) or os.getcwd()
+            video_name = Path(os.path.basename(save_path)).stem
+        return output_dir, video_name
+
+    def is_window_recording(self) -> bool:
+        """Check whether the viewer window is currently recording."""
+        return self._window_record_state is not None
+
+    def _step_window_record(self, state: _WindowRecordState) -> int:
+        """Capture frames in the render thread without blocking the UI loop."""
+        if state.task_status != TASK_RETURN.TASK_LOOP:
+            return state.task_status
+
+        now = time.time()
+        if now - state.last_capture_time < state.time_step:
+            return state.task_status
+
+        state.last_capture_time = now
+        frame: np.ndarray | None = None
+        if self._window is not None and state.record_camera is not None:
+            pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+            state.record_camera.set_local_pose(pose)
+            state.record_camera.render()
+            rgb = np.asarray(state.record_camera.get_rgb_map())
+            if rgb.size != 0:
+                frame = np.ascontiguousarray(rgb[..., :3])
+        if frame is None:
+            return state.task_status
+
+        state.frames.append(frame)
+        state.current_memory_bytes += frame.nbytes
+        if state.current_memory_bytes > state.max_memory_bytes:
+            logger.log_warning(
+                "Viewer recording exceeded the configured memory budget. "
+                "Press 'r' again to flush the buffered frames to disk."
+            )
+            state.task_status = TASK_RETURN.TASK_EXIT
+
+        return state.task_status
+
+    def _save_window_record_worker(
+        self,
+        frames: list[np.ndarray],
+        output_dir: str,
+        video_name: str,
+        save_kwargs: dict[str, object],
+    ) -> None:
+        """Encode buffered frames into a video file in a background thread."""
+        from dexsim.utility import images_to_video
+
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            images_to_video(
+                images=frames,
+                output_dir=output_dir,
+                video_name=video_name,
+                **save_kwargs,
+            )
+            logger.log_info(
+                f"Viewer recording saved to {os.path.join(output_dir, video_name + '.mp4')}"
+            )
+        except Exception as exc:
+            logger.log_error(f"Failed to save viewer recording: {exc}")
+
+    def start_window_record(
+        self,
+        save_path: str | None = None,
+        fps: int = 20,
+        max_memory: int = 1024,
+        video_prefix: str = "viewer_record",
+    ) -> bool:
+        """Start asynchronously recording the viewer by buffering frames from a hidden camera
+        that follows the live window camera pose.
+        """
+        if self._window is None:
+            logger.log_warning("No simulation window available for viewer recording.")
+            return False
+        width = self.sim_config.width
+        height = self.sim_config.height
+        if self._window_record_camera is None:
+            camera_name = f"viewer_record_camera_{self.instance_id}"
+            self._window_record_camera = self._env.create_camera(
+                camera_name, width, height
+            )
+        record_camera = self._window_record_camera
+        if hasattr(record_camera, "is_open") and record_camera.is_open() is False:
+            record_camera.open_camera()
+
+        time_step = 1.0 / float(fps)
+        output_dir, video_name = self._build_window_record_output(
+            save_path, video_prefix
+        )
+        state = _WindowRecordState(
+            time_step=time_step,
+            max_memory_bytes=max_memory * 1024 * 1024,
+            output_dir=output_dir,
+            video_name=video_name,
+            save_kwargs={"fps": fps},
+            record_camera=record_camera,
+            last_capture_time=time.time() - time_step,
+        )
+
+        def _window_record_loop(_: float) -> int:
+            return self._step_window_record(state)
+
+        state.loop_handle = self._world.thread_rt().add_loop(
+            _window_record_loop, time_step
+        )
+        self._window_record_state = state
+
+        logger.log_info(
+            f"Viewer recording started. Press 'r' again to stop and save to "
+            f"{os.path.join(output_dir, video_name + '.mp4')}"
+        )
+        return True
+
+    def stop_window_record(self, save_path: str | None = None) -> bool:
+        """Stop the active viewer recording and save frames in the background."""
+        if self._window_record_state is None:
+            logger.log_warning("No active viewer recording session found.")
+            return False
+
+        state = self._window_record_state
+        state.task_status = TASK_RETURN.TASK_EXIT
+        if save_path is not None:
+            output_dir, video_name = self._build_window_record_output(
+                save_path, "viewer_record"
+            )
+        else:
+            output_dir, video_name = state.output_dir, state.video_name
+
+        if state.record_camera is not None and hasattr(state.record_camera, "is_open"):
+            if state.record_camera.is_open():
+                state.record_camera.close_camera()
+
+        frames = list(state.frames)
+        self._window_record_state = None
+        if len(frames) == 0:
+            logger.log_warning(
+                "Viewer recording stopped, but no frames were captured. Skipping video export."
+            )
+            return False
+
+        self._window_record_save_threads = [
+            thread for thread in self._window_record_save_threads if thread.is_alive()
+        ]
+        save_thread = threading.Thread(
+            target=self._save_window_record_worker,
+            args=(frames, output_dir, video_name, dict(state.save_kwargs)),
+            daemon=False,
+        )
+        save_thread.start()
+        self._window_record_save_threads.append(save_thread)
+        logger.log_info(
+            "Viewer recording stopped. Saving video to "
+            f"{os.path.join(output_dir, video_name + '.mp4')} in background."
+        )
+        return True
+
+    def toggle_window_record(
+        self,
+        save_path: str | None = None,
+        fps: int = 20,
+        max_memory: int = 1024,
+        video_prefix: str = "viewer_record",
+    ) -> bool:
+        """Toggle viewer recording on or off."""
+        if self.is_window_recording():
+            return self.stop_window_record(save_path=save_path)
+        return self.start_window_record(
+            save_path=save_path,
+            fps=fps,
+            max_memory=max_memory,
+            video_prefix=video_prefix,
+        )
+
+    def enable_window_record_hotkey(
+        self,
+        save_path: str | None = None,
+        fps: int = 20,
+        max_memory: int = 1024,
+        video_prefix: str = "viewer_record",
+    ) -> bool:
+        """Register the ``r`` key to start/stop viewer recording."""
+        self._window_record_hotkey_cfg = {
+            "save_path": save_path,
+            "fps": fps,
+            "max_memory": max_memory,
+            "video_prefix": video_prefix,
+        }
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The viewer record hotkey will be registered after `open_window()`."
+            )
+            return False
+        if self._window_record_input_control is not None:
+            return True
+
+        from dexsim.types import InputKey
+
+        sim = self
+        hotkey_cfg = dict(self._window_record_hotkey_cfg)
+
+        class WindowRecordEvent(ObjectManipulator):
+            def on_key_down(self, key):
+                if key == InputKey.SCANCODE_R.value:
+                    sim.toggle_window_record(**hotkey_cfg)
+
+        self._window_record_input_control = WindowRecordEvent()
+        self._window.add_input_control(self._window_record_input_control)
+        logger.log_info(
+            "Viewer record hotkey registered. Press 'r' to start/stop recording."
+        )
+        return True
+
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.
 
@@ -1787,6 +2070,16 @@ class SimulationManager:
 
     def destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
+        if self.is_window_recording():
+            self.stop_window_record()
+        if self._window_record_camera is not None and hasattr(
+            self._window_record_camera, "is_open"
+        ):
+            if self._window_record_camera.is_open():
+                self._window_record_camera.close_camera()
+        for thread in list(self._window_record_save_threads):
+            thread.join()
+
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)
