@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+<rect width="100%" height="100%" fill="#fffdf8" />
+<text x="70" y="24" font-size="20" font-family="Arial" fill="#222">cart_pole Evaluation Reward</text>
+<line x1="70" y1="40" x2="70" y2="370" stroke="#333" stroke-width="1.5" />
+<line x1="70" y1="370" x2="880" y2="370" stroke="#333" stroke-width="1.5" />
+<line x1="70" y1="370.00" x2="880" y2="370.00" stroke="#e8e1d6" stroke-width="1" />
+<text x="10" y="374.00" font-size="12" font-family="Arial" fill="#555">32.786</text>
+<line x1="70" y1="287.50" x2="880" y2="287.50" stroke="#e8e1d6" stroke-width="1" />
+<text x="10" y="291.50" font-size="12" font-family="Arial" fill="#555">123.819</text>
+<line x1="70" y1="205.00" x2="880" y2="205.00" stroke="#e8e1d6" stroke-width="1" />
+<text x="10" y="209.00" font-size="12" font-family="Arial" fill="#555">214.852</text>
+<line x1="70" y1="122.50" x2="880" y2="122.50" stroke="#e8e1d6" stroke-width="1" />
+<text x="10" y="126.50" font-size="12" font-family="Arial" fill="#555">305.886</text>
+<line x1="70" y1="40.00" x2="880" y2="40.00" stroke="#e8e1d6" stroke-width="1" />
+<text x="10" y="44.00" font-size="12" font-family="Arial" fill="#555">396.919</text>
+<polyline fill="none" stroke="#1768ac" stroke-width="3" points="70.00,370.00" />
+<line x1="720" y1="40" x2="750" y2="40" stroke="#1768ac" stroke-width="3" />
+<text x="760" y="44" font-size="12" font-family="Arial" fill="#333">grpo</text>
+<polyline fill="none" stroke="#f26419" stroke-width="3" points="70.00,40.00" />
+<line x1="720" y1="58" x2="750" y2="58" stroke="#f26419" stroke-width="3" />
+<text x="760" y="62" font-size="12" font-family="Arial" fill="#333">ppo</text>
+</svg>

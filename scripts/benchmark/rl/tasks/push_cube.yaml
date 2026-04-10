@@ -1,0 +1,22 @@
+name: push_cube
+env_id: PushCubeRL
+success_threshold: 0.6
+train_eval_enabled: false
+base_config:
+  trainer:
+    gym_config: configs/agents/rl/push_cube/gym_config.json
+    exp_name: push_cube
+    device: cpu
+    headless: true
+    enable_rt: false
+    gpu_id: 0
+    num_envs: 64
+    iterations: 200
+    buffer_size: 1024
+    enable_eval: true
+    num_eval_envs: 8
+    num_eval_episodes: 10
+    eval_freq: 200
+    save_freq: 200
+    use_wandb: false
+    events: {}
