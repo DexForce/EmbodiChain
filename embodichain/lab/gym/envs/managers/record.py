@@ -252,30 +252,6 @@ class record_camera_data_async(record_camera_data):
             self._pending_env_episodes.clear()
 
 
-class record_viewer_window_hotkey(Functor):
-    """Register the ``r`` hotkey for recording the live viewer (see :meth:`SimulationManager.enable_window_record_hotkey`)."""
-
-    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._enabled = env.sim.enable_window_record_hotkey(
-            save_path=cfg.params.get("save_path"),
-            fps=cfg.params.get("fps", 20),
-            max_memory=cfg.params.get("max_memory", 1024),
-            video_prefix=cfg.params.get("video_prefix", "viewer_record"),
-        )
-
-    def __call__(
-        self,
-        env: EmbodiedEnv,
-        env_ids: Union[torch.Tensor, None],
-        save_path: str | None = None,
-        fps: int = 20,
-        max_memory: int = 1024,
-        video_prefix: str = "viewer_record",
-    ) -> bool:
-        return self._enabled
-
-
 class validation_cameras(Functor):
     """
     This functor creates validation cameras during initialization and captures

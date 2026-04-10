@@ -75,6 +75,7 @@ from embodichain.lab.sim.cfg import (
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
+    WindowRecordCfg,
     LightCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -89,6 +90,7 @@ from embodichain.utils import configclass, logger
 __all__ = [
     "SimulationManager",
     "SimulationManagerCfg",
+    "WindowRecordCfg",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
@@ -151,20 +153,8 @@ class SimulationManagerCfg:
     gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
     """The GPU memory configuration parameters."""
 
-    enable_window_record_hotkey: bool = True
-    """Whether to register the ``r`` hotkey for viewer recording when the window opens."""
-
-    window_record_save_path: str | None = None
-    """Optional output path for viewer recordings. If None, use the default outputs directory."""
-
-    window_record_fps: int = 20
-    """Frames per second for viewer recording."""
-
-    window_record_max_memory: int = 1024
-    """Maximum buffered recording memory in MB before auto-stopping capture."""
-
-    window_record_video_prefix: str = "viewer_record"
-    """Video file prefix used when no explicit save path is provided."""
+    window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
+    """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
 
 
 @dataclass
@@ -258,14 +248,15 @@ class SimulationManager:
         self._is_registered_window_control = False
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
+        wr = sim_config.window_record
         self._window_record_hotkey_cfg: dict[str, object] | None = (
             {
-                "save_path": sim_config.window_record_save_path,
-                "fps": sim_config.window_record_fps,
-                "max_memory": sim_config.window_record_max_memory,
-                "video_prefix": sim_config.window_record_video_prefix,
+                "save_path": wr.save_path,
+                "fps": wr.fps,
+                "max_memory": wr.max_memory,
+                "video_prefix": wr.video_prefix,
             }
-            if sim_config.enable_window_record_hotkey
+            if wr.enable_hotkey
             else None
         )
         self._window_record_input_control: ObjectManipulator | None = None

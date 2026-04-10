@@ -151,6 +151,26 @@ class GPUMemoryCfg:
 
 
 @configclass
+class WindowRecordCfg:
+    """Configuration for interactive viewer window recording."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``r`` hotkey for viewer recording when the window opens."""
+
+    save_path: str | None = None
+    """Optional output path for viewer recordings. If None, use the default outputs directory."""
+
+    fps: int = 20
+    """Frames per second for viewer recording."""
+
+    max_memory: int = 1024
+    """Maximum buffered recording memory in MB before auto-stopping capture."""
+
+    video_prefix: str = "viewer_record"
+    """Video file prefix used when no explicit save path is provided."""
+
+
+@configclass
 class RigidBodyAttributesCfg:
     """Physical attributes for rigid bodies.
 
