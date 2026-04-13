@@ -247,23 +247,29 @@ class OPWSolver(BaseSolver):
         N_SOL = 8
         DOF = 6
         n_sample = target_xpos.shape[0]
+        if self.device == torch.device("cpu"):
+            kernel_device = torch.device("cuda")
+        else:
+            kernel_device = self.device
 
         if target_xpos.shape == (4, 4):
-            target_xpos_batch = target_xpos[None, :, :]
+            target_xpos_batch = target_xpos[None, :, :].to(kernel_device)
         else:
-            target_xpos_batch = target_xpos
+            target_xpos_batch = target_xpos.to(kernel_device)
         target_xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
 
         all_qpos_wp = wp.zeros(
             n_sample * N_SOL * DOF,
             dtype=float,
-            device=standardize_device_string(self.device),
+            device=standardize_device_string(kernel_device),
         )
         all_ik_valid_wp = wp.zeros(
-            n_sample * N_SOL, dtype=int, device=standardize_device_string(self.device)
+            n_sample * N_SOL, dtype=int, device=standardize_device_string(kernel_device)
         )
 
         # TODO: whether require gradient
+        offsets_ = self.offsets.to(standardize_device_string(kernel_device))
+        sign_corrections_ = self.sign_corrections.to(standardize_device_string(kernel_device))
         wp.launch(
             kernel=opw_ik_kernel,
             dim=(n_sample),
@@ -271,11 +277,11 @@ class OPWSolver(BaseSolver):
                 target_xpos_wp,
                 self._tcp_inv_warp,
                 self.params,
-                self.offsets,
-                self.sign_corrections,
+                offsets_,
+                sign_corrections_,
             ),
             outputs=[all_qpos_wp, all_ik_valid_wp],
-            device=standardize_device_string(self.device),
+            device=standardize_device_string(kernel_device),
         )
 
         if return_all_solutions:
@@ -284,12 +290,12 @@ class OPWSolver(BaseSolver):
             return all_ik_valid, all_qpos
 
         if qpos_seed is not None:
-            qpos_seed_wp = wp.from_torch(qpos_seed.reshape(-1))
+            qpos_seed_wp = wp.from_torch(qpos_seed.reshape(-1).to(kernel_device))
         else:
             qpos_seed_wp = wp.zeros(
                 n_sample * DOF,
                 dtype=float,
-                device=standardize_device_string(self.device),
+                device=standardize_device_string(kernel_device),
             )
         joint_weight = kwargs.get("joint_weight", torch.ones(size=(DOF,), dtype=float))
         joint_weight_wp = wp_vec6f(
@@ -301,10 +307,10 @@ class OPWSolver(BaseSolver):
             joint_weight[5],
         )
         best_ik_result_wp = wp.zeros(
-            n_sample * 6, dtype=float, device=standardize_device_string(self.device)
+            n_sample * 6, dtype=float, device=standardize_device_string(kernel_device)
         )
         best_ik_valid_wp = wp.zeros(
-            n_sample, dtype=int, device=standardize_device_string(self.device)
+            n_sample, dtype=int, device=standardize_device_string(kernel_device)
         )
         wp.launch(
             kernel=opw_best_ik_kernel,
@@ -316,10 +322,12 @@ class OPWSolver(BaseSolver):
                 joint_weight_wp,
             ],
             outputs=[best_ik_result_wp, best_ik_valid_wp],
-            device=standardize_device_string(self.device),
+            device=standardize_device_string(kernel_device),
         )
-        best_ik_result = wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6)
-        best_ik_valid = wp.to_torch(best_ik_valid_wp)
+        best_ik_result = (
+            wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6).to(self.device)
+        )
+        best_ik_valid = wp.to_torch(best_ik_valid_wp).to(self.device)
         return best_ik_valid, best_ik_result
 
     def _calculate_dynamic_weights(
