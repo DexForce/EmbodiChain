@@ -269,7 +269,9 @@ class OPWSolver(BaseSolver):
 
         # TODO: whether require gradient
         offsets_ = self.offsets.to(standardize_device_string(kernel_device))
-        sign_corrections_ = self.sign_corrections.to(standardize_device_string(kernel_device))
+        sign_corrections_ = self.sign_corrections.to(
+            standardize_device_string(kernel_device)
+        )
         wp.launch(
             kernel=opw_ik_kernel,
             dim=(n_sample),
