@@ -584,6 +584,7 @@ class EmbodiedEnv(BaseEnv):
             )
             action_to_store = None
         if action_to_store is not None:
+            action_to_store = action_to_store[..., self.active_joint_ids]
             self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
                 action_to_store.to(buffer_device), non_blocking=True
             )
