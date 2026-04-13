@@ -29,7 +29,7 @@ from embodichain.utils.warp.kinematics.opw_solver import (
     OPWparam,
     opw_fk_kernel,
     opw_ik_kernel,
-    opw_best_ik_kernel,
+    opw_ik_select_kernel,
     wp_vec6f,
 )
 from embodichain.utils.device_utils import standardize_device_string
@@ -247,10 +247,7 @@ class OPWSolver(BaseSolver):
         N_SOL = 8
         DOF = 6
         n_sample = target_xpos.shape[0]
-        if self.device == torch.device("cpu"):
-            kernel_device = torch.device("cuda")
-        else:
-            kernel_device = self.device
+        kernel_device = standardize_device_string(self.device)
 
         if target_xpos.shape == (4, 4):
             target_xpos_batch = target_xpos[None, :, :].to(kernel_device)
@@ -292,13 +289,27 @@ class OPWSolver(BaseSolver):
             return all_ik_valid, all_qpos
 
         if qpos_seed is not None:
-            qpos_seed_wp = wp.from_torch(qpos_seed.reshape(-1).to(kernel_device))
+            if qpos_seed.shape == (
+                n_sample,
+                DOF,
+            ):
+                qpos_seed_ = qpos_seed.to(kernel_device)
+            elif qpos_seed.shape == (DOF,):
+                qpos_seed_ = (
+                    qpos_seed.unsqueeze(0).repeat(n_sample, 1).to(kernel_device)
+                )
+            else:
+                logger.log_error(
+                    f"Invalid shape for qpos_seed: {qpos_seed.shape}. Expected ({n_sample}, {DOF}) or ({DOF},)."
+                )
+            qpos_seed_wp = wp.from_torch(qpos_seed_)
         else:
-            qpos_seed_wp = wp.zeros(
-                n_sample * DOF,
-                dtype=float,
-                device=standardize_device_string(kernel_device),
+            qpos_seed = torch.zeros(
+                (n_sample, DOF), dtype=torch.float32, device=kernel_device
             )
+            qpos_seed_wp = wp.from_torch(qpos_seed)
+        all_qpos_wp = all_qpos_wp.reshape((n_sample, N_SOL, DOF))
+        all_ik_valid_wp = all_ik_valid_wp.reshape((n_sample, N_SOL))
         joint_weight = kwargs.get("joint_weight", torch.ones(size=(DOF,), dtype=float))
         joint_weight_wp = wp_vec6f(
             joint_weight[0],
@@ -309,13 +320,13 @@ class OPWSolver(BaseSolver):
             joint_weight[5],
         )
         best_ik_result_wp = wp.zeros(
-            n_sample * 6, dtype=float, device=standardize_device_string(kernel_device)
+            (n_sample, 6), dtype=float, device=standardize_device_string(kernel_device)
         )
         best_ik_valid_wp = wp.zeros(
             n_sample, dtype=int, device=standardize_device_string(kernel_device)
         )
         wp.launch(
-            kernel=opw_best_ik_kernel,
+            kernel=opw_ik_select_kernel,
             dim=(n_sample),
             inputs=[
                 all_qpos_wp,
@@ -323,9 +334,13 @@ class OPWSolver(BaseSolver):
                 qpos_seed_wp,
                 joint_weight_wp,
             ],
-            outputs=[best_ik_result_wp, best_ik_valid_wp],
+            outputs=[
+                best_ik_result_wp,
+                best_ik_valid_wp,
+            ],
             device=standardize_device_string(kernel_device),
         )
+
         best_ik_result = (
             wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6).to(self.device)
         )

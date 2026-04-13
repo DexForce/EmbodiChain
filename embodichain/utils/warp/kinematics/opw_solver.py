@@ -456,35 +456,31 @@ def opw_ik_kernel(
 
 
 @wp.kernel
-def opw_best_ik_kernel(
-    full_ik_result: wp.array(dtype=float),
-    full_ik_valid: wp.array(dtype=int),
-    qpos_seed: wp.array(dtype=float),
+def opw_ik_select_kernel(
+    full_ik_result: wp.array(dtype=float, ndim=3),  # [n_sample, N_SOL, DOF]
+    full_ik_valid: wp.array(dtype=int, ndim=2),  # [n_sample, N_SOL]
+    qpos_seed: wp.array(dtype=float, ndim=2),  # [n_sample, DOF]
     joint_weights: wp_vec6f,
-    best_ik_result: wp.array(dtype=float),
-    best_ik_valid: wp.array(dtype=int),
+    best_ik_result: wp.array(dtype=float, ndim=2),  # [n_sample, DOF]
+    best_ik_valid: wp.array(dtype=int, ndim=1),  # [n_sample, ]
 ):
-    i = wp.tid()
-    DOF = 6
-    N_SOL = 8
-
+    i = wp.tid()  # index for sample
     best_weighted_dis = float(1e10)
     best_ids = int(-1)
+    DOF = 6
+    N_SOL = 8
     for j in range(N_SOL):
-        is_full_valid = full_ik_valid[i * N_SOL + j]
+        is_full_valid = full_ik_valid[i, j]
         if is_full_valid == 0:
             # invalid ik result
             continue
         weighted_dis = 0.0
         for t in range(DOF):
             weighted_dis += (
-                (full_ik_result[i * N_SOL * DOF + j * DOF + t] - qpos_seed[i * DOF + t])
-                * joint_weights[0]
-                * (
-                    full_ik_result[i * N_SOL * DOF + j * DOF + t]
-                    - qpos_seed[i * DOF + t]
-                )
-                * joint_weights[0]
+                (full_ik_result[i, j, t] - qpos_seed[i, t])
+                * joint_weights[t]
+                * (full_ik_result[i, j, t] - qpos_seed[i, t])
+                * joint_weights[t]
             )
         if weighted_dis < best_weighted_dis:
             best_weighted_dis = weighted_dis
@@ -493,9 +489,7 @@ def opw_best_ik_kernel(
         # found best solution
         best_ik_valid[i] = 1
         for k in range(DOF):
-            best_ik_result[i * DOF + k] = full_ik_result[
-                i * N_SOL * DOF + best_ids * DOF + k
-            ]
+            best_ik_result[i, k] = full_ik_result[i, best_ids, k]
     else:
         # no valid solution
         best_ik_valid[i] = 0
