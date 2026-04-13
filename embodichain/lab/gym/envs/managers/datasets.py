@@ -321,7 +321,7 @@ class LeRobotRecorder(Functor):
                             "names": ["height", "width", "channel"],
                         }
 
-                        if is_stereo:
+                        if is_stereo and frame_name == "color":
                             features[f"{sensor_name}.{frame_name}_right"] = {
                                 "dtype": "video" if self.use_videos else "image",
                                 "shape": (sensor.cfg.height, sensor.cfg.width, 3),
