@@ -893,6 +893,9 @@ class WorkspaceAnalyzer:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute end-effector positions for given joint configurations.
 
+        Uses batched FK computation via ``robot.compute_batch_fk`` for
+        significant speedup on large sample counts.
+
         Args:
             joint_configs: Joint configurations, shape (num_samples, num_joints).
             batch_size: Batch size for FK computation. If None, uses config value.
@@ -903,56 +906,60 @@ class WorkspaceAnalyzer:
                 - valid_configs: Valid joint configurations, shape (num_valid, num_joints)
         """
         num_samples = len(joint_configs)
+        batch_size = batch_size or self.config.sampling.batch_size
+        # Cap batch size to total samples
+        batch_size = min(batch_size, num_samples)
 
+        logger.log_info(f"Computing FK for {num_samples} samples (batch_size={batch_size})...")
+
+        # Pre-allocate lists for results
         workspace_points_list = []
         valid_configs_list = []
-
-        logger.log_info(f"Computing FK for {num_samples} samples...")
-
-        # Track valid points for progress bar
         total_valid = 0
 
-        # Robot expects one configuration at a time (batch_size from robot environments, not samples)
-        # Process each configuration individually
         pbar = self._create_optimized_tqdm(
-            range(num_samples),
-            desc="Forward Kinematics",
-            unit="cfg",
+            range(0, num_samples, batch_size),
+            desc="Forward Kinematics (batched)",
+            unit="batch",
             color="cyan",
             emoji="🤖",
         )
-        for i in pbar:
-            qpos = joint_configs[i : i + 1]  # Keep batch dimension
+
+        for batch_start in pbar:
+            batch_end = min(batch_start + batch_size, num_samples)
+
+            # Reshape to (n_envs=1, batch_size, num_joints) for compute_batch_fk
+            qpos_batch = joint_configs[batch_start:batch_end].unsqueeze(0)
 
             try:
-                # Compute forward kinematics
-                pose = self.robot.compute_fk(
-                    qpos=qpos,
+                # Batched FK: (1, batch, num_joints) -> (1, batch, 4, 4)
+                poses = self.robot.compute_batch_fk(
+                    qpos=qpos_batch,
                     name=self.control_part_name,
                     to_matrix=True,
                 )
 
-                # Extract position (x, y, z)
-                position = pose[:, :3, 3]  # Shape: (1, 3)
+                # Extract positions: (1, batch, 4, 4) -> (batch, 3)
+                positions = poses[0, :, :3, 3]
 
-                # Filter by constraints (bounds + collision check)
-                valid_bounds = self.constraint_checker.check_bounds(position)
-                valid_collision = self.constraint_checker.check_collision(position)
-                valid_mask = valid_bounds & valid_collision
+                # Vectorized constraint check for entire batch
+                valid_mask = self.constraint_checker.check_constraints(positions)
 
-                # Store valid results
                 if valid_mask.any():
-                    workspace_points_list.append(position[valid_mask])
-                    valid_configs_list.append(qpos[valid_mask])
-                    total_valid += 1
+                    workspace_points_list.append(positions[valid_mask])
+                    valid_configs_list.append(
+                        joint_configs[batch_start:batch_end][valid_mask]
+                    )
+                    total_valid += valid_mask.sum().item()
 
-                # Update progress bar with intelligent statistics
                 self._update_progress_with_stats(
-                    pbar, i, total_valid, metric_name="valid", show_rate=True
+                    pbar, batch_end - 1, total_valid, metric_name="valid", show_rate=True
                 )
 
             except Exception as e:
-                logger.log_warning(f"FK computation failed for sample {i}: {e}")
+                logger.log_warning(
+                    f"FK computation failed for batch [{batch_start}:{batch_end}]: {e}"
+                )
                 continue
 
         # Concatenate all results
@@ -963,19 +970,17 @@ class WorkspaceAnalyzer:
             workspace_points = torch.empty((0, 3), device=self.device)
             valid_configs = torch.empty((0, self.num_joints), device=self.device)
 
-        # Performance summary for FK computation
-        pbar.close()  # Ensure progress bar is closed
-        success_rate = len(workspace_points) / num_samples * 100
+        pbar.close()
+        success_rate = len(workspace_points) / num_samples * 100 if num_samples > 0 else 0
 
-        # Performance indicator based on success rate
         if success_rate >= 90:
-            perf_icon = "🏆"  # Trophy for excellent performance
+            perf_icon = "🏆"
         elif success_rate >= 75:
-            perf_icon = "✅"  # Check mark for good performance
+            perf_icon = "✅"
         elif success_rate >= 50:
-            perf_icon = "🟡"  # Yellow circle for moderate performance
+            perf_icon = "🟡"
         else:
-            perf_icon = "⚠️"  # Warning for low performance
+            perf_icon = "⚠️"
 
         logger.log_info(
             f"{perf_icon} FK Results: {len(workspace_points)}/{num_samples} valid points "
