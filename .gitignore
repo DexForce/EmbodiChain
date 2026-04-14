@@ -200,4 +200,4 @@ wandb/
 embodichain/VERSION
 
 # benchmark results
-benchmark/reports/*
+scripts/benchmark/rl/reports/*

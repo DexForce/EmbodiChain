@@ -246,23 +246,34 @@ class OPWSolver(BaseSolver):
         """
         N_SOL = 8
         DOF = 6
-        n_sample = target_xpos.shape[0]
 
-        if target_xpos.shape == (4, 4):
-            target_xpos_batch = target_xpos[None, :, :]
+        # TODO: IK kernel in cpu is not accurate. Force to use cuda warp kernel
+        if self.device == torch.device("cpu"):
+            kernel_device = torch.device("cuda")
         else:
-            target_xpos_batch = target_xpos
+            kernel_device = self.device
+        n_sample = target_xpos.shape[0]
+        target_xpos_ = target_xpos.to(kernel_device)
+        if target_xpos_.shape == (4, 4):
+            target_xpos_batch = target_xpos_[None, :, :]
+        else:
+            target_xpos_batch = target_xpos_
         target_xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
 
         all_qpos_wp = wp.zeros(
             n_sample * N_SOL * DOF,
             dtype=float,
-            device=standardize_device_string(self.device),
+            device=standardize_device_string(kernel_device),
         )
         all_ik_valid_wp = wp.zeros(
-            n_sample * N_SOL, dtype=int, device=standardize_device_string(self.device)
+            n_sample * N_SOL, dtype=int, device=standardize_device_string(kernel_device)
         )
-
+        offsets_ = wp.array(
+            self.offsets, device=standardize_device_string(kernel_device)
+        )
+        sign_corrections_ = wp.array(
+            self.sign_corrections, device=standardize_device_string(kernel_device)
+        )
         # TODO: whether require gradient
         wp.launch(
             kernel=opw_ik_kernel,
@@ -271,11 +282,11 @@ class OPWSolver(BaseSolver):
                 target_xpos_wp,
                 self._tcp_inv_warp,
                 self.params,
-                self.offsets,
-                self.sign_corrections,
+                offsets_,
+                sign_corrections_,
             ),
             outputs=[all_qpos_wp, all_ik_valid_wp],
-            device=standardize_device_string(self.device),
+            device=standardize_device_string(kernel_device),
         )
 
         if return_all_solutions:
@@ -284,12 +295,13 @@ class OPWSolver(BaseSolver):
             return all_ik_valid, all_qpos
 
         if qpos_seed is not None:
-            qpos_seed_wp = wp.from_torch(qpos_seed.reshape(-1))
+            qpos_seed_ = qpos_seed.to(kernel_device)
+            qpos_seed_wp = wp.from_torch(qpos_seed_.reshape(-1))
         else:
             qpos_seed_wp = wp.zeros(
                 n_sample * DOF,
                 dtype=float,
-                device=standardize_device_string(self.device),
+                device=standardize_device_string(kernel_device),
             )
         joint_weight = kwargs.get("joint_weight", torch.ones(size=(DOF,), dtype=float))
         joint_weight_wp = wp_vec6f(
@@ -301,10 +313,10 @@ class OPWSolver(BaseSolver):
             joint_weight[5],
         )
         best_ik_result_wp = wp.zeros(
-            n_sample * 6, dtype=float, device=standardize_device_string(self.device)
+            n_sample * 6, dtype=float, device=standardize_device_string(kernel_device)
         )
         best_ik_valid_wp = wp.zeros(
-            n_sample, dtype=int, device=standardize_device_string(self.device)
+            n_sample, dtype=int, device=standardize_device_string(kernel_device)
         )
         wp.launch(
             kernel=opw_best_ik_kernel,
@@ -316,10 +328,12 @@ class OPWSolver(BaseSolver):
                 joint_weight_wp,
             ],
             outputs=[best_ik_result_wp, best_ik_valid_wp],
-            device=standardize_device_string(self.device),
+            device=standardize_device_string(kernel_device),
         )
-        best_ik_result = wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6)
-        best_ik_valid = wp.to_torch(best_ik_valid_wp)
+        best_ik_result = (
+            wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6).to(self.device)
+        )
+        best_ik_valid = wp.to_torch(best_ik_valid_wp).to(self.device)
         return best_ik_valid, best_ik_result
 
     def _calculate_dynamic_weights(
