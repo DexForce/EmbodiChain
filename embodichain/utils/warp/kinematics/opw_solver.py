@@ -31,6 +31,23 @@ def normalize_to_pi(angle: float) -> float:
 
 
 @wp.func
+def normalize_in_limit(angle: float, lower: float, upper: float) -> float:
+    two_pi = 2.0 * wp.pi
+    k = wp.ceil((lower - angle) / two_pi)
+    result = angle + k * two_pi
+    return result
+
+
+@wp.func
+def is_within_limit(
+    angle: float, lower: float, upper: float, safe_margin: float
+) -> bool:
+    if angle < lower + safe_margin or angle > upper - safe_margin:
+        return False
+    return True
+
+
+@wp.func
 def safe_acos(x: float) -> float:
     return wp.acos(wp.clamp(x, -1.0, 1.0))
 
@@ -219,6 +236,8 @@ def opw_ik_kernel(
     params: OPWparam,
     offsets: wp.array(dtype=float),
     sign_corrections: wp.array(dtype=float),
+    lower_limits: wp_vec6f,
+    upper_limits: wp_vec6f,
     qpos: wp.array(dtype=float),
     ik_valid: wp.array(dtype=int),
 ):
@@ -427,14 +446,17 @@ def opw_ik_kernel(
     )
     DOF = 6
     N_SOL = 8
+    SAFE_MARGIN = float(wp.pi * 5.0 / 180.0)
     # apply sign correction and offsets, and write to qpos
     for j in range(N_SOL):
         qpos_start = i * DOF * N_SOL + j * DOF
 
         for k in range(DOF):
             idx = j * DOF + k
-            qpos[qpos_start + k] = normalize_to_pi(
-                (theta[idx] + offsets[k]) * sign_corrections[k]
+            qpos[qpos_start + k] = normalize_in_limit(
+                (theta[idx] + offsets[k]) * sign_corrections[k],
+                lower=lower_limits[k],
+                upper=upper_limits[k],
             )
 
         # filter invalid solutions
@@ -449,10 +471,18 @@ def opw_ik_kernel(
         )
         t_err, r_err = get_transform_err(check_ee_pose, ee_pose)
         # mark invalid solutions (cannot pass ik check)
+        ik_valid[i * N_SOL + j] = 1
+        for k in range(DOF):
+            if not is_within_limit(
+                qpos[qpos_start + k],
+                lower_limits[k],
+                upper_limits[k],
+                safe_margin=SAFE_MARGIN,
+            ):
+                ik_valid[i * N_SOL + j] = 0
+                break
         if t_err > 1e-2 or r_err > 1e-1:
             ik_valid[i * N_SOL + j] = 0
-        else:
-            ik_valid[i * N_SOL + j] = 1
 
 
 @wp.kernel

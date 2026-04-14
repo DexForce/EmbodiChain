@@ -23,6 +23,10 @@ from typing import Tuple, List
 import time
 
 
+LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
+UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
+
+
 def get_pose_err(matrix_a: np.ndarray, matrix_b: np.ndarray) -> Tuple[float, float]:
     t_err = np.linalg.norm(matrix_a[:3, 3] - matrix_b[:3, 3])
     relative_rot = matrix_a[:3, :3].T @ matrix_b[:3, :3]
@@ -46,9 +50,13 @@ def get_poses_err(
 
 def check_opw_solver(solver_warp, solver_py_opw, n_samples=1000):
     DOF = 6
-    qpos_np = np.random.uniform(low=-np.pi, high=np.pi, size=(n_samples, DOF)).astype(
-        float
-    )
+    qpos_np = np.random.uniform(
+        low=np.array(LOWER_LIMITS)
+        + 5.1 / 180.0 * np.pi,  # add a margin to avoid sampling near the joint limits
+        high=np.array(UPPER_LIMITS) + -5.1 / 180.0 * np.pi,
+        size=(n_samples, DOF),
+    ).astype(float)
+
     qpos = torch.tensor(qpos_np, device=torch.device("cuda"), dtype=torch.float32)
     xpos = solver_warp.get_fk(qpos)
     qpos_seed = torch.tensor(
@@ -130,6 +138,11 @@ def benchmark_opw_solver():
     # TODO: ignore pk_serial_chain for OPW
     solver_warp = cfg.init_solver(device=torch.device("cuda"), pk_serial_chain="")
     solver_py_opw = cfg.init_solver(device=torch.device("cpu"), pk_serial_chain="")
+    solver_warp.lower_position_limits = np.array(LOWER_LIMITS)
+    solver_warp.upper_position_limits = np.array(UPPER_LIMITS)
+    solver_py_opw.lower_position_limits = np.array(LOWER_LIMITS)
+    solver_py_opw.upper_position_limits = np.array(UPPER_LIMITS)
+
     n_samples = [100, 1000, 10000, 100000]
     for n_sample in n_samples:
         # check_opw_solver(solver_warp, solver_py_opw, device=device, n_samples=n_sample)

@@ -269,6 +269,22 @@ class OPWSolver(BaseSolver):
         sign_corrections_ = self.sign_corrections.to(
             standardize_device_string(kernel_device)
         )
+        lower_limits_ = wp_vec6f(
+            self.lower_position_limits[0],
+            self.lower_position_limits[1],
+            self.lower_position_limits[2],
+            self.lower_position_limits[3],
+            self.lower_position_limits[4],
+            self.lower_position_limits[5],
+        )
+        upper_limits_ = wp_vec6f(
+            self.upper_position_limits[0],
+            self.upper_position_limits[1],
+            self.upper_position_limits[2],
+            self.upper_position_limits[3],
+            self.upper_position_limits[4],
+            self.upper_position_limits[5],
+        )
         wp.launch(
             kernel=opw_ik_kernel,
             dim=(n_sample),
@@ -278,6 +294,8 @@ class OPWSolver(BaseSolver):
                 self.params,
                 offsets_,
                 sign_corrections_,
+                lower_limits_,
+                upper_limits_,
             ),
             outputs=[all_qpos_wp, all_ik_valid_wp],
             device=standardize_device_string(kernel_device),
@@ -287,7 +305,6 @@ class OPWSolver(BaseSolver):
             all_qpos = wp.to_torch(all_qpos_wp).reshape(n_sample, N_SOL, DOF)
             all_ik_valid = wp.to_torch(all_ik_valid_wp).reshape(n_sample, N_SOL)
             return all_ik_valid, all_qpos
-
         if qpos_seed is not None:
             if qpos_seed.shape == (
                 n_sample,

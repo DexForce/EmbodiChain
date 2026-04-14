@@ -164,6 +164,16 @@ class BaseSolver(metaclass=ABCMeta):
                 root_link_name=self.root_link_name,
                 device=self.device,
             )
+            self.set_position_limits(
+                lower_position_limits=self.pk_serial_chain.low,
+                upper_position_limits=self.pk_serial_chain.high,
+            )
+        else:
+            # If a pk_serial_chain is provided, we assume it has the necessary information to set position limits.
+            self.set_position_limits(
+                lower_position_limits=[-2 * np.pi] * self.dof,
+                upper_position_limits=[2 * np.pi] * self.dof,
+            )
 
     def set_ik_nearest_weight(
         self, ik_weight: np.ndarray, joint_ids: np.ndarray | None = None
@@ -237,12 +247,6 @@ class BaseSolver(metaclass=ABCMeta):
         Returns:
             bool: True if limits are successfully set, False if the input is invalid.
         """
-        if (
-            len(lower_position_limits) != self.model.nq
-            or len(upper_position_limits) != self.model.nq
-        ):
-            logger.log_warning("Length of limits must match the number of joints.")
-            return False
 
         if any(
             lower > upper
