@@ -95,6 +95,9 @@ class ManipulabilityMetric(BaseMetric):
             valid_mask = manipulability_scores >= self.config.jacobian_threshold
             valid_scores = manipulability_scores[valid_mask]
 
+            if len(valid_scores) == 0:
+                valid_scores = np.array([0.0])
+
         self.results = {
             "mean_manipulability": float(valid_scores.mean()),
             "std_manipulability": float(valid_scores.std()),

@@ -176,7 +176,7 @@ class HaltonSampler(BaseSampler):
         self.bases = bases
         self.skip = skip
 
-    def sample(
+    def _sample_from_bounds(
         self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate Halton sequence samples within the given bounds.
