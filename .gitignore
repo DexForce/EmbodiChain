@@ -198,3 +198,6 @@ wandb/
 .vscode/
 
 embodichain/VERSION
+
+# benchmark results
+benchmark/reports/*

@@ -51,11 +51,13 @@ dependencies = [
   "fvcore",
   "h5py",
   "tensordict",
-  "viser==1.0.21",
-  "lerobot>=0.4.4"
+  "viser==1.0.21"
 ]
 
 [project.optional-dependencies]
+lerobot = [
+  "lerobot==0.4.4"
+]
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }

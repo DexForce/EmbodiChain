@@ -2,66 +2,81 @@
 
 ## System Requirements
 
-| Component | Requirement |
-|-----------|------------|
-| **OS** | Linux (x86_64): Ubuntu 20.04+ |
-| **GPU** | NVIDIA with compute capability 7.0+ |
-| **NVIDIA Driver** | 535 or higher (recommended 570) |
-| **Python** | 3.10 or 3.11 |
+The following minimum system requirements are recommended to run EmbodiChain reliably. These are the tested configurations during development — other Linux distributions and versions may work but are not officially supported.
 
-> [!NOTE]
-> Ensure your NVIDIA driver is compatible with your chosen PyTorch wheel. We recommend installing PyTorch from the [official PyTorch instructions](https://pytorch.org/get-started/locally/) for your CUDA version.
+- Operating System: 
+    - Linux (x86_64): Ubuntu 20.04+
 
-## Installation
+- NVIDIA GPU and drivers:
+    - Hardware: NVIDIA GPU with compute capability 7.0 or higher
+    - NVIDIA Driver: 535 or higher (recommended 570)
 
-### Docker (Recommended)
 
-We strongly recommend using our pre-configured Docker environment, which contains all necessary dependencies including CUDA, Vulkan, and GPU rendering support.
+- Python:
+    - 3.10
+    - 3.11
 
-**1. Pull the image:**
+Notes:
+
+- Ensure your NVIDIA driver is compatible with your chosen PyTorch wheel.
+- We recommend installing PyTorch from the official PyTorch instructions for your CUDA version: https://pytorch.org/get-started/locally/
+
+---
+
+### Recommended: Install with Docker 
+
+We strongly recommend using our pre-configured Docker environment, which contains all necessary dependencies.
 
 ```bash
 docker pull dexforce/embodichain:ubuntu22.04-cuda12.8
 ```
 
-**2. Start a container:**
-
-Use the provided run script ([`docker/docker_run.sh`](../../../docker/docker_run.sh)), which handles GPU driver and Vulkan mounting:
+After pulling the Docker image, you can run a container with the provided [scripts](../../../docker/docker_run.sh).
 
 ```bash
-./docker/docker_run.sh <container_name> <data_path>
+./docker_run.sh [container_name] [data_path]
 ```
 
-### pip (PyPI)
+---
 
-> [!TIP]
-> We strongly recommend using a virtual environment to avoid dependency conflicts.
+
+### Install EmbodiChain
+
+> **We strongly recommend using a virtual environment to avoid dependency conflicts.**
+
+To install EmbodiChain from pypi, run:
 
 ```bash
 pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+
+# Or install with the lerobot extras:
+pip install embodichain[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 ```
 
-### From Source
-
-> [!TIP]
-> We strongly recommend using a virtual environment to avoid dependency conflicts.
-
+To install the Embodichain from source, clone the EmbodiChain repository:
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
-cd EmbodiChain
-pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 ```
 
-## Verify Installation
+Install the project in development mode:
 
-Run the demo script to confirm everything is set up correctly:
+```bash
+pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+
+# Or install with the lerobot extras:
+pip install -e .[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+```
+
+> [!NOTE]
+> * [LeRobot](https://huggingface.co/docs/lerobot/installation) is an optional module for EmbodiChain that provides data saving and loading functionalities for robot learning tasks. Installing with the `lerobot` extras will include this module and its dependencies.
+
+### Verify Installation
+To verify that EmbodiChain is installed correctly, run a simple demo script to create a simulation scene:
 
 ```bash
 python scripts/tutorials/sim/create_scene.py
-```
 
-If the installation is successful, you will see a simulation window with a rendered scene. To run without a display:
-
-```bash
+# Or run in headless mode.
 python scripts/tutorials/sim/create_scene.py --headless
 ```
+---
