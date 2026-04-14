@@ -112,40 +112,48 @@ class ManipulabilityMetric(BaseMetric):
         return self.results
 
     def _compute_manipulability_index(self, jacobians: np.ndarray) -> np.ndarray:
-        """Compute Yoshikawa manipulability index.
+        """Compute Yoshikawa manipulability index with batched operations.
 
         Args:
-            jacobians: Jacobian matrices, shape (N, 6, num_joints).
+            jacobians: Jacobian matrices, shape (N, rows, cols).
 
         Returns:
             Manipulability indices, shape (N,).
         """
-        # Manipulability index: sqrt(det(J * J^T))
-        manipulability = np.zeros(len(jacobians))
+        # Batch matrix multiply: J @ J^T for all samples
+        JJT = np.matmul(jacobians, np.swapaxes(jacobians, -2, -1))
 
-        for i, J in enumerate(jacobians):
-            JJT = J @ J.T
-            det = np.linalg.det(JJT)
-            manipulability[i] = np.sqrt(max(det, 0))
+        # Batch determinant
+        dets = np.linalg.det(JJT)
 
-        return manipulability
+        # sqrt(max(0, det))
+        return np.sqrt(np.maximum(dets, 0.0))
 
     def _compute_condition_numbers(self, jacobians: np.ndarray) -> np.ndarray:
-        """Compute condition numbers of Jacobian matrices.
+        """Compute condition numbers of Jacobian matrices with batched SVD.
 
         Args:
-            jacobians: Jacobian matrices, shape (N, 6, num_joints).
+            jacobians: Jacobian matrices, shape (N, rows, cols).
 
         Returns:
             Condition numbers, shape (N,).
         """
-        condition_numbers = np.zeros(len(jacobians))
-
-        for i, J in enumerate(jacobians):
-            try:
-                condition_numbers[i] = np.linalg.cond(J)
-            except np.linalg.LinAlgError:
-                # Singular matrix, use infinity as condition number
-                condition_numbers[i] = np.inf
-
-        return condition_numbers
+        try:
+            _, singular_values, _ = np.linalg.svd(
+                jacobians, full_matrices=False
+            )
+            # Condition number = max singular value / min singular value
+            max_sv = singular_values[:, 0]
+            min_sv = singular_values[:, -1]
+            # Avoid division by zero
+            min_sv = np.maximum(min_sv, 1e-15)
+            return max_sv / min_sv
+        except np.linalg.LinAlgError:
+            # Fallback to per-matrix computation if batch SVD fails
+            condition_numbers = np.zeros(len(jacobians))
+            for i, J in enumerate(jacobians):
+                try:
+                    condition_numbers[i] = np.linalg.cond(J)
+                except np.linalg.LinAlgError:
+                    condition_numbers[i] = np.inf
+            return condition_numbers
