@@ -142,9 +142,7 @@ class ManipulabilityMetric(BaseMetric):
             Condition numbers, shape (N,).
         """
         try:
-            _, singular_values, _ = np.linalg.svd(
-                jacobians, full_matrices=False
-            )
+            _, singular_values, _ = np.linalg.svd(jacobians, full_matrices=False)
             # Condition number = max singular value / min singular value
             max_sv = singular_values[:, 0]
             min_sv = singular_values[:, -1]

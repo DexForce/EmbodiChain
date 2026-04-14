@@ -214,9 +214,7 @@ class HaltonSampler(BaseSampler):
             bases = self.bases[:n_dims]
 
         # Generate Halton sequence with vectorized van der Corput
-        samples_unit = self._generate_halton_vectorized(
-            num_samples, n_dims, bases
-        )
+        samples_unit = self._generate_halton_vectorized(num_samples, n_dims, bases)
 
         # Convert to tensor and scale to bounds
         samples_unit_tensor = self._to_tensor(samples_unit)

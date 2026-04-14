@@ -125,9 +125,7 @@ class ReachabilityMetric(BaseMetric):
         voxel_indices = np.floor(points / voxel_size).astype(int)
 
         # Use np.unique for vectorized counting
-        unique_indices, counts = np.unique(
-            voxel_indices, axis=0, return_counts=True
-        )
+        unique_indices, counts = np.unique(voxel_indices, axis=0, return_counts=True)
 
         # Filter by minimum points threshold and build dict
         min_points = self.config.min_points_per_voxel
