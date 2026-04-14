@@ -452,8 +452,6 @@ class PytorchSolver(BaseSolver):
         target_xpos = target_xpos @ torch.inverse(tcp_xpos)
 
         # Get joint limits and ensure shape matches dof
-        upper_limits = self.upper_position_limits.float()
-        lower_limits = self.lower_position_limits.float()
 
         batch_size = target_xpos.shape[0]
 
@@ -461,7 +459,10 @@ class PytorchSolver(BaseSolver):
             num_samples=self._num_samples, dof=self.dof, device=self.device
         )
         random_qpos_seeds = sampler.sample(
-            qpos_seed, lower_limits, upper_limits, batch_size
+            qpos_seed,
+            self.lower_position_limits,
+            self.upper_position_limits,
+            batch_size,
         )
         target_xpos_repeated = sampler.repeat_target_xpos(
             target_xpos, self._num_samples

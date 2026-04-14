@@ -257,8 +257,12 @@ class BaseSolver(metaclass=ABCMeta):
             )
             return False
 
-        self.lower_position_limits = np.array(lower_position_limits)
-        self.upper_position_limits = np.array(upper_position_limits)
+        self.lower_position_limits = torch.tensor(
+            lower_position_limits, dtype=float, device=self.device
+        )
+        self.upper_position_limits = torch.tensor(
+            upper_position_limits, dtype=float, device=self.device
+        )
         return True
 
     def get_position_limits(self) -> dict:
