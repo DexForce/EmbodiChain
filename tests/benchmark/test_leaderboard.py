@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from benchmark.metrics import build_leaderboard
+from benchmark.rl.metrics import build_leaderboard
 
 
 def test_build_leaderboard_ranks_higher_success_first():

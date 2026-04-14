@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from benchmark.plots import build_plot_artifacts
+from benchmark.rl.plots import build_plot_artifacts
 
 
 def test_build_plot_artifacts_writes_svg_files(tmp_path):

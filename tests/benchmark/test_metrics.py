@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from benchmark.metrics import (
+from benchmark.rl.metrics import (
     aggregate_runs,
     compute_final_metric_stable,
     compute_steps_to_threshold_first_hit,

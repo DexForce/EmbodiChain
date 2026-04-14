@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from benchmark.reporting import generate_markdown_report
+from benchmark.rl.reporting import generate_markdown_report
 
 
 def test_generate_markdown_report_writes_expected_sections(tmp_path):
