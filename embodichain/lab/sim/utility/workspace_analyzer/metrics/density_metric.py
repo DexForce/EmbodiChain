@@ -92,35 +92,42 @@ class DensityMetric(BaseMetric):
     def _compute_local_density(self, points: np.ndarray) -> np.ndarray:
         """Compute local density for each point.
 
+        Uses scipy.spatial.cKDTree for O(N log N) performance instead of
+        the O(N^2) brute-force approach. Falls back to brute-force if
+        scipy is unavailable.
+
         Args:
             points: Point cloud, shape (N, 3).
 
         Returns:
             Local densities, shape (N,).
         """
-        n_points = len(points)
-        densities = np.zeros(n_points)
-
-        # Use radius-based density estimation for better performance
         radius = self.config.radius
+        volume = (4.0 / 3.0) * np.pi * (radius**3)
 
-        for i in range(n_points):
-            # Compute distances to all other points
-            distances = np.linalg.norm(points - points[i], axis=1)
+        try:
+            from scipy.spatial import cKDTree
 
-            # Count neighbors within radius
-            num_neighbors = np.sum(distances <= radius) - 1  # Exclude self
-
-            # Density = neighbors / volume of sphere
-            volume = (4.0 / 3.0) * np.pi * (radius**3)
-            densities[i] = num_neighbors / volume if volume > 0 else 0.0
-
-        return densities
+            tree = cKDTree(points)
+            # Count neighbors within radius for all points at once
+            counts = tree.query_ball_point(points, r=radius, return_length=True)
+            # Subtract 1 to exclude self
+            densities = (counts - 1) / volume if volume > 0 else np.zeros(len(points))
+            return densities
+        except ImportError:
+            # Fallback: brute-force O(N^2)
+            n_points = len(points)
+            densities = np.zeros(n_points)
+            for i in range(n_points):
+                distances = np.linalg.norm(points - points[i], axis=1)
+                num_neighbors = np.sum(distances <= radius) - 1
+                densities[i] = num_neighbors / volume if volume > 0 else 0.0
+            return densities
 
     def _compute_knn_density(self, points: np.ndarray) -> np.ndarray:
         """Compute k-nearest neighbors density.
 
-        Alternative method using k-nearest neighbors instead of fixed radius.
+        Uses scipy.spatial.cKDTree for O(N log N) performance.
 
         Args:
             points: Point cloud, shape (N, 3).
@@ -134,19 +141,25 @@ class DensityMetric(BaseMetric):
         if k <= 0:
             return np.zeros(n_points)
 
-        densities = np.zeros(n_points)
+        try:
+            from scipy.spatial import cKDTree
 
-        for i in range(n_points):
-            # Compute distances to all other points
-            distances = np.linalg.norm(points - points[i], axis=1)
-
-            # Find k-nearest neighbors (excluding self)
-            distances[i] = np.inf
-            knn_distances = np.partition(distances, k)[:k]
-
-            # Density = k / volume of sphere containing k neighbors
-            max_distance = knn_distances.max()
-            volume = (4.0 / 3.0) * np.pi * (max_distance**3)
-            densities[i] = k / volume if volume > 0 else 0.0
-
-        return densities
+            tree = cKDTree(points)
+            # Query k+1 nearest (includes self)
+            distances, _ = tree.query(points, k=k + 1)
+            # Use the k-th nearest distance (index k, since 0 is self)
+            max_distances = distances[:, -1]
+            max_distances = np.maximum(max_distances, 1e-10)
+            volumes = (4.0 / 3.0) * np.pi * (max_distances**3)
+            densities = k / volumes
+            return densities
+        except ImportError:
+            densities = np.zeros(n_points)
+            for i in range(n_points):
+                distances = np.linalg.norm(points - points[i], axis=1)
+                distances[i] = np.inf
+                knn_distances = np.partition(distances, k)[:k]
+                max_distance = knn_distances.max()
+                volume = (4.0 / 3.0) * np.pi * (max_distance**3)
+                densities[i] = k / volume if volume > 0 else 0.0
+            return densities
