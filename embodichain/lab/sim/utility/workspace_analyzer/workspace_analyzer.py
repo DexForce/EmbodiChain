@@ -302,6 +302,7 @@ class WorkspaceAnalyzer:
         return factory.create_sampler(
             strategy=self.config.sampling.strategy,
             seed=self.config.sampling.seed,
+            device=self.device,
         )
 
     # Note: Geometric constraint creation methods temporarily removed
@@ -893,6 +894,9 @@ class WorkspaceAnalyzer:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute end-effector positions for given joint configurations.
 
+        Uses batched FK computation via ``robot.compute_batch_fk`` for
+        significant speedup on large sample counts.
+
         Args:
             joint_configs: Joint configurations, shape (num_samples, num_joints).
             batch_size: Batch size for FK computation. If None, uses config value.
@@ -903,56 +907,66 @@ class WorkspaceAnalyzer:
                 - valid_configs: Valid joint configurations, shape (num_valid, num_joints)
         """
         num_samples = len(joint_configs)
+        batch_size = batch_size or self.config.sampling.batch_size
+        # Cap batch size to total samples
+        batch_size = min(batch_size, num_samples)
 
+        logger.log_info(
+            f"Computing FK for {num_samples} samples (batch_size={batch_size})..."
+        )
+
+        # Pre-allocate lists for results
         workspace_points_list = []
         valid_configs_list = []
-
-        logger.log_info(f"Computing FK for {num_samples} samples...")
-
-        # Track valid points for progress bar
         total_valid = 0
 
-        # Robot expects one configuration at a time (batch_size from robot environments, not samples)
-        # Process each configuration individually
         pbar = self._create_optimized_tqdm(
-            range(num_samples),
-            desc="Forward Kinematics",
-            unit="cfg",
+            range(0, num_samples, batch_size),
+            desc="Forward Kinematics (batched)",
+            unit="batch",
             color="cyan",
             emoji="🤖",
         )
-        for i in pbar:
-            qpos = joint_configs[i : i + 1]  # Keep batch dimension
+
+        for batch_start in pbar:
+            batch_end = min(batch_start + batch_size, num_samples)
+
+            # Reshape to (n_envs=1, batch_size, num_joints) for compute_batch_fk
+            qpos_batch = joint_configs[batch_start:batch_end].unsqueeze(0)
 
             try:
-                # Compute forward kinematics
-                pose = self.robot.compute_fk(
-                    qpos=qpos,
+                # Batched FK: (1, batch, num_joints) -> (1, batch, 4, 4)
+                poses = self.robot.compute_batch_fk(
+                    qpos=qpos_batch,
                     name=self.control_part_name,
                     to_matrix=True,
                 )
 
-                # Extract position (x, y, z)
-                position = pose[:, :3, 3]  # Shape: (1, 3)
+                # Extract positions: (1, batch, 4, 4) -> (batch, 3)
+                positions = poses[0, :, :3, 3]
 
-                # Filter by constraints (bounds + collision check)
-                valid_bounds = self.constraint_checker.check_bounds(position)
-                valid_collision = self.constraint_checker.check_collision(position)
-                valid_mask = valid_bounds & valid_collision
+                # Vectorized constraint check for entire batch
+                valid_mask = self.constraint_checker.check_constraints(positions)
 
-                # Store valid results
                 if valid_mask.any():
-                    workspace_points_list.append(position[valid_mask])
-                    valid_configs_list.append(qpos[valid_mask])
-                    total_valid += 1
+                    workspace_points_list.append(positions[valid_mask])
+                    valid_configs_list.append(
+                        joint_configs[batch_start:batch_end][valid_mask]
+                    )
+                    total_valid += valid_mask.sum().item()
 
-                # Update progress bar with intelligent statistics
                 self._update_progress_with_stats(
-                    pbar, i, total_valid, metric_name="valid", show_rate=True
+                    pbar,
+                    batch_end - 1,
+                    total_valid,
+                    metric_name="valid",
+                    show_rate=True,
                 )
 
             except Exception as e:
-                logger.log_warning(f"FK computation failed for sample {i}: {e}")
+                logger.log_warning(
+                    f"FK computation failed for batch [{batch_start}:{batch_end}]: {e}"
+                )
                 continue
 
         # Concatenate all results
@@ -963,19 +977,19 @@ class WorkspaceAnalyzer:
             workspace_points = torch.empty((0, 3), device=self.device)
             valid_configs = torch.empty((0, self.num_joints), device=self.device)
 
-        # Performance summary for FK computation
-        pbar.close()  # Ensure progress bar is closed
-        success_rate = len(workspace_points) / num_samples * 100
+        pbar.close()
+        success_rate = (
+            len(workspace_points) / num_samples * 100 if num_samples > 0 else 0
+        )
 
-        # Performance indicator based on success rate
         if success_rate >= 90:
-            perf_icon = "🏆"  # Trophy for excellent performance
+            perf_icon = "🏆"
         elif success_rate >= 75:
-            perf_icon = "✅"  # Check mark for good performance
+            perf_icon = "✅"
         elif success_rate >= 50:
-            perf_icon = "🟡"  # Yellow circle for moderate performance
+            perf_icon = "🟡"
         else:
-            perf_icon = "⚠️"  # Warning for low performance
+            perf_icon = "⚠️"
 
         logger.log_info(
             f"{perf_icon} FK Results: {len(workspace_points)}/{num_samples} valid points "
@@ -987,7 +1001,13 @@ class WorkspaceAnalyzer:
     def compute_reachability(
         self, cartesian_points: torch.Tensor, batch_size: int | None = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute reachability for Cartesian points using IK.
+        """Compute reachability for Cartesian points using batched IK.
+
+        All ``ik_samples_per_point`` random seeds for a batch of points are
+        merged into the batch dimension and resolved with a **single**
+        ``robot.compute_batch_ik`` call (shape ``(1, n_valid * K, 4, 4)``).
+        This avoids the Python loop overhead and lets the solver process all
+        seeds in one vectorised pass.
 
         Args:
             cartesian_points: Cartesian positions, shape (num_samples, 3).
@@ -1003,208 +1023,125 @@ class WorkspaceAnalyzer:
         """
         num_samples = len(cartesian_points)
         ik_samples_per_point = self.config.ik_samples_per_point
+        batch_size = batch_size or self.config.sampling.batch_size
+        batch_size = min(batch_size, num_samples)
 
-        # Pre-filter Cartesian points by workspace constraints
-        # This eliminates points that are outside bounds or in collision zones
-        valid_cartesian_mask = self.constraint_checker.check_bounds(
+        # Pre-filter by workspace constraints (vectorized)
+        valid_cartesian_mask = self.constraint_checker.check_constraints(
             cartesian_points
-        ) & self.constraint_checker.check_collision(cartesian_points)
+        )
 
         logger.log_info(
             f"Pre-filtered Cartesian points: {valid_cartesian_mask.sum()}/{num_samples} "
             f"points pass workspace constraints ({(valid_cartesian_mask.sum()/num_samples*100):.1f}%)"
         )
 
-        # Store results for all points (including invalid ones for consistent indexing)
+        # Get reference end-effector pose for IK target orientation
+        current_ee_pose = self._get_reference_pose()
+
+        # Initialize result arrays
         all_success_rates = torch.zeros(num_samples, device=self.device)
         reachable_points_list = []
         best_configs_list = []
+        total_reachable = 0
 
-        logger.log_info(
-            f"Computing IK for {num_samples} Cartesian samples "
-            f"({ik_samples_per_point} seeds per point)..."
-        )
-
-        # Create a random sampler for generating IK seeds (avoid UniformSampler issues)
+        # Prepare random seeds for all attempts
         from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
             RandomSampler,
         )
 
-        random_sampler = RandomSampler(seed=self.config.sampling.seed)
-
-        # Get reference end-effector pose for IK target orientation
-        # Priority: use reference_pose if provided, otherwise compute from current joint configuration
-        if (
-            hasattr(self.config, "reference_pose")
-            and self.config.reference_pose is not None
-        ):
-            # Use provided reference pose (should be 4x4 transformation matrix)
-            reference_pose = self.config.reference_pose
-            if isinstance(reference_pose, np.ndarray):
-                reference_pose = torch.from_numpy(reference_pose).to(self.device)
-            if reference_pose.dim() == 2:  # Shape: (4, 4) -> (1, 4, 4)
-                reference_pose = reference_pose.unsqueeze(0)
-            current_ee_pose = reference_pose  # Shape: (1, 4, 4)
-            logger.log_info("Using provided reference pose for IK target orientation")
-        else:
-            # Fallback: compute current end-effector pose from joint configuration
-            try:
-                # Using first environment (index 0) for qpos retrieval
-                current_qpos = self.robot.get_qpos()[0][
-                    self.robot.get_joint_ids(self.control_part_name)
-                ]
-                current_ee_pose = self.robot.compute_fk(
-                    name=self.control_part_name,
-                    qpos=current_qpos.unsqueeze(0),
-                    to_matrix=True,
-                )  # Shape: (1, 4, 4)
-                logger.log_info(
-                    "Computing reference pose from current robot configuration"
-                )
-            except Exception as e:
-                logger.log_warning(f"Failed to compute current robot pose: {e}")
-                # Create identity pose as fallback
-                current_ee_pose = torch.eye(4, device=self.device).unsqueeze(0)
-                current_ee_pose[0, :3, 3] = torch.tensor(
-                    [0.5, 0.0, 1.0], device=self.device
-                )  # Default position
-                logger.log_info("Using default identity pose as fallback")
-
-            # Print current joint configuration and computed pose
-            pose_np = current_ee_pose[0].cpu().numpy()
-            position = pose_np[:3, 3]
-            rotation_matrix = pose_np[:3, :3]
-
-            # Convert rotation matrix to Euler angles
-            import scipy.spatial.transform as spt
-
-            euler_angles = spt.Rotation.from_matrix(rotation_matrix).as_euler(
-                "xyz", degrees=True
-            )
-
-        # Print detailed reference pose information
-        pose_np = current_ee_pose[0].cpu().numpy()
-        position = pose_np[:3, 3]
-        rotation_matrix = pose_np[:3, :3]
-
-        # Convert rotation matrix to Euler angles (ZYX convention)
-        import scipy.spatial.transform as spt
-
-        euler_angles = spt.Rotation.from_matrix(rotation_matrix).as_euler(
-            "xyz", degrees=True
+        random_sampler = RandomSampler(
+            seed=self.config.sampling.seed, device=self.device
         )
 
-        # Format matrix with proper indentation
-        matrix_lines = np.array2string(pose_np, precision=4, suppress_small=True).split(
-            "\n"
-        )
-        matrix_str = "\n".join(f"\t   {line}" for line in matrix_lines)
         logger.log_info(
-            f"🎯 Using provided reference pose for IK target orientation:\n"
-            f"\t Position: [{position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}] m\n"
-            f"\t Rotation (XYZ Euler): [{euler_angles[0]:.2f}°, {euler_angles[1]:.2f}°, {euler_angles[2]:.2f}°]\n"
-            f"\t Matrix:\n{matrix_str}"
+            f"Computing IK for {num_samples} Cartesian samples "
+            f"(batch_size={batch_size}, {ik_samples_per_point} seeds per point)..."
         )
 
-        # Track statistics for progress bar
-        total_reachable = 0
-
-        # Process each point individually (robot expects batch_size from environments, not samples)
         pbar = self._create_optimized_tqdm(
-            range(num_samples),
-            desc="Inverse Kinematics",
-            unit="pt",
+            range(0, num_samples, batch_size),
+            desc="Inverse Kinematics (batched)",
+            unit="batch",
             color="magenta",
             emoji="🎯",
         )
 
-        for i in pbar:
-            position = cartesian_points[i]  # Shape: (3,)
+        for batch_start in pbar:
+            batch_end = min(batch_start + batch_size, num_samples)
+            batch_valid_mask = valid_cartesian_mask[batch_start:batch_end]
+            n_valid = batch_valid_mask.sum().item()
 
-            # Skip points that don't satisfy workspace constraints
-            if not valid_cartesian_mask[i]:
-                # Mark as unreachable due to constraint violation
-                all_success_rates[i] = 0.0
-                # Update progress bar
-                reachability_rate = total_reachable / (i + 1) * 100
-                if reachability_rate >= 70:
-                    reach_color = "\033[32m"  # Green for high reachability
-                elif reachability_rate >= 40:
-                    reach_color = "\033[33m"  # Yellow for medium reachability
-                else:
-                    reach_color = "\033[31m"  # Red for low reachability
-                pbar.set_postfix_str(
-                    f"🎯 Reachable: {total_reachable}/{i+1} | {reach_color}{reachability_rate:.1f}%\033[0m rate (❌ constraint)"
-                )
+            if n_valid == 0:
                 continue
 
-            # Create target pose: use current orientation, replace position with sampled position
-            pose = current_ee_pose.clone()
-            pose[0, :3, 3] = position
+            # Get valid positions (n_valid, 3)
+            valid_positions = cartesian_points[batch_start:batch_end][batch_valid_mask]
 
-            # Try multiple random seeds for this point
-            success_count = 0
-            best_qpos = None
+            # Build target poses for all seeds in one shot.
+            # Each position is repeated ik_samples_per_point times so that a single
+            # compute_batch_ik call covers all (n_valid * K) targets at once.
+            # Shape: (1, n_valid * K, 4, 4)
+            base_pose = current_ee_pose.unsqueeze(1).expand(1, n_valid, 4, 4).clone()
+            base_pose[0, :, :3, 3] = valid_positions
+            target_poses = base_pose.repeat_interleave(ik_samples_per_point, dim=1)
 
-            logger.set_log_level("ERROR")  # Suppress warnings during IK attempts
-            for seed_idx in range(ik_samples_per_point):
-                # Generate random joint seed using RandomSampler
-                random_seed = random_sampler.sample(
-                    bounds=self.qpos_limits, num_samples=1
-                )  # Shape: (1, num_joints)
+            # Generate all random seeds at once: (1, n_valid * K, num_joints)
+            all_seeds = random_sampler.sample(
+                bounds=self.qpos_limits, num_samples=n_valid * ik_samples_per_point
+            ).unsqueeze(0)
 
-                try:
-                    # Compute IK
-                    ret, qpos = self.robot.compute_ik(
-                        pose=pose,
-                        joint_seed=random_seed,
-                        name=self.control_part_name,
-                    )
+            try:
+                logger.set_log_level("ERROR")
+                success, qpos = self.robot.compute_batch_ik(
+                    pose=target_poses,
+                    joint_seed=all_seeds,
+                    name=self.control_part_name,
+                )
+                logger.set_log_level("INFO")
 
-                    # Count successes
-                    if ret is not None and ret[0]:
-                        success_count += 1
-                        # Store first successful configuration
-                        if best_qpos is None:
-                            best_qpos = qpos[0]  # Extract from batch dimension
+                # Reshape results from flat batch to (n_valid, K)
+                success_2d = success[0].reshape(n_valid, ik_samples_per_point)
+                qpos_3d = qpos[0].reshape(
+                    n_valid, ik_samples_per_point, self.num_joints
+                )
 
-                except Exception as e:
-                    logger.log_warning(
-                        f"IK computation failed for sample {i}, seed {seed_idx}: {e}"
-                    )
-                    continue
-            logger.set_log_level("INFO")  # Restore log level
+                # Success rate: fraction of seeds that solved IK for each point
+                success_rates_batch = success_2d.float().mean(dim=1)  # (n_valid,)
 
-            # Calculate success rate for this point
-            success_rate = success_count / ik_samples_per_point
-            all_success_rates[i] = success_rate
+                # Pick the joint config from the first successful seed per point
+                any_success = success_2d.any(dim=1)  # (n_valid,)
+                first_success_idx = success_2d.float().argmax(dim=1)  # (n_valid,)
+                best_qpos = qpos_3d[
+                    torch.arange(n_valid, device=self.device), first_success_idx
+                ]  # (n_valid, num_joints)
 
-            # Filter by success threshold for reachable points
-            if success_rate and best_qpos is not None:
-                reachable_points_list.append(position.unsqueeze(0))  # Add batch dim
-                best_configs_list.append(best_qpos.unsqueeze(0))  # Add batch dim
-                total_reachable += 1
+            except Exception as e:
+                logger.set_log_level("INFO")
+                logger.log_warning(
+                    f"IK computation failed for batch [{batch_start}:{batch_end}]: {e}"
+                )
+                success_rates_batch = torch.zeros(n_valid, device=self.device)
+                any_success = torch.zeros(n_valid, dtype=torch.bool, device=self.device)
+                best_qpos = torch.zeros(n_valid, self.num_joints, device=self.device)
 
-            # Update progress bar with reachability statistics
-            reachability_rate = total_reachable / (i + 1) * 100
-            # Use color coding for the reachability rate
-            if reachability_rate >= 70:
-                reach_color = "\033[32m"  # Green for high reachability
-            elif reachability_rate >= 40:
-                reach_color = "\033[33m"  # Yellow for medium reachability
-            else:
-                reach_color = "\033[31m"  # Red for low reachability
+            # Map results back to original (pre-filter) indices
+            valid_local_indices = batch_valid_mask.nonzero(as_tuple=True)[0]
+            global_indices = batch_start + valid_local_indices
+            all_success_rates[global_indices] = success_rates_batch
 
-            # Add success rate indicator for this specific point
-            if success_rate:
-                point_status = "✅ IK"
-            elif success_rate > 0:
-                point_status = f"🟡 IK({success_rate:.1f})"
-            else:
-                point_status = "❌ IK"
+            # Collect reachable points
+            if any_success.any():
+                reachable_points_list.append(valid_positions[any_success])
+                best_configs_list.append(best_qpos[any_success])
+                total_reachable += any_success.sum().item()
 
-            pbar.set_postfix_str(
-                f"🎯 Reachable: {total_reachable}/{i+1} | {reach_color}{reachability_rate:.1f}%\033[0m rate | {point_status}"
+            self._update_progress_with_stats(
+                pbar,
+                batch_end - 1,
+                total_reachable,
+                metric_name="reachable",
+                show_rate=True,
             )
 
         # Concatenate reachable results
@@ -1215,24 +1152,23 @@ class WorkspaceAnalyzer:
             reachable_points = torch.empty((0, 3), device=self.device)
             best_configs = torch.empty((0, self.num_joints), device=self.device)
 
-        # Create reachability mask
         reachability_mask = all_success_rates > 0
 
-        # Performance summary for IK computation
-        pbar.close()  # Ensure progress bar is closed
-        reachability = len(reachable_points) / num_samples * 100
+        pbar.close()
+        reachability = (
+            len(reachable_points) / num_samples * 100 if num_samples > 0 else 0
+        )
 
-        # Reachability performance indicator
         if reachability >= 80:
-            reach_icon = "🏆"  # Trophy for high reachability
+            reach_icon = "🏆"
         elif reachability >= 60:
-            reach_icon = "🚀"  # Rocket for good reachability
+            reach_icon = "🚀"
         elif reachability >= 40:
-            reach_icon = "🟡"  # Yellow for moderate reachability
+            reach_icon = "🟡"
         elif reachability >= 20:
-            reach_icon = "🟠"  # Orange for low reachability
+            reach_icon = "🟠"
         else:
-            reach_icon = "⚠️"  # Warning for very low reachability
+            reach_icon = "⚠️"
 
         logger.log_info(
             f"{reach_icon} IK Results: {len(reachable_points)}/{num_samples} reachable points "
@@ -1246,6 +1182,42 @@ class WorkspaceAnalyzer:
             reachability_mask,
             best_configs,
         )
+
+    def _get_reference_pose(self) -> torch.Tensor:
+        """Get reference end-effector pose for IK target orientation.
+
+        Returns:
+            Reference pose tensor of shape (1, 4, 4).
+        """
+        if (
+            hasattr(self.config, "reference_pose")
+            and self.config.reference_pose is not None
+        ):
+            reference_pose = self.config.reference_pose
+            if isinstance(reference_pose, np.ndarray):
+                reference_pose = torch.from_numpy(reference_pose).to(self.device)
+            if reference_pose.dim() == 2:
+                reference_pose = reference_pose.unsqueeze(0)
+            logger.log_info("Using provided reference pose for IK target orientation")
+            return reference_pose
+
+        try:
+            current_qpos = self.robot.get_qpos()[0][
+                self.robot.get_joint_ids(self.control_part_name)
+            ]
+            current_ee_pose = self.robot.compute_fk(
+                name=self.control_part_name,
+                qpos=current_qpos.unsqueeze(0),
+                to_matrix=True,
+            )
+            logger.log_info("Computing reference pose from current robot configuration")
+            return current_ee_pose
+        except Exception as e:
+            logger.log_warning(f"Failed to compute current robot pose: {e}")
+            default_pose = torch.eye(4, device=self.device).unsqueeze(0)
+            default_pose[0, :3, 3] = torch.tensor([0.5, 0.0, 1.0], device=self.device)
+            logger.log_info("Using default identity pose as fallback")
+            return default_pose
 
     def analyze(
         self,

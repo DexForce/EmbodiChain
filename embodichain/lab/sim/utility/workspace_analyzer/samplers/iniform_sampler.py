@@ -75,8 +75,8 @@ class UniformSampler(BaseSampler):
             bounds: Tensor/Array of shape (n_dims, 2) containing [lower, upper] bounds for each dimension.
             num_samples: Total number of samples to generate. This is used to calculate
                 samples_per_dim if not explicitly provided during initialization.
-                Note: The actual number of samples may differ slightly from this value
-                to maintain a uniform grid.
+                Note: The actual number of samples (samples_per_dim^n_dims) will not
+                exceed this value, but may be less to maintain a uniform grid.
 
         Returns:
             Tensor of shape (actual_num_samples, n_dims) containing the sampled points.
@@ -99,7 +99,8 @@ class UniformSampler(BaseSampler):
         # Calculate samples per dimension if not provided
         if self.samples_per_dim is None:
             # Compute samples_per_dim to approximate the desired num_samples
-            samples_per_dim = max(2, int(np.ceil(num_samples ** (1.0 / n_dims))))
+            # Use floor to ensure actual grid size never exceeds num_samples
+            samples_per_dim = max(2, int(num_samples ** (1.0 / n_dims)))
         else:
             samples_per_dim = self.samples_per_dim
 
