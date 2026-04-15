@@ -71,33 +71,33 @@
             "reaching_reward": {
                 "func": "reaching_behind_object",
                 "mode": "add",
-                "weight": 0.1,
+                "weight": 0.03,
                 "params": {
                     "object_cfg": {
                         "uid": "cube"
                     },
                     "target_pose_key": "goal_pose",
-                    "behind_offset": 0.015,
+                    "behind_offset": 0.03,
                     "height_offset": 0.015,
-                    "distance_scale": 5.0,
+                    "distance_scale": 8.0,
                     "part_name": "arm"
                 }
             },
-            "place_reward": {
-                "func": "incremental_distance_to_target",
+            "goal_distance_reward": {
+                "func": "distance_to_target",
                 "mode": "add",
-                "weight": 1.0,
+                "weight": 0.8,
                 "params": {
                     "source_entity_cfg": {
                         "uid": "cube"
                     },
                     "target_pose_key": "goal_pose",
-                    "tanh_scale": 10.0,
-                    "positive_weight": 2.0,
-                    "negative_weight": 0.5,
+                    "exponential": true,
+                    "sigma": 0.12,
                     "use_xy_only": true
                 }
             },
+
             "action_penalty": {
                 "func": "action_smoothness_penalty",
                 "mode": "add",
@@ -175,9 +175,9 @@
             "body_type": "dynamic",
             "init_pos": [-0.6, -0.4, 0.05],
             "attrs": {
-                "mass": 10.0,
-                "static_friction": 3.0,
-                "dynamic_friction": 2.0,
+                "mass": 2.0,
+                "static_friction": 1.0,
+                "dynamic_friction": 0.8,
                 "linear_damping": 2.0,
                 "angular_damping": 2.0,
                 "contact_offset": 0.003,

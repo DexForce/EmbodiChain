@@ -1,0 +1,24 @@
+name: grpo
+config:
+  policy:
+    name: actor_only
+    actor:
+      type: mlp
+      network_cfg:
+        hidden_sizes: [256, 256]
+        activation: relu
+  algorithm:
+    name: grpo
+    cfg:
+      learning_rate: 0.0001
+      n_epochs: 10
+      batch_size: 8192
+      gamma: 0.99
+      clip_coef: 0.2
+      ent_coef: 0.01
+      kl_coef: 0.0
+      group_size: 4
+      eps: 1.0e-8
+      reset_every_rollout: true
+      truncate_at_first_done: true
+      max_grad_norm: 0.5
