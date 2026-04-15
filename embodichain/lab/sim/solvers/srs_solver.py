@@ -51,9 +51,6 @@ class SRSSolverCfg(SolverCfg):
     dh_params = []
     """Denavit-Hartenberg parameters for the robot's kinematic chain."""
 
-    qpos_limits = []
-    """Joint position limits for the robot."""
-
     T_b_ob = np.eye(4)
     """Base to observed base transform."""
 
@@ -107,7 +104,7 @@ class _BaseSRSSolverImpl:
         self.device = device
         self.dofs = 7
         self.dh_params = cfg.dh_params
-        self.qpos_limits = cfg.qpos_limits
+        self.qpos_limits = cfg.qpos_limits.T  # [2, DOF] -> [DOF, 2]
         self.tcp_xpos = np.eye(4)
 
         # Initialize transformation matrices
@@ -122,7 +119,7 @@ class _BaseSRSSolverImpl:
 
         # Convert configuration parameters to numpy arrays for efficient computation.
         self.dh_params_np = np.asarray(self.cfg.dh_params)
-        self.qpos_limits_np = np.asarray(self.cfg.qpos_limits)
+        self.qpos_limits_np = np.asarray(self.qpos_limits)
         self.link_lengths_np = np.asarray(self.cfg.link_lengths)
         self.rotation_directions_np = np.asarray(self.cfg.rotation_directions)
 
