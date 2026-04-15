@@ -1102,7 +1102,9 @@ class WorkspaceAnalyzer:
 
                 # Reshape results from flat batch to (n_valid, K)
                 success_2d = success[0].reshape(n_valid, ik_samples_per_point)
-                qpos_3d = qpos[0].reshape(n_valid, ik_samples_per_point, self.num_joints)
+                qpos_3d = qpos[0].reshape(
+                    n_valid, ik_samples_per_point, self.num_joints
+                )
 
                 # Success rate: fraction of seeds that solved IK for each point
                 success_rates_batch = success_2d.float().mean(dim=1)  # (n_valid,)

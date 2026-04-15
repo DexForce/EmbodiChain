@@ -48,7 +48,11 @@ if __name__ == "__main__":
     print("DexforceW1 robot added to the simulation.")
 
     # Set left arm joint positions (mirrored)
-    left_qpos = torch.tensor([0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0])
+    left_qpos = torch.tensor(
+        [0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
+        dtype=torch.float32,
+        device=robot.device,
+    )
     right_qpos = -left_qpos
     robot.set_qpos(
         qpos=left_qpos,
@@ -83,11 +87,6 @@ if __name__ == "__main__":
             show_unreachable_points=False, point_size=8.0
         ),
         control_part_name="left_arm",
-        # Try 5 random joint seeds per Cartesian point.  All seeds for the
-        # current batch are merged into the n_batch dimension and sent to
-        # compute_batch_ik in a single call, so increasing this value has
-        # much lower overhead than it would with sequential single-point IK.
-        ik_samples_per_point=5,
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim

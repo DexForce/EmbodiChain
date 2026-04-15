@@ -30,7 +30,7 @@ if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cuda")
+    config = SimulationManagerCfg(headless=False, sim_device="cpu")
     sim_manager = SimulationManager(config)
     sim_manager.set_manual_update(False)
 
