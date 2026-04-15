@@ -31,6 +31,23 @@ def normalize_to_pi(angle: float) -> float:
 
 
 @wp.func
+def normalize_in_limit(angle: float, lower: float, upper: float) -> float:
+    two_pi = 2.0 * wp.pi
+    k = wp.ceil((lower - angle) / two_pi)
+    result = angle + k * two_pi
+    return result
+
+
+@wp.func
+def is_within_limit(
+    angle: float, lower: float, upper: float, safe_margin: float
+) -> bool:
+    if angle < lower + safe_margin or angle > upper - safe_margin:
+        return False
+    return True
+
+
+@wp.func
 def safe_acos(x: float) -> float:
     return wp.acos(wp.clamp(x, -1.0, 1.0))
 
@@ -219,6 +236,9 @@ def opw_ik_kernel(
     params: OPWparam,
     offsets: wp.array(dtype=float),
     sign_corrections: wp.array(dtype=float),
+    lower_limits: wp_vec6f,
+    upper_limits: wp_vec6f,
+    safe_margin: float,
     qpos: wp.array(dtype=float),
     ik_valid: wp.array(dtype=int),
 ):
@@ -433,8 +453,10 @@ def opw_ik_kernel(
 
         for k in range(DOF):
             idx = j * DOF + k
-            qpos[qpos_start + k] = normalize_to_pi(
-                (theta[idx] + offsets[k]) * sign_corrections[k]
+            qpos[qpos_start + k] = normalize_in_limit(
+                (theta[idx] + offsets[k]) * sign_corrections[k],
+                lower=lower_limits[k],
+                upper=upper_limits[k],
             )
 
         # filter invalid solutions
@@ -449,42 +471,46 @@ def opw_ik_kernel(
         )
         t_err, r_err = get_transform_err(check_ee_pose, ee_pose)
         # mark invalid solutions (cannot pass ik check)
+        ik_valid[i * N_SOL + j] = 1
+        for k in range(DOF):
+            if not is_within_limit(
+                qpos[qpos_start + k],
+                lower_limits[k],
+                upper_limits[k],
+                safe_margin=safe_margin,
+            ):
+                ik_valid[i * N_SOL + j] = 0
+                break
         if t_err > 1e-2 or r_err > 1e-1:
             ik_valid[i * N_SOL + j] = 0
-        else:
-            ik_valid[i * N_SOL + j] = 1
 
 
 @wp.kernel
-def opw_best_ik_kernel(
-    full_ik_result: wp.array(dtype=float),
-    full_ik_valid: wp.array(dtype=int),
-    qpos_seed: wp.array(dtype=float),
+def opw_ik_select_kernel(
+    full_ik_result: wp.array(dtype=float, ndim=3),  # [n_sample, N_SOL, DOF]
+    full_ik_valid: wp.array(dtype=int, ndim=2),  # [n_sample, N_SOL]
+    qpos_seed: wp.array(dtype=float, ndim=2),  # [n_sample, DOF]
     joint_weights: wp_vec6f,
-    best_ik_result: wp.array(dtype=float),
-    best_ik_valid: wp.array(dtype=int),
+    best_ik_result: wp.array(dtype=float, ndim=2),  # [n_sample, DOF]
+    best_ik_valid: wp.array(dtype=int, ndim=1),  # [n_sample, ]
 ):
-    i = wp.tid()
-    DOF = 6
-    N_SOL = 8
-
+    i = wp.tid()  # index for sample
     best_weighted_dis = float(1e10)
     best_ids = int(-1)
+    DOF = 6
+    N_SOL = 8
     for j in range(N_SOL):
-        is_full_valid = full_ik_valid[i * N_SOL + j]
+        is_full_valid = full_ik_valid[i, j]
         if is_full_valid == 0:
             # invalid ik result
             continue
         weighted_dis = 0.0
         for t in range(DOF):
             weighted_dis += (
-                (full_ik_result[i * N_SOL * DOF + j * DOF + t] - qpos_seed[i * DOF + t])
-                * joint_weights[0]
-                * (
-                    full_ik_result[i * N_SOL * DOF + j * DOF + t]
-                    - qpos_seed[i * DOF + t]
-                )
-                * joint_weights[0]
+                (full_ik_result[i, j, t] - qpos_seed[i, t])
+                * joint_weights[t]
+                * (full_ik_result[i, j, t] - qpos_seed[i, t])
+                * joint_weights[t]
             )
         if weighted_dis < best_weighted_dis:
             best_weighted_dis = weighted_dis
@@ -493,9 +519,7 @@ def opw_best_ik_kernel(
         # found best solution
         best_ik_valid[i] = 1
         for k in range(DOF):
-            best_ik_result[i * DOF + k] = full_ik_result[
-                i * N_SOL * DOF + best_ids * DOF + k
-            ]
+            best_ik_result[i, k] = full_ik_result[i, best_ids, k]
     else:
         # no valid solution
         best_ik_valid[i] = 0
