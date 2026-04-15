@@ -1003,8 +1003,11 @@ class WorkspaceAnalyzer:
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute reachability for Cartesian points using batched IK.
 
-        Uses ``robot.compute_batch_ik`` for significant speedup on large
-        sample counts.
+        All ``ik_samples_per_point`` random seeds for a batch of points are
+        merged into the batch dimension and resolved with a **single**
+        ``robot.compute_batch_ik`` call (shape ``(1, n_valid * K, 4, 4)``).
+        This avoids the Python loop overhead and lets the solver process all
+        seeds in one vectorised pass.
 
         Args:
             cartesian_points: Cartesian positions, shape (num_samples, 3).
@@ -1072,70 +1075,64 @@ class WorkspaceAnalyzer:
             if n_valid == 0:
                 continue
 
-            # Get valid positions (N_valid, 3)
+            # Get valid positions (n_valid, 3)
             valid_positions = cartesian_points[batch_start:batch_end][batch_valid_mask]
 
-            # Build target poses: (1, N_valid, 4, 4)
-            target_poses = current_ee_pose.unsqueeze(1).expand(1, n_valid, 4, 4).clone()
-            target_poses[0, :, :3, 3] = valid_positions
+            # Build target poses for all seeds in one shot.
+            # Each position is repeated ik_samples_per_point times so that a single
+            # compute_batch_ik call covers all (n_valid * K) targets at once.
+            # Shape: (1, n_valid * K, 4, 4)
+            base_pose = current_ee_pose.unsqueeze(1).expand(1, n_valid, 4, 4).clone()
+            base_pose[0, :, :3, 3] = valid_positions
+            target_poses = base_pose.repeat_interleave(ik_samples_per_point, dim=1)
 
-            # Track best result per valid point in this batch
-            batch_best_success = torch.zeros(n_valid, device=self.device)
-            batch_best_qpos = torch.zeros(n_valid, self.num_joints, device=self.device)
+            # Generate all random seeds at once: (1, n_valid * K, num_joints)
+            all_seeds = random_sampler.sample(
+                bounds=self.qpos_limits, num_samples=n_valid * ik_samples_per_point
+            ).unsqueeze(0)
 
-            for seed_idx in range(ik_samples_per_point):
-                # Generate random seeds: (1, N_valid, num_joints)
-                random_seeds = random_sampler.sample(
-                    bounds=self.qpos_limits, num_samples=n_valid
+            try:
+                logger.set_log_level("ERROR")
+                success, qpos = self.robot.compute_batch_ik(
+                    pose=target_poses,
+                    joint_seed=all_seeds,
+                    name=self.control_part_name,
                 )
-                random_seeds = random_seeds.unsqueeze(0)  # (1, N_valid, num_joints)
+                logger.set_log_level("INFO")
 
-                try:
-                    logger.set_log_level("ERROR")
-                    success, qpos = self.robot.compute_batch_ik(
-                        pose=target_poses,
-                        joint_seed=random_seeds,
-                        name=self.control_part_name,
-                    )
-                    logger.set_log_level("INFO")
+                # Reshape results from flat batch to (n_valid, K)
+                success_2d = success[0].reshape(n_valid, ik_samples_per_point)
+                qpos_3d = qpos[0].reshape(n_valid, ik_samples_per_point, self.num_joints)
 
-                    # success shape: (1, N_valid), qpos shape: (1, N_valid, num_joints)
-                    success = success[0]  # (N_valid,)
-                    qpos = qpos[0]  # (N_valid, num_joints)
+                # Success rate: fraction of seeds that solved IK for each point
+                success_rates_batch = success_2d.float().mean(dim=1)  # (n_valid,)
 
-                    # Update best results: prefer first success, then accumulate
-                    newly_succeeded = success & ~batch_best_success.bool()
-                    batch_best_success[newly_succeeded] = 1.0
-                    batch_best_qpos[newly_succeeded] = qpos[newly_succeeded]
+                # Pick the joint config from the first successful seed per point
+                any_success = success_2d.any(dim=1)  # (n_valid,)
+                first_success_idx = success_2d.float().argmax(dim=1)  # (n_valid,)
+                best_qpos = qpos_3d[
+                    torch.arange(n_valid, device=self.device), first_success_idx
+                ]  # (n_valid, num_joints)
 
-                    # Accumulate success rate
-                    batch_best_success += success.float()
+            except Exception as e:
+                logger.set_log_level("INFO")
+                logger.log_warning(
+                    f"IK computation failed for batch [{batch_start}:{batch_end}]: {e}"
+                )
+                success_rates_batch = torch.zeros(n_valid, device=self.device)
+                any_success = torch.zeros(n_valid, dtype=torch.bool, device=self.device)
+                best_qpos = torch.zeros(n_valid, self.num_joints, device=self.device)
 
-                except Exception as e:
-                    logger.set_log_level("INFO")
-                    logger.log_warning(
-                        f"IK computation failed for batch [{batch_start}:{batch_end}], "
-                        f"seed {seed_idx}: {e}"
-                    )
-                    continue
-
-            logger.set_log_level("INFO")
-
-            # Compute success rates (0.0 to 1.0)
-            success_rates_batch = batch_best_success / ik_samples_per_point
-
-            # Map results back to original indices
+            # Map results back to original (pre-filter) indices
             valid_local_indices = batch_valid_mask.nonzero(as_tuple=True)[0]
             global_indices = batch_start + valid_local_indices
-
             all_success_rates[global_indices] = success_rates_batch
 
             # Collect reachable points
-            reached = success_rates_batch > 0
-            if reached.any():
-                reachable_points_list.append(valid_positions[reached])
-                best_configs_list.append(batch_best_qpos[reached])
-                total_reachable += reached.sum().item()
+            if any_success.any():
+                reachable_points_list.append(valid_positions[any_success])
+                best_configs_list.append(best_qpos[any_success])
+                total_reachable += any_success.sum().item()
 
             self._update_progress_with_stats(
                 pbar,

@@ -36,7 +36,7 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
-        headless=False, sim_device="cpu", width=1080, height=1080
+        headless=False, sim_device="cuda", width=1080, height=1080
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
@@ -83,6 +83,11 @@ if __name__ == "__main__":
             show_unreachable_points=False, point_size=8.0
         ),
         control_part_name="left_arm",
+        # Try 5 random joint seeds per Cartesian point.  All seeds for the
+        # current batch are merged into the n_batch dimension and sent to
+        # compute_batch_ik in a single call, so increasing this value has
+        # much lower overhead than it would with sequential single-point IK.
+        ik_samples_per_point=5,
     )
     wa_cartesian = WorkspaceAnalyzer(
         robot=robot, config=cartesian_config, sim_manager=sim
