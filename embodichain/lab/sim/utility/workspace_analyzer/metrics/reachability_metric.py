@@ -112,7 +112,7 @@ class ReachabilityMetric(BaseMetric):
     def _voxelize_points(
         self, points: np.ndarray, voxel_size: float
     ) -> Dict[tuple, int]:
-        """Convert points to voxel grid.
+        """Convert points to voxel grid using vectorized operations.
 
         Args:
             points: Point cloud, shape (N, 3).
@@ -124,14 +124,14 @@ class ReachabilityMetric(BaseMetric):
         # Convert points to voxel indices
         voxel_indices = np.floor(points / voxel_size).astype(int)
 
-        # Count points in each voxel
-        voxel_grid = {}
-        for idx in voxel_indices:
-            key = tuple(idx)
-            voxel_grid[key] = voxel_grid.get(key, 0) + 1
+        # Use np.unique for vectorized counting
+        unique_indices, counts = np.unique(voxel_indices, axis=0, return_counts=True)
 
-        # Filter by minimum points threshold
+        # Filter by minimum points threshold and build dict
         min_points = self.config.min_points_per_voxel
-        voxel_grid = {k: v for k, v in voxel_grid.items() if v >= min_points}
+        voxel_grid = {}
+        for idx, count in zip(unique_indices, counts):
+            if count >= min_points:
+                voxel_grid[tuple(idx)] = int(count)
 
         return voxel_grid
