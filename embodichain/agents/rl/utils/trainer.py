@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from typing import Any, Dict
 import time
 import numpy as np
 import torch
@@ -85,6 +86,11 @@ class Trainer:
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
+        self.train_history: list[dict[str, float]] = []
+        self.eval_history: list[dict[str, float]] = []
+        self.last_eval_metrics: dict[str, float] = {}
+        self.last_train_metrics: dict[str, float] = {}
+        self.latest_checkpoint_path: str | None = None
         num_envs = getattr(self.env, "num_envs", None)
         if num_envs is None:
             raise RuntimeError("Env must expose num_envs for trainer statistics.")
@@ -146,9 +152,9 @@ class Trainer:
                 continue
         return out
 
-    def train(self, total_timesteps: int):
+    def train(self, total_timesteps: int) -> Dict[str, Any]:
         if self.rank == 0:
-            logger.log_info(f"Start training, total steps: {total_timesteps}")
+            print(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
@@ -161,6 +167,7 @@ class Trainer:
                 self._eval_once(num_episodes=self.num_eval_episodes)
             if self.global_step % self.save_freq == 0:
                 self.save_checkpoint()
+        return self.get_summary()
 
     @torch.no_grad()
     def _collect_rollout(self):
@@ -197,9 +204,10 @@ class Trainer:
                 if log_dict and self.use_wandb:
                     wandb.log(log_dict, step=self.global_step)
 
+        rollout = self.buffer.start_rollout()
         rollout = self.collector.collect(
             num_steps=self.buffer_size,
-            rollout=self.buffer.start_rollout(),
+            rollout=rollout,
             on_step_callback=on_step,
         )
         self.buffer.add(rollout)
@@ -278,13 +286,23 @@ class Trainer:
             self.len_window.extend(all_len[start:])
 
     def _log_train(self, losses: Dict[str, float]):
-        if self.rank != 0:
-            return
+        elapsed = max(1e-6, time.time() - self.start_time)
+        sps = self.global_step / elapsed
+        avgR = np.mean(self.ret_window) if len(self.ret_window) > 0 else float("nan")
+        avgL = np.mean(self.len_window) if len(self.len_window) > 0 else float("nan")
+        history_entry = {
+            "global_step": float(self.global_step),
+            "charts/SPS": float(sps),
+            "charts/episode_reward_avg_100": float(avgR),
+            "charts/episode_length_avg_100": float(avgL),
+        }
+        history_entry.update({f"train/{k}": float(v) for k, v in losses.items()})
+        self.train_history.append(history_entry)
+        self.last_train_metrics = history_entry
+
         if self.writer:
             for k, v in losses.items():
                 self.writer.add_scalar(f"train/{k}", v, self.global_step)
-            elapsed = max(1e-6, time.time() - self.start_time)
-            sps = self.global_step / elapsed
             self.writer.add_scalar("charts/SPS", sps, self.global_step)
             if len(self.ret_window) > 0:
                 self.writer.add_scalar(
@@ -298,26 +316,24 @@ class Trainer:
                     float(np.mean(self.len_window)),
                     self.global_step,
                 )
-        # console
-        sps = self.global_step / max(1e-6, time.time() - self.start_time)
-        avgR = np.mean(self.ret_window) if len(self.ret_window) > 0 else float("nan")
-        avgL = np.mean(self.len_window) if len(self.len_window) > 0 else float("nan")
-        print(
-            f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
-        )
+        # console and external logging are rank-0 only in distributed mode.
+        if self.rank == 0:
+            print(
+                f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
+            )
 
-        # wandb (mirror TB logs)
-        if self.use_wandb:
-            log_dict = {f"train/{k}": v for k, v in losses.items()}
-            log_dict["charts/SPS"] = sps
-            if not np.isnan(avgR):
-                log_dict["charts/episode_reward_avg_100"] = float(avgR)
-            if not np.isnan(avgL):
-                log_dict["charts/episode_length_avg_100"] = float(avgL)
-            wandb.log(log_dict, step=self.global_step)
+            # wandb (mirror TB logs)
+            if self.use_wandb:
+                log_dict = {f"train/{k}": v for k, v in losses.items()}
+                log_dict["charts/SPS"] = sps
+                if not np.isnan(avgR):
+                    log_dict["charts/episode_reward_avg_100"] = float(avgR)
+                if not np.isnan(avgL):
+                    log_dict["charts/episode_length_avg_100"] = float(avgL)
+                wandb.log(log_dict, step=self.global_step)
 
     @torch.no_grad()
-    def _eval_once(self, num_episodes: int = 5):
+    def _eval_once(self, num_episodes: int = 5) -> Dict[str, float]:
         """Run evaluation for specified number of episodes.
 
         Each episode runs all parallel environments until completion, allowing
@@ -329,8 +345,11 @@ class Trainer:
         self.policy.eval()
         episode_returns = []
         episode_lengths = []
+        episode_successes = []
+        metric_values: dict[str, list[float]] = {}
 
-        self.eval_env.set_rollout_buffer(self.buffer.buffer)
+        # Evaluation does not consume the training rollout buffer; binding it here can
+        # overflow the shared RL buffer when eval episodes are longer than buffer_size.
         for _ in range(num_episodes):
             # Reset and initialize episode tracking
             obs, _ = self.eval_env.reset()
@@ -372,6 +391,17 @@ class Trainer:
                 still_running = ~done_mask
                 cumulative_reward[still_running] += reward[still_running].float()
                 step_count[still_running] += 1
+                newly_done = done & (~done_mask)
+                if newly_done.any():
+                    if isinstance(info, dict) and "success" in info:
+                        successes = info["success"][newly_done].detach().cpu().tolist()
+                        episode_successes.extend([float(v) for v in successes])
+                    if isinstance(info, dict) and "metrics" in info:
+                        for key, value in info["metrics"].items():
+                            values = value[newly_done].detach().cpu().tolist()
+                            metric_values.setdefault(key, []).extend(
+                                [float(v) for v in values]
+                            )
                 done_mask |= done
 
                 # Trigger evaluation events (e.g., video recording)
@@ -404,11 +434,44 @@ class Trainer:
             self.writer.add_scalar(
                 "eval/avg_length", float(np.mean(episode_lengths)), self.global_step
             )
+            if episode_successes:
+                self.writer.add_scalar(
+                    "eval/success_rate",
+                    float(np.mean(episode_successes)),
+                    self.global_step,
+                )
 
-    def save_checkpoint(self):
-        if self.rank != 0:
-            return
+        summary = {
+            "global_step": float(self.global_step),
+            "eval/avg_reward": (
+                float(np.mean(episode_returns)) if episode_returns else float("nan")
+            ),
+            "eval/avg_length": (
+                float(np.mean(episode_lengths)) if episode_lengths else float("nan")
+            ),
+            "eval/success_rate": (
+                float(np.mean(episode_successes)) if episode_successes else float("nan")
+            ),
+        }
+        for key, values in metric_values.items():
+            if values:
+                summary[f"eval/metrics/{key}"] = float(np.mean(values))
+        self.eval_history.append(summary)
+        self.last_eval_metrics = summary
+        if self.rank == 0 and self.use_wandb:
+            log_dict = {
+                key: value
+                for key, value in summary.items()
+                if key != "global_step" and not np.isnan(value)
+            }
+            if log_dict:
+                wandb.log(log_dict, step=self.global_step)
+        return summary
+
+    def save_checkpoint(self) -> str | None:
         # minimal model-only checkpoint; trainer/algorithm states can be added
+        if self.rank != 0:
+            return None
         path = f"{self.checkpoint_dir}/{self.exp_name}_step_{self.global_step}.pt"
         policy_state = (
             self.policy.module.state_dict()
@@ -422,4 +485,19 @@ class Trainer:
             },
             path,
         )
+        self.latest_checkpoint_path = path
         print(f"Checkpoint saved: {path}")
+        return path
+
+    def get_summary(self) -> Dict[str, Any]:
+        elapsed = max(1e-6, time.time() - self.start_time)
+        return {
+            "global_step": int(self.global_step),
+            "elapsed_time_sec": float(elapsed),
+            "training_fps": float(self.global_step / elapsed),
+            "last_train_metrics": dict(self.last_train_metrics),
+            "last_eval_metrics": dict(self.last_eval_metrics),
+            "train_history": list(self.train_history),
+            "eval_history": list(self.eval_history),
+            "latest_checkpoint_path": self.latest_checkpoint_path,
+        }
