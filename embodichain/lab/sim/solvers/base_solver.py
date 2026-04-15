@@ -72,8 +72,12 @@ class SolverCfg:
     when multiple solutions are available.
     """
 
-    qpos_limits: List[float] | None = None
-    """Joint position limits [2, DOF] for the solver."""
+    user_qpos_limits: List[float] | None = None
+    """
+        User defined Joint position limits [2, DOF] for the solver. 
+        If not provided (None), this value will replace by joint limits defined in urdf when solver init from robot.
+        If provided, the solver will use the intersection of user defined limits and urdf limits as the final joint limits.
+    """
 
     @abstractmethod
     def init_solver(self, device: torch.device, **kwargs) -> "BaseSolver":
@@ -231,20 +235,29 @@ class BaseSolver(metaclass=ABCMeta):
     def _init_qpos_limits(self):
         self.lower_qpos_limits = None
         self.upper_qpos_limits = None
-        if self.cfg.qpos_limits is not None:
+        if self.cfg.user_qpos_limits is not None:
             # robot qpos limits from config, expected shape [DOF, 2]
-            qpos_limits = torch.tensor(
-                self.cfg.qpos_limits, dtype=torch.float32, device=self.device
+            user_qpos_limits = torch.tensor(
+                self.cfg.user_qpos_limits, dtype=torch.float32, device=self.device
             )
-            if not qpos_limits.shape == (2, self.dof):
-                logger.log_error(
-                    f"qpos_limits must have shape (2, {self.dof}), but got {qpos_limits.shape}."
+            if user_qpos_limits.shape == (2, self.dof):
+                self.set_qpos_limits(
+                    lower_qpos_limits=user_qpos_limits[0],
+                    upper_qpos_limits=user_qpos_limits[1],
                 )
-            # If a pk_serial_chain is provided, we assume it has the
-            # necessary information to set position limits.
+            elif user_qpos_limits.shape == (self.dof, 2):
+                self.set_qpos_limits(
+                    lower_qpos_limits=user_qpos_limits[:, 0],
+                    upper_qpos_limits=user_qpos_limits[:, 1],
+                )
+            else:
+                logger.log_error(
+                    f"user_qpos_limits must have shape (2, {self.dof}) or ({self.dof}, 2), but got {user_qpos_limits.shape}."
+                )
+        elif self.pk_serial_chain is not None:
             self.set_qpos_limits(
-                lower_qpos_limits=qpos_limits[0],
-                upper_qpos_limits=qpos_limits[1],
+                lower_qpos_limits=self.pk_serial_chain.low,
+                upper_qpos_limits=self.pk_serial_chain.high,
             )
 
     def update_with_robot_limit(self, robot_qpos_limits: torch.Tensor):
@@ -257,15 +270,23 @@ class BaseSolver(metaclass=ABCMeta):
         robot_lower_limits = robot_qpos_limits[:, 0]
         robot_upper_limits = robot_qpos_limits[:, 1]
         if self.lower_qpos_limits is not None:
-            self.lower_qpos_limits = torch.max(
-                self.lower_qpos_limits, robot_lower_limits
-            )
+            if torch.any(self.lower_qpos_limits < robot_lower_limits):
+                logger.log_warning(
+                    "Solver lower_qpos_limits are smaller than robot limits. Clamping to robot limits."
+                )
+                self.lower_qpos_limits = torch.max(
+                    self.lower_qpos_limits, robot_lower_limits
+                )
         else:
             self.lower_qpos_limits = robot_lower_limits
         if self.upper_qpos_limits is not None:
-            self.upper_qpos_limits = torch.min(
-                self.upper_qpos_limits, robot_upper_limits
-            )
+            if torch.any(self.upper_qpos_limits > robot_upper_limits):
+                logger.log_warning(
+                    "Solver upper_qpos_limits are larger than robot limits. Clamping to robot limits."
+                )
+                self.upper_qpos_limits = torch.min(
+                    self.upper_qpos_limits, robot_upper_limits
+                )
         else:
             self.upper_qpos_limits = robot_upper_limits
 

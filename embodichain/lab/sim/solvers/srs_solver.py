@@ -104,9 +104,7 @@ class _BaseSRSSolverImpl:
         self.device = device
         self.dofs = 7
         self.dh_params = cfg.dh_params
-        self.qpos_limits = cfg.qpos_limits.T  # [2, DOF] -> [DOF, 2]
         self.tcp_xpos = np.eye(4)
-
         # Initialize transformation matrices
         self._parse_params()
 
@@ -119,7 +117,6 @@ class _BaseSRSSolverImpl:
 
         # Convert configuration parameters to numpy arrays for efficient computation.
         self.dh_params_np = np.asarray(self.cfg.dh_params)
-        self.qpos_limits_np = np.asarray(self.qpos_limits)
         self.link_lengths_np = np.asarray(self.cfg.link_lengths)
         self.rotation_directions_np = np.asarray(self.cfg.rotation_directions)
 
@@ -623,11 +620,6 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
         self.dh_params_wp = wp.array(
             self.dh_params_np.flatten(),
             dtype=float,
-            device=standardize_device_string(self.device),
-        )
-        self.qpos_limits_wp = wp.array(
-            self.qpos_limits_np,
-            dtype=wp.vec2,
             device=standardize_device_string(self.device),
         )
         self.link_lengths_wp = wp.array(
@@ -1193,6 +1185,21 @@ class SRSSolver(BaseSolver):
             self.impl = _CUDASRSSolverImpl(cfg, self.device)
         else:
             self.impl = _CPUSRSSolverImpl(cfg, self.device)
+
+        self._update_impl_qpos_limits()
+
+    def _update_impl_qpos_limits(self):
+        qpos_limits = torch.vstack([self.lower_qpos_limits, self.upper_qpos_limits]).T
+        self.impl.qpos_limits_np = qpos_limits.cpu().numpy()
+        self.impl.qpos_limits_wp = wp.array(
+            self.impl.qpos_limits_np,
+            dtype=wp.vec2,
+            device=standardize_device_string(self.device),
+        )
+
+    def update_with_robot_limit(self, robot_qpos_limits):
+        super().update_with_robot_limit(robot_qpos_limits)
+        self._update_impl_qpos_limits()
 
     def get_ik(
         self,

@@ -174,9 +174,6 @@ class PytorchSolver(BaseSolver):
 
         self.dof = self.pk_serial_chain.n_joints
 
-        self.upper_qpos_limits = self.pk_serial_chain.high
-        self.lower_qpos_limits = self.pk_serial_chain.low
-
     def get_iteration_params(self) -> dict:
         r"""Returns the current iteration parameters.
 
@@ -359,7 +356,6 @@ class PytorchSolver(BaseSolver):
             torch.Tensor: Batch of adjusted joint positions that fit within the limits, shape (M, dof),
                         where M <= N (invalid candidates are filtered out).
         """
-
         periodic_mask = torch.ones_like(
             qpos_list_split[0], dtype=torch.bool, device=self.device
         )

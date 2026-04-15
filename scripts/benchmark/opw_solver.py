@@ -118,7 +118,7 @@ def check_opw_solver(solver_warp, solver_py_opw, n_samples=1000):
 def benchmark_opw_solver():
     cfg = OPWSolverCfg(
         joint_names=("J1", "J2", "J3", "J4", "J5", "J6"),
-        qpos_limits=(LOWER_LIMITS, UPPER_LIMITS),
+        user_qpos_limits=(LOWER_LIMITS, UPPER_LIMITS),
     )
     cfg.a1 = 400.333
     cfg.a2 = -251.449
