@@ -583,7 +583,7 @@ class GraspGenerator:
         approach_direction: torch.Tensor,
         visualize_collision: bool = False,
         visualize_pose: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[bool, torch.Tensor, float]:
         """Get grasp pose given approach direction.
 
         Uses the antipodal point pairs stored in ``self._hit_point_pairs``
@@ -603,19 +603,20 @@ class GraspGenerator:
                 after computation.
 
         Returns:
-            A tuple ``(best_grasp_pose, best_open_length)`` where
-            ``best_grasp_pose`` is a ``(4, 4)`` homogeneous matrix and
-            ``best_open_length`` is a scalar.
+            is_success (bool): Whether a valid grasp pose is found.
+            best_grasp_pose (torch.Tensor): If a valid grasp pose is found, a tensor of shape (4, 4) representing the homogeneous transformation matrix of the best grasp pose in the world frame. Otherwise, an identity matrix.
+            best_open_length (float): If a valid grasp pose is found, a scalar representing the optimal gripper opening length. Otherwise, a zero tensor.
 
         Raises:
             RuntimeError: If :meth:`generate` or :meth:`annotate` has not
                 been called yet.
         """
         if self._hit_point_pairs is None:
-            raise RuntimeError(
+            logger.log_warning(
                 "No antipodal point pairs available. "
                 "Call generate() or annotate() first."
             )
+            return False, torch.eye(4, device=self.device), 0.0
         origin_points = self._hit_point_pairs[:, 0, :]
         hit_points = self._hit_point_pairs[:, 1, :]
         origin_points_ = self._apply_transform(origin_points, object_pose)
@@ -632,6 +633,10 @@ class GraspGenerator:
         valid_mask = (
             positive_angle - torch.pi / 2
         ).abs() <= self.cfg.max_deviation_angle
+        if valid_mask.sum() == 0:
+            logger.log_warning("No valid antipodal pairs after angle filtering.")
+            return False, torch.eye(4, device=self.device), 0.0
+
         valid_grasp_x = grasp_x[valid_mask]
         valid_centers = centers[valid_mask]
 
@@ -650,6 +655,9 @@ class GraspGenerator:
             is_visual=visualize_collision,
             collision_threshold=0.0,
         )
+        if is_colliding.logical_not().sum() == 0:
+            logger.log_warning("No valid antipodal pairs after angle filtering.")
+            return False, torch.eye(4, device=self.device), 0.0
         # get best grasp pose
         valid_grasp_poses = valid_grasp_poses[~is_colliding]
         valid_open_lengths = valid_open_lengths[~is_colliding]
@@ -674,7 +682,7 @@ class GraspGenerator:
                 grasp_pose=best_grasp_pose,
                 open_length=best_open_length.item(),
             )
-        return best_grasp_pose, best_open_length
+        return True, best_grasp_pose, best_open_length
 
     @staticmethod
     def _grasp_pose_from_approach_direction(
