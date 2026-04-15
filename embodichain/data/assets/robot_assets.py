@@ -53,9 +53,9 @@ class CobotMagicArm(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "CobotMagicArmV2.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "CobotMagicArmV3.zip"
             ),
-            "14af3e84b74193680899a59fc74e8337",
+            "12a249e231bfc2faf0fd55f9e2646b8d",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

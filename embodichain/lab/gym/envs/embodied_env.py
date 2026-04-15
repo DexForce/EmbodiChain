@@ -643,16 +643,20 @@ class EmbodiedEnv(BaseEnv):
             # Support multiple control modes simultaneously
             if "qpos" in action:
                 self.robot.set_qpos(
-                    qpos=action["qpos"], joint_ids=self.active_joint_ids
+                    qpos=action["qpos"].to(self.device), joint_ids=self.active_joint_ids
                 )
             if "qvel" in action:
                 self.robot.set_qvel(
-                    qvel=action["qvel"], joint_ids=self.active_joint_ids
+                    qvel=action["qvel"].to(self.device), joint_ids=self.active_joint_ids
                 )
             if "qf" in action:
-                self.robot.set_qf(qf=action["qf"], joint_ids=self.active_joint_ids)
+                self.robot.set_qf(
+                    qf=action["qf"].to(self.device), joint_ids=self.active_joint_ids
+                )
         elif isinstance(action, torch.Tensor):
-            self.robot.set_qpos(qpos=action, joint_ids=self.active_joint_ids)
+            self.robot.set_qpos(
+                qpos=action.to(self.device), joint_ids=self.active_joint_ids
+            )
         else:
             logger.log_error(f"Unsupported action type: {type(action)}")
 
