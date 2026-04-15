@@ -28,6 +28,7 @@ def grid_sample_qpos_from_limits(
     steps_per_joint: int = 4,
     device=None,
     max_samples: int = 4096,
+    safe_margin: float = 5 / 180 * np.pi,  # 5 degrees in radians
 ) -> torch.Tensor:
     """Generate grid samples for qpos from qpos_limits.
 
@@ -44,8 +45,8 @@ def grid_sample_qpos_from_limits(
         device = qpos_limits.device
 
     limits = qpos_limits.squeeze(0) if qpos_limits.dim() == 3 else qpos_limits
-    lows = limits[:, 0].to(device)
-    highs = limits[:, 1].to(device)
+    lows = limits[:, 0].to(device) + safe_margin * 1.01
+    highs = limits[:, 1].to(device) - safe_margin * 1.01
 
     # create per-joint linspaces
     grids = [
@@ -98,12 +99,20 @@ class BaseSolverTest:
                     "end_link_name": "left_link6",
                     "root_link_name": "left_arm_base",
                     "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+                    "qpos_limits": [
+                        [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944],
+                        [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944],
+                    ],
                 },
                 "right_arm": {
                     "class_type": "OPWSolver",
                     "end_link_name": "right_link6",
                     "root_link_name": "right_arm_base",
                     "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+                    "qpos_limits": [
+                        [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944],
+                        [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944],
+                    ],
                 },
             },
         }
@@ -165,7 +174,7 @@ class BaseSolverTest:
             device=self.robot.device,
         )
         res, ik_qpos = self.robot.compute_ik(
-            pose=invalid_pose, joint_seed=ik_qpos, name=arm_name
+            pose=invalid_pose, joint_seed=ik_qpos[:, 0, :], name=arm_name
         )
         dof = ik_qpos.shape[-1]
         assert res[0] == False
