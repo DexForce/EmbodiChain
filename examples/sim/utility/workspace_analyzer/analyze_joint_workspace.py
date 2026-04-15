@@ -43,7 +43,7 @@ if __name__ == "__main__":
     print("Example: Joint Space Analysis")
 
     wa_joint = WorkspaceAnalyzer(robot=robot, sim_manager=sim_manager)
-    results_joint = wa_joint.analyze(num_samples=3000, visualize=True)
+    results_joint = wa_joint.analyze(num_samples=30000, visualize=True)
 
     print(f"\nJoint Space Results:")
     print(
