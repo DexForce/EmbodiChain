@@ -30,7 +30,7 @@ if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    config = SimulationManagerCfg(headless=False, sim_device="cpu")
+    config = SimulationManagerCfg(headless=False, sim_device="cuda")
     sim_manager = SimulationManager(config)
     sim_manager.set_manual_update(False)
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     print("Example: Joint Space Analysis")
 
     wa_joint = WorkspaceAnalyzer(robot=robot, sim_manager=sim_manager)
-    results_joint = wa_joint.analyze(num_samples=3000, visualize=True)
+    results_joint = wa_joint.analyze(num_samples=30000, visualize=True)
 
     print(f"\nJoint Space Results:")
     print(

@@ -302,6 +302,7 @@ class WorkspaceAnalyzer:
         return factory.create_sampler(
             strategy=self.config.sampling.strategy,
             seed=self.config.sampling.seed,
+            device=self.device,
         )
 
     # Note: Geometric constraint creation methods temporarily removed
@@ -1046,7 +1047,9 @@ class WorkspaceAnalyzer:
             RandomSampler,
         )
 
-        random_sampler = RandomSampler(seed=self.config.sampling.seed)
+        random_sampler = RandomSampler(
+            seed=self.config.sampling.seed, device=self.device
+        )
 
         logger.log_info(
             f"Computing IK for {num_samples} Cartesian samples "
