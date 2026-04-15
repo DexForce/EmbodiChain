@@ -95,7 +95,7 @@ API Reference
            """Compute the Jacobian matrix for the given joint positions."""
 
 - **set_ik_nearst_weight**: Set weights for IK nearest neighbor search.
-- **set_position_limits / get_position_limits**: Set or get joint position limits.
+- **set_qpos_limits / get_qpos_limits**: Set or get joint position limits.
 - **set_tcp / get_tcp**: Set or get the tool center point (TCP) transformation.
 
 Configuration

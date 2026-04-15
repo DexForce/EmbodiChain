@@ -116,7 +116,10 @@ def check_opw_solver(solver_warp, solver_py_opw, n_samples=1000):
 
 
 def benchmark_opw_solver():
-    cfg = OPWSolverCfg()
+    cfg = OPWSolverCfg(
+        joint_names=("J1", "J2", "J3", "J4", "J5", "J6"),
+        qpos_limits=(LOWER_LIMITS, UPPER_LIMITS),
+    )
     cfg.a1 = 400.333
     cfg.a2 = -251.449
     cfg.b = 0.0
@@ -135,13 +138,9 @@ def benchmark_opw_solver():
     cfg.flip_axes = (True, False, True, True, False, True)
     cfg.has_parallelogram = False
 
-    # TODO: ignore pk_serial_chain for OPW
+    # TODO: Set pk_serial_chain to "" to ignore pk_serial_chain for OPW.
     solver_warp = cfg.init_solver(device=torch.device("cuda"), pk_serial_chain="")
     solver_py_opw = cfg.init_solver(device=torch.device("cpu"), pk_serial_chain="")
-    solver_warp.lower_position_limits = np.array(LOWER_LIMITS)
-    solver_warp.upper_position_limits = np.array(UPPER_LIMITS)
-    solver_py_opw.lower_position_limits = np.array(LOWER_LIMITS)
-    solver_py_opw.upper_position_limits = np.array(UPPER_LIMITS)
 
     n_samples = [100, 1000, 10000, 100000]
     for n_sample in n_samples:

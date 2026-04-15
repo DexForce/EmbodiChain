@@ -99,12 +99,20 @@ class BaseSolverTest:
                     "end_link_name": "left_link6",
                     "root_link_name": "left_arm_base",
                     "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+                    "qpos_limits": [
+                        [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944],
+                        [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944],
+                    ],
                 },
                 "right_arm": {
                     "class_type": "OPWSolver",
                     "end_link_name": "right_link6",
                     "root_link_name": "right_arm_base",
                     "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+                    "qpos_limits": [
+                        [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944],
+                        [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944],
+                    ],
                 },
             },
         }

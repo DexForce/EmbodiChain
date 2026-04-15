@@ -129,8 +129,8 @@ class PinocchioSolver(BaseSolver):
             self.robot.model.njoints - 1
         )  # Degrees of freedom of reduced robot joints
 
-        self.upper_position_limits = self.robot.model.upperPositionLimit
-        self.lower_position_limits = self.robot.model.lowerPositionLimit
+        self.upper_qpos_limits = self.robot.model.upperPositionLimit
+        self.lower_qpos_limits = self.robot.model.lowerPositionLimit
 
         self.ik_nearest_weight = np.ones(self.dof)
 
@@ -329,8 +329,8 @@ class PinocchioSolver(BaseSolver):
             current_possible_values = []
 
             # Calculate how many 2π fits into the adjustment to the limits
-            lower_adjustment = (q[i] - self.lower_position_limits[i]) // (2 * np.pi)
-            upper_adjustment = (self.upper_position_limits[i] - q[i]) // (2 * np.pi)
+            lower_adjustment = (q[i] - self.lower_qpos_limits[i]) // (2 * np.pi)
+            upper_adjustment = (self.upper_qpos_limits[i] - q[i]) // (2 * np.pi)
 
             # Consider the current value and its periodic adjustments
             for offset in range(
@@ -340,14 +340,14 @@ class PinocchioSolver(BaseSolver):
 
                 # Check if the adjusted value is within limits
                 if (
-                    self.lower_position_limits[i]
+                    self.lower_qpos_limits[i]
                     <= adjusted_value
-                    <= self.upper_position_limits[i]
+                    <= self.upper_qpos_limits[i]
                 ):
                     current_possible_values.append(adjusted_value)
 
             # Also check the original value
-            if self.lower_position_limits[i] <= q[i] <= self.upper_position_limits[i]:
+            if self.lower_qpos_limits[i] <= q[i] <= self.upper_qpos_limits[i]:
                 current_possible_values.append(q[i])
 
             if not current_possible_values:

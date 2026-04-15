@@ -174,8 +174,8 @@ class PytorchSolver(BaseSolver):
 
         self.dof = self.pk_serial_chain.n_joints
 
-        self.upper_position_limits = self.pk_serial_chain.high
-        self.lower_position_limits = self.pk_serial_chain.low
+        self.upper_qpos_limits = self.pk_serial_chain.high
+        self.lower_qpos_limits = self.pk_serial_chain.low
 
     def get_iteration_params(self) -> dict:
         r"""Returns the current iteration parameters.
@@ -294,8 +294,8 @@ class PytorchSolver(BaseSolver):
     def _qpos_to_limits_single(
         q: torch.Tensor,
         joint_seed: torch.Tensor,
-        lower_position_limits: torch.Tensor,
-        upper_position_limits: torch.Tensor,
+        lower_qpos_limits: torch.Tensor,
+        upper_qpos_limits: torch.Tensor,
         ik_nearest_weight: torch.Tensor,
         periodic_mask: torch.Tensor = None,  # Optional mask for periodic joints
     ) -> torch.Tensor:
@@ -305,8 +305,8 @@ class PytorchSolver(BaseSolver):
         Args:
             q (torch.Tensor): The initial joint positions.
             joint_seed (torch.Tensor): The seed joint positions for comparison.
-            lower_position_limits (torch.Tensor): The lower bounds for the joint positions.
-            upper_position_limits (torch.Tensor): The upper bounds for the joint positions.
+            lower_qpos_limits (torch.Tensor): The lower bounds for the joint positions.
+            upper_qpos_limits (torch.Tensor): The upper bounds for the joint positions.
             ik_nearest_weight (torch.Tensor): The weights for the inverse kinematics nearest calculation.
             periodic_mask (torch.Tensor, optional): Boolean mask indicating which joints are periodic.
 
@@ -315,8 +315,8 @@ class PytorchSolver(BaseSolver):
         """
         device = q.device
         joint_seed = joint_seed.to(device)
-        lower = lower_position_limits.to(device)
-        upper = upper_position_limits.to(device)
+        lower = lower_qpos_limits.to(device)
+        upper = upper_qpos_limits.to(device)
         weight = ik_nearest_weight.to(device)
 
         # If periodic_mask is not provided, assume all joints are periodic
@@ -368,8 +368,8 @@ class PytorchSolver(BaseSolver):
             self._qpos_to_limits_single(
                 q,
                 joint_seed,
-                self.lower_position_limits,
-                self.upper_position_limits,
+                self.lower_qpos_limits,
+                self.upper_qpos_limits,
                 self.ik_nearest_weight,
                 periodic_mask,
             )
@@ -460,8 +460,8 @@ class PytorchSolver(BaseSolver):
         )
         random_qpos_seeds = sampler.sample(
             qpos_seed,
-            self.lower_position_limits,
-            self.upper_position_limits,
+            self.lower_qpos_limits,
+            self.upper_qpos_limits,
             batch_size,
         )
         target_xpos_repeated = sampler.repeat_target_xpos(

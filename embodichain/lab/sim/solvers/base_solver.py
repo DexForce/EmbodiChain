@@ -72,6 +72,9 @@ class SolverCfg:
     when multiple solutions are available.
     """
 
+    qpos_limits: List[float] | None = None
+    """Joint position limits [2, DOF] for the solver."""
+
     @abstractmethod
     def init_solver(self, device: torch.device, **kwargs) -> "BaseSolver":
         pass
@@ -164,16 +167,8 @@ class BaseSolver(metaclass=ABCMeta):
                 root_link_name=self.root_link_name,
                 device=self.device,
             )
-            self.set_position_limits(
-                lower_position_limits=self.pk_serial_chain.low,
-                upper_position_limits=self.pk_serial_chain.high,
-            )
-        else:
-            # If a pk_serial_chain is provided, we assume it has the necessary information to set position limits.
-            self.set_position_limits(
-                lower_position_limits=[-2 * np.pi] * self.dof,
-                upper_position_limits=[2 * np.pi] * self.dof,
-            )
+
+        self._init_qpos_limits()
 
     def set_ik_nearest_weight(
         self, ik_weight: np.ndarray, joint_ids: np.ndarray | None = None
@@ -233,49 +228,89 @@ class BaseSolver(metaclass=ABCMeta):
         """
         return self.ik_nearest_weight
 
-    def set_position_limits(
+    def _init_qpos_limits(self):
+        self.lower_qpos_limits = None
+        self.upper_qpos_limits = None
+        if self.cfg.qpos_limits is not None:
+            # robot qpos limits from config, expected shape [DOF, 2]
+            qpos_limits = torch.tensor(
+                self.cfg.qpos_limits, dtype=torch.float32, device=self.device
+            )
+            if not qpos_limits.shape == (2, self.dof):
+                logger.log_error(
+                    f"qpos_limits must have shape (2, {self.dof}), but got {qpos_limits.shape}."
+                )
+            # If a pk_serial_chain is provided, we assume it has the
+            # necessary information to set position limits.
+            self.set_qpos_limits(
+                lower_qpos_limits=qpos_limits[0],
+                upper_qpos_limits=qpos_limits[1],
+            )
+
+    def update_with_robot_limit(self, robot_qpos_limits: torch.Tensor):
+        """Update with robot joint limits.
+            Make sure the solver's joint limits are within the robot's joint limits.
+
+        Args:
+            robot_qpos_limits (torch.Tensor): [DOF, 2] tensor of joint limits from the robot data
+        """
+        robot_lower_limits = robot_qpos_limits[:, 0]
+        robot_upper_limits = robot_qpos_limits[:, 1]
+        if self.lower_qpos_limits is not None:
+            self.lower_qpos_limits = torch.max(
+                self.lower_qpos_limits, robot_lower_limits
+            )
+        else:
+            self.lower_qpos_limits = robot_lower_limits
+        if self.upper_qpos_limits is not None:
+            self.upper_qpos_limits = torch.min(
+                self.upper_qpos_limits, robot_upper_limits
+            )
+        else:
+            self.upper_qpos_limits = robot_upper_limits
+
+    def set_qpos_limits(
         self,
-        lower_position_limits: List[float],
-        upper_position_limits: List[float],
+        lower_qpos_limits: List[float],
+        upper_qpos_limits: List[float],
     ) -> bool:
         r"""Sets the upper and lower joint position limits.
 
         Parameters:
-            lower_position_limits (List[float]): A list of lower limits for each joint.
-            upper_position_limits (List[float]): A list of upper limits for each joint.
+            lower_qpos_limits (List[float]): A list of lower limits for each joint.
+            upper_qpos_limits (List[float]): A list of upper limits for each joint.
 
         Returns:
             bool: True if limits are successfully set, False if the input is invalid.
         """
 
         if any(
-            lower > upper
-            for lower, upper in zip(lower_position_limits, upper_position_limits)
+            lower > upper for lower, upper in zip(lower_qpos_limits, upper_qpos_limits)
         ):
             logger.log_warning(
                 "Each lower limit must be less than or equal to the corresponding upper limit."
             )
             return False
 
-        self.lower_position_limits = torch.tensor(
-            lower_position_limits, dtype=float, device=self.device
+        self.lower_qpos_limits = torch.tensor(
+            lower_qpos_limits, dtype=float, device=self.device
         )
-        self.upper_position_limits = torch.tensor(
-            upper_position_limits, dtype=float, device=self.device
+        self.upper_qpos_limits = torch.tensor(
+            upper_qpos_limits, dtype=float, device=self.device
         )
         return True
 
-    def get_position_limits(self) -> dict:
+    def get_qpos_limits(self) -> dict:
         r"""Returns the current joint position limits.
 
         Returns:
             dict: A dictionary containing:
-                - lower_position_limits (List[float]): The current lower limits for each joint.
-                - upper_position_limits (List[float]): The current upper limits for each joint.
+                - lower_qpos_limits (List[float]): The current lower limits for each joint.
+                - upper_qpos_limits (List[float]): The current upper limits for each joint.
         """
         return {
-            "lower_position_limits": self.lower_position_limits.tolist(),
-            "upper_position_limits": self.upper_position_limits.tolist(),
+            "lower_qpos_limits": self.lower_qpos_limits.tolist(),
+            "upper_qpos_limits": self.upper_qpos_limits.tolist(),
         }
 
     def set_tcp(self, xpos: np.ndarray):

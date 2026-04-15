@@ -936,9 +936,7 @@ class Robot(Articulation):
                     self._solvers[name] = solver_cfg.init_solver(device=self.device)
                     joint_ids = self.get_joint_ids(name=part_name)
                     joint_limits = self._data.qpos_limits[0][joint_ids]
-                    lower_limits = joint_limits[:, 0].to("cpu").tolist()
-                    upper_limits = joint_limits[:, 1].to("cpu").tolist()
-                    self._solvers[name].set_position_limits(lower_limits, upper_limits)
+                    self._solvers[name].update_with_robot_limit(joint_limits)
 
     def get_solver(self, name: str | None = None) -> BaseSolver | None:
         """Get the kinematic solver for a specific control part.
