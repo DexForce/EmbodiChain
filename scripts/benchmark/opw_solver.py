@@ -23,6 +23,10 @@ from typing import Tuple, List
 import time
 
 
+LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
+UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
+
+
 def get_pose_err(matrix_a: np.ndarray, matrix_b: np.ndarray) -> Tuple[float, float]:
     t_err = np.linalg.norm(matrix_a[:3, 3] - matrix_b[:3, 3])
     relative_rot = matrix_a[:3, :3].T @ matrix_b[:3, :3]
@@ -46,9 +50,13 @@ def get_poses_err(
 
 def check_opw_solver(solver_warp, solver_py_opw, n_samples=1000):
     DOF = 6
-    qpos_np = np.random.uniform(low=-np.pi, high=np.pi, size=(n_samples, DOF)).astype(
-        float
-    )
+    qpos_np = np.random.uniform(
+        low=np.array(LOWER_LIMITS)
+        + 5.1 / 180.0 * np.pi,  # add a margin to avoid sampling near the joint limits
+        high=np.array(UPPER_LIMITS) + -5.1 / 180.0 * np.pi,
+        size=(n_samples, DOF),
+    ).astype(float)
+
     qpos = torch.tensor(qpos_np, device=torch.device("cuda"), dtype=torch.float32)
     xpos = solver_warp.get_fk(qpos)
     qpos_seed = torch.tensor(
@@ -108,7 +116,10 @@ def check_opw_solver(solver_warp, solver_py_opw, n_samples=1000):
 
 
 def benchmark_opw_solver():
-    cfg = OPWSolverCfg()
+    cfg = OPWSolverCfg(
+        joint_names=("J1", "J2", "J3", "J4", "J5", "J6"),
+        user_qpos_limits=(LOWER_LIMITS, UPPER_LIMITS),
+    )
     cfg.a1 = 400.333
     cfg.a2 = -251.449
     cfg.b = 0.0
@@ -127,11 +138,11 @@ def benchmark_opw_solver():
     cfg.flip_axes = (True, False, True, True, False, True)
     cfg.has_parallelogram = False
 
-    # TODO: ignore pk_serial_chain for OPW
+    # TODO: Set pk_serial_chain to "" to ignore pk_serial_chain for OPW.
     solver_warp = cfg.init_solver(device=torch.device("cuda"), pk_serial_chain="")
     solver_py_opw = cfg.init_solver(device=torch.device("cpu"), pk_serial_chain="")
+
     n_samples = [100, 1000, 10000, 100000]
-    # n_samples = [100]
     for n_sample in n_samples:
         # check_opw_solver(solver_warp, solver_py_opw, device=device, n_samples=n_sample)
         (
@@ -142,13 +153,13 @@ def benchmark_opw_solver():
             py_opw_t_mean_err,
             py_opw_r_mean_err,
         ) = check_opw_solver(solver_warp, solver_py_opw, n_samples=n_sample)
-        print(f"===warp OPW Solver FK/IK test over {n_sample} samples:")
-        print(f"  Warp IK time: {warp_cost_time * 1000:.6f} ms")
-        print(f"Translation mean error: {warp_t_mean_err*1000:.6f} mm")
-        print(f"Rotation mean error: {warp_r_mean_err*180/np.pi:.6f} degrees")
-        print(f"===Py OPW IK time: {py_opw_cost_time * 1000:.6f} ms")
-        print(f"Translation mean error: {py_opw_t_mean_err*1000:.6f} mm")
-        print(f"Rotation mean error: {py_opw_r_mean_err*180/np.pi:.6f} degrees")
+        print(f"*******warp cuda OPW Solver FK/IK test over {n_sample} samples:")
+        print(f"===Warp IK time: {warp_cost_time * 1000:.6f} ms")
+        print(f"   Translation mean error: {warp_t_mean_err*1000:.6f} mm")
+        print(f"   Rotation mean error: {warp_r_mean_err*180/np.pi:.6f} degrees")
+        print(f"===warp cpu IK time: {py_opw_cost_time * 1000:.6f} ms")
+        print(f"   Translation mean error: {py_opw_t_mean_err*1000:.6f} mm")
+        print(f"   Rotation mean error: {py_opw_r_mean_err*180/np.pi:.6f} degrees")
 
 
 if __name__ == "__main__":

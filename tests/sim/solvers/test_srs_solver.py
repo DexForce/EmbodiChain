@@ -73,7 +73,7 @@ class BaseSolverTest:
             )
             cfg.urdf_path = urdf
             cfg.dh_params = arm_params.dh_params
-            cfg.qpos_limits = arm_params.qpos_limits
+            cfg.user_qpos_limits = arm_params.qpos_limits
             cfg.T_e_oe = arm_params.T_e_oe
             cfg.T_b_ob = arm_params.T_b_ob
             cfg.link_lengths = arm_params.link_lengths
