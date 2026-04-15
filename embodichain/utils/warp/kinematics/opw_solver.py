@@ -238,6 +238,7 @@ def opw_ik_kernel(
     sign_corrections: wp.array(dtype=float),
     lower_limits: wp_vec6f,
     upper_limits: wp_vec6f,
+    safe_margin: float,
     qpos: wp.array(dtype=float),
     ik_valid: wp.array(dtype=int),
 ):
@@ -446,7 +447,6 @@ def opw_ik_kernel(
     )
     DOF = 6
     N_SOL = 8
-    SAFE_MARGIN = float(wp.pi * 5.0 / 180.0)
     # apply sign correction and offsets, and write to qpos
     for j in range(N_SOL):
         qpos_start = i * DOF * N_SOL + j * DOF
@@ -477,7 +477,7 @@ def opw_ik_kernel(
                 qpos[qpos_start + k],
                 lower_limits[k],
                 upper_limits[k],
-                safe_margin=SAFE_MARGIN,
+                safe_margin=safe_margin,
             ):
                 ik_valid[i * N_SOL + j] = 0
                 break

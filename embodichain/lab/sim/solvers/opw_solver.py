@@ -72,6 +72,9 @@ class OPWSolverCfg(SolverCfg):
     # Parameters for the inverse-kinematics method.
     ik_params: dict | None = None
 
+    # safe margin for joint limits, in radians
+    safe_margin: float = 5.0 * np.pi / 180.0
+
     def init_solver(
         self, device: torch.device = torch.device("cpu"), **kwargs
     ) -> "OPWSolver":
@@ -296,6 +299,7 @@ class OPWSolver(BaseSolver):
                 sign_corrections_,
                 lower_limits_,
                 upper_limits_,
+                self.cfg.safe_margin,
             ),
             outputs=[all_qpos_wp, all_ik_valid_wp],
             device=standardize_device_string(kernel_device),
