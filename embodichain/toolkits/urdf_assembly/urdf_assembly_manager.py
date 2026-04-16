@@ -687,6 +687,40 @@ class URDFAssemblyManager:
                 break  # No further links found in the chain
         return current_link
 
+    def _log_names_once(
+        self,
+        kind: str,
+        elems: list[ET.Element],
+        *,
+        max_items: int = 300,
+        max_chars: int = 8000,
+    ) -> None:
+        """Log element names in a single line (truncated)."""
+        names: list[str] = []
+        for e in elems:
+            n = e.get("name")
+            if n:
+                names.append(n)
+
+        total = len(names)
+        shown_names = names[:max_items]
+        text = ", ".join(shown_names)
+
+        truncated_items = max(0, total - len(shown_names))
+        truncated_chars = 0
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+            truncated_chars = 1
+
+        suffix_parts: list[str] = []
+        if truncated_items:
+            suffix_parts.append(f"truncated_items={truncated_items}")
+        if truncated_chars:
+            suffix_parts.append("truncated_chars=1")
+        suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+
+        self.logger.info(f"[merge_urdfs] {kind}: count={total} names=[{text}]{suffix}")
+
     @performance_monitor
     def merge_urdfs(
         self,
@@ -713,6 +747,16 @@ class URDFAssemblyManager:
             if obj is not None
         ]
         self.logger.info(f"🔧 Preparing to merge components: {available_components}")
+
+        order_items = " ".join(
+            f"[{comp}]({prefix})" for comp, prefix in self.component_order_and_prefix
+        )
+        self.logger.info(f"[component_order_and_prefix] {order_items}")
+
+        case_keys = [k for k in ("joint", "link") if k in self.name_case]
+        case_keys += [k for k in sorted(self.name_case) if k not in case_keys]
+        case_items = " ".join(f"[{k}]({self.name_case[k]})" for k in case_keys)
+        self.logger.info(f"[name_case] {case_items}")
 
         for comp in available_components:
             comp_obj = self.component_registry.get(comp)
@@ -769,25 +813,45 @@ class URDFAssemblyManager:
         robot_name = os.path.splitext(os.path.basename(output_path))[0]
         merged_urdf = ET.Element("robot", name=robot_name)
 
-        # Collect global URDF material definitions from components/sensors.
-        # Some URDFs reference materials by name in <visual><material name="..."/>
-        # and rely on <robot><material name="...">... definitions. These are not
-        # part of links/joints, so we must explicitly merge them.
+        # Global <material> definitions live directly under <robot> and are not part
+        # of links/joints. To avoid polluting the merged URDF, we only merge global
+        # materials that are actually referenced by merged links' visuals.
         materials: list[ET.Element] = []
         material_names: set[str] = set()
+        material_sources: list[tuple[ET.Element, str]] = []
 
-        def _add_materials_from_root(root: ET.Element, source: str) -> None:
-            for mat in root.findall("material"):
-                mat_name = mat.get("name")
-                if not mat_name:
-                    continue
-                if mat_name in material_names:
-                    continue
-                materials.append(copy.deepcopy(mat))
-                material_names.add(mat_name)
+        def _register_material_source(root: ET.Element, source: str) -> None:
+            material_sources.append((root, source))
+
+        def _merge_material_if_defined(mat_name: str) -> bool:
+            """Merge a global <material name=...> definition from known sources.
+
+            Only merges if the material is referenced and if a source URDF actually
+            defines it at the <robot> root. This prevents bringing in unused
+            materials from component URDFs.
+            """
+            if not mat_name or mat_name in material_names:
+                return False
+
+            matches: list[tuple[ET.Element, str]] = []
+            for root, source in material_sources:
+                for mat in root.findall("material"):
+                    if mat.get("name") == mat_name:
+                        matches.append((mat, source))
+
+            if not matches:
+                return False
+
+            if len(matches) > 1:
                 self.logger.debug(
-                    f"Merged URDF material definition: '{mat_name}' from {source}"
+                    f"Material '{mat_name}' defined in multiple URDF sources; using the first: {matches[0][1]}"
                 )
+
+            mat, source = matches[0]
+            materials.append(copy.deepcopy(mat))
+            material_names.add(mat_name)
+            self.logger.debug(f"Merged referenced material '{mat_name}' from {source}")
+            return True
 
         # 2. Create single base link for the entire robot
         base_link = ET.Element("link", name=self.base_link_name)
@@ -845,7 +909,7 @@ class URDFAssemblyManager:
 
             # Parse component URDF to analyze its structure
             urdf_root = ET.parse(comp_obj.urdf_path).getroot()
-            _add_materials_from_root(urdf_root, str(comp_obj.urdf_path))
+            _register_material_source(urdf_root, str(comp_obj.urdf_path))
 
             # Determine parent component and attachment point for current component
             parent_component = None
@@ -951,15 +1015,15 @@ class URDFAssemblyManager:
 
         # 5. Process sensor attachments using the new sensor manager
         for sensor_name, sensor_attach in self.sensor_registry.all().items():
-            # Merge any global materials defined in the sensor URDF.
+            # Register sensor URDF as a material source (do not merge materials eagerly).
             try:
                 sensor_root = ET.parse(sensor_attach.sensor_urdf).getroot()
             except Exception as exc:
                 self.logger.debug(
-                    f"Failed to parse sensor URDF for material merge ({sensor_attach.sensor_urdf}): {exc}"
+                    f"Failed to parse sensor URDF for material sourcing ({sensor_attach.sensor_urdf}): {exc}"
                 )
             else:
-                _add_materials_from_root(sensor_root, str(sensor_attach.sensor_urdf))
+                _register_material_source(sensor_root, str(sensor_attach.sensor_urdf))
 
             sensor_manager.attach_sensor(
                 sensor_name=sensor_name,
@@ -973,19 +1037,9 @@ class URDFAssemblyManager:
             links, joints, base_points, existing_link_names, existing_joint_names
         )
 
-        # 6. Ensure referenced materials exist (avoid simulator warnings).
-        # If a link references <material name="X"/> but X is not defined globally,
-        # inject a conservative fallback only for a small known palette.
-        fallback_palette = {
-            "white": "1 1 1 1",
-            "black": "0 0 0 1",
-            "red": "1 0 0 1",
-            "green": "0 1 0 1",
-            "blue": "0 0 1 1",
-            "gray": "0.5 0.5 0.5 1",
-            "grey": "0.5 0.5 0.5 1",
-        }
-
+        # 6. Merge only the global materials that are actually referenced by merged links.
+        # If a link references <material name="X"/> but no source URDF defines a global
+        # <material name="X"> under <robot>, we warn but do not inject guessed fallbacks.
         referenced_materials: set[str] = set()
         for link in links:
             for mat in link.findall(".//visual/material"):
@@ -997,27 +1051,26 @@ class URDFAssemblyManager:
                     continue
                 referenced_materials.add(mat_name)
 
-        for mat_name in sorted(referenced_materials - material_names):
-            key = mat_name.lower()
-            if key in fallback_palette:
-                rgba = fallback_palette[key]
-                fallback_mat = ET.Element("material", name=mat_name)
-                ET.SubElement(fallback_mat, "color", rgba=rgba)
-                materials.append(fallback_mat)
-                material_names.add(mat_name)
-                self.logger.warning(
-                    f"Material '{mat_name}' undefined; injected fallback color rgba='{rgba}'"
-                )
-            else:
-                self.logger.warning(
-                    f"Material '{mat_name}' referenced but not defined in merged URDF"
-                )
+        missing_materials: list[str] = []
+        for mat_name in sorted(referenced_materials):
+            if mat_name in material_names:
+                continue
+            if not _merge_material_if_defined(mat_name):
+                missing_materials.append(mat_name)
+
+        for mat_name in missing_materials:
+            self.logger.warning(
+                f"Material '{mat_name}' referenced but not defined in any source URDF"
+            )
 
         # Add global materials, then links/joints to merged URDF in proper order
         for mat in materials:
             merged_urdf.append(mat)
+
+        self._log_names_once("links", links)
         for link in links:
             merged_urdf.append(link)
+        self._log_names_once("joints", joints)
         for joint in joints:
             merged_urdf.append(joint)
 
