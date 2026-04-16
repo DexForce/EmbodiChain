@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,22 +27,10 @@ def _fmt(value: Any, digits: int = 3) -> str:
     return str(value)
 
 
-def _group_aggregate_results_by_task(
-    aggregate_results: list[dict[str, Any]],
-) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in aggregate_results:
-        grouped.setdefault(item["task"], []).append(item)
-    for task_results in grouped.values():
-        task_results.sort(
-            key=lambda item: (
-                -float(item.get("final_success_rate_stable_mean", float("-inf"))),
-                -float(item.get("final_success_rate_mean", float("-inf"))),
-                float(item.get("steps_to_success_threshold_mean", float("inf"))),
-                item["algorithm"],
-            )
-        )
-    return dict(sorted(grouped.items()))
+def _safe_divide(numerator: float, denominator: float) -> float:
+    if denominator <= 0:
+        return float("nan")
+    return numerator / denominator
 
 
 def generate_markdown_report(
@@ -52,12 +41,23 @@ def generate_markdown_report(
     protocol: dict[str, Any] | None,
     output_path: str | Path,
 ) -> Path:
-    """Write a markdown benchmark report to disk."""
+    """Write a benchmark markdown report with exactly two tables."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    ordered_runs = sorted(
+        run_results,
+        key=lambda item: (
+            str(item.get("task", "")),
+            str(item.get("algorithm", "")),
+            int(item.get("seed", 0)),
+        ),
+    )
+
     lines = [
         "# RL Benchmark Report",
+        "",
+        f"Generated at: {datetime.now().isoformat(timespec='seconds')}",
         "",
         "## Benchmark Overview",
         "",
@@ -80,175 +80,73 @@ def generate_markdown_report(
         )
     lines.extend(
         [
-            "## Leaderboard",
+            "## Time & Memory",
             "",
-            "| Rank | Algorithm | Score | Steps To Threshold (Sustained) | Success Rate Std | Avg Success Rate | Avg Stable Success Rate | Avg Final Reward | Tasks |",
-            "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| task | algorithm | seed | cost_time_ms | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb | training_fps | env_fps |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
-    for item in leaderboard:
+    for result in ordered_runs:
+        train_steps = float(result.get("train_steps", float("nan")))
+        training_fps = float(result.get("training_fps", float("nan")))
+        cost_time_ms = _safe_divide(train_steps, training_fps) * 1000.0
         lines.append(
-            "| {rank} | {algorithm} | {score} | {steps} | {std} | {success} | {stable_success} | {reward} | {tasks} |".format(
-                rank=item["rank"],
-                algorithm=item["algorithm"],
-                score=_fmt(item.get("score", float("nan"))),
-                steps=_fmt(item.get("steps_to_success_threshold", float("nan"))),
-                std=_fmt(item.get("success_rate_std", float("nan"))),
-                success=_fmt(item.get("avg_success_rate", float("nan"))),
-                stable_success=_fmt(item.get("avg_success_rate_stable", float("nan"))),
-                reward=_fmt(item.get("avg_final_reward", float("nan"))),
-                tasks=item.get("tasks_covered", 0),
-            )
-        )
-
-    lines.extend(
-        [
-            "",
-            "## Aggregate Results",
-            "",
-            "| Task | Algorithm | Runs | Final Reward | Final Success Rate | Final Stable Success Rate | Training FPS | Env FPS |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ]
-    )
-    for item in aggregate_results:
-        lines.append(
-            "| {task} | {algorithm} | {num_runs} | {reward} | {success} | {stable_success} | {train_fps} | {env_fps} |".format(
-                task=item["task"],
-                algorithm=item["algorithm"],
-                num_runs=item["num_runs"],
-                reward=_fmt(item.get("final_reward_mean", float("nan"))),
-                success=_fmt(item.get("final_success_rate_mean", float("nan"))),
-                stable_success=_fmt(
-                    item.get("final_success_rate_stable_mean", float("nan"))
-                ),
-                train_fps=_fmt(item.get("training_fps_mean", float("nan"))),
-                env_fps=_fmt(item.get("environment_fps_mean", float("nan"))),
-            )
-        )
-
-    lines.extend(
-        [
-            "",
-            "## Per-Task Comparison",
-            "",
-            "Each table compares different algorithms on the same task.",
-            "",
-        ]
-    )
-    for task, task_results in _group_aggregate_results_by_task(
-        aggregate_results
-    ).items():
-        lines.extend(
-            [
-                f"### {task}",
-                "",
-                "| Algorithm | Runs | Final Stable Success Rate | Final Success Rate | Steps To Threshold (Sustained) | Success Rate Std | Final Reward | Training FPS | Env FPS |",
-                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-            ]
-        )
-        for item in task_results:
-            lines.append(
-                "| {algorithm} | {num_runs} | {stable_success} | {success} | {steps} | {std} | {reward} | {train_fps} | {env_fps} |".format(
-                    algorithm=item["algorithm"],
-                    num_runs=item["num_runs"],
-                    stable_success=_fmt(
-                        item.get("final_success_rate_stable_mean", float("nan"))
-                    ),
-                    success=_fmt(item.get("final_success_rate_mean", float("nan"))),
-                    steps=_fmt(
-                        item.get("steps_to_success_threshold_mean", float("nan"))
-                    ),
-                    std=_fmt(item.get("final_success_rate_std", float("nan"))),
-                    reward=_fmt(item.get("final_reward_mean", float("nan"))),
-                    train_fps=_fmt(item.get("training_fps_mean", float("nan"))),
-                    env_fps=_fmt(item.get("environment_fps_mean", float("nan"))),
-                )
-            )
-        lines.append("")
-
-    lines.extend(
-        [
-            "",
-            "## Plots",
-            "",
-        ]
-    )
-    for plot_name, plot_path in sorted(plot_artifacts.items()):
-        relative = Path(plot_path).relative_to(output.parent)
-        lines.append(f"### {plot_name}")
-        lines.append("")
-        lines.append(f"![{plot_name}]({relative.as_posix()})")
-        lines.append("")
-    lines.extend(
-        [
-            "## Stability Analysis",
-            "",
-            "| Task | Algorithm | Success Rate Mean | Stable Success Rate Mean | Success Rate Std | Steps To Threshold Mean | First Hit Mean |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
-        ]
-    )
-    for item in aggregate_results:
-        lines.append(
-            "| {task} | {algorithm} | {mean_value} | {stable_mean} | {std_value} | {steps} | {first_hit} |".format(
-                task=item["task"],
-                algorithm=item["algorithm"],
-                mean_value=_fmt(item.get("final_success_rate_mean", float("nan"))),
-                stable_mean=_fmt(
-                    item.get("final_success_rate_stable_mean", float("nan"))
-                ),
-                std_value=_fmt(item.get("final_success_rate_std", float("nan"))),
-                steps=_fmt(item.get("steps_to_success_threshold_mean", float("nan"))),
-                first_hit=_fmt(
-                    item.get("steps_to_success_threshold_first_hit_mean", float("nan"))
-                ),
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "## System Performance",
-            "",
-            "| Task | Algorithm | Training FPS | Env FPS | Peak GPU Memory (MB) |",
-            "| --- | --- | ---: | ---: | ---: |",
-        ]
-    )
-    for item in aggregate_results:
-        lines.append(
-            "| {task} | {algorithm} | {train_fps} | {env_fps} | {mem} |".format(
-                task=item["task"],
-                algorithm=item["algorithm"],
-                train_fps=_fmt(item.get("training_fps_mean", float("nan"))),
-                env_fps=_fmt(item.get("environment_fps_mean", float("nan"))),
-                mem=_fmt(item.get("peak_gpu_memory_mb_mean", float("nan"))),
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "## Per-Run Results",
-            "",
-            "| Task | Algorithm | Seed | Final Reward | Final Success Rate | Final Stable Success Rate | Steps To Threshold | First Hit | Checkpoint |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
-        ]
-    )
-    for result in sorted(
-        run_results, key=lambda item: (item["task"], item["algorithm"], item["seed"])
-    ):
-        lines.append(
-            "| {task} | {algorithm} | {seed} | {reward} | {success} | {stable_success} | {steps} | {first_hit} | `{checkpoint}` |".format(
+            "| {task} | {algorithm} | {seed} | {cost_time_ms} | {cpu_delta} | {gpu_delta} | {peak_gpu} | {train_fps} | {env_fps} |".format(
                 task=result["task"],
                 algorithm=result["algorithm"],
                 seed=result["seed"],
-                reward=_fmt(result.get("final_reward", float("nan"))),
+                cost_time_ms=_fmt(cost_time_ms),
+                cpu_delta=_fmt(result.get("cpu_delta_mb", "n/a")),
+                gpu_delta=_fmt(result.get("gpu_delta_mb", "n/a")),
+                peak_gpu=_fmt(result.get("peak_gpu_memory_mb", float("nan"))),
+                train_fps=_fmt(result.get("training_fps", float("nan"))),
+                env_fps=_fmt(result.get("environment_fps", float("nan")), digits=2),
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Success & Other Metrics",
+            "",
+            "| task | algorithm | seed | success_rate | stable_success_rate | steps_to_threshold | first_hit | final_reward | final_episode_length |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in ordered_runs:
+        lines.append(
+            "| {task} | {algorithm} | {seed} | {success} | {stable_success} | {steps} | {first_hit} | {reward} | {episode_len} |".format(
+                task=result["task"],
+                algorithm=result["algorithm"],
+                seed=result["seed"],
                 success=_fmt(result.get("final_success_rate", float("nan"))),
                 stable_success=_fmt(
                     result.get("final_success_rate_stable", float("nan"))
                 ),
-                steps=result.get("steps_to_success_threshold", "n/a"),
-                first_hit=result.get("steps_to_success_threshold_first_hit", "n/a"),
-                checkpoint=result.get("checkpoint_path", ""),
+                steps=_fmt(result.get("steps_to_success_threshold", float("nan"))),
+                first_hit=_fmt(
+                    result.get("steps_to_success_threshold_first_hit", float("nan"))
+                ),
+                reward=_fmt(result.get("final_reward", float("nan"))),
+                episode_len=_fmt(result.get("final_episode_length", float("nan"))),
             )
         )
+
+    lines.extend(["", "## Notes", ""])
+    if leaderboard:
+        top = leaderboard[0]
+        lines.append(
+            "- Top algorithm by leaderboard score: "
+            f"`{top.get('algorithm', 'n/a')}` (score={_fmt(top.get('score', float('nan')))})."
+        )
+    if aggregate_results:
+        lines.append(f"- Aggregate summaries available: `{len(aggregate_results)}`.")
+
+    if plot_artifacts:
+        lines.extend(["", "## Plots", ""])
+    for plot_name, plot_path in sorted(plot_artifacts.items()):
+        relative = Path(plot_path).relative_to(output.parent)
+        lines.append(f"- {plot_name}: ![{plot_name}]({relative.as_posix()})")
 
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return output
