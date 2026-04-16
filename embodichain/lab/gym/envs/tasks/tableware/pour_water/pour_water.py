@@ -96,8 +96,13 @@ class PourWaterEnv(EmbodiedEnv):
 
         total_traj_num = ret[list(ret.keys())[0]].shape[-1]
         actions = torch.zeros(
-            (total_traj_num, self.num_envs, self.robot.dof), dtype=torch.float32
+            (total_traj_num, self.num_envs, len(self.active_joint_ids)),
+            dtype=torch.float32,
         )
+
+        active_id_map = {
+            j: i for i, j in enumerate(self.active_joint_ids)
+        }
 
         for key, joints in [
             ("left_arm", left_arm_joints),
@@ -106,8 +111,12 @@ class PourWaterEnv(EmbodiedEnv):
             ("right_eef", right_eef_joints),
         ]:
             if key in ret:
-                # TODO: only 1 env supported now
-                actions[:, 0, joints] = torch.as_tensor(ret[key].T, dtype=torch.float32)
+                local_ids = [active_id_map[j] for j in joints if j in active_id_map]
+                if local_ids:
+                    # TODO: only 1 env supported now
+                    actions[:, 0, local_ids] = torch.as_tensor(
+                        ret[key][: len(local_ids)].T, dtype=torch.float32
+                    )
 
         return actions
 

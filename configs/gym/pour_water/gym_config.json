@@ -212,7 +212,8 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "CobotMagic",
-                        "control_freq": 25
+                        "control_freq": 25,
+                        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
                     },
                     "instruction": {
                         "lang": "Pour water from bottle to cup"
