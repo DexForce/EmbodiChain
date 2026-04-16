@@ -12,9 +12,9 @@
         "enable_eval": true,
         "num_eval_envs": 16,
         "num_eval_episodes": 3,
-        "eval_freq": 2,
-        "save_freq": 200,
-        "use_wandb": false,
+        "eval_freq": 100,
+        "save_freq": 100,
+        "use_wandb": true,
         "wandb_project_name": "embodichain-push_cube",
         "events": {
             "eval": {
@@ -24,32 +24,12 @@
                     "interval_step": 1,
                     "params": {
                         "name": "main_cam",
-                        "resolution": [
-                            640,
-                            480
-                        ],
-                        "eye": [
-                            -1.4,
-                            1.4,
-                            2.0
-                        ],
-                        "target": [
-                            0,
-                            0,
-                            0
-                        ],
-                        "up": [
-                            0,
-                            0,
-                            1
-                        ],
-                        "intrinsics": [
-                            600,
-                            600,
-                            320,
-                            240
-                        ],
-                        "save_path": "./outputs/videos/eval"
+                        "resolution": [640, 480],
+                        "eye": [-1.4, 1.4, 2.0],
+                        "target": [0, 0, 0],
+                        "up": [0, 0, 1],
+                        "intrinsics": [600, 600, 320, 240],
+                        "save_path": "./outputs/videos_ppo1/eval"
                     }
                 }
             }

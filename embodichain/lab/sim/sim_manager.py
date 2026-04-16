@@ -1553,6 +1553,13 @@ class SimulationManager:
             return False
 
         draw_xpos = deepcopy(cfg.axis_xpos)
+        if isinstance(draw_xpos, torch.Tensor):
+            draw_xpos = draw_xpos.detach().cpu().numpy()
+        elif isinstance(draw_xpos, (list, tuple)):
+            draw_xpos = [
+                item.detach().cpu().numpy() if isinstance(item, torch.Tensor) else item
+                for item in draw_xpos
+            ]
         draw_xpos = np.array(draw_xpos)
         if draw_xpos.ndim == 2:
             if draw_xpos.shape == (4, 4):

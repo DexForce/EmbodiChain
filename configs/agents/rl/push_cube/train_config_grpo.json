@@ -1,0 +1,66 @@
+{
+    "trainer": {
+        "exp_name": "push_cube_grpo",
+        "gym_config": "configs/agents/rl/push_cube/gym_config.json",
+        "seed": 42,
+        "device": "cuda:0",
+        "headless": true,
+        "enable_rt": false,
+        "gpu_id": 0,
+        "num_envs": 64,
+        "iterations": 1000,
+        "buffer_size": 1024,
+        "enable_eval": true,
+        "num_eval_envs": 16,
+        "num_eval_episodes": 3,
+        "eval_freq": 200,
+        "save_freq": 200,
+        "use_wandb": false,
+        "wandb_project_name": "embodichain-push_cube",
+        "events": {
+            "eval": {
+                "record_camera": {
+                    "func": "record_camera_data_async",
+                    "mode": "interval",
+                    "interval_step": 1,
+                    "params": {
+                        "name": "main_cam",
+                        "resolution": [640, 480],
+                        "eye": [-1.4, 1.4, 2.0],
+                        "target": [0, 0, 0],
+                        "up": [0, 0, 1],
+                        "intrinsics": [600, 600, 320, 240],
+                        "save_path": "./outputs/videos/eval"
+                    }
+                }
+            }
+        }
+    },
+    "policy": {
+        "name": "actor_only",
+        "actor": {
+            "type": "mlp",
+            "network_cfg": {
+                "hidden_sizes": [256, 256],
+                "activation": "relu"
+            }
+        }
+    },
+    "algorithm": {
+        "name": "grpo",
+        "cfg": {
+            "learning_rate": 0.0001,
+            "n_epochs": 10,
+            "batch_size": 8192,
+            "gamma": 0.99,
+            "clip_coef": 0.2,
+            "ent_coef": 0.01,
+            "kl_coef": 0.0,
+            "group_size": 4,
+            "eps": 1e-8,
+            "reset_every_rollout": true,
+            "max_grad_norm": 0.5,
+            "truncate_at_first_done": true
+        }
+    }
+}

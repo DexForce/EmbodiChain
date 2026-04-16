@@ -138,6 +138,19 @@ class WorkspaceConstraintChecker(BaseConstraintChecker):
 
         return valid
 
+    def check_constraints(
+        self, points: torch.Tensor | np.ndarray
+    ) -> torch.Tensor | np.ndarray:
+        """Check all constraints (bounds + collision) in a single call.
+
+        Args:
+            points: Array of shape (N, 3) containing 3D point positions.
+
+        Returns:
+            Boolean array of shape (N,) indicating which points satisfy all constraints.
+        """
+        return self.check_bounds(points) & self.check_collision(points)
+
     def filter_points(
         self, points: torch.Tensor | np.ndarray
     ) -> torch.Tensor | np.ndarray:

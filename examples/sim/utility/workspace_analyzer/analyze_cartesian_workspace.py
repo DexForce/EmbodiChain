@@ -36,11 +36,7 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
-        headless=False,
-        sim_device="cpu",
-        width=1080,
-        height=1080,
-        render_cfg=RenderCfg(renderer="legacy"),
+        headless=False, sim_device="cpu", width=1080, height=1080
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
@@ -52,7 +48,11 @@ if __name__ == "__main__":
     print("DexforceW1 robot added to the simulation.")
 
     # Set left arm joint positions (mirrored)
-    left_qpos = torch.tensor([0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0])
+    left_qpos = torch.tensor(
+        [0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
+        dtype=torch.float32,
+        device=robot.device,
+    )
     right_qpos = -left_qpos
     robot.set_qpos(
         qpos=left_qpos,

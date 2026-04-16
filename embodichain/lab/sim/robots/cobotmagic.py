@@ -114,14 +114,14 @@ class CobotMagicCfg(RobotCfg):
                     root_link_name="left_arm_base",
                     tcp=np.array(
                         [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
-                    ),
+                    )
                 ),
                 "right_arm": OPWSolverCfg(
                     end_link_name="right_link6",
                     root_link_name="right_arm_base",
                     tcp=np.array(
                         [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
-                    ),
+                    )
                 ),
             },
             "min_position_iters": 8,

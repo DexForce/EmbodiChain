@@ -1055,6 +1055,8 @@ class Articulation(BatchEntity):
         # (e.g., support specifying which methods should be decorated for auto-conversion.)
         if not isinstance(qpos, torch.Tensor):
             qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        else:
+            qpos = qpos.to(device=self.device, dtype=torch.float32)
 
         if joint_ids is None:
             local_joint_ids = torch.arange(
@@ -1065,7 +1067,7 @@ class Articulation(BatchEntity):
                 joint_ids, dtype=torch.int32, device=self.device
             )
         else:
-            local_joint_ids = joint_ids
+            local_joint_ids = joint_ids.to(device=self.device, dtype=torch.int32)
 
         local_env_ids = self._all_indices if env_ids is None else env_ids
 

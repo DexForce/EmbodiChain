@@ -260,11 +260,20 @@ if __name__ == "__main__":
     )
     obj_poses = mug.get_local_pose(to_matrix=True)
     grasp_xpos_list = []
-    for obj_pose in obj_poses:
-        grasp_pose, _ = grasp_generator.get_grasp_poses(
+
+    rest_xpos = robot.compute_fk(
+        qpos=robot.get_qpos("arm"), name="arm", to_matrix=True
+    )[0]
+    for i, obj_pose in enumerate(obj_poses):
+        is_success, grasp_pose, open_length = grasp_generator.get_grasp_poses(
             obj_pose, approach_direction, visualize_pose=False
         )
-        grasp_xpos_list.append(grasp_pose.unsqueeze(0))
+        if is_success:
+            grasp_xpos_list.append(grasp_pose.unsqueeze(0))
+        else:
+            logger.log_warning(f"No valid grasp pose found for {i}-th object.")
+            grasp_xpos_list.append(rest_xpos.unsqueeze(0))
+
     grasp_xpos = torch.cat(grasp_xpos_list, dim=0)
     cost_time = time.time() - start_time
     logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
