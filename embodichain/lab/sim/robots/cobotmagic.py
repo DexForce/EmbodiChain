@@ -115,7 +115,7 @@ class CobotMagicCfg(RobotCfg):
                     tcp=np.array(
                         [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
                     ),
-                    safe_margin=5.0 * np.pi / 180.0,
+                    safe_margin=0.0,
                 ),
                 "right_arm": OPWSolverCfg(
                     end_link_name="right_link6",
@@ -123,7 +123,7 @@ class CobotMagicCfg(RobotCfg):
                     tcp=np.array(
                         [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
                     ),
-                    safe_margin=5.0 * np.pi / 180.0,
+                    safe_margin=0.0,
                 ),
             },
             "min_position_iters": 8,
