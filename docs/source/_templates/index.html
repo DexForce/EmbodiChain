@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmbodiChain Documentation</title>
+    <script type="text/javascript">
+    (function() {
+        'use strict';
+        fetch('versions.json')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('versions.json not found');
+                }
+                return response.json();
+            })
+            .then(data => {
+                const latestVersion = data.latest || data.versions?.[0]?.name || 'main';
+                const currentPath = window.location.pathname;
+                if (currentPath === '/' || currentPath.endsWith('/index.html') || currentPath.endsWith('/')) {
+                    window.location.href = latestVersion + '/';
+                }
+            })
+            .catch(error => {
+                console.warn('Version redirect failed:', error.message);
+                window.location.href = 'main/';
+            });
+    })();
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: #f5f5f5;
+        }
+        .redirect-message {
+            text-align: center;
+            color: #333;
+        }
+        a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="redirect-message">
+        <h2>Redirecting to latest documentation...</h2>
+        <p>If you are not redirected automatically, <a href="main/">click here</a>.</p>
+    </div>
+</body>
+</html>

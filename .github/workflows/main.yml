@@ -48,6 +48,27 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for sphinx-multiversion
+
+      - name: Cache Python dependencies
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-docs-${{ hashFiles('docs/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-docs-
+
+      - name: Cache Sphinx doctrees
+        id: cache-doctrees
+        uses: actions/cache@v4
+        with:
+          path: docs/build/doctrees
+          key: ${{ runner.os }}-doctrees-docs-${{ hashFiles('docs/**') }}
+          restore-keys: |
+            ${{ runner.os }}-doctrees-docs-
+
       - name: Build docs
         run: |
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
@@ -56,13 +77,72 @@ jobs:
           echo "Start Building docs..."
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
+          # Build main branch only (Phase 1)
           make html
+
       - name: Upload docs artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
-        with: 
+        with:
           path: ${{ github.workspace }}/docs/build/html
           retention-days: 3
+
+  # Phase 2: Multi-version build (enable in v0.2.0+)
+  # Uncomment and enable this job when releasing v0.2.0
+  # build-multiversion:
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   needs: lint
+  #   runs-on: Linux
+  #   env:
+  #     NVIDIA_DRIVER_CAPABILITIES: all
+  #     NVIDIA_VISIBLE_DEVICES: all
+  #     NVIDIA_DISABLE_REQUIRE: 1
+  #   container: *container_template
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0  # Full history for sphinx-multiversion
+  #
+  #     - name: Cache Python dependencies
+  #       id: cache-pip
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cache/pip
+  #         key: ${{ runner.os }}-pip-docs-${{ hashFiles('docs/requirements.txt') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pip-docs-
+  #
+  #     - name: Cache Sphinx doctrees
+  #       id: cache-doctrees
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: docs/build/doctrees
+  #         key: ${{ runner.os }}-doctrees-docs-${{ hashFiles('docs/**') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-doctrees-docs-
+  #
+  #     - name: Build multi-version docs
+  #       run: |
+  #         pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+  #         pip install -r docs/requirements.txt
+  #         cd ${GITHUB_WORKSPACE}/docs
+  #         echo "Start Building multi-version docs..."
+  #         pip uninstall pymeshlab -y
+  #         pip install pymeshlab==2023.12.post3
+  #         # Build all versions
+  #         make multiversion
+  #
+  #     - name: Upload multi-version docs artifact
+  #       uses: actions/upload-pages-artifact@v3
+  #       with:
+  #         path: ${{ github.workspace }}/docs/build/html
+  #         retention-days: 90
+  #
+  #     - name: Create version redirect index
+  #       run: |
+  #         # Create a copy of the index template at the root
+  #         cp docs/build/html/main/_templates/index.html docs/build/html/index.html 2>/dev/null || \
+  #         echo '<meta http-equiv="refresh" content="0; url=main/">' > docs/build/html/index.html
 
   test:
     if: github.event_name == 'pull_request'
@@ -91,7 +171,7 @@ jobs:
     runs-on: Linux
     permissions:
       pages: write
-      id-token: write 
+      id-token: write
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
@@ -99,10 +179,18 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-      - name: Download docs artifact
+
+      - name: Download docs artifact (main push - Phase 1)
         uses: actions/download-artifact@v4
         with:
           name: github-pages
+
+      # Phase 2: Uncomment and use this section for multi-version deployment
+      # - name: Download multi-version docs artifact (tag push)
+      #   if: startsWith(github.ref, 'refs/tags/v')
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: github-pages
 
       - name: Deploy GitHub Pages
         uses: actions/deploy-pages@v4

@@ -19,3 +19,27 @@ help:
 %: Makefile
 	@rm -rf "$(BUILDDIR)"
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
+# Multi-version build target for local testing
+.PHONY: multiversion
+multiversion:
+	@rm -rf "$(BUILDDIR)/html"
+	@echo "Building multi-version documentation..."
+	@sphinx-multiversion "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS) $(O)
+	@echo "Generating versions.json..."
+	@python3 scripts/generate_versions_json.py --build-dir "$(BUILDDIR)/html" --output "$(BUILDDIR)/html/versions.json"
+	@echo "Creating root index.html with inline redirect..."
+	@cp "$(SOURCEDIR)/_templates/index.html" "$(BUILDDIR)/html/index.html" 2>/dev/null || echo '<meta http-equiv="refresh" content="0; url=main/">' > "$(BUILDDIR)/html/index.html"
+	@echo "Multi-version docs built successfully."
+
+# Clean multi-version build artifacts
+.PHONY: clean-multiversion
+clean-multiversion:
+	@rm -rf "$(BUILDDIR)/html"
+	@echo "Multi-version build artifacts cleaned."
+
+# Preview documentation with local HTTP server
+.PHONY: preview
+preview:
+	@echo "Starting documentation preview server at http://localhost:8000"
+	@python3 preview.py --directory "$(BUILDDIR)/html" --port 8000 --open

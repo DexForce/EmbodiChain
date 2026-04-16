@@ -65,17 +65,51 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 
-# -- Options for HTML output -------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
-
-html_theme = "sphinx_book_theme"
-html_static_path = ["_static"]
-# html_logo = "_static/logo_e.png"
-
 # -- sphinx-multiversion configuration -------------------------------------------------
+# Enable multi-version builds (set to True in v0.2.0+)
+ENABLE_MULTI_VERSION = True
+
+# Version buffer size: number of releases to keep + main branch
+VERSION_BUFFER_SIZE = 5
+
 # Only build tags that look like v1.0.0 or branches like main/dev
 smv_tag_whitelist = r"^v\d+\.\d+\.\d+$"
 smv_branch_whitelist = r"^(main|dev)$"
 smv_remote_whitelist = r"^origin$"
 smv_released_pattern = r"^tags/v\d+\.\d+\.\d+$"
 smv_outputdir_format = "{ref.name}"
+
+
+# -- Options for HTML output -------------------------------------------------
+# https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
+
+html_theme = "sphinx_book_theme"
+html_static_path = ["_static"]
+# Don't include version-redirect.js automatically - we add it manually to root
+html_js_files = []
+# html_logo = "_static/logo_e.png"
+
+# Configure HTML base URL for better local previewing
+# Use empty string to use relative paths from the build directory
+html_baseurl = ""
+
+# HTML context for better path handling
+html_context = {
+    "github_user": "dexforce",
+    "github_repo": "EmbodiChain",
+    "github_version": "main",
+    "doc_path": "docs/source",
+}
+
+# Configure theme with version selector (enabled in Phase 2)
+html_theme_options = {
+    "title": "EmbodiChain",
+    "logo_only": False,
+    "show_toc_level": 2,
+    "collapse_navigation": True,
+    "sticky_navigation": True,
+    "navigation_depth": 4,
+    "includehidden": True,
+    "prev_next_buttons_location": "bottom",
+    # version_menu: True,  # Enable version selector in navbar (Phase 2)
+}
