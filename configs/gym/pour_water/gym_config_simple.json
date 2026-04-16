@@ -203,7 +203,7 @@
                 "mode": "modify",
                 "name": "robot/qpos",
                 "params": {
-                    "joint_ids": [12, 13, 14, 15]
+                    "joint_ids": [6, 13]
                 }
             }
         },
@@ -227,7 +227,8 @@
                     "use_videos": true
                 }
             }
-        }
+        },
+        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
     },
     "robot": {
         "uid": "CobotMagic",

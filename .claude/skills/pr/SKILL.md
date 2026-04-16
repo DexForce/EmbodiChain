@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Create a pull request for EmbodiChain following the project's PR template and conventions
+description: Create a pull request for EmbodiChain following the project's PR template and conventions, including selecting proper GitHub repository labels
 ---
 
 # EmbodiChain Pull Request Creator
@@ -99,6 +99,36 @@ Use the gh CLI with the proper PR template:
 gh pr create --title "<PR Title>" --body "<PR Body>"
 ```
 
+### 9. Select and Apply Labels
+
+After creating the PR, select proper labels from the repository label list and apply them.
+
+First, list available labels:
+
+```bash
+gh label list
+```
+
+Then choose labels based on change type and scope. Typical mapping:
+
+- Bug fix: `bug`
+- Enhancement: `enhancement`
+- New feature: `feature`
+- Documentation update: `docs`
+- Affected area labels when available (for example): `physics`, `robot`, `agent`, `dataset`, `dexsim`
+
+Apply labels to the PR:
+
+```bash
+gh pr edit <pr-number> --add-label "bug" --add-label "env"
+```
+
+If needed, remove incorrect labels:
+
+```bash
+gh pr edit <pr-number> --remove-label "<label-name>"
+```
+
 ## PR Template
 
 Use this template for the PR body:
@@ -161,6 +191,8 @@ Fixes #<issue-number>
 | `git checkout -b branch-name` | Create branch |
 | `git push -u origin branch` | Push to remote |
 | `gh pr create` | Create PR |
+| `gh label list` | List repository labels |
+| `gh pr edit <pr-number> --add-label ...` | Apply labels to PR |
 
 ## Notes
 
