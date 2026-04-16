@@ -73,7 +73,7 @@ class OPWSolverCfg(SolverCfg):
     ik_params: dict | None = None
 
     # safe margin for joint limits, in radians
-    safe_margin: float = 5.0 * np.pi / 180.0
+    safe_margin: float = 0.0  # 5.0 * np.pi / 180.0
 
     def init_solver(
         self, device: torch.device = torch.device("cpu"), **kwargs
