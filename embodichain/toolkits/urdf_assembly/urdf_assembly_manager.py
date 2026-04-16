@@ -241,8 +241,6 @@ class URDFAssemblyManager:
             raise ValueError("name_case must contain keys 'joint' and 'link'.")
 
         self._name_case = new_name_case
-        self.component_manager.name_case = new_name_case
-        self.sensor_manager.name_case = new_name_case
 
     def _apply_case(self, kind: str, name: str | None) -> str | None:
         """Normalize a name according to the assembly-wide case policy.
@@ -288,15 +286,14 @@ class URDFAssemblyManager:
 
     @component_order_and_prefix.setter
     def component_order_and_prefix(self, new_order):
-        """Patch the internal component prefix configuration.
-
+        """Set the internal component prefix configuration.
         Args:
-            new_order (list[tuple[str, str | None]]): List of
+            new_order: Value assigned directly to the internal
+                ``_component_order_and_prefix`` attribute, typically a list of
                 ``(component_name, prefix)`` tuples.
-
-        Raises:
-            ValueError: If the new order is not a list of tuples or if it
-                contains unknown component names.
+        Note:
+            This setter performs no validation or patch-style merging; it
+            stores ``new_order`` as provided.
         """
         self._component_order_and_prefix = new_order
 
@@ -305,9 +302,15 @@ class URDFAssemblyManager:
         """Configure name prefixes per component type.
 
         This is a user-facing alias over :attr:`component_order_and_prefix`.
-        It accepts a list of ``(component_name, prefix)`` tuples and updates
-        the internal configuration in a patch-style manner, without requiring
-        users to reason about the full processing order.
+
+        Semantics:
+            This setter is **patch-only**: it updates prefixes for components that
+            already exist in the current internal order and does **not** allow
+            introducing new component names.
+
+        Returns:
+            list[tuple[str, str | None]]: The internal list of
+            ``(component_name, prefix)`` pairs.
         """
 
         return self.component_order_and_prefix
@@ -318,13 +321,15 @@ class URDFAssemblyManager:
             isinstance(item, tuple) and len(item) == 2 for item in new_prefixes
         ):
             raise ValueError(
-                "component_order_and_prefix must be a list of (component_name, prefix) tuples."
+                "component_prefix must be a list of (component_name, prefix) tuples."
             )
 
-        # Treat new_order as a patch on top of the existing/default order:
+        # Treat new_prefixes as a patch on top of the existing/default order:
         #  - For components already present in self._component_order_and_prefix, update their prefix.
-        #  - Preserve components that are not mentioned in new_order, keeping their relative order.
-        #  - Append any brand‑new components from new_order at the end.
+        #  - Preserve components that are not mentioned, keeping their relative order.
+        #
+        # Note: New/unknown component names are rejected to keep the assembly order
+        # controlled internally.
 
         # Allowed components are exactly those already present in the default order.
         existing_components = {comp for comp, _ in self._component_order_and_prefix}
@@ -333,12 +338,10 @@ class URDFAssemblyManager:
         override_map = {}
         for comp, prefix in new_prefixes:
             if not isinstance(comp, str):
-                raise ValueError(
-                    "component name in component_order_and_prefix must be a string."
-                )
+                raise ValueError("component name in component_prefix must be a string.")
             if comp not in existing_components:
                 raise ValueError(
-                    f"component_order_and_prefix cannot introduce new component '{comp}'. "
+                    f"component_prefix cannot introduce new component '{comp}'. "
                     f"Allowed components: {sorted(existing_components)}"
                 )
             override_map[comp] = prefix

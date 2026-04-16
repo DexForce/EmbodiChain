@@ -1119,11 +1119,6 @@ class URDFCfg:
 
         if self.name_case is not None:
             manager.name_case = self.name_case
-        else:
-            manager.name_case = {
-                "joint": "upper",
-                "link": "lower",
-            }
 
         for comp_type, comp_config in components:
             params = comp_config.get("params", {})

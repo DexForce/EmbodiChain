@@ -246,17 +246,15 @@ Semantics:
 ##### Name casing policy (`name_case`)
 
 `URDFAssemblyManager` supports a global name casing policy that controls how
-link and joint names are normalized during assembly. This is configured via
-the optional `name_case` argument in the constructor:
+link and joint names are normalized during assembly. This is configured on
+the manager instance after construction:
 
 ```python
-manager = URDFAssemblyManager(
-        name_case={
-                "joint": "upper",  # or "lower" / "none"
-                "link": "lower",  # or "upper" / "none"
-        }
-)
-```
+manager = URDFAssemblyManager()
+manager.name_case = {
+        "joint": "upper",  # or "lower" / "none"
+        "link": "lower",  # or "upper" / "none"
+}
 
 Semantics:
 
@@ -454,7 +452,7 @@ def create_robot(sim):
                     "transform": hand_transform,
                 },
             ],
-            component_prefix=[("left_arm", "L_"), ("right_arm", "R_"), ("right_hand", "left_"), ("right_hand", "right_")],
+            component_prefix=[("left_arm", "L_"), ("right_arm", "R_"), ("left_hand", "left_"), ("right_hand", "right_")],
             name_case={
                 "joint": "lower",
                 "link": "lower",
