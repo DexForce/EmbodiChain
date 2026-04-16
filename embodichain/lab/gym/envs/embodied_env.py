@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from math import log
+from functools import wraps
 import os
 import torch
 import numpy as np
@@ -230,6 +231,27 @@ class EmbodiedEnv(BaseEnv):
     - action bank: The action bank is used to manage the actions in the environment, such as action composition, action graph, etc.
     - affordance_datas: The affordance data that can be used to store the intermediate results or information
     """
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        """Automatically wrap subclass demo-action builders with shape checks.
+
+        Any subclass overriding ``create_demo_action_list`` will be wrapped so its
+        returned action sequence is validated and, when possible, converted to the
+        environment action dimension.
+        """
+        super().__init_subclass__(**kwargs)
+        method = cls.__dict__.get("create_demo_action_list")
+        if method is None or getattr(method, "_demo_action_shape_wrapped", False):
+            return
+
+        @wraps(method)
+        def wrapped_create_demo_action_list(self, *args, **kwargs):
+            action_list = method(self, *args, **kwargs)
+            return self._normalize_demo_action_list(action_list)
+
+        wrapped_create_demo_action_list._demo_action_shape_wrapped = True
+        setattr(cls, "create_demo_action_list", wrapped_create_demo_action_list)
 
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
@@ -624,6 +646,112 @@ class EmbodiedEnv(BaseEnv):
             : self.num_envs, self.current_rollout_step
         ].copy_(truncateds.to(buffer_device), non_blocking=True)
 
+    def _normalize_demo_action_list(
+        self, action_list: Sequence[EnvAction] | torch.Tensor | None
+    ) -> Sequence[EnvAction] | torch.Tensor | None:
+        """Validate/convert demo action outputs to match single action-space dim."""
+        if action_list is None:
+            return None
+
+        expected_dim = int(np.prod(self.action_space.shape))
+
+        if isinstance(action_list, torch.Tensor):
+            return self._normalize_demo_action_tensor(action_list, expected_dim)
+
+        if not isinstance(action_list, Sequence):
+            raise TypeError(
+                "create_demo_action_list must return None, a torch.Tensor, or a sequence of actions. "
+                f"Got {type(action_list)}."
+            )
+
+        normalized_action_list = [
+            self._normalize_demo_action_tensor(action, expected_dim)
+            for action in action_list
+        ]
+        return type(action_list)(normalized_action_list)
+
+    def _normalize_demo_action_tensor(
+        self, action: EnvAction | torch.Tensor, expected_dim: int
+    ) -> EnvAction | torch.Tensor:
+        """Normalize one action tensor to the expected action dimension.
+
+        Conversion rule:
+        - If last-dim equals action-space dim, keep as-is.
+        - If last-dim is larger, slice with ``active_joint_ids``.
+        - If last-dim is smaller, raise ``ValueError``.
+        """
+        if isinstance(action, TensorDict):
+            return self._normalize_demo_action_tensordict(action, expected_dim)
+
+        if not isinstance(action, torch.Tensor):
+            raise TypeError(
+                "Each demo action must be a torch.Tensor or TensorDict. "
+                f"Got {type(action)}."
+            )
+
+        if action.ndim == 0:
+            raise ValueError(
+                "Demo action tensor must have at least one dimension with action features on the last axis."
+            )
+
+        action_dim = int(action.shape[-1])
+        if action_dim == expected_dim:
+            return action
+        if action_dim < expected_dim:
+            raise ValueError(
+                "Demo action dim is smaller than action space dim and cannot be auto-converted. "
+                f"Got action dim={action_dim}, expected={expected_dim}."
+            )
+        return self._slice_action_with_active_joint_ids(
+            action, action_dim, expected_dim
+        )
+
+    def _normalize_demo_action_tensordict(
+        self, action: TensorDict, expected_dim: int
+    ) -> TensorDict:
+        """Normalize tensor entries in a TensorDict action payload."""
+        converted_action = action.clone()
+        for key in ("qpos", "qvel", "qf"):
+            if key not in converted_action:
+                continue
+            value = converted_action[key]
+            if value.ndim == 0:
+                raise ValueError(
+                    f"Demo action TensorDict['{key}'] must have at least one dimension."
+                )
+            action_dim = int(value.shape[-1])
+            if action_dim == expected_dim:
+                continue
+            if action_dim < expected_dim:
+                raise ValueError(
+                    f"Demo action TensorDict['{key}'] dim={action_dim} is smaller than expected action dim={expected_dim}."
+                )
+            converted_action[key] = self._slice_action_with_active_joint_ids(
+                value, action_dim, expected_dim
+            )
+        return converted_action
+
+    def _slice_action_with_active_joint_ids(
+        self, action: torch.Tensor, action_dim: int, expected_dim: int
+    ) -> torch.Tensor:
+        """Slice a high-dimensional action to active joints.
+
+        This is used when demo actions are generated in full-DoF form while the
+        environment action-space only controls active joints.
+        """
+        if len(self.active_joint_ids) != expected_dim:
+            raise ValueError(
+                "Cannot convert demo action by active_joint_ids because their length does not match the action space dim. "
+                f"len(active_joint_ids)={len(self.active_joint_ids)}, expected={expected_dim}."
+            )
+
+        if len(self.active_joint_ids) == 0:
+            raise ValueError(
+                "Cannot convert demo action by active_joint_ids because active_joint_ids is empty."
+            )
+
+        return action[..., self.active_joint_ids]
+
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
 
@@ -907,6 +1035,12 @@ class EmbodiedEnv(BaseEnv):
 
         Returns:
             Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.
+
+        Note:
+            Subclass outputs are automatically post-processed by the base class:
+            action last-dimension must match ``single_action_space``. If larger,
+            actions are sliced by ``active_joint_ids``; if smaller, ``ValueError``
+            is raised.
         """
         raise NotImplementedError(
             "The method 'create_demo_action_list' must be implemented in subclasses."
