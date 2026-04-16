@@ -18,7 +18,7 @@ The tool provides a programmatic way to:
 ```python
 from pathlib import Path
 import numpy as np
-from embedichain.toolkits.urdf_assembly import URDFAssemblyManager
+from embodichain.toolkits.urdf_assembly import URDFAssemblyManager
 
 # Initialize the assembly manager
 manager = URDFAssemblyManager()
@@ -201,6 +201,74 @@ Get all attached sensors.
 manager.get_attached_sensors() -> dict
 ```
 
+##### Component name prefixes (`component_prefix`)
+
+`URDFAssemblyManager` uses `component_prefix` to configure name prefixes for
+each supported component type. This attribute is a list of 2-tuples:
+
+- Form: `[(component_name, prefix), ...]`
+- The default value is:
+
+    ```python
+    [
+        ("chassis", None),
+        ("legs", None),
+        ("torso", None),
+        ("head", None),
+        ("left_arm", "left_"),
+        ("right_arm", "right_"),
+        ("left_hand", "left_"),
+        ("right_hand", "right_"),
+        ("arm", None),
+        ("hand", None),
+    ]
+    ```
+
+You can configure it in a *patch-style* manner via the property:
+
+```python
+# Only override prefixes for existing components; do not introduce
+# new component names.
+manager.component_prefix = [
+    ("left_arm", "L_"),
+    ("right_arm", "R_"),
+    ("left_hand", "L_"),
+    ("right_hand", "R_"),
+]
+```
+
+Semantics:
+
+- Only components that already exist in the default configuration (e.g. `chassis/torso/left_arm/...`) may be overridden; new component names are not allowed.
+- Components not listed in `new_prefixes` keep their original prefix.
+- If `new_prefixes` contains an unknown component name, a `ValueError` is raised indicating that new component types cannot be introduced.
+
+##### Name casing policy (`name_case`)
+
+`URDFAssemblyManager` supports a global name casing policy that controls how
+link and joint names are normalized during assembly. This is configured via
+the optional `name_case` argument in the constructor:
+
+```python
+manager = URDFAssemblyManager(
+        name_case={
+                "joint": "upper",  # or "lower" / "none"
+                "link": "lower",  # or "upper" / "none"
+        }
+)
+```
+
+Semantics:
+
+- Valid keys: `"joint"`, `"link"`.
+- Valid values: `"upper"`, `"lower"`, `"none"`.
+- Default behavior matches the legacy implementation:
+  - joints are normalized to **UPPERCASE**,
+  - links are normalized to **lowercase**.
+- This policy is propagated to the internal component and connection managers,
+    and is also included in the assembly signature. Changing `name_case` will
+    therefore force a rebuild of the assembled URDF.
+
 ## Using with URDFCfg for Robot Creation
 
 The URDF Assembly Tool can be used directly with `URDFCfg` to create robots with multiple components in the simulation. This is the recommended approach when building robots from assembled URDF files.
@@ -210,7 +278,7 @@ The URDF Assembly Tool can be used directly with `URDFCfg` to create robots with
 The `URDFCfg` class provides a convenient way to define multi-component robots:
 
 ```python
-from embedichain.lab.sim.cfg import RobotCfg, URDFCfg
+from embodichain.lab.sim.cfg import RobotCfg, URDFCfg
 
 cfg = RobotCfg(
     uid="my_robot",
@@ -232,6 +300,27 @@ cfg = RobotCfg(
 )
 ```
 
+When using `URDFCfg` to build multi-component robots, you can pass custom
+component prefixes to the internal `URDFAssemblyManager` via
+`URDFCfg.component_prefix`. Its semantics are identical to
+`URDFAssemblyManager.component_prefix`:
+
+- Each element is a `(component_name, prefix)` tuple.
+- Only prefixes for components that exist in the default configuration may be overridden; no new component names can be added.
+- Components not explicitly listed keep their original prefix.
+
+Example:
+
+```python
+urdf_cfg = URDFCfg(
+    components=[...],
+)
+urdf_cfg.component_prefix = [
+    ("left_arm", "L_"),
+    ("right_arm", "R_"),
+]
+```
+
 ### Complete Example
 
 Here's a complete example from `scripts/tutorials/sim/create_robot.py`:
@@ -241,14 +330,14 @@ import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
 
-from embedichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embedichain.lab.sim.objects import Robot
-from embedichain.lab.sim.cfg import (
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
 )
-from embedichain.data import get_data_path
+from embodichain.data import get_data_path
 
 
 def create_robot(sim):
@@ -269,7 +358,6 @@ def create_robot(sim):
     # Define transformation for hand attachment
     hand_transform = np.eye(4)
     hand_transform[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
-    hand_transform[2, 3] = 0.02  # 2cm offset along z-axis
 
     # Create robot configuration
     cfg = RobotCfg(
@@ -291,6 +379,86 @@ def create_robot(sim):
         drive_pros=JointDrivePropertiesCfg(
             stiffness={"JOINT[1-6]": 1e4, "LEFT_.*": 1e3},
             damping={"JOINT[1-6]": 1e3, "LEFT_.*": 1e2},
+        ),
+    )
+
+    # Add robot to simulation
+    robot: Robot = sim.add_robot(cfg=cfg)
+
+    return robot
+
+
+# Initialize simulation and create robot
+sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=4))
+robot = create_robot(sim)
+print(f"Robot created with {robot.dof} joints")
+```
+
+```python
+import numpy as np
+import torch
+from scipy.spatial.transform import Rotation as R
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.cfg import (
+    JointDrivePropertiesCfg,
+    RobotCfg,
+    URDFCfg,
+)
+from embodichain.data import get_data_path
+
+
+def create_robot(sim):
+    """Create and configure a robot with arm and hand components."""
+
+    # Get URDF paths for robot components
+    arm_urdf_path = get_data_path("Rokae/SR5/SR5.urdf")
+    hand_urdf_path = get_data_path(
+        "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
+    )
+
+    # Define transformation for hand attachment
+    hand_transform = np.eye(4)
+    hand_transform[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
+
+    left_arm_base_xpos = np.eye(4)
+    left_arm_base_xpos[1, 3] = 0.3
+
+    right_arm_base_xpos = np.eye(4)
+    right_arm_base_xpos[1, 3] = -0.3
+
+    # Create robot configuration
+    cfg = RobotCfg(
+        uid="dual_sr5",
+        urdf_cfg=URDFCfg(
+            components=[
+                {
+                    "component_type": "left_arm",
+                    "urdf_path": arm_urdf_path,
+                    "transform": left_arm_base_xpos,
+                },
+                {
+                    "component_type": "right_arm",
+                    "urdf_path": arm_urdf_path,
+                    "transform": right_arm_base_xpos,
+                },
+                {
+                    "component_type": "left_hand",
+                    "urdf_path": hand_urdf_path,
+                    "transform": hand_transform,
+                },
+                {
+                    "component_type": "right_hand",
+                    "urdf_path": hand_urdf_path,
+                    "transform": hand_transform,
+                },
+            ],
+            component_prefix=[("left_arm", "L_"), ("right_arm", "R_"), ("right_hand", "left_"), ("right_hand", "right_")],
+            name_case={
+                "joint": "lower",
+                "link": "lower",
+            }
         ),
     )
 
