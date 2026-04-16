@@ -93,7 +93,6 @@ def _build_env_cfg(
     gym_config_path: str,
     num_envs: int | None,
     headless: bool,
-    enable_rt: bool,
     device: torch.device,
     gpu_id: int,
 ):
@@ -107,7 +106,6 @@ def _build_env_cfg(
         gym_env_cfg.sim_cfg = SimulationManagerCfg()
     gym_env_cfg.seed = getattr(gym_env_cfg, "seed", None)
     gym_env_cfg.sim_cfg.headless = headless
-    gym_env_cfg.sim_cfg.enable_rt = enable_rt
     gym_env_cfg.sim_cfg.gpu_id = gpu_id
     gym_env_cfg.sim_cfg.sim_device = device
     return gym_config_data, gym_env_cfg
@@ -239,7 +237,6 @@ def train_with_config(
         gym_config_path=trainer_cfg["gym_config"],
         num_envs=trainer_cfg.get("num_envs"),
         headless=bool(trainer_cfg.get("headless", True)),
-        enable_rt=bool(trainer_cfg.get("enable_rt", False)),
         device=device,
         gpu_id=int(trainer_cfg.get("gpu_id", 0)),
     )
@@ -331,7 +328,6 @@ def evaluate_checkpoint(
         gym_config_path=trainer_cfg["gym_config"],
         num_envs=num_envs if num_envs is not None else trainer_cfg.get("num_eval_envs"),
         headless=True,
-        enable_rt=False,
         device=device,
         gpu_id=int(trainer_cfg.get("gpu_id", 0)),
     )
