@@ -64,9 +64,9 @@ The {class}`~cfg.RenderCfg` class controls the rendering backend and quality set
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"hybrid"` | Renderer backend to use. Options are `'legacy'` (rasterization), `'hybrid'` (ray tracing for shadows/reflections + rasterization), and `'fast-rt'` (full ray tracing). |
-| `enable_denoiser` | `bool` | `True` | Whether to enable denoising. Only valid when `renderer` is `'hybrid'` or `'fast-rt'`. |
-| `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when `renderer` is `'hybrid'` or `'fast-rt'` and `enable_denoiser` is `False`. |
+| `renderer` | `str` | `"hybrid"` | Renderer backend to use. Options are `'legacy'` (rasterization), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
+| `enable_denoiser` | `bool` | `True` | Whether to enable denoising. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'`. |
+| `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'` and `enable_denoiser` is `False`. |
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg

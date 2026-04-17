@@ -185,7 +185,7 @@ You can customize the run with additional arguments:
 
 .. code-block:: bash
 
-   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --renderer <legacy|hybrid|fast-rt> --headless
+   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --renderer <legacy|hybrid|fast-rt|rt> --headless
 
 After confirming the grasp region in the browser, the script will compute a grasp pose, print the elapsed time, and then wait for you to press **Enter** before executing the full grasp trajectory in the simulation. Press **Enter** again to exit once the motion is complete.
 

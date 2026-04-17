@@ -43,21 +43,22 @@ from .shapes import ShapeCfg, MeshCfg
 
 
 # Global default renderer settings for simulation
-DEFAULT_RENDERER: Literal["legacy", "hybrid", "fast-rt"] = "hybrid"
+DEFAULT_RENDERER: Literal["legacy", "hybrid", "fast-rt", "rt"] = "hybrid"
 
 
 @configclass
 class RenderCfg:
-    renderer: Literal["legacy", "hybrid", "fast-rt"] = field(
+    renderer: Literal["legacy", "hybrid", "fast-rt", "rt"] = field(
         default_factory=lambda: DEFAULT_RENDERER
     )
-    """Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', and 'fast-rt'.
+    """Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', 'fast-rt', and 'rt'.
     
     Note: 
     - 'legacy' is the traditional rasterization-based renderer and the default for backward compatibility.
     - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering, 
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
+    - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
 
     enable_denoiser: bool = True
@@ -73,9 +74,11 @@ class RenderCfg:
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
             return Renderer.FASTRT
+        elif self.renderer == "rt":
+            return Renderer.OFFLINERT
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'legacy', 'hybrid', or 'fast-rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'legacy', 'hybrid', 'fast-rt', or 'rt'."
             )
 
     @property

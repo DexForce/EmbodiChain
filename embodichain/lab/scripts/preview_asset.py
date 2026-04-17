@@ -317,7 +317,7 @@ def cli():
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=["legacy", "hybrid", "fast-rt"],
+        choices=["legacy", "hybrid", "fast-rt", "rt"],
         default="hybrid",
         help="Renderer backend (default: hybrid).",
     )

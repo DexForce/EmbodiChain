@@ -36,7 +36,11 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
-        headless=False, sim_device="cpu", width=1080, height=1080, render_cfg=RenderCfg(renderer="legacy")
+        headless=False,
+        sim_device="cpu",
+        width=1080,
+        height=1080,
+        render_cfg=RenderCfg(renderer="legacy"),
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
