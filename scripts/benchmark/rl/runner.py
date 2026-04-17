@@ -211,7 +211,9 @@ class BenchmarkRunner:
         """Load compatible existing training artifacts for the requested jobs."""
         records: list[dict[str, Any]] = []
         for task_name, algorithm_name, seed in self._iter_jobs():
-            record = self._load_existing_training_record(task_name, algorithm_name, seed)
+            record = self._load_existing_training_record(
+                task_name, algorithm_name, seed
+            )
             if record is not None:
                 records.append(record)
         return records

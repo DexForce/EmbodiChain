@@ -220,9 +220,11 @@ Every benchmark script must write its final results to **one Markdown file** aft
 
 - Output directory recommendation: `outputs/benchmarks/`
 - File naming recommendation: `<benchmark_name>_<YYYYMMDD_HHMMSS>.md`
-- Requirement: output **exactly two Markdown tables** in the report
+- Requirement: output **exactly three Markdown tables** in the report
     1. `Time & Memory` table (cost time + memory columns)
     2. `Success & Other Metrics` table (success rate + quality/accuracy/extra metrics)
+    3. `Leaderboard` table (algorithm ranking by overall success rate, descending)
+- `Leaderboard` coverage rule: include **all algorithms evaluated in the current benchmark scope**. If a provided leaderboard artifact is incomplete, backfill missing algorithms from aggregate summaries before rendering.
 
 Use this pattern:
 
@@ -235,6 +237,7 @@ def write_markdown_report(
     benchmark_name: str,
     perf_rows: list[dict[str, object]],
     metric_rows: list[dict[str, object]],
+    leaderboard_rows: list[dict[str, object]],
     notes: list[str] | None = None,
 ) -> Path:
     """Write benchmark results into a single markdown report file."""
@@ -275,6 +278,19 @@ def write_markdown_report(
     else:
         lines.append("No success/metric rows were produced.")
 
+    lines.extend(["", "## Leaderboard", ""])
+
+    if leaderboard_rows:
+        leaderboard_headers = list(leaderboard_rows[0].keys())
+        lines.append("| " + " | ".join(leaderboard_headers) + " |")
+        lines.append("| " + " | ".join(["---"] * len(leaderboard_headers)) + " |")
+        for row in leaderboard_rows:
+            lines.append(
+                "| " + " | ".join(str(row[h]) for h in leaderboard_headers) + " |"
+            )
+    else:
+        lines.append("No leaderboard rows were produced.")
+
     if notes:
         lines.extend(["", "## Notes", ""])
         lines.extend([f"- {note}" for note in notes])
@@ -298,10 +314,15 @@ def run_all_benchmarks() -> None:
     metric_rows.extend(metric_part)
     # ...
 
+    leaderboard_rows = build_leaderboard_rows(metric_rows)
+    # `build_leaderboard_rows` should aggregate per algorithm and sort by
+    # overall success rate in descending order.
+
     report_path = write_markdown_report(
         benchmark_name="workspace_analyzer",
         perf_rows=perf_rows,
         metric_rows=metric_rows,
+        leaderboard_rows=leaderboard_rows,
         notes=["CPU/GPU memory fields are deltas measured around timed calls."],
     )
     print(f"Markdown report saved: {report_path}")
@@ -318,6 +339,7 @@ def run_all_benchmarks() -> None:
 | Markdown report path | `Markdown report saved: outputs/benchmarks/<name>_<timestamp>.md` |
 | Markdown table 1 (Time & Memory) | `| sample_size | impl | cost_time_ms | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb |` |
 | Markdown table 2 (Success & Metrics) | `| sample_size | impl | success_rate | translation_err_mm | rotation_err_deg | ... |` |
+| Markdown table 3 (Leaderboard) | `| rank | algorithm | overall_success_rate | ... |` (sorted by `overall_success_rate` descending) |
 | Section header | `\n=== <Name> Benchmark ===` |
 | Top-level separator | `"=" * 60` |
 
@@ -447,9 +469,11 @@ Before finishing a benchmark script:
 - [ ] Graceful skip for benchmarks that need unavailable hardware
 - [ ] `run_all_benchmarks()` orchestrator with formatted separators
 - [ ] Results are written to exactly one Markdown report file per run
-- [ ] Report contains exactly two Markdown tables: `Time & Memory` and `Success & Other Metrics`
+- [ ] Report contains exactly three Markdown tables: `Time & Memory`, `Success & Other Metrics`, and `Leaderboard`
 - [ ] `Time & Memory` table includes `cost_time_ms`, `cpu_delta_mb`, `gpu_delta_mb`, `peak_gpu_mb`
 - [ ] `Success & Other Metrics` table includes `success_rate` and domain-specific quality metrics
+- [ ] `Leaderboard` table ranks algorithms by overall success rate in descending order
+- [ ] `Leaderboard` table includes all benchmarked algorithms (missing entries are backfilled from aggregate summaries if needed)
 - [ ] Console log includes final report path
 - [ ] `if __name__ == "__main__":` entry point
 - [ ] `black .` formatting applied

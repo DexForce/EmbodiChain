@@ -35,7 +35,7 @@ from embodichain.lab.sim.solvers.opw_solver import OPWSolverCfg
 
 LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
-SAMPLE_SIZES = [100, 1000, 10000, 100000]
+SAMPLE_SIZES = [100, 1000, 10000]
 
 
 def _sync_cuda() -> None:
@@ -115,26 +115,32 @@ def _write_markdown_report(
     return report_path
 
 
-def get_pose_err(matrix_a: np.ndarray, matrix_b: np.ndarray) -> tuple[float, float]:
-    """Return translation and rotation errors between two poses."""
-    t_err = np.linalg.norm(matrix_a[:3, 3] - matrix_b[:3, 3])
-    relative_rot = matrix_a[:3, :3].T @ matrix_b[:3, :3]
-    cos_angle = np.clip((np.trace(relative_rot) - 1) / 2.0, -1.0, 1.0)
-    r_err = np.arccos(cos_angle)
-    return float(t_err), float(r_err)
+def get_pose_err(
+    matrix_a: np.ndarray | torch.Tensor,
+    matrix_b: np.ndarray | torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return translation and rotation errors between paired poses.
 
+    Supports either a single 4x4 pose or a batch with shape (N, 4, 4).
+    """
+    tensor_a = torch.as_tensor(matrix_a, dtype=torch.float64)
+    tensor_b = torch.as_tensor(matrix_b, dtype=torch.float64, device=tensor_a.device)
 
-def get_poses_err(
-    matrix_a_list: list[np.ndarray], matrix_b_list: list[np.ndarray]
-) -> tuple[float, float]:
-    """Return mean translation and rotation errors for batched poses."""
-    t_errs: list[float] = []
-    r_errs: list[float] = []
-    for mat_a, mat_b in zip(matrix_a_list, matrix_b_list):
-        t_err, r_err = get_pose_err(mat_a, mat_b)
-        t_errs.append(t_err)
-        r_errs.append(r_err)
-    return float(np.mean(t_errs)), float(np.mean(r_errs))
+    if tensor_a.ndim == 2:
+        tensor_a = tensor_a.unsqueeze(0)
+    if tensor_b.ndim == 2:
+        tensor_b = tensor_b.unsqueeze(0)
+
+    t_err = torch.linalg.norm(tensor_a[:, :3, 3] - tensor_b[:, :3, 3], dim=-1)
+
+    relative_rot = torch.matmul(
+        tensor_a[:, :3, :3].transpose(-1, -2),
+        tensor_b[:, :3, :3],
+    )
+    trace = torch.diagonal(relative_rot, dim1=-2, dim2=-1).sum(dim=-1)
+    cos_angle = torch.clamp((trace - 1.0) / 2.0, min=-1.0, max=1.0)
+    r_err = torch.arccos(cos_angle)
+    return t_err, r_err
 
 
 def _timed_ik_call(
@@ -196,9 +202,10 @@ def check_opw_solver(
     )
 
     check_xpos = solver_warp.get_fk(warp_ik_qpos)
-    warp_t_mean_err, warp_r_mean_err = get_poses_err(
-        [x.cpu().numpy() for x in xpos_cuda],
-        [x.cpu().numpy() for x in check_xpos],
+    warp_t_err, warp_r_err = get_pose_err(xpos_cuda, check_xpos)
+    warp_t_mean_err, warp_r_mean_err = (
+        warp_t_err.mean().item(),
+        warp_r_err.mean().item(),
     )
 
     xpos_cpu = xpos_cuda.to(torch.device("cpu"))
@@ -219,9 +226,10 @@ def check_opw_solver(
     )
 
     check_xpos = solver_warp.get_fk(py_opw_ik_qpos.to(torch.device("cuda")))
-    py_opw_t_mean_err, py_opw_r_mean_err = get_poses_err(
-        [x.cpu().numpy() for x in xpos_cuda],
-        [x.cpu().numpy() for x in check_xpos],
+    py_opw_t_err, py_opw_r_err = get_pose_err(xpos_cpu, check_xpos)
+    py_opw_t_mean_err, py_opw_r_mean_err = (
+        py_opw_t_err.mean().item(),
+        py_opw_r_err.mean().item(),
     )
 
     warp_success_rate = float(warp_ik_success.float().mean().item())

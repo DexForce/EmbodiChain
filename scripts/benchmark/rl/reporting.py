@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import math
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,77 @@ def _safe_divide(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
+def _sortable_success_rate(item: dict[str, Any]) -> float:
+    value = float(item.get("avg_success_rate", float("nan")))
+    if math.isnan(value):
+        return float("-inf")
+    return value
+
+
+def _build_report_leaderboard_rows(
+    leaderboard: list[dict[str, Any]],
+    aggregate_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build complete leaderboard rows and sort by overall success rate."""
+    by_algorithm: dict[str, dict[str, Any]] = {}
+    for item in leaderboard:
+        algorithm = str(item.get("algorithm", ""))
+        if not algorithm:
+            continue
+        by_algorithm[algorithm] = dict(item)
+
+    grouped_aggregate: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in aggregate_results:
+        algorithm = str(item.get("algorithm", ""))
+        if not algorithm:
+            continue
+        grouped_aggregate[algorithm].append(item)
+
+    for algorithm, items in grouped_aggregate.items():
+        if algorithm in by_algorithm:
+            continue
+
+        success_values = [
+            float(entry["final_success_rate_mean"])
+            for entry in items
+            if isinstance(entry.get("final_success_rate_mean"), (int, float))
+            and not math.isnan(float(entry["final_success_rate_mean"]))
+        ]
+        stable_success_values = [
+            float(entry["final_success_rate_stable_mean"])
+            for entry in items
+            if isinstance(entry.get("final_success_rate_stable_mean"), (int, float))
+            and not math.isnan(float(entry["final_success_rate_stable_mean"]))
+        ]
+        by_algorithm[algorithm] = {
+            "algorithm": algorithm,
+            "avg_success_rate": (
+                sum(success_values) / len(success_values)
+                if success_values
+                else float("nan")
+            ),
+            "avg_success_rate_stable": (
+                sum(stable_success_values) / len(stable_success_values)
+                if stable_success_values
+                else float("nan")
+            ),
+            "score": (
+                sum(stable_success_values) / len(stable_success_values)
+                if stable_success_values
+                else float("nan")
+            ),
+            "tasks_covered": len(items),
+        }
+
+    return sorted(
+        by_algorithm.values(),
+        key=lambda item: (
+            -_sortable_success_rate(item),
+            str(item.get("algorithm", "")),
+        ),
+    )
+
+
 def generate_markdown_report(
     run_results: list[dict[str, Any]],
     aggregate_results: list[dict[str, Any]],
@@ -41,7 +114,7 @@ def generate_markdown_report(
     protocol: dict[str, Any] | None,
     output_path: str | Path,
 ) -> Path:
-    """Write a benchmark markdown report with exactly two tables."""
+    """Write a benchmark markdown report with exactly three tables."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -132,12 +205,38 @@ def generate_markdown_report(
             )
         )
 
-    lines.extend(["", "## Notes", ""])
-    if leaderboard:
-        top = leaderboard[0]
+    leaderboard_by_success = _build_report_leaderboard_rows(
+        leaderboard=leaderboard,
+        aggregate_results=aggregate_results,
+    )
+    lines.extend(
+        [
+            "",
+            "## Leaderboard",
+            "",
+            "| rank | algorithm | overall_success_rate | stable_success_rate | score | tasks_covered |",
+            "| ---: | --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for rank, item in enumerate(leaderboard_by_success, start=1):
         lines.append(
-            "- Top algorithm by leaderboard score: "
-            f"`{top.get('algorithm', 'n/a')}` (score={_fmt(top.get('score', float('nan')))})."
+            "| {rank} | {algorithm} | {success} | {stable_success} | {score} | {tasks} |".format(
+                rank=rank,
+                algorithm=item.get("algorithm", "n/a"),
+                success=_fmt(item.get("avg_success_rate", float("nan"))),
+                stable_success=_fmt(item.get("avg_success_rate_stable", float("nan"))),
+                score=_fmt(item.get("score", float("nan"))),
+                tasks=item.get("tasks_covered", 0),
+            )
+        )
+
+    lines.extend(["", "## Notes", ""])
+    if leaderboard_by_success:
+        top = leaderboard_by_success[0]
+        lines.append(
+            "- Top algorithm by overall success rate: "
+            f"`{top.get('algorithm', 'n/a')}` "
+            f"(success_rate={_fmt(top.get('avg_success_rate', float('nan')))})."
         )
     if aggregate_results:
         lines.append(f"- Aggregate summaries available: `{len(aggregate_results)}`.")
@@ -156,19 +255,26 @@ def generate_leaderboard_markdown(
     leaderboard: list[dict[str, Any]],
     output_path: str | Path,
 ) -> Path:
-    """Write a dedicated leaderboard markdown artifact."""
+    """Write a dedicated leaderboard markdown artifact sorted by success rate."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
+    leaderboard_by_success = sorted(
+        leaderboard,
+        key=lambda item: (
+            -_sortable_success_rate(item),
+            str(item.get("algorithm", "")),
+        ),
+    )
     lines = [
         "# Benchmark Leaderboard",
         "",
         "| Rank | Algorithm | Score | Steps To Threshold (Sustained) | Success Rate Std | Avg Success Rate | Avg Stable Success Rate | Avg Final Reward | Tasks |",
         "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for item in leaderboard:
+    for rank, item in enumerate(leaderboard_by_success, start=1):
         lines.append(
             "| {rank} | {algorithm} | {score} | {steps} | {std} | {success} | {stable_success} | {reward} | {tasks} |".format(
-                rank=item["rank"],
+                rank=rank,
                 algorithm=item["algorithm"],
                 score=_fmt(item.get("score", float("nan"))),
                 steps=_fmt(item.get("steps_to_success_threshold", float("nan"))),

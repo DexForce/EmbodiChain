@@ -147,7 +147,9 @@ def _write_markdown_report(
     return report_path
 
 
-def benchmark_halton_sampler() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def benchmark_halton_sampler() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
     """Benchmark Halton sampler: vectorized vs loop-based."""
     from embodichain.lab.sim.utility.workspace_analyzer.samplers.halton_sampler import (
         HaltonSampler,
@@ -209,7 +211,9 @@ def benchmark_halton_sampler() -> tuple[list[dict[str, object]], list[dict[str, 
     return perf_rows, metric_rows
 
 
-def benchmark_density_metric() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def benchmark_density_metric() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
     """Benchmark density metric: KDTree vs brute-force."""
     from embodichain.lab.sim.utility.workspace_analyzer.metrics.density_metric import (
         DensityMetric,
@@ -327,7 +331,9 @@ def benchmark_voxelization() -> tuple[list[dict[str, object]], list[dict[str, ob
     return perf_rows, metric_rows
 
 
-def benchmark_manipulability() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def benchmark_manipulability() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
     """Benchmark manipulability: batch vs per-sample."""
     from embodichain.lab.sim.utility.workspace_analyzer.metrics.manipulability_metric import (
         ManipulabilityMetric,
