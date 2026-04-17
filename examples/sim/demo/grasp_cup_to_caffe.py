@@ -77,16 +77,6 @@ def initialize_simulation(args) -> SimulationManager:
     )
     sim = SimulationManager(config)
 
-    if args.renderer != "legacy":
-        light = sim.add_light(
-            cfg=LightCfg(
-                uid="main_light",
-                color=(0.6, 0.6, 0.6),
-                intensity=30.0,
-                init_pos=(1.0, 0, 3.0),
-            )
-        )
-
     return sim
 
 
