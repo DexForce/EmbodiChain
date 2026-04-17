@@ -18,4 +18,5 @@ Tutorials
    basic_env
    modular_env
    rl
+   data_generation
    
