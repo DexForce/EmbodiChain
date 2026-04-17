@@ -20,7 +20,7 @@ Usage examples::
 
     python -m scripts.benchmark rl --tasks push_cube --algorithms ppo --suite default
     python -m scripts.benchmark rl --rebuild-report-only
-    python -m scripts.benchmark robotics-kinematic-solver
+    python -m scripts.benchmark robotics-kinematic-solver -s pytorch
 """
 
 from __future__ import annotations
