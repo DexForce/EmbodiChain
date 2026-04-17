@@ -312,13 +312,25 @@ class BaseSolver(metaclass=ABCMeta):
                 "Each lower limit must be less than or equal to the corresponding upper limit."
             )
             return False
+        
+        if isinstance(lower_qpos_limits, list) or isinstance(lower_qpos_limits, np.ndarray):
+            self.lower_qpos_limits = torch.tensor(
+                lower_qpos_limits, dtype=float, device=self.device
+            )
+        elif isinstance(lower_qpos_limits, torch.Tensor):
+            self.lower_qpos_limits = lower_qpos_limits.clone().to(device=self.device)
+        else:
+            logger.log_error(f"Invalid type for lower_qpos_limits: {type(lower_qpos_limits)}. Must be list, np.ndarray, or torch.Tensor.")
 
-        self.lower_qpos_limits = torch.tensor(
-            lower_qpos_limits, dtype=float, device=self.device
-        )
-        self.upper_qpos_limits = torch.tensor(
-            upper_qpos_limits, dtype=float, device=self.device
-        )
+        if isinstance(upper_qpos_limits, list) or isinstance(upper_qpos_limits, np.ndarray):
+            self.upper_qpos_limits = torch.tensor(
+                upper_qpos_limits, dtype=float, device=self.device
+            )
+        elif isinstance(upper_qpos_limits, torch.Tensor):
+            self.upper_qpos_limits = upper_qpos_limits.clone().to(device=self.device)
+        else:
+            logger.log_error(f"Invalid type for upper_qpos_limits: {type(upper_qpos_limits)}. Must be list, np.ndarray, or torch.Tensor.")
+
         return True
 
     def get_qpos_limits(self) -> dict:

@@ -29,6 +29,22 @@ import argparse
 import sys
 
 
+def _run_robotics_kinematic_solver_cli(args: argparse.Namespace) -> None:
+    """Run robotics kinematic solver benchmark with forwarded CLI args."""
+    from scripts.benchmark.robotics.kinematic_solver.run_benchmark import (
+        run_all_benchmarks,
+    )
+
+    run_all_benchmarks(selected_solvers=args.solvers)
+
+
+def _run_rl_cli(_: argparse.Namespace) -> None:
+    """Run RL benchmark CLI entrypoint."""
+    from scripts.benchmark.rl.run_benchmark import main as rl_main
+
+    rl_main()
+
+
 def main() -> None:
     """Dispatch to the appropriate benchmark sub-command CLI."""
     parser = argparse.ArgumentParser(
@@ -42,20 +58,22 @@ def main() -> None:
         "rl",
         help="Run RL benchmark: train, evaluate, aggregate, and report results.",
     )
-    from scripts.benchmark.rl.run_benchmark import main as rl_main
-
-    rl_parser.set_defaults(func=rl_main)
+    rl_parser.set_defaults(func=_run_rl_cli)
 
     # -- robotics-kinematic-solver -------------------------------------------
     robotics_ks_parser = subparsers.add_parser(
         "robotics-kinematic-solver",
         help="Benchmark the OPW kinematic solver (FK/IK accuracy and speed).",
     )
-    from scripts.benchmark.robotics.kinematic_solver.opw_solver import (
-        benchmark_opw_solver,
+    robotics_ks_parser.add_argument(
+        "--solvers",
+        "-s",
+        nargs="+",
+        choices=("opw", "pytorch", "all"),
+        default=["all"],
+        help="Solvers to benchmark. Use one or more of: opw, pytorch, all.",
     )
-
-    robotics_ks_parser.set_defaults(func=benchmark_opw_solver)
+    robotics_ks_parser.set_defaults(func=_run_robotics_kinematic_solver_cli)
 
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
@@ -73,7 +91,7 @@ def main() -> None:
         original_argv = sys.argv
         sys.argv = subcommand_argv
         try:
-            known.func()
+            known.func(known)
         finally:
             sys.argv = original_argv
     else:
