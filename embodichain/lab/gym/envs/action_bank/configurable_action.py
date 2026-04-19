@@ -997,7 +997,7 @@ def get_xpos_name(affordance_name: str) -> str:
 
 
 def get_control_part(env, agent_uid):
-    control_parts = env.metadata["dataset"]["robot_meta"].get("control_parts", [])
+    control_parts = env.cfg.control_parts
 
     if agent_uid in control_parts:
         return agent_uid
