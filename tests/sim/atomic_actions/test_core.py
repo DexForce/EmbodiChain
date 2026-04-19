@@ -48,11 +48,13 @@ class TestAffordance:
 
     def test_grasp_pose_multiple(self):
         """Test GraspPose with multiple poses."""
-        poses = torch.stack([
-            torch.eye(4),
-            torch.eye(4),
-            torch.eye(4),
-        ])
+        poses = torch.stack(
+            [
+                torch.eye(4),
+                torch.eye(4),
+                torch.eye(4),
+            ]
+        )
         grasp = GraspPose(
             object_label="bottle",
             poses=poses,
@@ -70,10 +72,12 @@ class TestAffordance:
 
     def test_grasp_pose_best_grasp(self):
         """Test get_best_grasp method."""
-        poses = torch.stack([
-            torch.eye(4),
-            torch.eye(4) * 2,
-        ])
+        poses = torch.stack(
+            [
+                torch.eye(4),
+                torch.eye(4) * 2,
+            ]
+        )
         confidence = torch.tensor([0.7, 0.9])
         grasp = GraspPose(
             poses=poses,
@@ -87,16 +91,20 @@ class TestAffordance:
 
     def test_interaction_points(self):
         """Test InteractionPoints class."""
-        points = torch.tensor([
-            [0.1, 0.0, 0.0],
-            [0.0, 0.1, 0.0],
-            [0.0, 0.0, 0.1],
-        ])
-        normals = torch.tensor([
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ])
+        points = torch.tensor(
+            [
+                [0.1, 0.0, 0.0],
+                [0.0, 0.1, 0.0],
+                [0.0, 0.0, 0.1],
+            ]
+        )
+        normals = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         interaction = InteractionPoints(
             object_label="cube",
             points=points,

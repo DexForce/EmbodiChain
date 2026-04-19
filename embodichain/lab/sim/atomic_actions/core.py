@@ -45,7 +45,8 @@ class Affordance:
     object_label: str = ""
     """Label of the object this affordance belongs to."""
 
-    def get_batch_size(self) -> int:
+    @property
+    def batch_size(self) -> int:
         """Return the batch size of this affordance data."""
         return 1
 
@@ -66,37 +67,17 @@ class GraspPose(Affordance):
     the end-effector pose in the object's local coordinate frame.
     """
 
-    grasp_types: List[str] = field(default_factory=lambda: ["default"])
-    """List of grasp type labels for each pose in the batch.
-
-    Examples: "pinch", "power", "hook", "spherical", etc.
-    Length must match the batch dimension of `poses`.
-    """
-
-    confidence_scores: Optional[torch.Tensor] = None
+    confidence_scores: torch.Tensor | None = None
     """Optional confidence scores for each grasp pose with shape [B].
 
     Higher values indicate more reliable/ stable grasps.
     Used for grasp selection when multiple options exist.
     """
 
-    def get_batch_size(self) -> int:
+    @property
+    def batch_size(self) -> int:
         """Return the number of grasp poses in this affordance."""
         return self.poses.shape[0]
-
-    def get_grasp_by_type(self, grasp_type: str) -> Optional[torch.Tensor]:
-        """Get grasp pose by type label.
-
-        Args:
-            grasp_type: Type of grasp (e.g., "pinch", "power")
-
-        Returns:
-            4x4 pose tensor if found, None otherwise
-        """
-        if grasp_type in self.grasp_types:
-            idx = self.grasp_types.index(grasp_type)
-            return self.poses[idx]
-        return None
 
     def get_best_grasp(self) -> torch.Tensor:
         """Get the best grasp pose based on confidence scores.
@@ -125,43 +106,23 @@ class InteractionPoints(Affordance):
     Each point is a 3D coordinate in the object's local coordinate frame.
     """
 
-    normals: Optional[torch.Tensor] = None
+    normals: torch.Tensor | None = None
     """Optional surface normals at each interaction point with shape [B, 3].
 
     Normals indicate the surface orientation at each point,
     useful for determining approach directions.
     """
 
-    point_types: List[str] = field(default_factory=lambda: ["contact"])
-    """List of interaction types for each point.
-
-    Examples: "push", "poke", "touch", "support", "handle", etc.
-    Length must match the batch dimension of `points`.
-    """
-
-    contact_regions: Optional[List[str]] = None
+    contact_regions: torch.Tensor | None = None
     """Optional labels for object regions each point belongs to.
 
     Examples: "handle", "face", "edge", "corner", "center"
     """
 
-    def get_batch_size(self) -> int:
+    @property
+    def batch_size(self) -> int:
         """Return the number of interaction points in this affordance."""
         return self.points.shape[0]
-
-    def get_points_by_type(self, point_type: str) -> Optional[torch.Tensor]:
-        """Get all points of a specific interaction type.
-
-        Args:
-            point_type: Type of interaction (e.g., "push", "handle")
-
-        Returns:
-            Tensor of points with shape [N, 3] if found, None otherwise
-        """
-        indices = [i for i, t in enumerate(self.point_types) if t == point_type]
-        if indices:
-            return self.points[indices]
-        return None
 
     def get_approach_direction(self, point_idx: int) -> torch.Tensor:
         """Get recommended approach direction for a given point.
@@ -176,7 +137,9 @@ class InteractionPoints(Affordance):
             # Approach from the opposite direction of the surface normal
             return -self.normals[point_idx]
         # Default: approach from positive z
-        return torch.tensor([0, 0, 1], dtype=self.points.dtype, device=self.points.device)
+        return torch.tensor(
+            [0, 0, 1], dtype=self.points.dtype, device=self.points.device
+        )
 
 
 # =============================================================================
@@ -192,7 +155,7 @@ class ObjectSemantics:
     an object needed for intelligent interaction planning.
     """
 
-    label: str
+    label: str = "none"
     """Object category label (e.g., 'apple', 'bottle')."""
 
     affordance: Affordance
@@ -221,13 +184,7 @@ class ActionCfg:
     """Control part name for the action."""
 
     interpolation_type: str = "linear"
-    """Interpolation type: 'linear', 'cubic', or 'toppra'."""
-
-    velocity_limit: Optional[float] = None
-    """Maximum velocity for trajectory."""
-
-    acceleration_limit: Optional[float] = None
-    """Maximum acceleration for trajectory."""
+    """Interpolation type: 'linear', 'cubic'."""
 
 
 class AtomicAction(ABC):
@@ -240,22 +197,18 @@ class AtomicAction(ABC):
 
     def __init__(
         self,
-        motion_generator: "MotionGenerator",
-        robot: "Robot",
-        control_part: str,
-        device: torch.device = torch.device("cuda"),
+        motion_generator: MotionGenerator,
     ):
         self.motion_generator = motion_generator
-        self.robot = robot
-        self.control_part = control_part
-        self.device = device
+        self.robot = motion_generator.robot
+        self.device = self.robot.device
 
     @abstractmethod
     def execute(
         self,
         target: Union[torch.Tensor, ObjectSemantics],
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> PlanResult:
         """Execute the atomic action.
 
@@ -277,7 +230,7 @@ class AtomicAction(ABC):
         self,
         target: Union[torch.Tensor, ObjectSemantics],
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Validate if the action is feasible without executing.
 
@@ -289,14 +242,8 @@ class AtomicAction(ABC):
         """
         pass
 
-    def _get_current_qpos(self) -> torch.Tensor:
-        """Get current joint configuration from robot."""
-        return self.robot.get_qpos()[0]  # Assuming single environment
-
     def _ik_solve(
-        self,
-        target_pose: torch.Tensor,
-        qpos_seed: Optional[torch.Tensor] = None
+        self, target_pose: torch.Tensor, qpos_seed: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Solve IK for target pose.
 
@@ -311,7 +258,7 @@ class AtomicAction(ABC):
             RuntimeError: If IK fails to find a solution
         """
         if qpos_seed is None:
-            qpos_seed = self._get_current_qpos()
+            qpos_seed = self.robot.get_qpos()
 
         success, qpos = self.robot.compute_ik(
             pose=target_pose.unsqueeze(0),

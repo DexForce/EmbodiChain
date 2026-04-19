@@ -35,7 +35,12 @@ from .actions import (
     ReleaseAction,
     MoveAction,
 )
-from .engine import AtomicActionEngine, register_action, unregister_action, get_registered_actions
+from .engine import (
+    AtomicActionEngine,
+    register_action,
+    unregister_action,
+    get_registered_actions,
+)
 
 __all__ = [
     # Core classes

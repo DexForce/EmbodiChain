@@ -177,7 +177,7 @@ class AtomicActionEngine:
         """Initialize default atomic action instances."""
         from .actions import ReachAction, GraspAction, MoveAction, ReleaseAction
 
-        control_parts = getattr(self.robot, 'control_parts', None) or ["default"]
+        control_parts = getattr(self.robot, "control_parts", None) or ["default"]
 
         for part in control_parts:
             self.register_action(
@@ -187,7 +187,7 @@ class AtomicActionEngine:
                     robot=self.robot,
                     control_part=part,
                     device=self.device,
-                )
+                ),
             )
             self.register_action(
                 f"grasp_{part}",
@@ -196,7 +196,7 @@ class AtomicActionEngine:
                     robot=self.robot,
                     control_part=part,
                     device=self.device,
-                )
+                ),
             )
             self.register_action(
                 f"move_{part}",
@@ -205,7 +205,7 @@ class AtomicActionEngine:
                     robot=self.robot,
                     control_part=part,
                     device=self.device,
-                )
+                ),
             )
             self.register_action(
                 f"release_{part}",
@@ -214,7 +214,7 @@ class AtomicActionEngine:
                     robot=self.robot,
                     control_part=part,
                     device=self.device,
-                )
+                ),
             )
 
         # Register action classes for dynamic instantiation
@@ -264,7 +264,7 @@ class AtomicActionEngine:
         action_name: str,
         target: Union[torch.Tensor, str, ObjectSemantics],
         control_part: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> PlanResult:
         """Execute an atomic action.
 
@@ -301,7 +301,7 @@ class AtomicActionEngine:
         action_name: str,
         target: Union[torch.Tensor, str, ObjectSemantics],
         control_part: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Validate if an action is feasible without executing."""
         if control_part:

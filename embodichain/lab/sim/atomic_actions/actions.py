@@ -54,7 +54,7 @@ class ReachAction(AtomicAction):
         start_qpos: Optional[torch.Tensor] = None,
         approach_offset: Optional[torch.Tensor] = None,
         use_affordance: bool = True,
-        **kwargs
+        **kwargs,
     ) -> PlanResult:
         """Execute reach action.
 
@@ -85,14 +85,8 @@ class ReachAction(AtomicAction):
 
         # Create plan states
         target_states = [
-            PlanState(
-                qpos=start_qpos,
-                move_type=MoveType.JOINT_MOVE
-            ),
-            PlanState(
-                xpos=approach_pose,
-                move_type=MoveType.EEF_MOVE
-            ),
+            PlanState(qpos=start_qpos, move_type=MoveType.JOINT_MOVE),
+            PlanState(xpos=approach_pose, move_type=MoveType.EEF_MOVE),
         ]
 
         # Plan trajectory
@@ -115,7 +109,7 @@ class ReachAction(AtomicAction):
         self,
         target: Union[torch.Tensor, ObjectSemantics],
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Check if the reach action is feasible."""
         try:
@@ -126,7 +120,9 @@ class ReachAction(AtomicAction):
                 target_pose = target
 
             # Attempt IK
-            qpos_seed = start_qpos if start_qpos is not None else self._get_current_qpos()
+            qpos_seed = (
+                start_qpos if start_qpos is not None else self._get_current_qpos()
+            )
             success, _ = self.robot.compute_ik(
                 pose=target_pose.unsqueeze(0),
                 qpos_seed=qpos_seed.unsqueeze(0),
@@ -137,9 +133,7 @@ class ReachAction(AtomicAction):
             return False
 
     def _resolve_target_pose(
-        self,
-        semantics: ObjectSemantics,
-        use_affordance: bool
+        self, semantics: ObjectSemantics, use_affordance: bool
     ) -> torch.Tensor:
         """Resolve target pose from object semantics."""
         from .core import GraspPose
@@ -195,7 +189,7 @@ class GraspAction(AtomicAction):
         start_qpos: Optional[torch.Tensor] = None,
         use_affordance: bool = True,
         grasp_type: str = "default",  # "default", "pinch", "power"
-        **kwargs
+        **kwargs,
     ) -> PlanResult:
         """Execute grasp action.
 
@@ -242,12 +236,16 @@ class GraspAction(AtomicAction):
         self,
         target: ObjectSemantics,
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Validate if grasp is feasible."""
         try:
-            grasp_pose = self._resolve_grasp_pose(target, use_affordance=True, grasp_type="default")
-            qpos_seed = start_qpos if start_qpos is not None else self._get_current_qpos()
+            grasp_pose = self._resolve_grasp_pose(
+                target, use_affordance=True, grasp_type="default"
+            )
+            qpos_seed = (
+                start_qpos if start_qpos is not None else self._get_current_qpos()
+            )
             success, _ = self.robot.compute_ik(
                 pose=grasp_pose.unsqueeze(0),
                 qpos_seed=qpos_seed.unsqueeze(0),
@@ -258,10 +256,7 @@ class GraspAction(AtomicAction):
             return False
 
     def _resolve_grasp_pose(
-        self,
-        semantics: ObjectSemantics,
-        use_affordance: bool,
-        grasp_type: str
+        self, semantics: ObjectSemantics, use_affordance: bool, grasp_type: str
     ) -> torch.Tensor:
         """Resolve grasp pose from object semantics."""
         from .core import GraspPose
@@ -343,7 +338,6 @@ class MoveAction(AtomicAction):
         offset: Optional[torch.Tensor] = None,
         velocity_limit: Optional[float] = None,
         acceleration_limit: Optional[float] = None,
-        **kwargs
     ) -> PlanResult:
         """Execute move action.
 
@@ -405,7 +399,7 @@ class MoveAction(AtomicAction):
         self,
         target: Union[torch.Tensor, ObjectSemantics],
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Validate if move action is feasible."""
         try:
@@ -414,7 +408,9 @@ class MoveAction(AtomicAction):
             else:
                 target_pose = target
 
-            qpos_seed = start_qpos if start_qpos is not None else self._get_current_qpos()
+            qpos_seed = (
+                start_qpos if start_qpos is not None else self._get_current_qpos()
+            )
 
             if self.move_type == "joint":
                 # For joint space moves, we need IK solvability
@@ -453,7 +449,7 @@ class ReleaseAction(AtomicAction):
         self,
         target: Optional[Union[torch.Tensor, ObjectSemantics]] = None,
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> PlanResult:
         """Execute release action.
 
@@ -511,14 +507,16 @@ class ReleaseAction(AtomicAction):
         self,
         target: Optional[Union[torch.Tensor, ObjectSemantics]] = None,
         start_qpos: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Validate if release action is feasible."""
         # Release is generally always feasible
         # If target is specified, validate that we can reach it
         if target is not None and isinstance(target, torch.Tensor):
             try:
-                qpos_seed = start_qpos if start_qpos is not None else self._get_current_qpos()
+                qpos_seed = (
+                    start_qpos if start_qpos is not None else self._get_current_qpos()
+                )
                 success, _ = self.robot.compute_ik(
                     pose=target.unsqueeze(0),
                     qpos_seed=qpos_seed.unsqueeze(0),
