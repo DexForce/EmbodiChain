@@ -39,8 +39,13 @@ from embodichain.lab.sim.solvers.pytorch_solver import PytorchSolver, PytorchSol
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
-PYTORCH_LOWER_LIMITS = [-6.2832, -6.2832, -3.1416, -6.2832, -6.2832, -6.2832]
-PYTORCH_UPPER_LIMITS = [6.2832, 6.2832, 3.1416, 6.2832, 6.2832, 6.2832]
+
+# TODO: Easy to failed if use full joint range, consider adding a margin to avoid sampling near the joint limits.
+# PYTORCH_LOWER_LIMITS = [-6.2832, -6.2832, -3.1416, -6.2832, -6.2832, -6.2832]
+# PYTORCH_UPPER_LIMITS = [6.2832, 6.2832, 3.1416, 6.2832, 6.2832, 6.2832]
+PYTORCH_LOWER_LIMITS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+PYTORCH_UPPER_LIMITS = [2.5, 2.5, 2.5, 2.5, 2.5, 2.5]
+
 SAMPLE_SIZES = [100, 1000, 10000]
 SUPPORTED_SOLVERS = ("opw", "pytorch")
 
