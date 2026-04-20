@@ -45,8 +45,7 @@ class Affordance:
     object_label: str = ""
     """Label of the object this affordance belongs to."""
 
-    @property
-    def batch_size(self) -> int:
+    def get_batch_size(self) -> int:
         """Return the batch size of this affordance data."""
         return 1
 
@@ -67,6 +66,13 @@ class GraspPose(Affordance):
     the end-effector pose in the object's local coordinate frame.
     """
 
+    grasp_types: List[str] = field(default_factory=lambda: ["default"])
+    """List of grasp type labels for each pose in the batch.
+
+    Examples: "pinch", "power", "hook", "spherical", etc.
+    Length must match the batch dimension of `poses`.
+    """
+
     confidence_scores: torch.Tensor | None = None
     """Optional confidence scores for each grasp pose with shape [B].
 
@@ -74,10 +80,23 @@ class GraspPose(Affordance):
     Used for grasp selection when multiple options exist.
     """
 
-    @property
-    def batch_size(self) -> int:
+    def get_batch_size(self) -> int:
         """Return the number of grasp poses in this affordance."""
         return self.poses.shape[0]
+
+    def get_grasp_by_type(self, grasp_type: str) -> Optional[torch.Tensor]:
+        """Get grasp pose by type label.
+
+        Args:
+            grasp_type: Type of grasp (e.g., "pinch", "power")
+
+        Returns:
+            4x4 pose tensor if found, None otherwise
+        """
+        if grasp_type in self.grasp_types:
+            idx = self.grasp_types.index(grasp_type)
+            return self.poses[idx]
+        return None
 
     def get_best_grasp(self) -> torch.Tensor:
         """Get the best grasp pose based on confidence scores.
@@ -113,14 +132,27 @@ class InteractionPoints(Affordance):
     useful for determining approach directions.
     """
 
-    contact_regions: torch.Tensor | None = None
-    """Optional labels for object regions each point belongs to.
+    point_types: List[str] = field(default_factory=list)
+    """Optional labels for each point's interaction type.
 
-    Examples: "handle", "face", "edge", "corner", "center"
+    Examples: "push", "poke", "touch", "pinch"
     """
 
-    @property
-    def batch_size(self) -> int:
+    def get_points_by_type(self, point_type: str) -> torch.Tensor | None:
+        """Get points by their interaction type.
+
+        Args:
+            point_type: Type of interaction (e.g., "push", "poke")
+
+        Returns:
+            Tensor of points if found, None otherwise
+        """
+        if point_type in self.point_types:
+            indices = [i for i, t in enumerate(self.point_types) if t == point_type]
+            return self.points[indices]
+        return None
+
+    def get_batch_size(self) -> int:
         """Return the number of interaction points in this affordance."""
         return self.points.shape[0]
 
@@ -155,17 +187,17 @@ class ObjectSemantics:
     an object needed for intelligent interaction planning.
     """
 
-    label: str = "none"
-    """Object category label (e.g., 'apple', 'bottle')."""
-
     affordance: Affordance
     """Affordance data (GraspPose, InteractionPoints, etc.)."""
 
     geometry: Dict[str, Any]
     """Geometric information including bounding box, mesh data."""
 
-    properties: Dict[str, Any]
+    properties: Dict[str, Any] = field(default_factory=dict)
     """Physical properties: mass, friction, etc."""
+
+    label: str = "none"
+    """Object category label (e.g., 'apple', 'bottle')."""
 
     uid: Optional[str] = None
     """Optional unique identifier for the object instance."""
@@ -185,6 +217,12 @@ class ActionCfg:
 
     interpolation_type: str = "linear"
     """Interpolation type: 'linear', 'cubic'."""
+
+    velocity_limit: Optional[float] = None
+    """Optional velocity limit for the motion."""
+
+    acceleration_limit: Optional[float] = None
+    """Optional acceleration limit for the motion."""
 
 
 class AtomicAction(ABC):
