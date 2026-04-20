@@ -428,11 +428,6 @@ def benchmark_pytorch_solver() -> (
             cpu_success,
             cpu_ik_qpos,
         ) = _timed_pytorch_ik_call(cpu_solver, fk_xpos_cpu, qpos_cpu)
-
-        # failed_qpos = qpos_cpu[cpu_success.logical_not()]
-        # failed_xpos = fk_xpos_cpu[cpu_success.logical_not()]
-        # test_success, test_check_xpos = cpu_solver.get_ik(failed_xpos, joint_seed=failed_qpos)
-        # import ipdb; ipdb.set_trace()
         check_xpos_cpu = cpu_solver.get_fk(cpu_ik_qpos)
         cpu_t_err, cpu_r_err = get_pose_err(fk_xpos_cpu, check_xpos_cpu)
 
