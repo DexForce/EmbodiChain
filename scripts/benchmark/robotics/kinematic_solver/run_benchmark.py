@@ -39,8 +39,13 @@ from embodichain.lab.sim.solvers.pytorch_solver import PytorchSolver, PytorchSol
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
-PYTORCH_LOWER_LIMITS = [-6.2832, -6.2832, -3.1416, -6.2832, -6.2832, -6.2832]
-PYTORCH_UPPER_LIMITS = [6.2832, 6.2832, 3.1416, 6.2832, 6.2832, 6.2832]
+
+# TODO: Easy to failed if use full joint range, consider adding a margin to avoid sampling near the joint limits.
+# PYTORCH_LOWER_LIMITS = [-6.2832, -6.2832, -3.1416, -6.2832, -6.2832, -6.2832]
+# PYTORCH_UPPER_LIMITS = [6.2832, 6.2832, 3.1416, 6.2832, 6.2832, 6.2832]
+PYTORCH_LOWER_LIMITS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+PYTORCH_UPPER_LIMITS = [2.5, 2.5, 2.5, 2.5, 2.5, 2.5]
+
 SAMPLE_SIZES = [100, 1000, 10000]
 SUPPORTED_SOLVERS = ("opw", "pytorch")
 
@@ -423,6 +428,11 @@ def benchmark_pytorch_solver() -> (
             cpu_success,
             cpu_ik_qpos,
         ) = _timed_pytorch_ik_call(cpu_solver, fk_xpos_cpu, qpos_cpu)
+
+        # failed_qpos = qpos_cpu[cpu_success.logical_not()]
+        # failed_xpos = fk_xpos_cpu[cpu_success.logical_not()]
+        # test_success, test_check_xpos = cpu_solver.get_ik(failed_xpos, joint_seed=failed_qpos)
+        # import ipdb; ipdb.set_trace()
         check_xpos_cpu = cpu_solver.get_fk(cpu_ik_qpos)
         cpu_t_err, cpu_r_err = get_pose_err(fk_xpos_cpu, check_xpos_cpu)
 
