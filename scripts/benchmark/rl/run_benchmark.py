@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Run RL benchmark training/evaluation and generate one markdown report.
+
+Run: python -m scripts.benchmark.rl.run_benchmark
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -73,9 +78,16 @@ def main() -> None:
     if args.rebuild_report_only:
         run_results = runner.collect_existing_run_results()
         if not run_results:
-            raise SystemExit(
-                "No compatible existing benchmark results were found for the requested jobs."
-            )
+            training_runs = runner.collect_existing_training_runs()
+            if training_runs:
+                run_results = runner.run_evaluation(training_runs)
+            else:
+                raise SystemExit(
+                    "No compatible existing benchmark results were found for the requested jobs under "
+                    f"{runner.output_root / 'runs'}. "
+                    "Run once without --rebuild-report-only to generate artifacts, "
+                    "or pass --output-root to the directory containing existing runs."
+                )
     else:
         existing_results = (
             runner.collect_existing_run_results() if args.skip_existing else []
@@ -87,7 +99,7 @@ def main() -> None:
     aggregate_result = runner.aggregate_results(run_results)
     leaderboard = runner.update_leaderboard(aggregate_result, run_results)
     report_path = runner.generate_report(run_results, aggregate_result, leaderboard)
-    print(f"Benchmark report written to: {report_path}")
+    print(f"Markdown report saved: {report_path}")
 
 
 if __name__ == "__main__":
