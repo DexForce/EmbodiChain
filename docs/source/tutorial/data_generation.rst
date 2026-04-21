@@ -5,7 +5,7 @@ Data Generation
 
 .. currentmodule:: embodichain.lab.gym
 
-This tutorial shows you how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment launcher and dataset manager. You will learn how to configure LeRobot recording in a JSON file, how the official ``run_env.py`` script builds environments and executes expert trajectories, and how completed episodes are automatically saved to disk.
+This tutorial shows you how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment launcher and dataset manager. You will learn how to configure LeRobot recording in a JSON file, how the ``run_env.py`` script builds environments and executes expert trajectories, and how completed episodes are automatically saved to disk.
 
 Overview
 ~~~~~~~~
@@ -19,8 +19,6 @@ EmbodiChain provides a built-in data generation workflow for imitation learning 
 - **Dataset Manager**: Records observation-action pairs during ``env.step()``.
 - **LeRobotRecorder**: Converts completed episodes into LeRobot-compatible datasets, with optional video export.
 
-This workflow is useful when you want to generate large amounts of synthetic data for manipulation tasks without writing a custom rollout loop from scratch.
-
 What This Tutorial Records
 --------------------------
 
@@ -33,17 +31,13 @@ This page documents the full path from task configuration to saved dataset:
 5. Execute the actions with ``env.step()``.
 6. Let the dataset manager automatically save completed episodes.
 
-The intention is to make the data-generation process easy to reproduce for new tasks.
-
 Example Task: Items Handover and Place
 --------------------------------------
 
 As a running example, we use an ``items_handover_place`` task. In a project repository, this usually comes with two files:
 
-- ``configs/items_handover_place/gym_config.json``
-- ``configs/items_handover_place/action_config.json``
-
-The gym configuration defines the simulation scene and recording behavior, while the action configuration defines the expert action graph used to solve the task.
+- ``configs/items_handover_place/gym_config.json`` The gym configuration defines the simulation scene and recording behavior.
+- ``configs/items_handover_place/action_config.json`` The action configuration defines the expert action graph used to solve the task.
 
 The Code
 ~~~~~~~~
@@ -100,24 +94,81 @@ The dataset-related part looks like this:
        }
    }
 
-The most important parameters are:
+Important parameters are:
 
 - **save_path**: Where the generated dataset will be written.
 - **robot_meta**: Robot metadata such as robot type, control frequency, and active control parts.
 - **instruction**: Task language instruction stored together with the dataset.
 - **extra**: Additional metadata such as scene type and task description.
 - **use_videos**: Whether camera observations should be stored as videos instead of raw images.
-
-In the same example file, the task also defines scene randomization and sensor setup. This is important because the generated data is determined not only by the recorder, but also by how the scene is randomized before each rollout.
-
+ 
 In the current implementation, ``LeRobotRecorder`` stores robot state and action features such as ``observation.qpos``, ``observation.qvel``, ``observation.qf``, ``action``, and camera images when sensors are present.
 
 Step 2: Prepare the Action Configuration
 ----------------------------------------
 
-The second input is the ``action_config.json`` file. This file describes how the task generates its expert trajectory. In the ``items_handover_place`` example, it defines graph scopes such as ``right_arm``, ``left_arm``, ``left_eef``, and ``right_eef``, together with affordance nodes and IK-based transitions.
+The second input is the ``action_config.json`` file. This file defines the expert action graph used by the task. It is the main configuration entry for scripted trajectory generation. Take ``items_handover_place`` as example, the file is organized around ``scope``, ``node``, ``edge``, and ``sync``.
 
-In practice, this file is what turns a task from “a simulated scene” into “a data generator”. Without it, the launcher can build the environment, but the task cannot produce expert actions.
+**Scope Configuration**
+
+.. literalinclude:: ../../../configs/items_handover_place/action_config.json
+   :language: json
+   :lines: 1-40
+
+This section defines the controllable sub-graphs used by the task:
+
+- **Control groups**: Scopes such as ``right_arm``, ``left_arm``, ``right_eef``, and ``left_eef`` separate arm motion from gripper motion.
+- **Initialization**: Each scope specifies how its initial state is obtained, such as ``current_qpos`` or ``given_qpos``.
+- **Action dimensions**: The ``dim`` field defines the action dimension for each scope, for example 6 DoF for an arm and 1 DoF for a gripper.
+
+**Node Configuration**
+
+The following excerpts show representative node entries from the real ``action_config.json``:
+
+.. literalinclude:: ../../../configs/items_handover_place/action_config.json
+   :language: json
+   :lines: 304-364
+
+
+This section defines how key poses or joint targets are generated:
+
+- **Affordance-driven targets**: Nodes typically start from an affordance source such as an object pose or a previously generated pose.
+- **Pose processing**: Intermediate transforms such as offsets and rotations are applied before motion targets are finalized.
+- **IK conversion**: For arm scopes, nodes often solve inverse kinematics to convert a pose target into a valid joint target.
+- **Cross-scope reuse**: A node in one scope can depend on data produced by another scope, which is common in dual-arm tasks.
+
+**Edge Configuration**
+
+.. literalinclude:: ../../../configs/items_handover_place/action_config.json
+   :language: json
+   :lines: 1005-1017
+
+.. literalinclude:: ../../../configs/items_handover_place/action_config.json    
+   :language: json
+   :lines: 1141-1150
+
+This section defines executable transitions between nodes:
+
+- **Motion edges**: Entries such as ``right_up_to_handover`` use ``plan_trajectory`` to move an arm between two node states.
+- **Gripper edges**: Entries such as ``right_open0`` use functions like ``execute_open`` or ``execute_close`` to generate gripper actions.
+- **Durations**: The ``duration`` field controls how many simulation steps each transition occupies.
+- **Execution binding**: The ``name`` field selects which execution function is used for that transition.
+
+**Synchronization**
+
+.. literalinclude:: ../../../configs/items_handover_place/action_config.json
+   :language: json
+   :lines: 1191-1210
+
+This section defines dependencies between sub-actions:
+
+- **Temporal ordering**: The ``sync`` block enforces that some actions can only start after other actions finish.
+- **Cross-scope coordination**: Dependencies commonly connect arm motion and gripper actions across different scopes.
+- **Multi-stage execution**: This is how multiple independently configured primitives become one coherent expert rollout.
+
+Together, ``scope`` defines what can be controlled, ``node`` defines target states, ``edge`` defines executable transitions, and ``sync`` defines ordering constraints. This is the core configuration structure that ``create_demo_action_list()`` consumes when generating an expert rollout.
+
+Note: Action bank is not the only way to generate action demos. Depending on the task design, trajectories can also be produced by other scripted generation methods.
 
 Step 3: Build the Environment
 -----------------------------
@@ -141,14 +192,12 @@ The launcher first asks the task to generate an expert action sequence, then exe
    :start-at: def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
    :end-at: return True
 
-This function highlights the core data-generation loop:
+This function highlights the data-generation loop:
 
 1. Call ``create_demo_action_list()`` from the environment.
 2. Validate that the returned action list is not empty.
 3. Execute each action with ``env.step(action)``.
 4. Let the environment and dataset manager record the rollout automatically.
-
-For internal users, this is the most important handoff point: the task code is responsible for producing a valid scripted trajectory, while the launcher is responsible for executing and recording it.
 
 Step 5: Validate and Regenerate Failed Rollouts
 -----------------------------------------------
@@ -172,7 +221,7 @@ The top-level ``main()`` function runs offline generation for the configured num
    :start-at: def main(args, env, gym_config):
    :end-at:     _, _ = env.reset()
 
-In practice, the most commonly used command-line arguments are:
+Commonly used command-line arguments are:
 
 - **--gym_config**: Path to the task JSON configuration.
 - **--action_config**: Optional path to the action-bank configuration.
@@ -182,19 +231,6 @@ In practice, the most commonly used command-line arguments are:
 - **--headless**: Run without GUI for faster generation.
 - **--enable_rt**: Enable ray tracing for higher-quality visual observations.
 - **--filter_dataset_saving**: Disable dataset saving for debugging.
-
-Using a Project Wrapper
------------------------
-
-If your tasks, managers, or action banks live outside the core EmbodiChain package, create a thin wrapper launcher that:
-
-1. Imports your task package so custom environments are registered.
-2. Extends ``DEFAULT_MANAGER_MODULES`` with your custom manager modules.
-3. Delegates execution to ``embodichain.lab.scripts.run_env.main``.
-
-This pattern keeps the data-generation logic in the official launcher while allowing project-specific extensions.
-
-In project repositories such as ``Embodied_Challenge``, the wrapper typically imports the project package, extends ``DEFAULT_MANAGER_MODULES``, and then forwards execution to the official launcher. This keeps the rollout logic centralized while still allowing task-specific managers and action functors.
 
 The Code Execution
 ~~~~~~~~~~~~~~~~~~
@@ -210,7 +246,6 @@ To run data generation with the official launcher:
        --headless \
        --enable_rt
 
-If you maintain a project-specific wrapper for custom tasks, run that wrapper with the same arguments instead.
 
 Outputs
 ~~~~~~~
