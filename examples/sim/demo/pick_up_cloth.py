@@ -176,7 +176,7 @@ def create_cloth(sim: SimulationManager):
                 mass=0.01,
                 youngs=1e10,
                 poissons=0.4,
-                thickness=0.04,
+                thickness=0.06,
                 bending_stiffness=0.01,
                 bending_damping=0.1,
                 dynamic_friction=0.95,
@@ -287,8 +287,7 @@ def main():
     n_waypoint = grab_traj.shape[1]
     for i in range(n_waypoint):
         robot.set_qpos(grab_traj[:, i, :])
-        sim.update(step=4)
-        time.sleep(1e-2)
+        sim.update(step=3)
     input("Press Enter to exit the simulation...")
 
 
