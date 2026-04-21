@@ -22,7 +22,9 @@ from typing import Optional, Union, TYPE_CHECKING, Any
 from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
-from .core import AtomicAction, ObjectSemantics
+from .core import AtomicAction, ObjectSemantics, AntipodalAffordance, ActionCfg
+from embodichain.utils import logger
+from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
@@ -45,7 +47,7 @@ class ReachAction(AtomicAction):
         device: torch.device = torch.device("cuda"),
         interpolation_type: str = "linear",  # "linear", "cubic", "toppra"
     ):
-        super().__init__(motion_generator, robot, control_part, device)
+        super().__init__(motion_generator)
         self.interpolation_type = interpolation_type
 
     def execute(
@@ -165,6 +167,124 @@ class ReachAction(AtomicAction):
 # =============================================================================
 # Grasp Action
 # =============================================================================
+@configclass
+class PickUpActionCfg(ActionCfg):
+    hand_open_qpos: torch.Tensor | None = None
+    hand_close_qpos: torch.Tensor | None = None
+    hand_control_part: str = "hand"
+    pre_grasp_distance: float = 0.05
+    approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
+    lift_height: float = 0.1
+    hand_interp_steps: int = 10
+
+
+class PickUpAction(AtomicAction):
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: PickUpActionCfg | None = None,
+    ):
+        super().__init__(motion_generator)
+        # TODO: consider using a config dataclass for these parameters
+        self.cfg = cfg if cfg is not None else PickUpActionCfg()
+        self.approach_direction = self.cfg.approach_direction.to(self.device)
+        if self.cfg.hand_open_qpos is None:
+            logger.log_error("hand_open_qpos must be specified in PickUpActionCfg")
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error("hand_close_qpos must be specified in PickUpActionCfg")
+        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+
+    def execute(
+        self,
+        target: ObjectSemantics,
+        start_qpos: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> PlanResult:
+        """Execute pick-up action."""
+        # Resolve grasp pose
+
+        is_success, grasp_xpos, open_length = self._resolve_grasp_pose(target)
+        # TODO: warning and fallback if no valid grasp pose found
+
+        # Compute pre-grasp pose
+        pre_grasp_pose = self._compute_pre_grasp_xpos(grasp_xpos)
+
+        # Compute lift pose
+        lift_xpos = self._compute_lift_xpos(grasp_xpos)
+
+        target_states = [
+            PlanState(xpos=pre_grasp_pose, move_type=MoveType.EEF_MOVE),
+            PlanState(xpos=grasp_xpos, move_type=MoveType.EEF_MOVE),
+        ]
+        options = MotionGenOptions(
+            start_qpos=start_qpos,
+            control_part=self.cfg.control_part,
+            is_interpolate=True,
+            is_linear=False,
+            interpolate_position_step=0.001,
+            plan_opts=ToppraPlanOptions(
+                sample_interval=kwargs.get("sample_interval", 30),
+            ),
+        )
+        result = self.plan_trajectory(target_states, options)
+        import ipdb
+
+        ipdb.set_trace()
+
+        # # Get current state
+        # if start_qpos is None:
+        #     start_qpos = self._get_current_qpos()
+
+        # # Build trajectory plan states
+        # target_states = [
+        #     PlanState(qpos=start_qpos, move_type=MoveType.JOINT_MOVE),
+        #     PlanState(xpos=pre_grasp_pose, move_type=MoveType.EEF_MOVE),
+        #     PlanState(xpos=grasp_pose, move_type=MoveType.EEF_MOVE),
+        #     PlanState(xpos=lift_pose, move_type=MoveType.EEF_MOVE),
+        # ]
+
+        # options = MotionGenOptions(
+        #     control_part=self.arm_control_part,
+        #     is_interpolate=True,
+        #     is_linear=False,
+        #     interpolate_position_step=0.001,
+        #     plan_opts=ToppraPlanOptions(
+        #         sample_interval=kwargs.get("sample_interval", 30),
+        #     ),
+        # )
+
+        # result = self.plan_trajectory(target_states, options)
+
+    def _resolve_grasp_pose(self, semantics: ObjectSemantics) -> torch.Tensor:
+        if not isinstance(semantics.affordance, AntipodalAffordance):
+            logger.log_error(
+                "Grasp pose affordance must be of type AntipodalAffordance"
+            )
+        if semantics.entity is None:
+            logger.log_error(
+                "ObjectSemantics must be associated with an entity to get object pose"
+            )
+        obj_poses = semantics.entity.get_local_pose(to_matrix=True)
+
+        is_success, grasp_xpos, open_length = semantics.affordance.get_best_grasp_poses(
+            obj_poses=obj_poses, approach_direction=self.approach_direction
+        )
+        return is_success, grasp_xpos, open_length
+
+    def _compute_pre_grasp_xpos(self, grasp_xpos: torch.Tensor) -> torch.Tensor:
+        offsets = self.approach_direction * self.cfg.pre_grasp_distance
+        pre_grasp_xpos = grasp_xpos.clone()
+        pre_grasp_xpos[:, :3, 3] += offsets
+        return pre_grasp_xpos
+
+    def _compute_lift_xpos(self, xpos: torch.Tensor) -> torch.Tensor:
+        lift_xpos = xpos.clone()
+        lift_xpos[:, 2, 3] += self.cfg.lift_height
+        return lift_xpos
+
+    def validate(self, target, start_qpos=None, **kwargs):
+        return True
 
 
 class GraspAction(AtomicAction):
@@ -172,14 +292,12 @@ class GraspAction(AtomicAction):
 
     def __init__(
         self,
-        motion_generator: "MotionGenerator",
-        robot: "Robot",
+        motion_generator: MotionGenerator,
         control_part: str,
-        device: torch.device = torch.device("cuda"),
         pre_grasp_distance: float = 0.05,
         approach_direction: str = "z",  # "x", "y", "z", or "custom"
     ):
-        super().__init__(motion_generator, robot, control_part, device)
+        super().__init__(motion_generator)
         self.pre_grasp_distance = pre_grasp_distance
         self.approach_direction = approach_direction
 
@@ -327,7 +445,7 @@ class MoveAction(AtomicAction):
         move_type: str = "cartesian",  # "cartesian", "joint"
         interpolation: str = "linear",  # "linear", "cubic", "toppra"
     ):
-        super().__init__(motion_generator, robot, control_part, device)
+        super().__init__(motion_generator)
         self.move_type = move_type
         self.interpolation = interpolation
 

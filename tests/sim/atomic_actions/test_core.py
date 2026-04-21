@@ -16,6 +16,8 @@
 
 import torch
 import pytest
+from embodichain.lab.sim.planners import PlanResult
+from embodichain.lab.sim.atomic_actions.engine import SemanticAnalyzer
 
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -23,6 +25,7 @@ from embodichain.lab.sim.atomic_actions import (
     InteractionPoints,
     ObjectSemantics,
     ActionCfg,
+    AtomicActionEngine,
     register_action,
     unregister_action,
     get_registered_actions,
@@ -36,7 +39,31 @@ class TestAffordance:
         """Test base affordance class."""
         aff = Affordance(object_label="test_object")
         assert aff.object_label == "test_object"
+        assert aff.geometry == {}
+        assert aff.custom_config == {}
         assert aff.get_batch_size() == 1
+
+    def test_affordance_with_mesh_and_custom_config(self):
+        """Test affordance mesh tensor payload and custom config."""
+        vertices = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
+        triangles = torch.tensor([[0, 1, 2]])
+        aff = Affordance(
+            geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
+            custom_config={"planner": "fast"},
+        )
+
+        assert torch.allclose(aff.mesh_vertices, vertices)
+        assert torch.equal(aff.mesh_triangles, triangles)
+        assert aff.get_custom_config("planner") == "fast"
+
+        aff.set_custom_config("approach_mode", "top_down")
+        assert aff.get_custom_config("approach_mode") == "top_down"
 
     def test_grasp_pose_default(self):
         """Test GraspPose with default values."""
@@ -141,7 +168,7 @@ class TestObjectSemantics:
 
     def test_basic_creation(self):
         """Test basic ObjectSemantics creation."""
-        affordance = GraspPose(object_label="bottle")
+        affordance = GraspPose()
         semantics = ObjectSemantics(
             label="bottle",
             affordance=affordance,
@@ -153,6 +180,7 @@ class TestObjectSemantics:
         assert semantics.label == "bottle"
         assert semantics.uid == "bottle_001"
         assert semantics.affordance.object_label == "bottle"
+        assert semantics.affordance.geometry is semantics.geometry
         assert semantics.properties["mass"] == 0.5
 
     def test_no_uid(self):
@@ -235,3 +263,67 @@ class TestActionRegistry:
 
         # Cleanup
         unregister_action("dummy")
+
+
+class TestAtomicActionEngineConvenienceTarget:
+    """Test convenience target input for execute/validate."""
+
+    class _DummyAction:
+        def __init__(self):
+            self.last_target = None
+
+        def execute(self, target, **kwargs):
+            self.last_target = target
+            return PlanResult(success=True)
+
+        def validate(self, target, **kwargs):
+            self.last_target = target
+            return True
+
+    def _build_engine(self):
+        engine = AtomicActionEngine.__new__(AtomicActionEngine)
+        engine._semantic_analyzer = SemanticAnalyzer()
+        engine._actions = {"test": self._DummyAction()}
+        return engine
+
+    def test_execute_with_dict_semantic_target(self):
+        """Test execute supports dict target with geometry/custom_config."""
+        engine = self._build_engine()
+        mesh_vertices = torch.zeros(3, 3)
+        mesh_triangles = torch.tensor([[0, 1, 2]])
+
+        result = engine.execute(
+            "test",
+            {
+                "label": "cup",
+                "geometry": {
+                    "bounding_box": [0.2, 0.2, 0.1],
+                    "mesh_vertices": mesh_vertices,
+                    "mesh_triangles": mesh_triangles,
+                },
+                "custom_config": {"mode": "stable"},
+                "properties": {"mass": 0.3},
+                "uid": "cup_001",
+                "use_cache": False,
+            },
+        )
+
+        assert result.success is True
+        resolved_target = engine._actions["test"].last_target
+        assert isinstance(resolved_target, ObjectSemantics)
+        assert resolved_target.label == "cup"
+        assert resolved_target.uid == "cup_001"
+        assert resolved_target.properties["mass"] == 0.3
+        assert torch.equal(resolved_target.affordance.mesh_vertices, mesh_vertices)
+        assert torch.equal(resolved_target.affordance.mesh_triangles, mesh_triangles)
+        assert resolved_target.affordance.get_custom_config("mode") == "stable"
+
+    def test_validate_with_dict_pose_target(self):
+        """Test validate supports dict target with direct pose."""
+        engine = self._build_engine()
+        pose = torch.eye(4)
+
+        success = engine.validate("test", {"pose": pose})
+
+        assert success is True
+        assert torch.equal(engine._actions["test"].last_target, pose)

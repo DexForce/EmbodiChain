@@ -23,7 +23,6 @@ custom action registration.
 
 from .core import (
     Affordance,
-    GraspPose,
     InteractionPoints,
     ObjectSemantics,
     ActionCfg,

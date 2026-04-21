@@ -24,8 +24,18 @@ from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.utils import configclass
 
+from embodichain.toolkits.graspkit.pg_grasp import (
+    GraspGenerator,
+    GraspGeneratorCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
+    GripperCollisionCfg,
+)
+from embodichain.lab.sim.common import BatchEntity
+from embodichain.utils import logger
+
 if TYPE_CHECKING:
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.planners import MotionGenerator, MotionGenOptions
     from embodichain.lab.sim.objects import Robot
 
 
@@ -45,69 +55,128 @@ class Affordance:
     object_label: str = ""
     """Label of the object this affordance belongs to."""
 
+    geometry: Dict[str, Any] = field(default_factory=dict)
+    """Geometry dictionary shared with ObjectSemantics.
+
+    The mesh payload is expected to be stored in:
+    - ``mesh_vertices``: torch.Tensor with shape [N, 3]
+    - ``mesh_triangles``: torch.Tensor with shape [M, 3]
+    """
+
+    custom_config: Dict[str, Any] = field(default_factory=dict)
+    """User-defined configuration payload for affordance creation and usage."""
+
+    @property
+    def mesh_vertices(self) -> torch.Tensor | None:
+        """Get mesh vertices from geometry.
+
+        Returns:
+            Mesh vertices tensor [N, 3], or None if unavailable.
+
+        Raises:
+            TypeError: If ``mesh_vertices`` exists but is not a torch tensor.
+        """
+        vertices = self.geometry.get("mesh_vertices")
+        if vertices is None:
+            return None
+        if not isinstance(vertices, torch.Tensor):
+            raise TypeError("geometry['mesh_vertices'] must be a torch.Tensor")
+        return vertices
+
+    @property
+    def mesh_triangles(self) -> torch.Tensor | None:
+        """Get mesh triangles from geometry.
+
+        Returns:
+            Mesh triangle index tensor [M, 3], or None if unavailable.
+
+        Raises:
+            TypeError: If ``mesh_triangles`` exists but is not a torch tensor.
+        """
+        triangles = self.geometry.get("mesh_triangles")
+        if triangles is None:
+            return None
+        if not isinstance(triangles, torch.Tensor):
+            raise TypeError("geometry['mesh_triangles'] must be a torch.Tensor")
+        return triangles
+
+    def set_custom_config(self, key: str, value: Any) -> None:
+        """Set a custom affordance configuration value."""
+        self.custom_config[key] = value
+
+    def get_custom_config(self, key: str, default: Any = None) -> Any:
+        """Get a custom affordance configuration value."""
+        return self.custom_config.get(key, default)
+
     def get_batch_size(self) -> int:
         """Return the batch size of this affordance data."""
         return 1
 
 
 @dataclass
-class GraspPose(Affordance):
-    """Grasp pose affordance containing a batch of 4x4 transformation matrices.
+class AntipodalAffordance(Affordance):
+    generator: GraspGenerator | None = None
+    """Grasp generator instance, initialized lazily when needed."""
 
-    Each grasp pose represents a valid end-effector pose for grasping the object.
-    Multiple poses may be available for different grasp types (pinch, power, etc.)
-    or approach directions.
-    """
+    force_reannotate: bool = False
+    """Whether to force re-annotation of grasp generator on each access."""
 
-    poses: torch.Tensor = field(default_factory=lambda: torch.eye(4).unsqueeze(0))
-    """Batch of grasp poses with shape [B, 4, 4].
+    def _init_generator(self):
+        if (
+            self.geometry.get("mesh_vertices", None) is None
+            or self.geometry.get("mesh_triangles", None) is None
+        ):
+            logger.log_error(
+                "Mesh vertices and triangles must be provided in geometry to initialize AntipodalAffordance."
+            )
+        self.generator = GraspGenerator(
+            vertices=self.geometry.get("mesh_vertices"),
+            triangles=self.geometry.get("mesh_triangles"),
+            cfg=self.custom_config.get("generator_cfg", None),
+            gripper_collision_cfg=self.custom_config.get("gripper_collision_cfg", None),
+        )
+        if self.force_reannotate:
+            self.generator.annotate()
+        else:
+            if self.generator._hit_point_pairs is None:
+                self.generator.annotate()
 
-    Each pose is a 4x4 homogeneous transformation matrix representing
-    the end-effector pose in the object's local coordinate frame.
-    """
+    def get_best_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.generator is None:
+            self._init_generator()
 
-    grasp_types: List[str] = field(default_factory=lambda: ["default"])
-    """List of grasp type labels for each pose in the batch.
-
-    Examples: "pinch", "power", "hook", "spherical", etc.
-    Length must match the batch dimension of `poses`.
-    """
-
-    confidence_scores: torch.Tensor | None = None
-    """Optional confidence scores for each grasp pose with shape [B].
-
-    Higher values indicate more reliable/ stable grasps.
-    Used for grasp selection when multiple options exist.
-    """
-
-    def get_batch_size(self) -> int:
-        """Return the number of grasp poses in this affordance."""
-        return self.poses.shape[0]
-
-    def get_grasp_by_type(self, grasp_type: str) -> Optional[torch.Tensor]:
-        """Get grasp pose by type label.
-
-        Args:
-            grasp_type: Type of grasp (e.g., "pinch", "power")
-
-        Returns:
-            4x4 pose tensor if found, None otherwise
-        """
-        if grasp_type in self.grasp_types:
-            idx = self.grasp_types.index(grasp_type)
-            return self.poses[idx]
-        return None
-
-    def get_best_grasp(self) -> torch.Tensor:
-        """Get the best grasp pose based on confidence scores.
-
-        Returns:
-            4x4 pose tensor with highest confidence
-        """
-        if self.confidence_scores is not None:
-            best_idx = torch.argmax(self.confidence_scores)
-            return self.poses[best_idx]
-        return self.poses[0]  # Default to first if no scores available
+        grasp_xpos_list = []
+        is_success_list = []
+        open_length_list = []
+        for i, obj_pose in enumerate(obj_poses):
+            is_success, grasp_xpos, open_length = self.generator.get_grasp_poses(
+                obj_pose, approach_direction
+            )
+            if is_success:
+                grasp_xpos_list.append(grasp_xpos.unsqueeze(0))
+            else:
+                logger.log_warning(f"No valid grasp pose found for {i}-th object.")
+                grasp_xpos_list.append(
+                    torch.eye(
+                        4, dtype=torch.float32, device=self.generator.device
+                    ).unsqueeze(0)
+                )  # Default to identity pose if no grasp found
+            is_success_list.append(is_success)
+            open_length_list.append(open_length)
+        is_success = torch.tensor(
+            is_success_list, dtype=torch.bool, device=self.generator.device
+        )
+        grasp_xpos = torch.concatenate(grasp_xpos_list, dim=0)  # [B, 4, 4]
+        open_length = torch.tensor(
+            open_length_list, dtype=torch.float32, device=self.generator.device
+        )
+        return is_success, grasp_xpos, open_length
 
 
 @dataclass
@@ -199,8 +268,17 @@ class ObjectSemantics:
     label: str = "none"
     """Object category label (e.g., 'apple', 'bottle')."""
 
-    uid: Optional[str] = None
-    """Optional unique identifier for the object instance."""
+    entity: BatchEntity | None = None
+    """Optional reference to the underlying simulation entity representing this object."""
+
+    def __post_init__(self) -> None:
+        """Bind affordance metadata to this semantic object.
+
+        The affordance shares the same geometry dict instance as
+        ``ObjectSemantics.geometry`` so mesh tensors are authored in one place.
+        """
+        self.affordance.object_label = self.label
+        self.affordance.geometry = self.geometry
 
 
 # =============================================================================
@@ -212,7 +290,7 @@ class ObjectSemantics:
 class ActionCfg:
     """Configuration for atomic actions."""
 
-    control_part: str = "left_arm"
+    control_part: str = "arm"
     """Control part name for the action."""
 
     interpolation_type: str = "linear"
@@ -236,9 +314,12 @@ class AtomicAction(ABC):
     def __init__(
         self,
         motion_generator: MotionGenerator,
+        cfg: ActionCfg = ActionCfg(),
     ):
         self.motion_generator = motion_generator
+        self.cfg = cfg
         self.robot = motion_generator.robot
+        self.control_part = cfg.control_part
         self.device = self.robot.device
 
     @abstractmethod
