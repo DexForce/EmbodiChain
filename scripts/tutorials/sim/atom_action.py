@@ -179,50 +179,17 @@ def create_mug(sim: SimulationManager) -> RigidObject:
     return mug
 
 
-def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tensor):
-    n_envs = sim.num_envs
-    rest_arm_qpos = robot.get_qpos("arm")
-
-    approach_xpos = grasp_xpos.clone()
-    approach_xpos[:, 2, 3] += 0.04
-    _, qpos_approach = robot.compute_ik(
-        pose=approach_xpos, joint_seed=rest_arm_qpos, name="arm"
-    )
-    _, qpos_grasp = robot.compute_ik(
-        pose=grasp_xpos, joint_seed=qpos_approach, name="arm"
-    )
-    hand_open_qpos = torch.tensor([0.00, 0.00], dtype=torch.float32, device=sim.device)
-    hand_close_qpos = torch.tensor(
-        [0.025, 0.025], dtype=torch.float32, device=sim.device
-    )
-
-    arm_trajectory = torch.cat(
-        [
-            rest_arm_qpos[:, None, :],
-            qpos_approach[:, None, :],
-            qpos_grasp[:, None, :],
-            qpos_grasp[:, None, :],
-            qpos_approach[:, None, :],
-            rest_arm_qpos[:, None, :],
-        ],
-        dim=1,
-    )
-    hand_trajectory = torch.cat(
-        [
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-        ],
-        dim=1,
-    )
-    all_trajectory = torch.cat([arm_trajectory, hand_trajectory], dim=-1)
-    interp_trajectory = interpolate_with_distance(
-        trajectory=all_trajectory, interp_num=220, device=sim.device
-    )
-    return interp_trajectory
+def run_trajactory(
+    robot: Robot,
+    trajectory: torch.Tensor,
+    joint_ids: list[float],
+    sim: SimulationManager,
+):
+    n_waypoint = trajectory.shape[1]
+    for i in range(n_waypoint):
+        robot.set_qpos(trajectory[:, i, :], joint_ids=joint_ids)
+        sim.update(step=4)
+        time.sleep(1e-2)
 
 
 def main():
@@ -233,8 +200,7 @@ def main():
     and performs the press softbody task.
     """
     args = parse_arguments()
-    sim = initialize_simulation(args)
-
+    sim: SimulationManager = initialize_simulation(args)
     robot = create_robot(sim)
     mug = create_mug(sim)
 
@@ -258,6 +224,8 @@ def main():
         approach_direction=torch.tensor(
             [0.0, 0.0, -1.0], dtype=torch.float32, device=sim.device
         ),
+        pre_grasp_distance=0.15,
+        lift_height=0.15,
     )
     atom_engine = AtomicActionEngine(
         robot=robot,
@@ -296,11 +264,29 @@ def main():
         affordance=mug_grasp_affordance,
         entity=mug,  # in order to fetch object pose
     )
-    result = atom_engine.execute(
+    start_qpos = robot.get_qpos(name="arm")
+
+    target_grasp_pose = torch.tensor(
+        [
+            [-0.0539, -0.9985, -0.0022, 0.4489],
+            [-0.9977, 0.0540, -0.0401, -0.0030],
+            [0.0401, 0.0000, -0.9992, 0.1400],
+            [0.0000, 0.0000, 0.0000, 1.0000],
+        ],
+        dtype=torch.float32,
+        device=sim.device,
+    )
+
+    is_success, trajectory, joint_ids = atom_engine.execute(
+        start_qpos=start_qpos,
         action_name="pick_up",
-        target=mug_semantics,
+        # target=mug_semantics,
+        target=target_grasp_pose,
         control_part="arm",
     )
+    run_trajactory(robot, trajectory, joint_ids, sim)
+
+    input("Press Enter to exit...")
 
 
 if __name__ == "__main__":
