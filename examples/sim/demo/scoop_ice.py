@@ -305,7 +305,7 @@ def create_ice_cubes(sim: SimulationManager):
         cfg=VisualMaterialCfg(
             base_color=[1.0, 1.0, 1.0, 1.0],
             ior=1.31,
-            roughness=0.05,
+            roughness=0.45,
             material_type="BSDF",
         )
     )
