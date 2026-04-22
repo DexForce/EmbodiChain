@@ -211,20 +211,6 @@ def main():
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
 
-    # Already move to default actions in engine init, no need to register here
-    # register_action(
-    #     name="pick_up",
-    #     action_class=PickUpAction,
-    # )
-    # register_action(
-    #     name="place",
-    #     action_class=PlaceAction,
-    # )
-    # register_action(
-    #     name="move",
-    #     action_class=MoveAction,
-    # )
-
     pickup_cfg = PickUpActionCfg(
         hand_open_qpos=torch.tensor(
             [0.00, 0.00], dtype=torch.float32, device=sim.device
@@ -279,7 +265,7 @@ def main():
     )
     mug_grasp_affordance = AntipodalAffordance(
         object_label="mug",
-        force_reannotate=False,
+        force_reannotate=True,  # set to True if you want to re-annotate affordance even if the object has been seen before, which is useful when you have changed the grasp generator configuration and want to see the effect of new configuration, but it will take more time to annotate. So usually set it to False and only set it to True when you have changed the grasp generator configuration or you want to debug the annotation process.
         custom_config={
             "gripper_collision_cfg": gripper_collision_cfg,
             "generator_cfg": generator_cfg,

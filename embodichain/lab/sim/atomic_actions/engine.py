@@ -212,9 +212,6 @@ class AtomicActionEngine:
                         cfg = actions_cfg_dict[action_name]
                     else:
                         cfg = None
-                    print(
-                        f"====== Initializing action: {action_key} ====== with cfg: {cfg}"
-                    )
                     instance = action_class(
                         motion_generator=self.motion_generator, cfg=cfg
                     )
@@ -264,7 +261,7 @@ class AtomicActionEngine:
         target: Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]],
         control_part: Optional[str] = None,
         **kwargs,
-    ) -> PlanResult:
+    ) -> tuple[bool, torch.Tensor, list[float]]:
         """Execute an atomic action.
 
         Args:
@@ -286,8 +283,10 @@ class AtomicActionEngine:
             **kwargs: Additional action parameters
 
         Returns:
-            PlanResult with trajectory (positions, velocities, accelerations),
-            end-effector poses (xpos_list), and success status.
+            tuple[bool, torch.Tensor, list[float]]:
+            is_success,
+            trajectory of shape (n_envs, n_waypoints, dof),
+            joint_ids corresponding to trajectory
         """
         # Resolve action
         if control_part:
