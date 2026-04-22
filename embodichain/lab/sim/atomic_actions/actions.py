@@ -166,7 +166,104 @@ class ReachAction(AtomicAction):
 
 
 @configclass
-class PickUpActionCfg(ActionCfg):
+class MoveActionCfg(ActionCfg):
+    sample_interval: int = 50
+
+
+class MoveAction(AtomicAction):
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: MoveActionCfg | None = None,
+    ):
+        super().__init__(motion_generator)
+        self.cfg = cfg if cfg is not None else MoveActionCfg()
+
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.dof = len(self.arm_joint_ids)
+
+    def execute(
+        self,
+        target: Union[ObjectSemantics, torch.Tensor],
+        start_qpos: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        """execute pick up action
+
+        Args:
+            target (ObjectSemantics): object semantics containing grasp affordance and entity information
+            start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.
+
+        Returns:
+            tuple[bool, torch.Tensor, list[float]]:
+            is_success,
+            trajectory of shape (n_envs, n_waypoints, dof),
+            joint_ids corresponding to trajectory
+        """
+
+        if isinstance(target, ObjectSemantics):
+            # TODO: place semantics
+            logger.log_error(
+                "PlaceAction currently does not support ObjectSemantics target. Please provide target pose as torch.Tensor of shape (4, 4) or (n_envs, 4, 4)",
+                NotImplementedError,
+            )
+        elif isinstance(target, torch.Tensor):
+            if target.shape == (4, 4):
+                target = target.unsqueeze(0).repeat(self.n_envs, 1, 1)  # (n_envs, 4, 4)
+            if target.shape != (self.n_envs, 4, 4):
+                logger.log_error(
+                    f"Target tensor must have shape (4, 4) or ({self.n_envs}, 4, 4), but got {target.shape}",
+                    ValueError,
+                )
+            is_success = True
+            move_xpos = target
+        else:
+            logger.log_error(
+                "Target must be either ObjectSemantics or torch.Tensor of shape (4, 4) or (n_envs, 4, 4)",
+                TypeError,
+            )
+
+        # TODO: warning and fallback if no valid grasp pose found
+        if not is_success:
+            logger.log_warning(
+                "Failed to resolve grasp pose, using default approach pose"
+            )
+            return False, torch.empty(0), self.arm_joint_ids
+
+        # TODO: passing options from arguments
+        options = MotionGenOptions(
+            start_qpos=start_qpos[0],
+            control_part=self.cfg.control_part,
+            is_interpolate=True,
+            is_linear=False,
+            interpolate_position_step=0.001,
+            plan_opts=ToppraPlanOptions(
+                sample_interval=self.cfg.sample_interval,
+            ),
+        )
+
+        trajectory = torch.zeros(
+            size=(self.n_envs, self.cfg.sample_interval, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        for i in range(self.n_envs):
+            target_states = [
+                PlanState(xpos=move_xpos[i], move_type=MoveType.EEF_MOVE),
+            ]
+            options.start_qpos = start_qpos[i]
+            result = self.plan_trajectory(target_states, options)
+            trajectory[i, :, :] = result.positions
+        return True, trajectory, self.arm_joint_ids
+
+    def validate(self, target, start_qpos=None, **kwargs):
+        # TODO: implement proper validation logic for pick up action
+        return True
+
+
+@configclass
+class PickUpActionCfg(MoveActionCfg):
     hand_open_qpos: torch.Tensor | None = None
     hand_close_qpos: torch.Tensor | None = None
     hand_control_part: str = "hand"
@@ -177,14 +274,15 @@ class PickUpActionCfg(ActionCfg):
     hand_interp_steps: int = 5
 
 
-class PickUpAction(AtomicAction):
+class PickUpAction(MoveAction):
     def __init__(
         self,
         motion_generator: MotionGenerator,
         cfg: PickUpActionCfg | None = None,
     ):
-        super().__init__(motion_generator)
-        self.cfg = cfg if cfg is not None else PickUpActionCfg()
+        cfg = cfg if cfg is not None else PickUpActionCfg()
+        super().__init__(motion_generator, cfg)
+        self.cfg = cfg
         self.approach_direction = self.cfg.approach_direction.to(self.device)
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PickUpActionCfg")
@@ -193,8 +291,6 @@ class PickUpAction(AtomicAction):
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
         self.arm_dof = len(self.arm_joint_ids)
@@ -359,9 +455,6 @@ class PickUpAction(AtomicAction):
         )
         return True, trajectory, self.joint_ids
 
-    def _pack_trajectory(self):
-        pass
-
     def _resolve_grasp_pose(
         self, semantics: ObjectSemantics
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -397,7 +490,7 @@ class PickUpAction(AtomicAction):
 
 
 @configclass
-class PlaceActionCfg(ActionCfg):
+class PlaceActionCfg(MoveActionCfg):
     hand_open_qpos: torch.Tensor | None = None
     hand_close_qpos: torch.Tensor | None = None
     hand_control_part: str = "hand"
@@ -406,14 +499,15 @@ class PlaceActionCfg(ActionCfg):
     hand_interp_steps: int = 5
 
 
-class PlaceAction(AtomicAction):
+class PlaceAction(MoveAction):
     def __init__(
         self,
         motion_generator: MotionGenerator,
         cfg: PlaceActionCfg | None = None,
     ):
-        super().__init__(motion_generator)
-        self.cfg = cfg if cfg is not None else PlaceActionCfg()
+        cfg = cfg if cfg is not None else PlaceActionCfg()
+        super().__init__(motion_generator, cfg)
+        self.cfg = cfg
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PlaceActionCfg")
         if self.cfg.hand_close_qpos is None:
@@ -421,8 +515,6 @@ class PlaceAction(AtomicAction):
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
         self.arm_dof = len(self.arm_joint_ids)
@@ -561,8 +653,8 @@ class PlaceAction(AtomicAction):
             options.start_qpos = reach_qpos[i]
             result = self.plan_trajectory(target_states, options)
             lift_trajectory[i, :, : self.arm_dof] = result.positions
-        # padding hand close qpos to lift trajectory
-        lift_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
+        # padding hand open qpos to lift trajectory
+        lift_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
 
         # concatenate trajectories
         trajectory = torch.cat(
@@ -719,133 +811,6 @@ class GraspAction(AtomicAction):
         grasp_offset[2, 3] = bbox[2] / 2 + 0.02  # Slightly above object
 
         return object_pose @ grasp_offset
-
-
-# =============================================================================
-# Move Action
-# =============================================================================
-
-
-class MoveAction(AtomicAction):
-    """Atomic action for moving to a target position."""
-
-    def __init__(
-        self,
-        motion_generator: "MotionGenerator",
-        robot: "Robot",
-        control_part: str,
-        device: torch.device = torch.device("cuda"),
-        move_type: str = "cartesian",  # "cartesian", "joint"
-        interpolation: str = "linear",  # "linear", "cubic", "toppra"
-    ):
-        super().__init__(motion_generator)
-        self.move_type = move_type
-        self.interpolation = interpolation
-
-    def execute(
-        self,
-        target: Union[torch.Tensor, ObjectSemantics],
-        start_qpos: Optional[torch.Tensor] = None,
-        offset: Optional[torch.Tensor] = None,
-        velocity_limit: Optional[float] = None,
-        acceleration_limit: Optional[float] = None,
-    ) -> PlanResult:
-        """Execute move action.
-
-        Args:
-            target: Target pose [4, 4] or ObjectSemantics
-            start_qpos: Starting joint configuration
-            offset: Optional offset from target
-            velocity_limit: Max velocity for trajectory
-            acceleration_limit: Max acceleration for trajectory
-        """
-        # Resolve target
-        if isinstance(target, ObjectSemantics):
-            target_pose = self._get_object_pose(target.label)
-        else:
-            target_pose = target
-
-        # Apply offset if specified
-        if offset is not None:
-            target_pose = self._apply_offset(target_pose, offset)
-
-        # Get start state
-        if start_qpos is None:
-            start_qpos = self._get_current_qpos()
-
-        # Create plan states based on move type
-        if self.move_type == "cartesian":
-            target_states = [
-                PlanState(qpos=start_qpos, move_type=MoveType.JOINT_MOVE),
-                PlanState(xpos=target_pose, move_type=MoveType.EEF_MOVE),
-            ]
-            is_linear = self.interpolation == "linear"
-        else:  # joint space
-            target_qpos = self._ik_solve(target_pose, start_qpos)
-            target_states = [
-                PlanState(qpos=start_qpos, move_type=MoveType.JOINT_MOVE),
-                PlanState(qpos=target_qpos, move_type=MoveType.JOINT_MOVE),
-            ]
-            is_linear = False
-
-        # Configure motion generation
-        options = MotionGenOptions(
-            control_part=self.control_part,
-            is_interpolate=True,
-            is_linear=is_linear,
-            interpolate_position_step=0.002,
-            plan_opts=ToppraPlanOptions(
-                sample_interval=kwargs.get("sample_interval", 30),
-                velocity_limit=velocity_limit,
-                acceleration_limit=acceleration_limit,
-            ),
-        )
-
-        result = self.plan_trajectory(target_states, options)
-
-        # Return PlanResult directly - it contains all trajectory data
-        return result
-
-    def validate(
-        self,
-        target: Union[torch.Tensor, ObjectSemantics],
-        start_qpos: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> bool:
-        """Validate if move action is feasible."""
-        try:
-            if isinstance(target, ObjectSemantics):
-                target_pose = self._get_object_pose(target.label)
-            else:
-                target_pose = target
-
-            qpos_seed = (
-                start_qpos if start_qpos is not None else self._get_current_qpos()
-            )
-
-            if self.move_type == "joint":
-                # For joint space moves, we need IK solvability
-                self._ik_solve(target_pose, qpos_seed)
-            else:
-                # For cartesian moves, just check IK
-                success, _ = self.robot.compute_ik(
-                    pose=target_pose.unsqueeze(0),
-                    qpos_seed=qpos_seed.unsqueeze(0),
-                    name=self.control_part,
-                )
-                if not success.all():
-                    return False
-
-            return True
-        except Exception:
-            return False
-
-    def _get_object_pose(self, label: str) -> torch.Tensor:
-        """Get current pose of object by label."""
-        raise NotImplementedError(
-            "_get_object_pose must be implemented by subclass or "
-            "provided with environment-specific object management"
-        )
 
 
 # =============================================================================

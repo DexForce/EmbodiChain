@@ -62,6 +62,8 @@ from embodichain.lab.sim.atomic_actions.actions import (
     PickUpAction,
     PlaceActionCfg,
     PlaceAction,
+    MoveActionCfg,
+    MoveAction,
 )
 
 
@@ -217,6 +219,10 @@ def main():
         name="place",
         action_class=PlaceAction,
     )
+    register_action(
+        name="move",
+        action_class=MoveAction,
+    )
     pickup_cfg = PickUpActionCfg(
         hand_open_qpos=torch.tensor(
             [0.00, 0.00], dtype=torch.float32, device=sim.device
@@ -245,11 +251,15 @@ def main():
         lift_height=0.15,
     )
 
+    move_cfg = MoveActionCfg(
+        control_part="arm",
+    )
+
     atom_engine = AtomicActionEngine(
         robot=robot,
         motion_generator=motion_gen,
         device=sim.device,
-        actions_cfg_dict={"pick_up": pickup_cfg, "place": place_cfg},
+        actions_cfg_dict={"pick_up": pickup_cfg, "place": place_cfg, "move": move_cfg},
     )
 
     sim.init_gpu_physics()
@@ -312,9 +322,19 @@ def main():
         target=place_xpos,
         control_part="arm",
     )
+    rest_xpos = target_grasp_xpos.clone()
+    rest_xpos[:3, 3] = torch.tensor([0.5, 0.0, 0.5], device=sim.device)
+    move_start_qpos = place_trajectory[:, -1, arm_joint_ids]
+    is_success, move_trajectory, arm_joint_ids = atom_engine.execute(
+        start_qpos=move_start_qpos,
+        action_name="move",
+        target=rest_xpos,
+        control_part="arm",
+    )
 
     run_trajactory(robot, pick_trajectory, joint_ids, sim)
     run_trajactory(robot, place_trajectory, joint_ids, sim)
+    run_trajactory(robot, move_trajectory, arm_joint_ids, sim)
 
     input("Press Enter to exit...")
 

@@ -236,7 +236,7 @@ class AtomicActionEngine:
         # Register action classes for dynamic instantiation
         for action_name, action_class in _global_action_registry.items():
             # Don't override default actions
-            if action_name not in ["reach", "grasp", "move", "release"]:
+            if action_name not in ["reach", "grasp", "release"]:
                 for part in control_parts:
                     action_key = f"{action_name}_{part}"
                     if action_key not in self._actions:
