@@ -211,18 +211,20 @@ def main():
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
 
-    register_action(
-        name="pick_up",
-        action_class=PickUpAction,
-    )
-    register_action(
-        name="place",
-        action_class=PlaceAction,
-    )
-    register_action(
-        name="move",
-        action_class=MoveAction,
-    )
+    # Already move to default actions in engine init, no need to register here
+    # register_action(
+    #     name="pick_up",
+    #     action_class=PickUpAction,
+    # )
+    # register_action(
+    #     name="place",
+    #     action_class=PlaceAction,
+    # )
+    # register_action(
+    #     name="move",
+    #     action_class=MoveAction,
+    # )
+
     pickup_cfg = PickUpActionCfg(
         hand_open_qpos=torch.tensor(
             [0.00, 0.00], dtype=torch.float32, device=sim.device
@@ -309,7 +311,7 @@ def main():
         start_qpos=start_qpos,
         action_name="pick_up",
         target=mug_semantics,
-        # target=target_grasp_xpos,
+        # target=target_grasp_xpos,   # can directly specify target grasp pose without semantics, but then no affordance will be used and no grasp generator will be called, which is not recommended
         control_part="arm",
     )
     arm_joint_ids = robot.get_joint_ids("arm")

@@ -194,49 +194,36 @@ class AtomicActionEngine:
         actions_cfg_dict: Optional[Dict[str, ActionCfg]] = dict(),
     ):
         """Initialize default atomic action instances."""
-        from .actions import ReachAction, GraspAction, MoveAction, ReleaseAction
+        from .actions import MoveAction, PickUpAction, PlaceAction
 
         control_parts = getattr(self.robot, "control_parts", None) or ["default"]
+        default_action_dict = {
+            "move": MoveAction,
+            "pick_up": PickUpAction,
+            "place": PlaceAction,
+        }
 
-        # for part in control_parts:
-        #     self.register_action(
-        #         f"reach_{part}",
-        #         ReachAction(
-        #             motion_generator=self.motion_generator,
-        #             robot=self.robot,
-        #             control_part=part,
-        #             device=self.device,
-        #         ),
-        #     )
-        #     self.register_action(
-        #         f"grasp_{part}",
-        #         GraspAction(
-        #             motion_generator=self.motion_generator,
-        #             robot=self.robot,
-        #             control_part=part,
-        #             device=self.device,
-        #         ),
-        #     )
-        #     self.register_action(
-        #         f"move_{part}",
-        #         MoveAction(
-        #             motion_generator=self.motion_generator,
-        #             robot=self.robot,
-        #             control_part=part,
-        #             device=self.device,
-        #         ),
-        #     )
-        #     self.register_action(
-        #         f"release_{part}",
-        #         ReleaseAction(
-        #             motion_generator=self.motion_generator,
-        #         ),
-        #     )
+        # set default actions for each control part
+        for part in control_parts:
+            for action_name, action_class in default_action_dict.items():
+                action_key = f"{action_name}_{part}"
+                if action_key not in self._actions:
+                    if action_name in actions_cfg_dict:
+                        cfg = actions_cfg_dict[action_name]
+                    else:
+                        cfg = None
+                    print(
+                        f"====== Initializing action: {action_key} ====== with cfg: {cfg}"
+                    )
+                    instance = action_class(
+                        motion_generator=self.motion_generator, cfg=cfg
+                    )
+                    self._actions[action_key] = instance
 
-        # Register action classes for dynamic instantiation
+        # Register user defined action classes for dynamic instantiation
         for action_name, action_class in _global_action_registry.items():
             # Don't override default actions
-            if action_name not in ["reach", "grasp", "release"]:
+            if action_name not in list(default_action_dict.keys()):
                 for part in control_parts:
                     action_key = f"{action_name}_{part}"
                     if action_key not in self._actions:
