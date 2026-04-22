@@ -174,6 +174,7 @@ class Camera(BaseSensor):
                 self._entities[i] = view
 
         else:
+            # TODO: To be removed in the future.
             self._grid_size = math.ceil(math.sqrt(num_instances))
             frame_width = self._grid_size * config.width
             frame_height = self._grid_size * config.height

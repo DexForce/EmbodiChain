@@ -155,6 +155,7 @@ def is_rt_enabled() -> bool:
     return (
         config.renderer == dexsim.types.Renderer.FASTRT
         or config.renderer == dexsim.types.Renderer.HYBRID
+        or config.renderer == dexsim.types.Renderer.OFFLINERT
     )
 
 

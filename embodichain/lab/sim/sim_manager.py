@@ -184,11 +184,6 @@ class SimulationManager:
         # Mark as initialized
         self.instance_id = instance_id
 
-        if not sim_config.render_cfg.is_legacy and instance_id > 0:
-            logger.log_error(
-                f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
-            )
-
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
