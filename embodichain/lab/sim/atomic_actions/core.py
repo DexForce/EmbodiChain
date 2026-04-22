@@ -316,6 +316,12 @@ class AtomicAction(ABC):
         motion_generator: MotionGenerator,
         cfg: ActionCfg = ActionCfg(),
     ):
+        """
+        Initialize the atomic action.
+        Args:
+            motion_generator: The motion generator instance to use for planning.
+            cfg: Configuration for the action.
+        """
         self.motion_generator = motion_generator
         self.cfg = cfg
         self.robot = motion_generator.robot

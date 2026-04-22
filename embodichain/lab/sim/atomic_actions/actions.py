@@ -44,8 +44,15 @@ class MoveAction(AtomicAction):
         motion_generator: MotionGenerator,
         cfg: MoveActionCfg | None = None,
     ):
-        super().__init__(motion_generator)
-        self.cfg = cfg if cfg is not None else MoveActionCfg()
+        """
+        Initialize the atomic action.
+        Args:
+            motion_generator: The motion generator instance to use for planning.
+            cfg: Configuration for the action.
+        """
+        super().__init__(
+            motion_generator, cfg=cfg if cfg is not None else MoveActionCfg()
+        )
 
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
@@ -235,11 +242,22 @@ class PickUpActionCfg(MoveActionCfg):
     """[hand_dof,] of float. Joint positions for closed hand state. Must be specified for PickUpAction."""
 
     hand_control_part: str = "hand"
+    """Name of the robot part that controls the hand joints. Must correspond to a valid control part in the robot definition."""
+
     pre_grasp_distance: float = 0.15
+    """Distance to offset back from the grasp pose along the approach direction to get the pre-grasp pose. Should be large enough to avoid collision during approach, but not too large to cause unnecessary detour."""
+
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
+    """Direction from which the gripper approaches the object for grasping, expressed in the object local frame. Should be a unit vector. Default is [0, 0, -1], which means approaching from above along the negative z-axis."""
+
     lift_height: float = 0.1
+    """Height to lift the object after grasping, expressed in meters. Should be large enough to avoid collision with the environment, but not too large to cause unnecessary motion."""
+
     sample_interval: int = 80
+    """Number of waypoints to sample for the entire pick up motion trajectory, including approach, hand closing, and lifting. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
+
     hand_interp_steps: int = 5
+    """Number of waypoints to interpolate for the hand closing motion. Should be at least 2 to ensure smooth interpolation between open and closed hand states, but not too large to cause unnecessary computation overhead."""
 
 
 class PickUpAction(MoveAction):
@@ -248,8 +266,15 @@ class PickUpAction(MoveAction):
         motion_generator: MotionGenerator,
         cfg: PickUpActionCfg | None = None,
     ):
-        cfg = cfg if cfg is not None else PickUpActionCfg()
-        super().__init__(motion_generator, cfg)
+        """
+        Initialize the atomic action.
+        Args:
+            motion_generator: The motion generator instance to use for planning.
+            cfg: Configuration for the action.
+        """
+        super().__init__(
+            motion_generator, cfg=cfg if cfg is not None else PickUpActionCfg()
+        )
         self.cfg = cfg
         self.approach_direction = self.cfg.approach_direction.to(self.device)
         if self.cfg.hand_open_qpos is None:
@@ -363,8 +388,7 @@ class PickUpAction(MoveAction):
         # lift_xpos = self._compute_lift_xpos(grasp_xpos)
         lift_xpos = self._apply_offset(
             pose=grasp_xpos,
-            offset=torch.tensor([0, 0, self.cfg.lift_height], device=self.device)
-            * self.cfg.lift_height,
+            offset=torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
         )
         target_states_list = [
             [
@@ -413,11 +437,22 @@ class PickUpAction(MoveAction):
 @configclass
 class PlaceActionCfg(MoveActionCfg):
     hand_open_qpos: torch.Tensor | None = None
+    """[hand_dof,] of float. Joint positions for open hand state. Must be specified for PickUpAction."""
+
     hand_close_qpos: torch.Tensor | None = None
+    """[hand_dof,] of float. Joint positions for closed hand state. Must be specified for PickUpAction."""
+
     hand_control_part: str = "hand"
+    """Name of the robot part that controls the hand joints. Must correspond to a valid control part in the robot definition."""
+
     lift_height: float = 0.1
+    """Height to lift the object after grasping, expressed in meters. Should be large enough to avoid collision with the environment, but not too large to cause unnecessary motion."""
+
     sample_interval: int = 80
+    """Number of waypoints to sample for the entire pick up motion trajectory, including approach, hand closing, and lifting. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
+
     hand_interp_steps: int = 5
+    """Number of waypoints to interpolate for the hand closing motion. Should be at least 2 to ensure smooth interpolation between open and closed hand states, but not too large to cause unnecessary computation overhead."""
 
 
 class PlaceAction(MoveAction):
@@ -426,8 +461,15 @@ class PlaceAction(MoveAction):
         motion_generator: MotionGenerator,
         cfg: PlaceActionCfg | None = None,
     ):
-        cfg = cfg if cfg is not None else PlaceActionCfg()
-        super().__init__(motion_generator, cfg)
+        """
+        Initialize the atomic action.
+        Args:
+            motion_generator: The motion generator instance to use for planning.
+            cfg: Configuration for the action.
+        """
+        super().__init__(
+            motion_generator, cfg=cfg if cfg is not None else PlaceActionCfg()
+        )
         self.cfg = cfg
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PlaceActionCfg")
@@ -487,8 +529,7 @@ class PlaceAction(MoveAction):
         )
         lift_xpos = self._apply_offset(
             pose=place_xpos,
-            offset=torch.tensor([0, 0, self.cfg.lift_height], device=self.device)
-            * self.cfg.lift_height,
+            offset=torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
         )
         target_states_list = [
             [
