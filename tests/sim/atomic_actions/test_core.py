@@ -14,316 +14,340 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
-import pytest
-from embodichain.lab.sim.planners import PlanResult
-from embodichain.lab.sim.atomic_actions.engine import SemanticAnalyzer
+from __future__ import annotations
 
-from embodichain.lab.sim.atomic_actions import (
+import pytest
+import torch
+
+import embodichain.lab.sim.atomic_actions.core as core_module
+
+from embodichain.lab.sim.atomic_actions.core import (
+    ActionCfg,
     Affordance,
-    GraspPose,
+    AntipodalAffordance,
+    AtomicAction,
     InteractionPoints,
     ObjectSemantics,
-    ActionCfg,
-    AtomicActionEngine,
-    register_action,
-    unregister_action,
-    get_registered_actions,
+)
+from embodichain.lab.sim.planners import (
+    MotionGenOptions,
+    MoveType,
+    PlanResult,
+    PlanState,
 )
 
 
-class TestAffordance:
-    """Test affordance base class and subclasses."""
+class DummyRobot:
+    def __init__(self) -> None:
+        self.device = torch.device("cpu")
+        self.qpos = torch.tensor([[0.1, 0.2, 0.3]], dtype=torch.float32)
+        self.fail_ik = False
+        self.last_ik_call: dict | None = None
+        self.last_fk_call: dict | None = None
 
-    def test_affordance_base(self):
-        """Test base affordance class."""
-        aff = Affordance(object_label="test_object")
-        assert aff.object_label == "test_object"
-        assert aff.geometry == {}
-        assert aff.custom_config == {}
-        assert aff.get_batch_size() == 1
+    def get_qpos(self) -> torch.Tensor:
+        return self.qpos.clone()
 
-    def test_affordance_with_mesh_and_custom_config(self):
-        """Test affordance mesh tensor payload and custom config."""
-        vertices = torch.tensor(
-            [
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-            ]
+    def compute_ik(
+        self,
+        pose: torch.Tensor,
+        qpos_seed: torch.Tensor,
+        name: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self.last_ik_call = {
+            "pose": pose.clone(),
+            "qpos_seed": qpos_seed.clone(),
+            "name": name,
+        }
+        success = torch.tensor([not self.fail_ik], dtype=torch.bool, device=self.device)
+        if self.fail_ik:
+            return success, torch.zeros_like(qpos_seed)
+        return success, qpos_seed + 1.0
+
+    def compute_fk(
+        self,
+        qpos: torch.Tensor,
+        name: str,
+        to_matrix: bool,
+    ) -> torch.Tensor:
+        self.last_fk_call = {
+            "qpos": qpos.clone(),
+            "name": name,
+            "to_matrix": to_matrix,
+        }
+        batch_size = qpos.shape[0]
+        poses = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(batch_size, 1, 1)
+        poses[:, 0, 3] = qpos.sum(dim=-1)
+        return poses
+
+
+class DummyMotionGenerator:
+    def __init__(self) -> None:
+        self.robot = DummyRobot()
+        self.last_target_states: list[PlanState] | None = None
+        self.last_options: MotionGenOptions | None = None
+
+    def generate(
+        self,
+        target_states: list[PlanState],
+        options: MotionGenOptions,
+    ) -> PlanResult:
+        self.last_target_states = target_states
+        self.last_options = options
+        positions = torch.tensor(
+            [[0.0, 0.1, 0.2], [0.3, 0.4, 0.5]], dtype=torch.float32
         )
-        triangles = torch.tensor([[0, 1, 2]])
-        aff = Affordance(
+        return PlanResult(success=True, positions=positions)
+
+
+class DummyAtomicAction(AtomicAction):
+    def execute(
+        self,
+        target: torch.Tensor | ObjectSemantics,
+        start_qpos: torch.Tensor | None = None,
+        **kwargs,
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        return True, torch.empty(0), []
+
+    def validate(
+        self,
+        target: torch.Tensor | ObjectSemantics,
+        start_qpos: torch.Tensor | None = None,
+        **kwargs,
+    ) -> bool:
+        return True
+
+
+class DummyGraspGenerator:
+    instances: list["DummyGraspGenerator"] = []
+
+    def __init__(
+        self,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        cfg=None,
+        gripper_collision_cfg=None,
+    ) -> None:
+        self.vertices = vertices
+        self.triangles = triangles
+        self.cfg = cfg
+        self.gripper_collision_cfg = gripper_collision_cfg
+        self.device = vertices.device
+        self._hit_point_pairs: torch.Tensor | None = None
+        self.annotate_calls = 0
+        self.get_grasp_pose_calls: list[tuple[torch.Tensor, torch.Tensor]] = []
+        DummyGraspGenerator.instances.append(self)
+
+    def annotate(self) -> None:
+        self.annotate_calls += 1
+        self._hit_point_pairs = torch.ones(
+            (1, 2, 3), dtype=torch.float32, device=self.device
+        )
+
+    def get_grasp_poses(
+        self,
+        obj_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[bool, torch.Tensor, float]:
+        self.get_grasp_pose_calls.append((obj_pose.clone(), approach_direction.clone()))
+        if float(obj_pose[0, 3]) > 0.5:
+            return False, torch.eye(4, dtype=torch.float32, device=self.device), 0.0
+
+        grasp_pose = obj_pose.clone()
+        grasp_pose[2, 3] += 0.02
+        return True, grasp_pose, 0.04
+
+
+class TestAffordanceAndSemantics:
+    def test_affordance_mesh_properties_and_custom_config(self) -> None:
+        vertices = torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=torch.float32)
+        triangles = torch.tensor([[0, 1, 1]], dtype=torch.int64)
+        affordance = Affordance(
+            object_label="mug",
             geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
-            custom_config={"planner": "fast"},
         )
 
-        assert torch.allclose(aff.mesh_vertices, vertices)
-        assert torch.equal(aff.mesh_triangles, triangles)
-        assert aff.get_custom_config("planner") == "fast"
+        affordance.set_custom_config("score_threshold", 0.8)
 
-        aff.set_custom_config("approach_mode", "top_down")
-        assert aff.get_custom_config("approach_mode") == "top_down"
+        assert torch.equal(affordance.mesh_vertices, vertices)
+        assert torch.equal(affordance.mesh_triangles, triangles)
+        assert affordance.get_custom_config("score_threshold") == pytest.approx(0.8)
+        assert affordance.get_batch_size() == 1
 
-    def test_grasp_pose_default(self):
-        """Test GraspPose with default values."""
-        grasp = GraspPose(object_label="bottle")
-        assert grasp.object_label == "bottle"
-        assert grasp.poses.shape == (1, 4, 4)
-        assert grasp.grasp_types == ["default"]
-        assert grasp.get_batch_size() == 1
-
-    def test_grasp_pose_multiple(self):
-        """Test GraspPose with multiple poses."""
-        poses = torch.stack(
-            [
-                torch.eye(4),
-                torch.eye(4),
-                torch.eye(4),
-            ]
-        )
-        grasp = GraspPose(
-            object_label="bottle",
-            poses=poses,
-            grasp_types=["pinch", "power", "hook"],
-        )
-        assert grasp.get_batch_size() == 3
-
-        # Test get_grasp_by_type
-        pinch_pose = grasp.get_grasp_by_type("pinch")
-        assert pinch_pose is not None
-        assert torch.allclose(pinch_pose, torch.eye(4))
-
-        nonexistent = grasp.get_grasp_by_type("nonexistent")
-        assert nonexistent is None
-
-    def test_grasp_pose_best_grasp(self):
-        """Test get_best_grasp method."""
-        poses = torch.stack(
-            [
-                torch.eye(4),
-                torch.eye(4) * 2,
-            ]
-        )
-        confidence = torch.tensor([0.7, 0.9])
-        grasp = GraspPose(
-            poses=poses,
-            grasp_types=["low_conf", "high_conf"],
-            confidence_scores=confidence,
+    def test_affordance_mesh_properties_raise_on_invalid_types(self) -> None:
+        affordance = Affordance(
+            geometry={"mesh_vertices": [[0.0, 0.0, 0.0]], "mesh_triangles": [[0, 1, 2]]}
         )
 
-        best = grasp.get_best_grasp()
-        # Should return the second pose (higher confidence)
-        assert torch.allclose(best, poses[1])
+        with pytest.raises(TypeError):
+            _ = affordance.mesh_vertices
 
-    def test_interaction_points(self):
-        """Test InteractionPoints class."""
-        points = torch.tensor(
-            [
-                [0.1, 0.0, 0.0],
-                [0.0, 0.1, 0.0],
-                [0.0, 0.0, 0.1],
-            ]
-        )
-        normals = torch.tensor(
-            [
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        interaction = InteractionPoints(
-            object_label="cube",
-            points=points,
-            normals=normals,
-            point_types=["push", "poke", "touch"],
+        with pytest.raises(TypeError):
+            _ = affordance.mesh_triangles
+
+    def test_interaction_points_helpers(self) -> None:
+        interaction_points = InteractionPoints(
+            points=torch.tensor(
+                [[0.0, 0.0, 0.0], [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+                dtype=torch.float32,
+            ),
+            normals=torch.tensor(
+                [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=torch.float32,
+            ),
+            point_types=["push", "touch", "push"],
         )
 
-        assert interaction.get_batch_size() == 3
+        push_points = interaction_points.get_points_by_type("push")
 
-        # Test get_points_by_type
-        push_points = interaction.get_points_by_type("push")
         assert push_points is not None
-        assert torch.allclose(push_points, points[0:1])
+        assert push_points.shape == (2, 3)
+        assert interaction_points.get_batch_size() == 3
+        assert torch.allclose(
+            interaction_points.get_approach_direction(1),
+            torch.tensor([-1.0, 0.0, 0.0], dtype=torch.float32),
+        )
 
-        nonexistent = interaction.get_points_by_type("nonexistent")
-        assert nonexistent is None
+        no_normal_points = InteractionPoints(
+            points=torch.zeros((1, 3), dtype=torch.float32)
+        )
+        assert torch.allclose(
+            no_normal_points.get_approach_direction(0),
+            torch.tensor([0.0, 0.0, 1.0], dtype=torch.float32),
+        )
 
-        # Test get_approach_direction
-        approach = interaction.get_approach_direction(0)
-        assert torch.allclose(approach, torch.tensor([-1.0, 0.0, 0.0]))
+    def test_object_semantics_binds_label_and_geometry_to_affordance(self) -> None:
+        geometry = {"mesh_vertices": torch.zeros((4, 3), dtype=torch.float32)}
+        affordance = Affordance()
 
-    def test_interaction_points_no_normals(self):
-        """Test InteractionPoints without normals."""
-        points = torch.tensor([[0.1, 0.2, 0.3]])
-        interaction = InteractionPoints(points=points)
-
-        # Default approach direction should be +z
-        approach = interaction.get_approach_direction(0)
-        assert torch.allclose(approach, torch.tensor([0.0, 0.0, 1.0]))
-
-
-class TestObjectSemantics:
-    """Test ObjectSemantics dataclass."""
-
-    def test_basic_creation(self):
-        """Test basic ObjectSemantics creation."""
-        affordance = GraspPose()
         semantics = ObjectSemantics(
-            label="bottle",
+            label="cup",
             affordance=affordance,
-            geometry={"bounding_box": [0.1, 0.2, 0.3]},
-            properties={"mass": 0.5, "friction": 0.8},
-            uid="bottle_001",
+            geometry=geometry,
+            properties={"mass": 0.1},
         )
 
-        assert semantics.label == "bottle"
-        assert semantics.uid == "bottle_001"
-        assert semantics.affordance.object_label == "bottle"
-        assert semantics.affordance.geometry is semantics.geometry
-        assert semantics.properties["mass"] == 0.5
+        assert semantics.affordance.object_label == "cup"
+        assert semantics.affordance.geometry is geometry
+        assert semantics.properties["mass"] == pytest.approx(0.1)
 
-    def test_no_uid(self):
-        """Test ObjectSemantics without UID."""
-        affordance = GraspPose()
-        semantics = ObjectSemantics(
-            label="apple",
-            affordance=affordance,
-            geometry={},
-            properties={},
+    def test_antipodal_affordance_requires_mesh_geometry(self) -> None:
+        affordance = AntipodalAffordance(object_label="mug")
+
+        with pytest.raises(RuntimeError):
+            affordance.get_best_grasp_poses(
+                torch.eye(4, dtype=torch.float32).unsqueeze(0)
+            )
+
+    def test_antipodal_affordance_get_best_grasp_poses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        DummyGraspGenerator.instances.clear()
+        monkeypatch.setattr(core_module, "GraspGenerator", DummyGraspGenerator)
+
+        vertices = torch.tensor(
+            [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            dtype=torch.float32,
         )
-
-        assert semantics.uid is None
-
-
-class TestActionCfg:
-    """Test ActionCfg dataclass."""
-
-    def test_defaults(self):
-        """Test ActionCfg default values."""
-        cfg = ActionCfg()
-        assert cfg.control_part == "left_arm"
-        assert cfg.interpolation_type == "linear"
-        assert cfg.velocity_limit is None
-        assert cfg.acceleration_limit is None
-
-    def test_custom_values(self):
-        """Test ActionCfg with custom values."""
-        cfg = ActionCfg(
-            control_part="right_arm",
-            interpolation_type="toppra",
-            velocity_limit=0.5,
-            acceleration_limit=1.0,
-        )
-        assert cfg.control_part == "right_arm"
-        assert cfg.interpolation_type == "toppra"
-        assert cfg.velocity_limit == 0.5
-        assert cfg.acceleration_limit == 1.0
-
-
-class TestActionRegistry:
-    """Test action registry functions."""
-
-    def test_register_and_unregister(self):
-        """Test registering and unregistering actions."""
-        from embodichain.lab.sim.atomic_actions import AtomicAction
-
-        class TestAction(AtomicAction):
-            def execute(self, target, **kwargs):
-                return PlanResult(success=True)
-
-            def validate(self, target, **kwargs):
-                return True
-
-        # Register
-        register_action("test", TestAction)
-        assert "test" in get_registered_actions()
-
-        # Unregister
-        unregister_action("test")
-        assert "test" not in get_registered_actions()
-
-    def test_get_registered_actions_copy(self):
-        """Test that get_registered_actions returns a copy."""
-        from embodichain.lab.sim.atomic_actions import AtomicAction
-
-        initial = get_registered_actions()
-
-        class DummyAction(AtomicAction):
-            def execute(self, target, **kwargs):
-                return PlanResult(success=True)
-
-            def validate(self, target, **kwargs):
-                return True
-
-        register_action("dummy", DummyAction)
-
-        # Original should not contain the new action
-        assert "dummy" not in initial
-
-        # Cleanup
-        unregister_action("dummy")
-
-
-class TestAtomicActionEngineConvenienceTarget:
-    """Test convenience target input for execute/validate."""
-
-    class _DummyAction:
-        def __init__(self):
-            self.last_target = None
-
-        def execute(self, target, **kwargs):
-            self.last_target = target
-            return PlanResult(success=True)
-
-        def validate(self, target, **kwargs):
-            self.last_target = target
-            return True
-
-    def _build_engine(self):
-        engine = AtomicActionEngine.__new__(AtomicActionEngine)
-        engine._semantic_analyzer = SemanticAnalyzer()
-        engine._actions = {"test": self._DummyAction()}
-        return engine
-
-    def test_execute_with_dict_semantic_target(self):
-        """Test execute supports dict target with geometry/custom_config."""
-        engine = self._build_engine()
-        mesh_vertices = torch.zeros(3, 3)
-        mesh_triangles = torch.tensor([[0, 1, 2]])
-
-        result = engine.execute(
-            "test",
-            {
-                "label": "cup",
-                "geometry": {
-                    "bounding_box": [0.2, 0.2, 0.1],
-                    "mesh_vertices": mesh_vertices,
-                    "mesh_triangles": mesh_triangles,
-                },
-                "custom_config": {"mode": "stable"},
-                "properties": {"mass": 0.3},
-                "uid": "cup_001",
-                "use_cache": False,
+        triangles = torch.tensor([[0, 1, 2]], dtype=torch.int64)
+        affordance = AntipodalAffordance(
+            object_label="mug",
+            geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
+            custom_config={
+                "generator_cfg": object(),
+                "gripper_collision_cfg": object(),
             },
         )
+        object_poses = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(2, 1, 1)
+        object_poses[1, 0, 3] = 1.0
+
+        is_success, grasp_xpos, open_length = affordance.get_best_grasp_poses(
+            object_poses
+        )
+        generator = DummyGraspGenerator.instances[-1]
+
+        assert generator.annotate_calls == 1
+        assert torch.equal(is_success, torch.tensor([True, False], dtype=torch.bool))
+        assert torch.allclose(
+            grasp_xpos[0, :3, 3],
+            torch.tensor([0.0, 0.0, 0.02], dtype=torch.float32),
+        )
+        assert torch.allclose(grasp_xpos[1], torch.eye(4, dtype=torch.float32))
+        assert open_length.tolist() == pytest.approx([0.04, 0.0])
+
+
+class TestAtomicActionHelpers:
+    def setup_method(self) -> None:
+        self.motion_generator = DummyMotionGenerator()
+        self.action = DummyAtomicAction(
+            motion_generator=self.motion_generator,
+            cfg=ActionCfg(control_part="arm"),
+        )
+
+    def test_ik_solve_uses_control_part_and_seed(self) -> None:
+        target_pose = torch.eye(4, dtype=torch.float32)
+        qpos_seed = torch.tensor([0.5, 0.6, 0.7], dtype=torch.float32)
+
+        result = self.action._ik_solve(target_pose, qpos_seed)
+
+        assert torch.allclose(result, qpos_seed + 1.0)
+        assert self.motion_generator.robot.last_ik_call is not None
+        assert self.motion_generator.robot.last_ik_call["name"] == "arm"
+        assert torch.allclose(
+            self.motion_generator.robot.last_ik_call["qpos_seed"],
+            qpos_seed.unsqueeze(0),
+        )
+
+    def test_ik_solve_raises_when_solver_fails(self) -> None:
+        self.motion_generator.robot.fail_ik = True
+
+        with pytest.raises(RuntimeError):
+            self.action._ik_solve(torch.eye(4, dtype=torch.float32))
+
+    def test_fk_compute_handles_single_and_batched_qpos(self) -> None:
+        single_qpos = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+        batched_qpos = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=torch.float32
+        )
+
+        single_pose = self.action._fk_compute(single_qpos)
+        batched_pose = self.action._fk_compute(batched_qpos)
+
+        assert single_pose.shape == (4, 4)
+        assert batched_pose.shape == (2, 4, 4)
+        assert single_pose[0, 3] == pytest.approx(6.0)
+        assert torch.allclose(
+            batched_pose[:, 0, 3],
+            torch.tensor([1.0, 1.0], dtype=torch.float32),
+        )
+        assert self.motion_generator.robot.last_fk_call is not None
+        assert self.motion_generator.robot.last_fk_call["to_matrix"] is True
+        assert self.motion_generator.robot.last_fk_call["name"] == "arm"
+
+    def test_apply_offset_updates_translation_in_place_copy(self) -> None:
+        pose = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(2, 1, 1)
+        offset = torch.tensor([[0.1, 0.2, 0.3], [-0.1, 0.0, 0.2]], dtype=torch.float32)
+
+        result = self.action._apply_offset(pose, offset)
+
+        assert torch.allclose(result[:, :3, 3], offset)
+        assert torch.allclose(pose[:, :3, 3], torch.zeros((2, 3), dtype=torch.float32))
+
+    def test_plan_trajectory_builds_default_motion_generation_options(self) -> None:
+        target_states = [
+            PlanState(
+                xpos=torch.eye(4, dtype=torch.float32), move_type=MoveType.EEF_MOVE
+            )
+        ]
+
+        result = self.action.plan_trajectory(target_states)
 
         assert result.success is True
-        resolved_target = engine._actions["test"].last_target
-        assert isinstance(resolved_target, ObjectSemantics)
-        assert resolved_target.label == "cup"
-        assert resolved_target.uid == "cup_001"
-        assert resolved_target.properties["mass"] == 0.3
-        assert torch.equal(resolved_target.affordance.mesh_vertices, mesh_vertices)
-        assert torch.equal(resolved_target.affordance.mesh_triangles, mesh_triangles)
-        assert resolved_target.affordance.get_custom_config("mode") == "stable"
-
-    def test_validate_with_dict_pose_target(self):
-        """Test validate supports dict target with direct pose."""
-        engine = self._build_engine()
-        pose = torch.eye(4)
-
-        success = engine.validate("test", {"pose": pose})
-
-        assert success is True
-        assert torch.equal(engine._actions["test"].last_target, pose)
+        assert result.positions is not None
+        assert self.motion_generator.last_options is not None
+        assert self.motion_generator.last_options.control_part == "arm"
+        assert self.motion_generator.last_options.start_qpos is None
+        assert self.motion_generator.last_target_states is not None
+        assert (
+            self.motion_generator.last_target_states[0].move_type == MoveType.EEF_MOVE
+        )

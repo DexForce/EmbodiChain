@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 @configclass
 class MoveActionCfg(ActionCfg):
     sample_interval: int = 50
+    """Number of waypoints to sample for the motion trajectory. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
 
 
 class MoveAction(AtomicAction):
@@ -228,7 +229,11 @@ class MoveAction(AtomicAction):
 @configclass
 class PickUpActionCfg(MoveActionCfg):
     hand_open_qpos: torch.Tensor | None = None
+    """[hand_dof,] of float. Joint positions for open hand state. Must be specified for PickUpAction."""
+
     hand_close_qpos: torch.Tensor | None = None
+    """[hand_dof,] of float. Joint positions for closed hand state. Must be specified for PickUpAction."""
+
     hand_control_part: str = "hand"
     pre_grasp_distance: float = 0.15
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
