@@ -25,8 +25,6 @@ import time
 import open3d as o3d
 import torch
 
-from dexsim.utility.path import get_resources_data_path
-
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
@@ -40,8 +38,6 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RigidBodyAttributesCfg,
     LightCfg,
-    ClothObjectCfg,
-    ClothPhysicalAttributesCfg,
     URDFCfg,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
@@ -61,7 +57,12 @@ from embodichain.lab.sim.atomic_actions.engine import (
     register_action,
 )
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics, AntipodalAffordance
-from embodichain.lab.sim.atomic_actions.actions import PickUpActionCfg, PickUpAction
+from embodichain.lab.sim.atomic_actions.actions import (
+    PickUpActionCfg,
+    PickUpAction,
+    PlaceActionCfg,
+    PlaceAction,
+)
 
 
 def parse_arguments():
@@ -212,6 +213,10 @@ def main():
         name="pick_up",
         action_class=PickUpAction,
     )
+    register_action(
+        name="place",
+        action_class=PlaceAction,
+    )
     pickup_cfg = PickUpActionCfg(
         hand_open_qpos=torch.tensor(
             [0.00, 0.00], dtype=torch.float32, device=sim.device
@@ -227,11 +232,24 @@ def main():
         pre_grasp_distance=0.15,
         lift_height=0.15,
     )
+
+    place_cfg = PlaceActionCfg(
+        hand_open_qpos=torch.tensor(
+            [0.00, 0.00], dtype=torch.float32, device=sim.device
+        ),
+        hand_close_qpos=torch.tensor(
+            [0.025, 0.025], dtype=torch.float32, device=sim.device
+        ),
+        control_part="arm",
+        hand_control_part="hand",
+        lift_height=0.15,
+    )
+
     atom_engine = AtomicActionEngine(
         robot=robot,
         motion_generator=motion_gen,
         device=sim.device,
-        actions_cfg_dict={"pick_up": pickup_cfg},
+        actions_cfg_dict={"pick_up": pickup_cfg, "place": place_cfg},
     )
 
     sim.init_gpu_physics()
@@ -266,7 +284,7 @@ def main():
     )
     start_qpos = robot.get_qpos(name="arm")
 
-    target_grasp_pose = torch.tensor(
+    target_grasp_xpos = torch.tensor(
         [
             [-0.0539, -0.9985, -0.0022, 0.4489],
             [-0.9977, 0.0540, -0.0401, -0.0030],
@@ -277,14 +295,26 @@ def main():
         device=sim.device,
     )
 
-    is_success, trajectory, joint_ids = atom_engine.execute(
+    is_success, pick_trajectory, joint_ids = atom_engine.execute(
         start_qpos=start_qpos,
         action_name="pick_up",
-        # target=mug_semantics,
-        target=target_grasp_pose,
+        target=mug_semantics,
+        # target=target_grasp_xpos,
         control_part="arm",
     )
-    run_trajactory(robot, trajectory, joint_ids, sim)
+    arm_joint_ids = robot.get_joint_ids("arm")
+    place_start_qpos = pick_trajectory[:, -1, arm_joint_ids]
+    place_xpos = target_grasp_xpos.clone()
+    place_xpos[:3, 3] += torch.tensor([-0.2, 0.4, 0.1], device=sim.device)
+    is_success, place_trajectory, joint_ids = atom_engine.execute(
+        start_qpos=place_start_qpos,
+        action_name="place",
+        target=place_xpos,
+        control_part="arm",
+    )
+
+    run_trajactory(robot, pick_trajectory, joint_ids, sim)
+    run_trajactory(robot, place_trajectory, joint_ids, sim)
 
     input("Press Enter to exit...")
 

@@ -261,14 +261,26 @@ class PickUpAction(AtomicAction):
                 ValueError,
             )
 
-        # n_waypoint = kwargs.get("sample_interval", 30)
+        # compute waypoint number for each phase
         n_approach_waypoint = int(
             np.round(self.cfg.sample_interval - self.cfg.hand_interp_steps) * 0.6
         )
+        if n_approach_waypoint < 2:
+            logger.log_error(
+                "Not enough waypoints for approach trajectory. "
+                "Please increase sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
         n_close_waypoint = self.cfg.hand_interp_steps
         n_lift_waypoint = (
             self.cfg.sample_interval - n_approach_waypoint - n_close_waypoint
         )
+        if n_lift_waypoint < 2:
+            logger.log_error(
+                "Not enough waypoints for lift trajectory. "
+                "Please increase sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
 
         # TODO: passing options from arguments
         options = MotionGenOptions(
@@ -320,6 +332,7 @@ class PickUpAction(AtomicAction):
         )
         hand_close_trajectory[:, :, : self.arm_dof] = grasp_qpos
         hand_close_trajectory[:, :, self.arm_dof :] = hand_close_path
+
         # get lift trajectory
         lift_trajectory = torch.zeros(
             size=(self.n_envs, n_lift_waypoint, self.dof),
@@ -462,7 +475,100 @@ class PlaceAction(AtomicAction):
             )
             return False, torch.empty(0), self.joint_ids
 
+        # compute waypoint number for each phase
+        n_down_waypoint = int(
+            np.round(self.cfg.sample_interval - self.cfg.hand_interp_steps) * 0.6
+        )
+        if n_down_waypoint < 2:
+            logger.log_error(
+                "Not enough waypoints for approach trajectory. "
+                "Please increase sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
+        n_close_waypoint = self.cfg.hand_interp_steps
+        n_lift_waypoint = self.cfg.sample_interval - n_down_waypoint - n_close_waypoint
+        if n_lift_waypoint < 2:
+            logger.log_error(
+                "Not enough waypoints for lift trajectory. "
+                "Please increase sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
+
+        # TODO: passing options from arguments
+        options = MotionGenOptions(
+            start_qpos=start_qpos[0],
+            control_part=self.cfg.control_part,
+            is_interpolate=True,
+            is_linear=False,
+            interpolate_position_step=0.001,
+            plan_opts=ToppraPlanOptions(
+                sample_interval=n_down_waypoint,
+            ),
+        )
+
+        down_trajectory = torch.zeros(
+            size=(self.n_envs, n_down_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
         lift_xpos = self._compute_lift_xpos(place_xpos)
+        options.plan_opts = ToppraPlanOptions(sample_interval=n_down_waypoint)
+        for i in range(self.n_envs):
+            target_states = [
+                PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE),
+                PlanState(xpos=place_xpos[i], move_type=MoveType.EEF_MOVE),
+            ]
+            # Use specified start_qpos for each environment robot instance
+            options.start_qpos = start_qpos[i]
+            result = self.plan_trajectory(target_states, options)
+            down_trajectory[i, :, : self.arm_dof] = result.positions
+        # Padding hand open qpos to pick trajectory
+        down_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
+
+        # get hand closing trajectory
+        reach_qpos = down_trajectory[
+            :, -1, : self.arm_dof
+        ]  # Assuming the last point of pick trajectory is the grasp pose
+        weights = torch.linspace(
+            0, 1, steps=self.cfg.hand_interp_steps, device=self.device
+        )
+        hand_qpos_list = [
+            torch.lerp(self.hand_close_qpos, self.hand_open_qpos, w) for w in weights
+        ]
+        hand_open_path = torch.stack(
+            hand_qpos_list, dim=0
+        )  # (hand_interp_steps, hand_dof)
+        hand_open_trajectory = torch.zeros(
+            size=(self.n_envs, n_close_waypoint, self.dof),
+            device=self.device,
+        )
+        hand_open_trajectory[:, :, : self.arm_dof] = reach_qpos
+        hand_open_trajectory[:, :, self.arm_dof :] = hand_open_path
+
+        # get lift trajectory
+        lift_trajectory = torch.zeros(
+            size=(self.n_envs, n_lift_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        options.plan_opts = ToppraPlanOptions(sample_interval=n_lift_waypoint)
+        # TODO: batch planning
+        for i in range(self.n_envs):
+            target_states = [
+                PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE),
+            ]
+            # Use specified start_qpos for each environment robot instance
+            options.start_qpos = reach_qpos[i]
+            result = self.plan_trajectory(target_states, options)
+            lift_trajectory[i, :, : self.arm_dof] = result.positions
+        # padding hand close qpos to lift trajectory
+        lift_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
+
+        # concatenate trajectories
+        trajectory = torch.cat(
+            [down_trajectory, hand_open_trajectory, lift_trajectory], dim=1
+        )
+        return True, trajectory, self.joint_ids
 
     def _compute_lift_xpos(self, xpos: torch.Tensor) -> torch.Tensor:
         lift_xpos = xpos.clone()
