@@ -294,7 +294,10 @@ class PickUpAction(MoveAction):
             return False, torch.empty(0), self.joint_ids
 
         # Compute pre-grasp pose
-        pre_grasp_xpos = self._compute_pre_grasp_xpos(grasp_xpos)
+        pre_grasp_xpos = self._apply_offset(
+            pose=grasp_xpos,
+            offset=-self.approach_direction * self.cfg.pre_grasp_distance,
+        )
 
         # Compute lift pose
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
@@ -352,7 +355,12 @@ class PickUpAction(MoveAction):
             dtype=torch.float32,
             device=self.device,
         )
-        lift_xpos = self._compute_lift_xpos(grasp_xpos)
+        # lift_xpos = self._compute_lift_xpos(grasp_xpos)
+        lift_xpos = self._apply_offset(
+            pose=grasp_xpos,
+            offset=torch.tensor([0, 0, self.cfg.lift_height], device=self.device)
+            * self.cfg.lift_height,
+        )
         target_states_list = [
             [
                 PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE),
@@ -391,17 +399,6 @@ class PickUpAction(MoveAction):
             obj_poses=obj_poses, approach_direction=self.approach_direction
         )
         return is_success, grasp_xpos, open_length
-
-    def _compute_pre_grasp_xpos(self, grasp_xpos: torch.Tensor) -> torch.Tensor:
-        offsets = -self.approach_direction * self.cfg.pre_grasp_distance
-        pre_grasp_xpos = grasp_xpos.clone()
-        pre_grasp_xpos[:, :3, 3] += offsets
-        return pre_grasp_xpos
-
-    def _compute_lift_xpos(self, xpos: torch.Tensor) -> torch.Tensor:
-        lift_xpos = xpos.clone()
-        lift_xpos[:, 2, 3] += self.cfg.lift_height
-        return lift_xpos
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
@@ -483,7 +480,11 @@ class PlaceAction(MoveAction):
             dtype=torch.float32,
             device=self.device,
         )
-        lift_xpos = self._compute_lift_xpos(place_xpos)
+        lift_xpos = self._apply_offset(
+            pose=place_xpos,
+            offset=torch.tensor([0, 0, self.cfg.lift_height], device=self.device)
+            * self.cfg.lift_height,
+        )
         target_states_list = [
             [
                 PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE),
@@ -542,11 +543,6 @@ class PlaceAction(MoveAction):
             [down_trajectory, hand_open_trajectory, lift_trajectory], dim=1
         )
         return True, trajectory, self.joint_ids
-
-    def _compute_lift_xpos(self, xpos: torch.Tensor) -> torch.Tensor:
-        lift_xpos = xpos.clone()
-        lift_xpos[:, 2, 3] += self.cfg.lift_height
-        return lift_xpos
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action

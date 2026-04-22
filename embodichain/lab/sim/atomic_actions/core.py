@@ -412,14 +412,20 @@ class AtomicAction(ABC):
         """Apply offset to pose in local frame.
 
         Args:
-            pose: Base pose [4, 4]
-            offset: Offset in local frame [3]
+            pose: Base pose [N, 4, 4]
+            offset: Offset in local frame [N, 3] or [3]
 
         Returns:
-            Pose with offset applied [4, 4]
+            Pose with offset applied [N, 4, 4]
         """
+        if not len(pose.shape) == 3 or pose.shape[1:] != (4, 4):
+            logger.log_error("pose must have shape [N, 4, 4]")
+        if len(offset.shape) == 1:
+            offset = offset.unsqueeze(0)
+        if not len(offset.shape) == 2 or offset.shape[1] != 3:
+            logger.log_error("offset must have shape [N, 3] or [3]")
         result = pose.clone()
-        result[:3, 3] += pose[:3, :3] @ offset
+        result[:, :3, 3] += offset
         return result
 
     def plan_trajectory(
