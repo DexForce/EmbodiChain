@@ -27,7 +27,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
@@ -41,8 +40,7 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-import os
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
+from embodichain.lab.sim.shapes import MeshCfg
 
 from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
@@ -59,11 +57,8 @@ from embodichain.lab.sim.atomic_actions.engine import (
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics, AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.actions import (
     PickUpActionCfg,
-    PickUpAction,
     PlaceActionCfg,
-    PlaceAction,
     MoveActionCfg,
-    MoveAction,
 )
 
 
@@ -265,7 +260,7 @@ def main():
     )
     mug_grasp_affordance = AntipodalAffordance(
         object_label="mug",
-        force_reannotate=True,  # set to True if you want to re-annotate affordance even if the object has been seen before, which is useful when you have changed the grasp generator configuration and want to see the effect of new configuration, but it will take more time to annotate. So usually set it to False and only set it to True when you have changed the grasp generator configuration or you want to debug the annotation process.
+        force_reannotate=False,  # set to True if you want to re-annotate affordance even if the object has been seen before, which is useful when you have changed the grasp generator configuration and want to see the effect of new configuration, but it will take more time to annotate. So usually set it to False and only set it to True when you have changed the grasp generator configuration or you want to debug the annotation process.
         custom_config={
             "gripper_collision_cfg": gripper_collision_cfg,
             "generator_cfg": generator_cfg,
@@ -320,6 +315,7 @@ def main():
         control_part="arm",
     )
 
+    logger.logger.info(f"Starting simulation with pick success: {is_success}")
     run_trajactory(robot, pick_trajectory, joint_ids, sim)
     run_trajactory(robot, place_trajectory, joint_ids, sim)
     run_trajactory(robot, move_trajectory, arm_joint_ids, sim)

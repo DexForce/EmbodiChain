@@ -328,21 +328,19 @@ class AtomicAction(ABC):
         target: Union[torch.Tensor, ObjectSemantics],
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> PlanResult:
-        """Execute the atomic action.
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        """execute pick up action
 
         Args:
-            target: Target pose [4, 4] or ObjectSemantics
-            start_qpos: Starting joint configuration [DOF]
-            **kwargs: Additional action-specific parameters
+            target (ObjectSemantics): object semantics containing grasp affordance and entity information
+            start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.
 
         Returns:
-            PlanResult with trajectory (positions, velocities, accelerations),
-            end-effector poses (xpos_list), and success status.
-            Use result.positions for joint trajectory [T, DOF].
-            Use result.xpos_list for EE poses [T, 4, 4].
+            tuple[bool, torch.Tensor, list[float]]:
+            is_success,
+            trajectory of shape (n_envs, n_waypoints, dof),
+            joint_ids corresponding to trajectory
         """
-        pass
 
     @abstractmethod
     def validate(
