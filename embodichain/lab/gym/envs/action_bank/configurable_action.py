@@ -1324,7 +1324,8 @@ class GeneralActionBank(ActionBank):
 
         if len(filtered_keyposes) == 1 and len(ref_poses) == 0:
 
-            ret = np.array([filtered_keyposes[0]] * duration)
+            return np.array([filtered_keyposes[0]] * duration).T
+
         else:
             mo_gen = MotionGenerator(
                 cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
