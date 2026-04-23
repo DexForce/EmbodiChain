@@ -431,17 +431,17 @@ class PytorchSolver(BaseSolver):
             qpos_seed = torch.as_tensor(qpos_seed, device=self.device)
 
         # Check qpos_seed dimensions
-        if qpos_seed.dim() == 1:
-            qpos_seed = qpos_seed.unsqueeze(0)
-            qpos_seed_ndim = 1
-        elif qpos_seed.dim() == 2:
-            qpos_seed_ndim = 2
-            if qpos_seed.shape[0] != target_xpos.shape[0]:
-                raise ValueError(
-                    "Batch size of qpos_seed must match batch size of target_xpos when qpos_seed is a 2D tensor."
-                )
+        n_batch = target_xpos.shape[0]
+        if qpos_seed.shape == (n_batch, self.dof):
+            qpos_seed = qpos_seed
+        elif qpos_seed.shape == (self.dof, ):
+            qpos_seed = qpos_seed.unsqueeze(0).repeat(n_batch, 1)
         else:
-            raise ValueError("`qpos_seed` must be a tensor of shape (n,) or (n, n).")
+            logger.log_error(
+                f"Invalid qpos_seed shape {qpos_seed.shape} for batch_size {n_batch} and dof {self.dof}",
+                ValueError,
+            )
+        # output qpos_seed shape: (batch_size, dof)
 
         # Transform target_xpos by TCP
         tcp_xpos = torch.as_tensor(
@@ -456,6 +456,9 @@ class PytorchSolver(BaseSolver):
         sampler = QposSeedSampler(
             num_samples=self._num_samples, dof=self.dof, device=self.device
         )
+        # sampler = QposSeedSampler(
+        #     num_samples=1, dof=self.dof, device=self.device
+        # )
         random_qpos_seeds = sampler.sample(
             qpos_seed,
             self.lower_qpos_limits,
@@ -465,11 +468,13 @@ class PytorchSolver(BaseSolver):
         target_xpos_repeated = sampler.repeat_target_xpos(
             target_xpos, self._num_samples
         )
+        # import ipdb; ipdb.set_trace()
 
         # Compute IK solutions for all samples
         res_list, qpos_list = self._compute_inverse_kinematics(
             target_xpos_repeated, random_qpos_seeds
         )
+        import ipdb; ipdb.set_trace()
 
         if not isinstance(res_list, torch.Tensor) or not res_list.any():
             logger.log_warning(
