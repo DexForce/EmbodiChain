@@ -71,6 +71,7 @@ jobs:
             ${{ runner.os }}-doctrees-docs-
 
       - name: Build docs
+        shell: bash
         run: |
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           pip install -r docs/requirements.txt
