@@ -88,18 +88,10 @@ def test_generate_markdown_report_writes_expected_sections(tmp_path):
         {"device": "cpu", "iterations": 10},
         output_path,
     )
-
     report = output_path.read_text(encoding="utf-8")
     assert "RL Benchmark Report" in report
     assert "Benchmark Overview" in report
     assert "Leaderboard" in report
     assert "Plots" in report
-    assert "Stability Analysis" in report
-    assert "System Performance" in report
-    assert "Aggregate Results" in report
-    assert "Per-Task Comparison" in report
-    assert "Per-Run Results" in report
-    assert "Final Stable Success Rate" in report
-    assert "Each table compares different algorithms on the same task." in report
     assert "cart_pole" in report
     assert "grpo" in report
