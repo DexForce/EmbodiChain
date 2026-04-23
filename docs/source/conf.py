@@ -65,19 +65,25 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 
-# -- sphinx-multiversion configuration -------------------------------------------------
-# Enable multi-version builds (set to True in v0.2.0+)
-ENABLE_MULTI_VERSION = True
-
-# Version buffer size: number of releases to keep + main branch
-VERSION_BUFFER_SIZE = 5
-
-# Only build tags that look like v1.0.0 or branches like main/dev
-smv_tag_whitelist = r"^v\d+\.\d+\.\d+$"
-smv_branch_whitelist = r"^(main|dev)$"
+# -- sphinx-multiversion configuration -------------------------------------------
+# Whitelist pattern for remotes
 smv_remote_whitelist = r"^origin$"
+# Whitelist pattern for branches (set to None to ignore all branches)
+smv_branch_whitelist = os.getenv("SMV_BRANCH_WHITELIST", r"^main$")
+# Whitelist pattern for tags (set to None to ignore all tags)
+smv_tag_whitelist = os.getenv("SMV_TAG_WHITELIST", r"^v\d+\.\d+\.\d+$")
 smv_released_pattern = r"^tags/v\d+\.\d+\.\d+$"
 smv_outputdir_format = "{ref.name}"
+
+# Sidebar with version selector (populated by sphinx-multiversion)
+html_sidebars = {
+    "**": [
+        "navbar-logo.html",
+        "versioning.html",
+        "search-field.html",
+        "sbt-sidebar-nav.html",
+    ]
+}
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -101,7 +107,6 @@ html_context = {
     "doc_path": "docs/source",
 }
 
-# Configure theme with version selector (enabled in Phase 2)
 html_theme_options = {
     "title": "EmbodiChain",
     "logo_only": False,
@@ -111,5 +116,4 @@ html_theme_options = {
     "navigation_depth": 4,
     "includehidden": True,
     "prev_next_buttons_location": "bottom",
-    # version_menu: True,  # Enable version selector in navbar (Phase 2)
 }

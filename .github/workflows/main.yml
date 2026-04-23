@@ -45,6 +45,7 @@ jobs:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
+      DOCS_VERSIONS: "main,v0.2.0"  # Versions to include in multi-version build
     container: *container_template
     steps:
       - uses: actions/checkout@v4
@@ -74,75 +75,37 @@ jobs:
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
-          echo "Start Building docs..."
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
-          # Build main branch only (Phase 1)
-          make html
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "Building multi-version docs for tag ${GITHUB_REF_NAME}..."
+            # Build smv whitelists from DOCS_VERSIONS
+            BRANCH_PATTERN=""
+            TAG_PATTERN=""
+            IFS=',' read -ra VERSIONS <<< "${DOCS_VERSIONS}"
+            for v in "${VERSIONS[@]}"; do
+              v_escaped="${v//./\\.}"
+              if [[ "${v}" == v* ]]; then
+                TAG_PATTERN="${TAG_PATTERN:+${TAG_PATTERN}|}${v_escaped}"
+              else
+                BRANCH_PATTERN="${BRANCH_PATTERN:+${BRANCH_PATTERN}|}${v_escaped}"
+              fi
+            done
+            export SMV_BRANCH_WHITELIST="^(${BRANCH_PATTERN:-none})$"
+            export SMV_TAG_WHITELIST="^(${TAG_PATTERN:-none})$"
+            echo "SMV_BRANCH_WHITELIST=${SMV_BRANCH_WHITELIST}"
+            echo "SMV_TAG_WHITELIST=${SMV_TAG_WHITELIST}"
+            make multiversion
+          else
+            echo "Building single-version docs..."
+            make html
+          fi
 
       - name: Upload docs artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ github.workspace }}/docs/build/html
-          retention-days: 3
-
-  # Phase 2: Multi-version build (enable in v0.2.0+)
-  # Uncomment and enable this job when releasing v0.2.0
-  # build-multiversion:
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   needs: lint
-  #   runs-on: Linux
-  #   env:
-  #     NVIDIA_DRIVER_CAPABILITIES: all
-  #     NVIDIA_VISIBLE_DEVICES: all
-  #     NVIDIA_DISABLE_REQUIRE: 1
-  #   container: *container_template
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         fetch-depth: 0  # Full history for sphinx-multiversion
-  #
-  #     - name: Cache Python dependencies
-  #       id: cache-pip
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ~/.cache/pip
-  #         key: ${{ runner.os }}-pip-docs-${{ hashFiles('docs/requirements.txt') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-pip-docs-
-  #
-  #     - name: Cache Sphinx doctrees
-  #       id: cache-doctrees
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: docs/build/doctrees
-  #         key: ${{ runner.os }}-doctrees-docs-${{ hashFiles('docs/**') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-doctrees-docs-
-  #
-  #     - name: Build multi-version docs
-  #       run: |
-  #         pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
-  #         pip install -r docs/requirements.txt
-  #         cd ${GITHUB_WORKSPACE}/docs
-  #         echo "Start Building multi-version docs..."
-  #         pip uninstall pymeshlab -y
-  #         pip install pymeshlab==2023.12.post3
-  #         # Build all versions
-  #         make multiversion
-  #
-  #     - name: Upload multi-version docs artifact
-  #       uses: actions/upload-pages-artifact@v3
-  #       with:
-  #         path: ${{ github.workspace }}/docs/build/html
-  #         retention-days: 90
-  #
-  #     - name: Create version redirect index
-  #       run: |
-  #         # Create a copy of the index template at the root
-  #         cp docs/build/html/main/_templates/index.html docs/build/html/index.html 2>/dev/null || \
-  #         echo '<meta http-equiv="refresh" content="0; url=main/">' > docs/build/html/index.html
 
   test:
     if: github.event_name == 'pull_request'
@@ -166,7 +129,7 @@ jobs:
           pytest tests
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     needs: build
     runs-on: Linux
     permissions:
@@ -180,17 +143,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download docs artifact (main push - Phase 1)
+      - name: Download docs artifact
         uses: actions/download-artifact@v4
         with:
           name: github-pages
-
-      # Phase 2: Uncomment and use this section for multi-version deployment
-      # - name: Download multi-version docs artifact (tag push)
-      #   if: startsWith(github.ref, 'refs/tags/v')
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: github-pages
 
       - name: Deploy GitHub Pages
         uses: actions/deploy-pages@v4
