@@ -25,6 +25,7 @@ from embodichain.toolkits.urdf_assembly.logging_utils import (
     URDFAssemblyLogger,
 )
 from embodichain.toolkits.urdf_assembly.mesh import URDFMeshManager
+from embodichain.toolkits.urdf_assembly.name_normalizer import NameNormalizer
 
 __all__ = ["ComponentRegistry", "URDFComponent", "URDFComponentManager"]
 
@@ -82,11 +83,39 @@ class URDFComponent:
 
 
 class URDFComponentManager:
-    """Responsible for loading, renaming, and processing meshes for a single component."""
+    """Responsible for loading, renaming, and processing meshes for a single component.
 
-    def __init__(self, mesh_manager: URDFMeshManager):
+    This manager normalizes link and joint names according to a configurable
+    case policy so that the overall assembly naming scheme can be controlled
+    centrally (e.g. all links lowercase, all joints uppercase).
+    """
+
+    def __init__(
+        self,
+        mesh_manager: URDFMeshManager,
+        name_case: dict[str, str] | None = None,
+    ):
+        """Create a component manager.
+
+        Args:
+            mesh_manager (URDFMeshManager): Mesh manager used for copying and
+                rewriting mesh references.
+            name_case (dict[str, str] | None): Optional mapping controlling
+                how joint and link names are normalized. Supported keys are
+                ``"joint"`` and ``"link"`` with values ``"upper``,
+                ``"lower"`` or ``"none"``. When omitted, joints are
+                uppercased and links are lowercased (the previous default
+                behavior).
+        """
+
         self.mesh_manager = mesh_manager
         self.logger = URDFAssemblyLogger.get_logger("component_manager")
+
+        self.name_normalizer = NameNormalizer(name_case)
+
+    def _apply_case(self, kind: str, name: str | None) -> str | None:
+        """Normalize a name using the NameNormalizer."""
+        return self.name_normalizer.normalize(kind, name)
 
     def process_component(
         self,
@@ -118,12 +147,12 @@ class URDFComponentManager:
 
             # Safe way to get link and joint names, handling None values
             global_link_names = {
-                link.get("name").lower()
+                self._apply_case("link", link.get("name"))
                 for link in links
                 if link.get("name") is not None
             }
             global_joint_names = {
-                joint.get("name").upper()
+                self._apply_case("joint", joint.get("name"))
                 for joint in joints
                 if joint.get("name") is not None
             }
@@ -142,15 +171,19 @@ class URDFComponentManager:
 
                 # Generate unique name
                 if prefix:
-                    new_name = self._generate_unique_name(
-                        orig_name, prefix, global_link_names
-                    ).lower()
+                    new_name = self._apply_case(
+                        "link",
+                        self._generate_unique_name(
+                            orig_name, prefix, global_link_names
+                        ),
+                    )
                 else:
                     # For components without prefix, ensure names are unique
-                    if orig_name.lower() in global_link_names:
-                        new_name = f"{comp}_{orig_name}".lower()
+                    normalized_orig = self._apply_case("link", orig_name)
+                    if normalized_orig in global_link_names:
+                        new_name = self._apply_case("link", f"{comp}_{orig_name}")
                     else:
-                        new_name = orig_name.lower()
+                        new_name = normalized_orig
 
                 global_link_names.add(new_name)
 
@@ -159,7 +192,7 @@ class URDFComponentManager:
                     base_points[comp] = new_name
                     first_link_flag = False
 
-                # Update link name mapping and set link name to lowercase
+                # Update link name mapping and set link name according to policy
                 name_mapping[(comp, orig_name)] = new_name
                 link.set("name", new_name)
                 links.append(link)
@@ -175,9 +208,12 @@ class URDFComponentManager:
                 if orig_joint_name is None:
                     continue
 
-                new_joint_name = self._generate_unique_name(
-                    orig_joint_name, prefix, global_joint_names
-                ).upper()
+                new_joint_name = self._apply_case(
+                    "joint",
+                    self._generate_unique_name(
+                        orig_joint_name, prefix, global_joint_names
+                    ),
+                )
                 global_joint_names.add(new_joint_name)
 
                 # Build the complete mapping table
@@ -191,16 +227,16 @@ class URDFComponentManager:
                 # Set the new joint name
                 joint.set("name", new_joint_name)
 
-                # Update parent and child links to lowercase - with None checks
+                # Update parent and child links with case normalization - with None checks
                 parent_elem = joint.find("parent")
                 child_elem = joint.find("child")
 
                 if parent_elem is not None:
                     parent = parent_elem.get("link")
                     if parent is not None:
-                        new_parent_name = name_mapping.get(
-                            (comp, parent), parent
-                        ).lower()
+                        new_parent_name = self._apply_case(
+                            "link", name_mapping.get((comp, parent), parent)
+                        )
                         parent_elem.set("link", new_parent_name)
                     else:
                         self.logger.warning(
@@ -210,7 +246,9 @@ class URDFComponentManager:
                 if child_elem is not None:
                     child = child_elem.get("link")
                     if child is not None:
-                        new_child_name = name_mapping.get((comp, child), child).lower()
+                        new_child_name = self._apply_case(
+                            "link", name_mapping.get((comp, child), child)
+                        )
                         child_elem.set("link", new_child_name)
                     else:
                         self.logger.warning(
@@ -269,10 +307,14 @@ class URDFComponentManager:
         if orig_name is None:
             orig_name = "unnamed"
 
+        # For uniqueness checks we always operate on a normalized form that is
+        # consistent with the link case policy. This keeps collisions and
+        # generated names aligned with how names are written back to the URDF.
+        base_name = orig_name
         if prefix and not orig_name.lower().startswith(prefix.lower()):
-            new_name = f"{prefix}{orig_name}".lower()
-        else:
-            new_name = orig_name.lower()
+            base_name = f"{prefix}{orig_name}"
+
+        new_name = base_name
 
         # Ensure the new name is unique
         if new_name in existing_names:
