@@ -170,6 +170,7 @@ class PytorchSolver(BaseSolver):
             max_iterations=self._max_iterations,
             lr=self._dt,
             num_retries=1,
+            use_compile=True,
         )
 
         self.dof = self.pk_serial_chain.n_joints
@@ -244,6 +245,7 @@ class PytorchSolver(BaseSolver):
             max_iterations=self._max_iterations,
             lr=self._dt,
             num_retries=1,
+            use_compile=True,
         )
 
         return True
