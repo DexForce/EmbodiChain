@@ -291,13 +291,17 @@ def _timed_pytorch_ik_call(
     _sync_cuda()
 
     start = time.perf_counter()
-    ik_success, ik_qpos = solver.get_ik(
-        fk_xpos,
-        joint_seed=qpos_seed,
-        return_all_solutions=False,
-    )
+    for i in range(3):
+        if i == 1:  # skip first run to avoid initialization overhead
+            start = time.perf_counter()
+        ik_success, ik_qpos = solver.get_ik(
+            fk_xpos,
+            joint_seed=qpos_seed,
+            return_all_solutions=False,
+        )
     _sync_cuda()
     elapsed = time.perf_counter() - start
+    elapsed /= 2.0
 
     mem_after = _memory_snapshot()
     deltas = {

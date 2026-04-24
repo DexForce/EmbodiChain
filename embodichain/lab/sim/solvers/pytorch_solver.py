@@ -289,99 +289,25 @@ class PytorchSolver(BaseSolver):
 
         return False, torch.empty(0)
 
-    @staticmethod
-    def _qpos_to_limits_single(
-        q: torch.Tensor,
-        joint_seed: torch.Tensor,
-        lower_qpos_limits: torch.Tensor,
-        upper_qpos_limits: torch.Tensor,
-        ik_nearest_weight: torch.Tensor,
-        periodic_mask: torch.Tensor = None,  # Optional mask for periodic joints
-    ) -> torch.Tensor:
-        """
-        Adjusts the given joint positions (q) to fit within the specified limits while minimizing the difference to the seed position.
+    def _qpos_map_to_limits(
+        self, qpos: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        r"""Maps a batch of joint positions to fit within joint limits and computes the distance to the seed position.
 
         Args:
-            q (torch.Tensor): The initial joint positions.
-            joint_seed (torch.Tensor): The seed joint positions for comparison.
-            lower_qpos_limits (torch.Tensor): The lower bounds for the joint positions.
-            upper_qpos_limits (torch.Tensor): The upper bounds for the joint positions.
-            ik_nearest_weight (torch.Tensor): The weights for the inverse kinematics nearest calculation.
-            periodic_mask (torch.Tensor, optional): Boolean mask indicating which joints are periodic.
-
+            qpos (torch.Tensor): Batch of candidate joint positions, shape (N, dof).
         Returns:
-            torch.Tensor: The adjusted joint positions that fit within the limits.
+            tuple[torch.Tensor, torch.Tensor]: A tuple containing:
+                - torch.Tensor: whether qpos exactly within joint limit, shape (N).
+                - torch.Tensor: qpos that roughly mapped into joint limit, shape (N, dof).
         """
-        device = q.device
-        joint_seed = joint_seed.to(device)
-        lower = lower_qpos_limits.to(device)
-        upper = upper_qpos_limits.to(device)
-        weight = ik_nearest_weight.to(device)
-
-        # If periodic_mask is not provided, assume all joints are periodic
-        if periodic_mask is None:
-            periodic_mask = torch.ones_like(q, dtype=torch.bool, device=device)
-
-        # Only enumerate [-2π, 0, 2π] for periodic joints, single value for non-periodic
-        offsets = torch.tensor([-2 * torch.pi, 0, 2 * torch.pi], device=device)
-        candidate_list = []
-        for i in range(q.size(0)):
-            if periodic_mask[i]:
-                candidate_list.append(q[i] + offsets)
-            else:
-                candidate_list.append(q[i].unsqueeze(0))
-        # Generate all possible combinations
-        mesh = torch.meshgrid(*candidate_list, indexing="ij")
-        candidates = torch.stack([m.reshape(-1) for m in mesh], dim=1)
-        # Filter candidates that are out of limits
-        mask = (candidates >= lower) & (candidates <= upper)
-        valid_mask = mask.all(dim=1)
-        valid_candidates = candidates[valid_mask]
-        if valid_candidates.shape[0] == 0:
-            return torch.tensor([]).to(device)
-        # Compute weighted distance to seed and select the closest
-        diffs = torch.abs(valid_candidates - joint_seed) * weight
-        distances = torch.sum(diffs, dim=1)
-        min_idx = torch.argmin(distances)
-        return valid_candidates[min_idx]
-
-    def _qpos_to_limits(
-        self, qpos_list_split: torch.Tensor, joint_seed: torch.Tensor
-    ) -> torch.Tensor:
-        r"""Adjusts a batch of joint positions to fit within joint limits and minimize the weighted distance to the seed position.
-
-        Args:
-            qpos_list_split (torch.Tensor): Batch of candidate joint positions, shape (N, dof).
-            joint_seed (torch.Tensor): The reference joint positions for comparison, shape (dof,).
-
-        Returns:
-            torch.Tensor: Batch of adjusted joint positions that fit within the limits, shape (M, dof),
-                        where M <= N (invalid candidates are filtered out).
-        """
-        periodic_mask = torch.ones_like(
-            qpos_list_split[0], dtype=torch.bool, device=self.device
+        two_pi = 2.0 * torch.pi
+        k = torch.ceil((self.lower_qpos_limits - qpos) / two_pi)
+        qpos_mapped = qpos + k * two_pi
+        is_within_limits = (qpos_mapped >= self.lower_qpos_limits) & (
+            qpos_mapped <= self.upper_qpos_limits
         )
-
-        adjusted_qpos_list = [
-            self._qpos_to_limits_single(
-                q,
-                joint_seed,
-                self.lower_qpos_limits,
-                self.upper_qpos_limits,
-                self.ik_nearest_weight,
-                periodic_mask,
-            )
-            for q in qpos_list_split
-        ]
-
-        # Filter out empty results
-        adjusted_qpos_list = [q for q in adjusted_qpos_list if q.numel() > 0]
-
-        return (
-            torch.stack(adjusted_qpos_list).to(qpos_list_split.device)
-            if adjusted_qpos_list
-            else torch.tensor([], device=self.device)
-        )
+        return is_within_limits.all(dim=1), qpos_mapped
 
     @ensure_pose_shape
     def get_ik(
@@ -434,7 +360,7 @@ class PytorchSolver(BaseSolver):
         n_batch = target_xpos.shape[0]
         if qpos_seed.shape == (n_batch, self.dof):
             qpos_seed = qpos_seed
-        elif qpos_seed.shape == (self.dof, ):
+        elif qpos_seed.shape == (self.dof,):
             qpos_seed = qpos_seed.unsqueeze(0).repeat(n_batch, 1)
         else:
             logger.log_error(
@@ -445,9 +371,12 @@ class PytorchSolver(BaseSolver):
 
         # Transform target_xpos by TCP
         tcp_xpos = torch.as_tensor(
-            deepcopy(self.tcp_xpos), device=self.device, dtype=torch.float32
+            self.tcp_xpos, device=self.device, dtype=torch.float32
         )
-        target_xpos = target_xpos @ torch.inverse(tcp_xpos)
+        tcp_xpos_inv = tcp_xpos.clone()
+        tcp_xpos_inv[:3, :3] = tcp_xpos_inv[:3, :3].T
+        tcp_xpos_inv[:3, 3] = -tcp_xpos_inv[:3, :3] @ tcp_xpos_inv[:3, 3]
+        target_xpos = target_xpos @ tcp_xpos_inv
 
         # Get joint limits and ensure shape matches dof
 
@@ -468,76 +397,28 @@ class PytorchSolver(BaseSolver):
         target_xpos_repeated = sampler.repeat_target_xpos(
             target_xpos, self._num_samples
         )
-        # import ipdb; ipdb.set_trace()
 
         # Compute IK solutions for all samples
-        res_list, qpos_list = self._compute_inverse_kinematics(
+        is_ik_success, ik_qpos = self._compute_inverse_kinematics(
             target_xpos_repeated, random_qpos_seeds
         )
-        import ipdb; ipdb.set_trace()
+        # map ik_qpos to within limits and check validity
+        is_mask_valid, ik_qpos_mapped = self._qpos_map_to_limits(ik_qpos)
+        is_success = torch.logical_and(is_ik_success, is_mask_valid)
 
-        if not isinstance(res_list, torch.Tensor) or not res_list.any():
-            logger.log_warning(
-                "Pk: No valid solutions found for the given target poses and joint seeds."
-            )
-            return torch.zeros(
-                batch_size, dtype=torch.bool, device=self.device
-            ), torch.zeros((batch_size, self.dof), device=self.device)
-
-        # Split res_list and qpos_list according to self._num_samples
-        res_list_split = torch.split(res_list, self._num_samples)
-        qpos_list_split = torch.split(qpos_list, self._num_samples)
-
-        # Initialize the final results and the closest joint positions
-        final_results = []
-        final_qpos = []
-
-        # For each batch, select the closest valid solution to qpos_seed
-        for i in range(batch_size):
-            target_qpos_seed = qpos_seed[i] if qpos_seed_ndim == 2 else qpos_seed
-
-            if not res_list_split[i].any():
-                final_results.append(False)
-                final_qpos.append(torch.zeros((1, self.dof), device=self.device))
-                continue
-
-            result_qpos_limit = self._qpos_to_limits(
-                qpos_list_split[i], target_qpos_seed
-            )
-
-            if result_qpos_limit.shape[0] == 0:
-                final_results.append(False)
-                final_qpos.append(torch.zeros((self.dof), device=self.device))
-                continue
-
-            distances = torch.norm(result_qpos_limit - target_qpos_seed, dim=1)
-            sorted_indices = torch.argsort(distances)
-            # shape: (N, dof)
-            sorted_qpos_array = result_qpos_limit[sorted_indices]
-            final_qpos.append(sorted_qpos_array)
-            final_results.append(True)
-
-        # Pad all batches to the same number of solutions for stacking
-        max_solutions = max([q.shape[0] for q in final_qpos]) if final_qpos else 1
-        final_qpos_tensor = torch.zeros(
-            (batch_size, max_solutions, self.dof), device=self.device
-        )
-        for i, q in enumerate(final_qpos):
-            n = q.shape[0]
-            final_qpos_tensor[i, :n, :] = q
-
-        final_results = torch.tensor(
-            final_results, dtype=torch.bool, device=self.device
-        )
+        all_is_success = is_success.reshape(batch_size, self._num_samples)
+        all_results = ik_qpos_mapped.reshape(batch_size, self._num_samples, self.dof)
 
         if return_all_solutions:
-            # Return all sorted solutions for each batch (shape: batch_size, max_solutions, dof)
-            return final_results, final_qpos_tensor
-
-        # Only return the closest solution for each batch (shape: batch_size, 1, dof)
-        # If multiple solutions, take the first (closest)
-        final_qpos_tensor = final_qpos_tensor[:, :1, :]
-        return final_results, final_qpos_tensor
+            return all_is_success.any(dim=1), all_results
+        qpos_seed_repeat = qpos_seed.unsqueeze(1).repeat(1, self._num_samples, 1)
+        weighed_diff = self.ik_nearest_weight * (all_results - qpos_seed_repeat)
+        qpos_seed_dis = torch.norm(weighed_diff, dim=2)
+        # Tricky: mask out invalid solutions by setting distance to inf, so they won't be selected as closest
+        qpos_seed_dis[~all_is_success] = float("inf")
+        closest_indices = torch.argmin(qpos_seed_dis, dim=1)
+        closest_qpos = all_results[torch.arange(batch_size), closest_indices]
+        return all_is_success.any(dim=0), closest_qpos[:, None, :]
 
     def get_all_fk(self, qpos: torch.tensor) -> torch.tensor:
         r"""Get the forward kinematics for all links from root to end link.

@@ -55,7 +55,7 @@ class QposSeedSampler:
         """
         if qpos_seed.shape == (batch_size, self.dof):
             seed_head = qpos_seed[:, None, :]
-        elif qpos_seed.shape == (self.dof, ):
+        elif qpos_seed.shape == (self.dof,):
             seed_head = qpos_seed.unsqueeze(0).repeat(batch_size, 1)[:, None, :]
         else:
             logger.log_error(
@@ -63,8 +63,17 @@ class QposSeedSampler:
                 ValueError,
             )
         n_random_samples = self.num_samples - 1
-        seed_random = torch.rand(size=(batch_size, n_random_samples, self.dof), device=self.device)
-        seed_random = lower_limits + (upper_limits - lower_limits) * seed_random    
+
+        # seed_random = torch.rand(
+        #     size=(batch_size, n_random_samples, self.dof), device=self.device
+        # )
+
+        # save sampling time, repeat for each batch and sample in one go
+        seed_random = torch.rand(
+            size=(1, n_random_samples, self.dof), device=self.device
+        )
+        seed_random = seed_random.repeat(batch_size, 1, 1)
+        seed_random = lower_limits + (upper_limits - lower_limits) * seed_random
         joint_seeds = torch.cat([seed_head, seed_random], dim=1)
         return joint_seeds.reshape(-1, self.dof)
 
@@ -80,8 +89,9 @@ class QposSeedSampler:
         Returns:
             torch.Tensor: (batch_size * num_samples, 4, 4) or (batch_size * num_samples, 3, 3)
         """
-        repeated_list = [
-            target_xpos[i].unsqueeze(0).repeat(num_samples, 1, 1)
-            for i in range(target_xpos.shape[0])
-        ]
-        return torch.cat(repeated_list, dim=0)
+        num_batch = target_xpos.shape[0]
+        target_xpos_repeated = target_xpos.unsqueeze(0).repeat(num_samples, 1, 1, 1)
+        target_xpos_repeated = target_xpos_repeated.reshape(
+            num_batch * num_samples, 4, 4
+        )
+        return target_xpos_repeated
