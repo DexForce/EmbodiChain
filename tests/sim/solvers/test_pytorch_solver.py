@@ -104,7 +104,7 @@ class BaseSolverTest:
             pose=invalid_pose, joint_seed=ik_qpos, name=arm_name
         )
         dof = ik_qpos.shape[-1]
-        assert res[0] == False
+        assert res[0].item() == False
         assert ik_qpos.shape == (1, dof)
 
     def teardown_method(self):

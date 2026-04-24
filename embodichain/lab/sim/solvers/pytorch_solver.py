@@ -283,11 +283,7 @@ class PytorchSolver(BaseSolver):
         self.pik.initial_config = joint_seed
 
         result = self.pik.solve(tf)
-
-        if result.converged_any.any().item():
-            return result.converged_any, result.solutions[:, 0, :].squeeze(0)
-
-        return False, torch.empty(0)
+        return result.converged_any, result.solutions[:, 0, :].squeeze(0)
 
     def _qpos_map_to_limits(
         self, qpos: torch.Tensor
@@ -402,6 +398,13 @@ class PytorchSolver(BaseSolver):
         is_ik_success, ik_qpos = self._compute_inverse_kinematics(
             target_xpos_repeated, random_qpos_seeds
         )
+        if is_ik_success.any().item() is False:
+            logger.log_warning("No IK solutions found for any of the target poses.")
+            failed_state = is_ik_success.reshape(batch_size, self._num_samples)[:, 0]
+            failed_qpos = ik_qpos.reshape(batch_size, self._num_samples, self.dof)[
+                :, 0, :
+            ]
+            return failed_state, failed_qpos
         # map ik_qpos to within limits and check validity
         is_mask_valid, ik_qpos_mapped = self._qpos_map_to_limits(ik_qpos)
         is_success = torch.logical_and(is_ik_success, is_mask_valid)
