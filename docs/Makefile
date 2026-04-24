@@ -20,17 +20,9 @@ help:
 	@rm -rf "$(BUILDDIR)"
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-# Build multi-version docs (for production deployment)
-.PHONY: multiversion
-multiversion:
-	@rm -rf "$(BUILDDIR)/html"
-	@echo "Building multi-version documentation..."
-	@sphinx-multiversion "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS) $(O)
-	@cp "$(SOURCEDIR)/_templates/index.html" "$(BUILDDIR)/html/index.html"
-	@echo "Multi-version docs built successfully."
-
 # Build current version only (for local development / PR verification)
 .PHONY: current-docs
 current-docs:
 	@rm -rf "$(BUILDDIR)/html"
 	@$(SPHINXBUILD) -W --keep-going "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS) $(O)
+	@python3 "$(CURDIR)/scripts/generate_versions_json.py" --build-dir "$(BUILDDIR)/html"

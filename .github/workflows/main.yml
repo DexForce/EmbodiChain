@@ -45,12 +45,10 @@ jobs:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
-      DOCS_VERSIONS: "main,v0.2.0"  # Versions to include in multi-version build
+      DOCS_MAX_VERSIONS: "4"  # Max number of release versions to keep
     container: *container_template
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history for sphinx-multiversion
 
       - name: Cache Python dependencies
         id: cache-pip
@@ -61,14 +59,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-docs-
 
-      - name: Cache Sphinx doctrees
-        id: cache-doctrees
+      - name: Restore previous docs output
+        if: github.event_name == 'push'
         uses: actions/cache@v4
         with:
-          path: docs/build/doctrees
-          key: ${{ runner.os }}-doctrees-docs-${{ hashFiles('docs/**') }}
+          path: docs/build/html
+          key: docs-output-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-doctrees-docs-
+            docs-output-
 
       - name: Build docs
         shell: bash
@@ -78,28 +76,39 @@ jobs:
           cd ${GITHUB_WORKSPACE}/docs
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
+
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "Building multi-version docs for tag ${GITHUB_REF_NAME}..."
-            # Build smv whitelists from DOCS_VERSIONS
-            BRANCH_PATTERN=""
-            TAG_PATTERN=""
-            IFS=',' read -ra VERSIONS <<< "${DOCS_VERSIONS}"
-            for v in "${VERSIONS[@]}"; do
-              v_escaped="${v//./\\.}"
-              if [[ "${v}" == v* ]]; then
-                TAG_PATTERN="${TAG_PATTERN:+${TAG_PATTERN}|}${v_escaped}"
-              else
-                BRANCH_PATTERN="${BRANCH_PATTERN:+${BRANCH_PATTERN}|}${v_escaped}"
-              fi
+            VERSION="${GITHUB_REF_NAME}"
+            echo "Building docs for release tag ${VERSION}..."
+
+            # Build only this version into its own subdirectory
+            sphinx-build source build/html/${VERSION}
+
+            cd build/html
+
+            # Prune old release versions beyond the window
+            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+              echo "Pruning old version: ${TAG_DIRS[0]}"
+              rm -rf "${TAG_DIRS[0]}"
+              TAG_DIRS=("${TAG_DIRS[@]:1}")
             done
-            export SMV_BRANCH_WHITELIST="^(${BRANCH_PATTERN:-none})$"
-            export SMV_TAG_WHITELIST="^(${TAG_PATTERN:-none})$"
-            echo "SMV_BRANCH_WHITELIST=${SMV_BRANCH_WHITELIST}"
-            echo "SMV_TAG_WHITELIST=${SMV_TAG_WHITELIST}"
-            make multiversion
+
+            # Generate versions.json and root index.html
+            python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+              --build-dir .
+
           else
-            echo "Building single-version docs..."
-            make html
+            echo "Building dev docs for main branch..."
+            # Build only main/ — don't touch existing version directories
+            rm -rf build/html/main
+            sphinx-build source build/html/main
+
+            cd build/html
+
+            # Generate versions.json and root index.html
+            python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+              --build-dir .
           fi
 
       - name: Upload docs artifact
@@ -136,14 +145,7 @@ jobs:
     permissions:
       pages: write
       id-token: write
-    env:
-      NVIDIA_DRIVER_CAPABILITIES: all
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DISABLE_REQUIRE: 1
-    container: *container_template
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download docs artifact
         uses: actions/download-artifact@v4
         with:
@@ -165,7 +167,7 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
   #       with:
-  #         fetch-depth: 0   
+  #         fetch-depth: 0
 
   #     - name: (Release) Install build tools
   #       run: |

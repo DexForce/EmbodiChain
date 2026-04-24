@@ -41,7 +41,6 @@ extensions = [
     "sphinx_design",
     "myst_parser",  # if you prefer Markdown pages
     "sphinx_copybutton",
-    "sphinx_multiversion",
 ]
 # Napoleon settings if using Google/NumPy docstring style:
 napoleon_google_docstring = True
@@ -65,17 +64,7 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 
-# -- sphinx-multiversion configuration -------------------------------------------
-# Whitelist pattern for remotes
-smv_remote_whitelist = r"^origin$"
-# Whitelist pattern for branches (set to None to ignore all branches)
-smv_branch_whitelist = os.getenv("SMV_BRANCH_WHITELIST", r"^main$")
-# Whitelist pattern for tags (set to None to ignore all tags)
-smv_tag_whitelist = os.getenv("SMV_TAG_WHITELIST", r"^v\d+\.\d+\.\d+$")
-smv_released_pattern = r"^tags/v\d+\.\d+\.\d+$"
-smv_outputdir_format = "{ref.name}"
-
-# Sidebar with version selector (populated by sphinx-multiversion)
+# -- Version selector sidebar ---------------------------------------------------
 html_sidebars = {
     "**": [
         "navbar-logo.html",

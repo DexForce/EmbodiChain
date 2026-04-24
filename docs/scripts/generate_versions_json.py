@@ -14,106 +14,99 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+"""Generate versions.json and root index.html for the docs version selector."""
 
-"""Generate versions.json for multi-version documentation."""
+from __future__ import annotations
 
+import argparse
 import json
-import os
+import re
 from pathlib import Path
 
 
-def generate_versions_json(build_dir: str) -> dict:
-    """Generate versions.json from build directory structure.
-
-    Args:
-        build_dir: Path to the build/html directory
-
-    Returns:
-        Dictionary with versions metadata
-    """
-    build_path = Path(build_dir)
-
-    # Find all version directories (main, v0.1.0, etc.)
-    versions = []
-    for item in build_path.iterdir():
-        if not item.is_dir() or item.name.startswith("_") or item.name.startswith("."):
-            continue
-
-        # Check if it's a version directory (has index.html)
-        index_file = item / "index.html"
-        if index_file.exists():
-            versions.append(
-                {
-                    "name": item.name,
-                    "version": item.name,
-                    "url": item.name + "/",
-                }
-            )
-
-    # Sort versions (main last, releases in descending order - newest first)
-    def version_key(v):
-        name = v["name"]
-        if name == "main":
-            return (2, "")  # Put main last
-        else:
-            # Extract version number for sorting (v0.1.3 -> (0, 1, 3))
-            parts = name.lstrip("v").split(".")
-            try:
-                major, minor, patch = map(int, parts[:3])
-                # Use negative for descending sort (newest first)
-                return (1, (-major, -minor, -patch))
-            except (ValueError, IndexError):
-                return (1, (0, 0, 0))
-
-    versions.sort(key=version_key)
-
-    return {
-        "versions": versions,
-        "latest": versions[0]["name"] if versions else "main",
-    }
+def parse_version(tag: str) -> tuple[int, int, int]:
+    """Parse a version tag like 'v1.2.3' into a tuple (1, 2, 3)."""
+    match = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", tag)
+    if not match:
+        return (0, 0, 0)
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
-def main():
-    """CLI entry point."""
-    import argparse
-
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate versions.json for multi-version docs"
+        description="Generate versions.json and root index.html for multi-version docs"
     )
     parser.add_argument(
         "--build-dir",
-        type=str,
         default="build/html",
         help="Path to build/html directory (default: build/html)",
     )
     parser.add_argument(
         "--output",
-        type=str,
-        default="build/html/versions.json",
-        help="Output path for versions.json (default: build/html/versions.json)",
+        default=None,
+        help="Output path for versions.json (default: <build-dir>/versions.json)",
+    )
+    parser.add_argument(
+        "--latest",
+        default=None,
+        help="Name of the latest stable version (default: auto-detected from tags, falls back to main)",
     )
     args = parser.parse_args()
 
-    build_dir = Path(args.build_dir)
-    if not build_dir.exists():
-        print(f"Error: Build directory '{build_dir}' does not exist.")
-        return 1
+    html_dir = Path(args.build_dir)
+    output = Path(args.output) if args.output else html_dir / "versions.json"
 
-    versions_data = generate_versions_json(args.build_dir)
+    if not html_dir.exists():
+        print(f"Error: Build directory '{html_dir}' does not exist.")
+        raise SystemExit(1)
+
+    versions: list[dict[str, str]] = []
+
+    # Collect tag versions (vX.Y.Z directories), sorted newest-first
+    tag_dirs = sorted(
+        [d for d in html_dir.glob("v*") if d.is_dir()],
+        key=lambda d: parse_version(d.name),
+        reverse=True,
+    )
+    for d in tag_dirs:
+        name = d.name
+        versions.append({"name": name, "url": f"./{name}/index.html", "type": "tag"})
+
+    # Collect main (dev branch)
+    if (html_dir / "main").is_dir():
+        versions.append({"name": "main", "url": "./main/index.html", "type": "branch"})
+
+    # Determine latest: explicit arg > newest tag > main
+    if args.latest:
+        latest = args.latest
+    elif versions:
+        tag_names = [v["name"] for v in versions if v["type"] == "tag"]
+        latest = tag_names[0] if tag_names else "main"
+    else:
+        latest = "main"
+
+    manifest = {
+        "latest": latest,
+        "versions": versions,
+    }
 
     # Write versions.json
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(manifest, indent=2))
+    print(f"Generated {output} with {len(versions)} versions (latest: {latest})")
 
-    with open(output_path, "w") as f:
-        json.dump(versions_data, f, indent=2)
-
-    print(f"Generated versions.json at: {output_path}")
-    print(f"Found {len(versions_data['versions'])} versions")
-    print(f"Latest: {versions_data['latest']}")
-
-    return 0
+    # Write root index.html redirect
+    index_path = html_dir / "index.html"
+    index_content = (
+        "<!DOCTYPE html>\n"
+        "<html><head>\n"
+        f"  <title>EmbodiChain Docs</title>\n"
+        f'  <meta http-equiv="refresh" content="0; url=./{latest}/index.html">\n'
+        "</head></html>\n"
+    )
+    index_path.write_text(index_content)
+    print(f"Generated {index_path} (redirects to ./{latest}/index.html)")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
