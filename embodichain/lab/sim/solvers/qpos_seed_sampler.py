@@ -89,9 +89,6 @@ class QposSeedSampler:
         Returns:
             torch.Tensor: (batch_size * num_samples, 4, 4) or (batch_size * num_samples, 3, 3)
         """
-        num_batch = target_xpos.shape[0]
-        target_xpos_repeated = target_xpos.unsqueeze(0).repeat(num_samples, 1, 1, 1)
-        target_xpos_repeated = target_xpos_repeated.reshape(
-            num_batch * num_samples, 4, 4
-        )
-        return target_xpos_repeated
+
+        target_xpos_repeated = target_xpos.unsqueeze(1).repeat(1, num_samples, 1, 1)
+        return target_xpos_repeated.reshape(-1, 4, 4)

@@ -381,9 +381,6 @@ class PytorchSolver(BaseSolver):
         sampler = QposSeedSampler(
             num_samples=self._num_samples, dof=self.dof, device=self.device
         )
-        # sampler = QposSeedSampler(
-        #     num_samples=1, dof=self.dof, device=self.device
-        # )
         random_qpos_seeds = sampler.sample(
             qpos_seed,
             self.lower_qpos_limits,
@@ -421,7 +418,7 @@ class PytorchSolver(BaseSolver):
         qpos_seed_dis[~all_is_success] = float("inf")
         closest_indices = torch.argmin(qpos_seed_dis, dim=1)
         closest_qpos = all_results[torch.arange(batch_size), closest_indices]
-        return all_is_success.any(dim=0), closest_qpos[:, None, :]
+        return all_is_success.any(dim=1), closest_qpos[:, None, :]
 
     def get_all_fk(self, qpos: torch.tensor) -> torch.tensor:
         r"""Get the forward kinematics for all links from root to end link.
