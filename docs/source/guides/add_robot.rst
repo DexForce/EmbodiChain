@@ -561,3 +561,11 @@ After adding your robot:
 - Configure sensors (cameras, force sensors)
 - Implement custom IK solvers if needed
 - Add motion planning support
+
+.. tip::
+   **Using an AI coding agent?** These skills can help when extending your robot:
+
+   - **/add-task-env** — Scaffold a task environment that uses your new robot.
+   - **/add-functor** — Add observation, reward, or randomization functors for robot-specific tasks.
+   - **/add-test** — Write tests for your robot config or task environment.
+   - **/pre-commit-check** — Verify all code passes CI checks before committing.

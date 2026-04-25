@@ -5,6 +5,10 @@
 
 This page lists all available reward functors that can be used with the Reward Manager. Reward functors are configured using {class}`~cfg.RewardCfg` and return scalar reward tensors that are weighted and summed to form the total environment reward.
 
+````{tip}
+**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new reward functor with the correct signature (`env, obs, action, info, ...`), module placement in `rewards.py`, and `__all__` export. Use **`/add-test`** to generate mock-based tests.
+````
+
 ## Distance-Based Rewards
 
 ```{list-table} Distance-Based Reward Functors
