@@ -26,7 +26,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
-from dexsim.utility.path import get_resources_data_path
+from embodichain.data import get_data_path
 
 
 def main():
@@ -71,7 +71,7 @@ def main():
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
 
-    # Add objects to the scene
+    # Add cube object to the scene
     cube: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
@@ -83,7 +83,25 @@ def main():
                 static_friction=0.5,
                 restitution=0.1,
             ),
-            init_pos=[0.0, 0.0, 1.0],
+            init_pos=[0.5, 0.0, 1.0],
+        )
+    )
+
+    # Add toy_duck object to the scene
+    toy_duck_path = get_data_path("ToyDuck/toy_duck.glb")
+    toy_duck: RigidObject = sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="toy_duck",
+            shape=MeshCfg(fpath=toy_duck_path),
+            body_type="dynamic",
+            attrs=RigidBodyAttributesCfg(
+                mass=1.0,
+                dynamic_friction=0.5,
+                static_friction=0.5,
+                restitution=0.1,
+            ),
+            init_pos=[0.0, 0.0, 0.2],
+            init_rot=[0.0, 0.0, 0.0],
         )
     )
 
