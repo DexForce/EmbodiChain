@@ -6,7 +6,7 @@
 |-----------|------------|
 | **OS** | Linux (x86_64): Ubuntu 20.04+ |
 | **GPU** | NVIDIA with compute capability 7.0+ |
-| **NVIDIA Driver** | 535 or higher (recommended 570) |
+| **NVIDIA Driver** | 535 - 570 (580+ is untested and may be unstable) |
 | **Python** | 3.10 or 3.11 |
 
 > [!NOTE]

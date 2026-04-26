@@ -45,24 +45,78 @@ jobs:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
+      DOCS_MAX_VERSIONS: "4"  # Max number of release versions to keep
     container: *container_template
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Python dependencies
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-docs-${{ hashFiles('docs/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-docs-
+
+      - name: Restore previous docs output
+        if: github.event_name == 'push'
+        uses: actions/cache@v4
+        with:
+          path: docs/build/html
+          key: docs-output-${{ github.repository }}-${{ github.ref_name }}
+          restore-keys: |
+            docs-output-${{ github.repository }}-${{ github.ref_name }}-
+            docs-output-${{ github.repository }}-
+
       - name: Build docs
+        shell: bash
         run: |
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           pip install -r docs/requirements.txt
           cd ${GITHUB_WORKSPACE}/docs
-          echo "Start Building docs..."
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
-          make html
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+            echo "Building docs for release tag ${VERSION}..."
+
+            # Build only this version into its own subdirectory
+            sphinx-build source build/html/${VERSION}
+
+            cd build/html
+
+            # Prune old release versions beyond the window
+            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+              echo "Pruning old version: ${TAG_DIRS[0]}"
+              rm -rf "${TAG_DIRS[0]}"
+              TAG_DIRS=("${TAG_DIRS[@]:1}")
+            done
+
+            # Generate versions.json and root index.html
+            python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+              --build-dir .
+
+          else
+            echo "Building dev docs for main branch..."
+            # Build only main/ — don't touch existing version directories
+            rm -rf build/html/main
+            sphinx-build source build/html/main
+
+            cd build/html
+
+            # Generate versions.json and root index.html
+            python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+              --build-dir .
+          fi
+
       - name: Upload docs artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
-        with: 
+        with:
           path: ${{ github.workspace }}/docs/build/html
-          retention-days: 3
 
   test:
     if: github.event_name == 'pull_request'
@@ -86,19 +140,13 @@ jobs:
           pytest tests
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     needs: build
     runs-on: Linux
     permissions:
       pages: write
-      id-token: write 
-    env:
-      NVIDIA_DRIVER_CAPABILITIES: all
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DISABLE_REQUIRE: 1
-    container: *container_template
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
       - name: Download docs artifact
         uses: actions/download-artifact@v4
         with:
@@ -120,7 +168,7 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
   #       with:
-  #         fetch-depth: 0   
+  #         fetch-depth: 0
 
   #     - name: (Release) Install build tools
   #       run: |
