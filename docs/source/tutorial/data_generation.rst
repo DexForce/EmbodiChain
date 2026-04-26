@@ -5,17 +5,17 @@ Data Generation
 
 .. currentmodule:: embodichain.lab.gym
 
-This tutorial shows you how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment launcher and dataset manager. You will learn how to configure LeRobot recording in a JSON file, how the ``run_env.py`` script builds environments and executes expert trajectories, and how completed episodes are automatically saved to disk.
+This tutorial shows how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment rollout and dataset manager. You will learn how to configure LeRobot recording in ``gym_config.json``, how ``run_env.py`` builds an environment from configuration files, and how completed episodes are automatically saved to disk.
 
 Overview
 ~~~~~~~~
 
-EmbodiChain provides a built-in data generation workflow for imitation learning tasks:
+EmbodiChain provides a built-in data generation workflow for imitation-learning and manipulation tasks:
 
-- **Gym Configuration**: Describes the scene, robot, sensors, randomization events, observations, and dataset recorder.
-- **Action Configuration**: Describes how the task-specific expert trajectory should be generated.
-- **Environment Launcher**: Builds the environment directly from configuration files.
-- **Expert Policy**: Each task provides ``create_demo_action_list()`` to generate a scripted trajectory.
+- **Gym Configuration**: Describes the scene, robot, sensors, randomization events, observations, dataset recorder, and rollout settings.
+- **Action Configuration**: Describes the task-specific expert action graph for tasks that use the action bank.
+- **Environment Rollout**: Builds the environment directly from configuration files and executes offline generation.
+- **Expert Policy**: Each task provides ``create_demo_action_list()`` or another scripted policy entry to generate expert actions.
 - **Dataset Manager**: Records observation-action pairs during ``env.step()``.
 - **LeRobotRecorder**: Converts completed episodes into LeRobot-compatible datasets, with optional video export.
 
@@ -25,24 +25,22 @@ What This Tutorial Records
 This page documents the full path from task configuration to saved dataset:
 
 1. Prepare a task ``gym_config.json``.
-2. Prepare an ``action_config.json`` that controls expert action generation.
-3. Launch the environment runner.
-4. Let the task generate actions through ``create_demo_action_list()``.
-5. Execute the actions with ``env.step()``.
-6. Let the dataset manager automatically save completed episodes.
+2. Prepare an ``action_config.json`` if the task uses the action bank.
+3. Launch the environment rollout with ``run-env``.
+4. Let the dataset manager automatically save completed episodes.
 
-Example Task: Items Handover and Place
---------------------------------------
+Example Task
+------------
 
-As a running example, we use an ``items_handover_place`` task. In a project repository, this usually comes with two files:
+As a concrete example, this tutorial uses a real action-bank task shipped in the repository:
 
-- ``configs/items_handover_place/gym_config.json`` The gym configuration defines the simulation scene and recording behavior.
-- ``configs/items_handover_place/action_config.json`` The action configuration defines the expert action graph used to solve the task.
+- ``configs/gym/pour_water/gym_config.json`` defines the simulation scene and dataset recording behavior.
+- ``configs/gym/pour_water/action_config.json`` defines the action-bank graph used to solve the task.
 
 The Code
 ~~~~~~~~
 
-The tutorial corresponds to the ``run_env.py`` script in the ``embodichain/lab/scripts`` directory.
+The tutorial corresponds to the ``run_env.py`` script in ``embodichain/lab/scripts``.
 
 .. dropdown:: Code for run_env.py
    :icon: code
@@ -55,218 +53,137 @@ The tutorial corresponds to the ``run_env.py`` script in the ``embodichain/lab/s
 The Code Explained
 ~~~~~~~~~~~~~~~~~~
 
-The launcher builds the environment from configuration, generates expert trajectories, executes them step by step, and relies on the dataset manager to auto-save valid episodes.
+The rollout script builds the environment from configuration, generates expert trajectories, executes them step by step, and relies on the dataset manager to auto-save valid episodes.
 
 Step 1: Prepare the Task Configuration
 --------------------------------------
 
-The first input to the pipeline is the task ``gym_config.json``. In the ``items_handover_place`` example, the same file contains scene randomization, observations, dataset recording, and robot/sensor definitions.
+The first input to the pipeline is the task ``gym_config.json``. In the example below, the same file contains rollout settings, scene randomization, observations, dataset recording, and robot or sensor definitions.
+
+The rollout settings include the episode count:
+
+.. literalinclude:: ../../../configs/gym/pour_water/gym_config.json
+   :language: json
+   :lines: 2-4
 
 The dataset-related part looks like this:
 
-.. code-block:: json
-
-   {
-       "env": {
-           "dataset": {
-               "lerobot": {
-                   "func": "LeRobotRecorder",
-                   "mode": "save",
-                   "params": {
-                       "save_path": "/root/workspace/Embodied_Challenge/lerobot_dataset/",
-                       "robot_meta": {
-                           "robot_type": "CobotMagic",
-                           "control_freq": 25,
-                           "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
-                       },
-                       "instruction": {
-                           "lang": "Right arm picks up the pen and hands it to left arm, then places it inside the pen holder"
-                       },
-                       "extra": {
-                           "scene_type": "Sim",
-                           "task_description": "items_handover_place",
-                           "data_type": "sim"
-                       },
-                       "use_videos": true
-                   }
-               }
-           }
-       }
-   }
+.. literalinclude:: ../../../configs/gym/pour_water/gym_config.json
+   :language: json
+   :lines: 261-281
 
 Important parameters are:
 
-- **save_path**: Where the generated dataset will be written.
-- **robot_meta**: Robot metadata such as robot type, control frequency, and active control parts.
-- **instruction**: Task language instruction stored together with the dataset.
-- **extra**: Additional metadata such as scene type and task description.
-- **use_videos**: Whether camera observations should be stored as videos instead of raw images.
- 
+- **max_episodes**: Number of rollout episodes generated by ``run_env.py``.
+- **max_episode_steps**: Maximum number of environment steps per episode.
+- **dataset.lerobot.params.robot_meta**: Robot metadata such as robot type and control frequency.
+- **dataset.lerobot.params.instruction**: Task language instruction stored together with the dataset.
+- **dataset.lerobot.params.extra**: Additional metadata such as scene type and task description.
+- **dataset.lerobot.params.use_videos**: Whether camera observations should be stored as videos.
+- **env.control_parts**: Controlled robot parts in the environment.
+
+
 In the current implementation, ``LeRobotRecorder`` stores robot state and action features such as ``observation.qpos``, ``observation.qvel``, ``observation.qf``, ``action``, and camera images when sensors are present.
 
 Step 2: Prepare the Action Configuration
 ----------------------------------------
 
-The second input is the ``action_config.json`` file. This file defines the expert action graph used by the task. It is the main configuration entry for scripted trajectory generation. Take ``items_handover_place`` as example, the file is organized around ``scope``, ``node``, ``edge``, and ``sync``.
+For tasks that use the action bank, the second input is ``action_config.json``. This file defines the expert action graph consumed by ``create_demo_action_list()``. In the example below, the file is organized around ``scope``, ``node``, ``edge``, and ``sync``.
 
-**Scope Configuration**
+.. dropdown:: Action bank structure in the example task Pour_Water
+   :icon: code
 
-.. literalinclude:: ../../../configs/items_handover_place/action_config.json
-   :language: json
-   :lines: 1-40
+   **Scope Configuration**
 
-This section defines the controllable sub-graphs used by the task:
+   .. literalinclude:: ../../../configs/gym/pour_water/action_config.json
+      :language: json
+      :lines: 2-57
 
-- **Control groups**: Scopes such as ``right_arm``, ``left_arm``, ``right_eef``, and ``left_eef`` separate arm motion from gripper motion.
-- **Initialization**: Each scope specifies how its initial state is obtained, such as ``current_qpos`` or ``given_qpos``.
-- **Action dimensions**: The ``dim`` field defines the action dimension for each scope, for example 6 DoF for an arm and 1 DoF for a gripper.
+   **Node Configuration**
 
-**Node Configuration**
+   .. literalinclude:: ../../../configs/gym/pour_water/action_config.json
+      :language: json
+      :lines: 96-177
 
-The following excerpts show representative node entries from the real ``action_config.json``:
+   **Edge Configuration**
 
-.. literalinclude:: ../../../configs/items_handover_place/action_config.json
-   :language: json
-   :lines: 304-364
+   .. literalinclude:: ../../../configs/gym/pour_water/action_config.json
+      :language: json
+      :lines: 763-790
 
+   **Synchronization**
 
-This section defines how key poses or joint targets are generated:
+   .. literalinclude:: ../../../configs/gym/pour_water/action_config.json
+      :language: json
+      :lines: 906-932
 
-- **Affordance-driven targets**: Nodes typically start from an affordance source such as an object pose or a previously generated pose.
-- **Pose processing**: Intermediate transforms such as offsets and rotations are applied before motion targets are finalized.
-- **IK conversion**: For arm scopes, nodes often solve inverse kinematics to convert a pose target into a valid joint target.
-- **Cross-scope reuse**: A node in one scope can depend on data produced by another scope, which is common in dual-arm tasks.
+This structure defines the expert rollout as follows:
 
-**Edge Configuration**
+- **Scope**: Defines controllable sub-graphs such as ``right_arm``, ``left_arm``, ``right_eef``, and ``left_eef``.
+- **Node**: Defines key poses, targets computed from object affordances, and IK-generated joint targets.
+- **Edge**: Defines executable transitions between nodes, including duration and execution function.
+- **Sync**: Defines execution order rules between independently configured sub-actions.
 
-.. literalinclude:: ../../../configs/items_handover_place/action_config.json
-   :language: json
-   :lines: 1005-1017
+Note: Action bank is not the only way to generate demonstrations. Depending on the task design, trajectories can also be produced by other scripted generation methods.
 
-.. literalinclude:: ../../../configs/items_handover_place/action_config.json    
-   :language: json
-   :lines: 1141-1150
+Step 3: Launch the Environment Rollout
+--------------------------------------
 
-This section defines executable transitions between nodes:
-
-- **Motion edges**: Entries such as ``right_up_to_handover`` use ``plan_trajectory`` to move an arm between two node states.
-- **Gripper edges**: Entries such as ``right_open0`` use functions like ``execute_open`` or ``execute_close`` to generate gripper actions.
-- **Durations**: The ``duration`` field controls how many simulation steps each transition occupies.
-- **Execution binding**: The ``name`` field selects which execution function is used for that transition.
-
-**Synchronization**
-
-.. literalinclude:: ../../../configs/items_handover_place/action_config.json
-   :language: json
-   :lines: 1191-1210
-
-This section defines dependencies between sub-actions:
-
-- **Temporal ordering**: The ``sync`` block enforces that some actions can only start after other actions finish.
-- **Cross-scope coordination**: Dependencies commonly connect arm motion and gripper actions across different scopes.
-- **Multi-stage execution**: This is how multiple independently configured primitives become one coherent expert rollout.
-
-Together, ``scope`` defines what can be controlled, ``node`` defines target states, ``edge`` defines executable transitions, and ``sync`` defines ordering constraints. This is the core configuration structure that ``create_demo_action_list()`` consumes when generating an expert rollout.
-
-Note: Action bank is not the only way to generate action demos. Depending on the task design, trajectories can also be produced by other scripted generation methods.
-
-Step 3: Build the Environment
------------------------------
-
-The launcher parses command-line arguments, loads ``gym_config.json`` and ``action_config.json``, converts them into environment configuration objects, and creates the environment instance:
+The rollout script parses command-line arguments, loads ``gym_config.json`` and ``action_config.json``, converts them into environment configuration objects, creates the environment instance, and then runs offline rollout for ``max_episodes`` episodes:
 
 .. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
    :language: python
    :start-at: def cli():
    :end-at:     main(args, env, gym_config)
 
-This means the runtime inputs of the whole data-generation pipeline are simply the task config files plus launcher arguments.
+Each rollout internally calls ``create_demo_action_list()``, validates the returned sequence, executes actions with ``env.step(action)``, and discards invalid rollouts by resetting with ``save_data=False``.
 
-Step 4: Generate and Execute Expert Actions
--------------------------------------------
-
-The launcher first asks the task to generate an expert action sequence, then executes each action with ``env.step()``:
-
-.. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
-   :language: python
-   :start-at: def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
-   :end-at: return True
-
-This function highlights the data-generation loop:
-
-1. Call ``create_demo_action_list()`` from the environment.
-2. Validate that the returned action list is not empty.
-3. Execute each action with ``env.step(action)``.
-4. Let the environment and dataset manager record the rollout automatically.
-
-Step 5: Validate and Regenerate Failed Rollouts
------------------------------------------------
-
-The launcher also handles invalid trajectories safely:
-
-.. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
-   :language: python
-   :start-at: def generate_function(
-   :end-at: return True
-
-If a generated action sequence is invalid, the launcher resets the environment with ``save_data=False`` so that broken rollouts are discarded instead of being written into the dataset.
-
-Step 6: Loop Over Episodes
---------------------------
-
-The top-level ``main()`` function runs offline generation for the configured number of episodes:
-
-.. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
-   :language: python
-   :start-at: def main(args, env, gym_config):
-   :end-at:     _, _ = env.reset()
-
-Commonly used command-line arguments are:
-
-- **--gym_config**: Path to the task JSON configuration.
-- **--action_config**: Optional path to the action-bank configuration.
-- **--num_envs**: Number of environments to run in parallel.
-- **--device**: Simulation device, such as ``cpu`` or ``cuda``.
-- **--arena_space**: Arena size used by the simulation manager.
-- **--headless**: Run without GUI for faster generation.
-- **--enable_rt**: Enable ray tracing for higher-quality visual observations.
-- **--filter_dataset_saving**: Disable dataset saving for debugging.
-
-The Code Execution
-~~~~~~~~~~~~~~~~~~
-
-To run data generation with the official launcher:
+The recommended CLI entrypoint is:
 
 .. code-block:: bash
 
-   python -m embodichain.lab.scripts.run_env \
-       --gym_config path/to/gym_config.json \
-       --action_config path/to/action_config.json \
-       --arena_space 5.0 \
-       --headless \
-       --enable_rt
+   python -m embodichain run-env \
+       --gym_config configs/gym/pour_water/gym_config.json \
+       --action_config configs/gym/pour_water/action_config.json \
+       --headless
 
+For interactive inspection, you can use preview mode: replace ``--headless`` with ``--preview``.
+When ``--preview`` is enabled, the script opens the environment in an interactive debugging mode. This mode is for inspection and does not save datasets.
+
+
+Useful CLI arguments:
+
+- **--gym_config**: Path to the task JSON configuration.
+- **--action_config**: Path to the action-bank configuration.
+- **--num_envs**: Number of environments to run in parallel.
+- **--device**: Simulation device, such as ``cpu`` or ``cuda``.
+- **--headless**: Run without GUI for faster generation.
+- **--enable_rt**: Enable ray tracing for higher-quality visual observations.
+- **--preview**: Launch the environment in interactive preview mode.
+- **--filter_dataset_saving**: Disable dataset saving for debugging.
+
+For the complete CLI argument list, see :doc:`CLI Reference </guides/cli>`.
 
 Outputs
 ~~~~~~~
 
-After successful execution, completed episodes are saved under the configured ``save_path``. A LeRobot dataset typically contains:
+After successful execution, completed episodes are saved under the configured dataset root. A LeRobot dataset typically contains:
+
+If no explicit save path is provided and ``EMBODICHAIN_DATASET_ROOT`` is not set, ``LeRobotRecorder`` uses ``~/.cache/embodichain_datasets`` as the default dataset root.
 
 - **data/**: Recorded action and state data.
 - **videos/**: Camera observations saved as videos when ``use_videos=True``.
 - **meta/**: Dataset metadata such as task information and robot description.
 
-Dataset folders are automatically numbered, which makes it easy to run repeated generations without overwriting previous results. In the current implementation, the recorder also auto-increments dataset names and writes dataset metadata during creation.
+Dataset folders are automatically numbered, which makes it easy to run repeated generations without overwriting previous results.
 
-In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts should consume these saved LeRobot episodes rather than regenerating trajectories every time.
+In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts typically consume these saved LeRobot episodes instead of regenerating trajectories each time.
 
 Best Practices
 ~~~~~~~~~~~~~~
 
-- **Keep the config pair together**: Always version ``gym_config.json`` and ``action_config.json`` together for a task.
+- **Keep the config pair together**: Version ``gym_config.json`` and ``action_config.json`` together for action-bank tasks.
 - **Use valid scripted policies**: Make sure ``create_demo_action_list()`` returns executable trajectories for the current scene.
-- **Enable ``use_videos`` for visual tasks**: This is especially useful for downstream vision-based training.
 - **Use ``--headless`` for throughput**: Disable the GUI when generating large datasets.
-- **Use ``--enable_rt`` when image quality matters**: Ray tracing improves realism for camera observations.
-- **Use ``--filter_dataset_saving`` for debugging**: This is useful when you need to inspect task logic without writing datasets.
+- **Use ``--preview`` and ``--filter_dataset_saving`` for debugging**: Inspect task logic without writing datasets.
 - **Discard invalid rollouts**: Keep the default validation logic so failed trajectories are not saved.
