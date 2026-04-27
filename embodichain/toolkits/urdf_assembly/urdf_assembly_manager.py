@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import copy
 import os
 import time
 import logging
@@ -128,6 +129,15 @@ class URDFAssemblyManager:
     ):
         self.logger = setup_urdf_logging()
 
+        # Global name normalization strategy for this assembly. By default,
+        # this preserves the legacy behavior: link names are lowercase and
+        # joint names are uppercase. The same mapping is passed down to
+        # managers that deal with naming so that the policy stays consistent.
+        self._name_case: dict[str, str] = {
+            "joint": "upper",
+            "link": "lower",
+        }
+
         # Use registries for components and sensors
         self.component_registry = component_registry or ComponentRegistry()
         self.sensor_registry = sensor_registry or SensorRegistry()
@@ -137,13 +147,13 @@ class URDFAssemblyManager:
 
         # Initialize managers for components and sensors
         self.component_manager = component_manager or URDFComponentManager(
-            self.mesh_manager
+            self.mesh_manager, name_case=self._name_case
         )
         self.sensor_manager = sensor_manager or URDFSensorManager(self.mesh_manager)
 
         # Processing order for components with their name prefixes
         # Tuple format: (component_name, prefix)
-        self.component_order = [
+        self._component_order_and_prefix = [
             ("chassis", None),
             ("legs", None),
             ("torso", None),
@@ -204,6 +214,150 @@ class URDFAssemblyManager:
 
         # Initialize signature manager instead of cache manager
         self.signature_manager = URDFAssemblySignatureManager()
+
+    @property
+    def name_case(self):
+        """Get the current name case policy for joints and links.
+
+        Returns:
+            dict[str, str]: A dictionary mapping 'joint' and 'link' to their respective case modes.
+        """
+        return self._name_case
+
+    @name_case.setter
+    def name_case(self, new_name_case: dict[str, str]):
+        """Set a new name case policy for joints and links.
+
+        This method updates the name case policy and propagates it to the component and sensor managers.
+
+        Args:
+            new_name_case (dict[str, str]): A dictionary mapping 'joint' and 'link' to their desired case modes (e.g., 'upper', 'lower', 'none').
+        """
+        if not isinstance(new_name_case, dict):
+            raise ValueError(
+                "name_case must be a dictionary mapping 'joint' and 'link' to case modes."
+            )
+        if "joint" not in new_name_case or "link" not in new_name_case:
+            raise ValueError("name_case must contain keys 'joint' and 'link'.")
+
+        self._name_case = new_name_case
+
+    def _apply_case(self, kind: str, name: str | None) -> str | None:
+        """Normalize a name according to the assembly-wide case policy.
+
+        This helper mirrors the behavior of the managers' own case helpers so
+        that any name sets computed here (e.g. for sensors) stay consistent
+        with how names are written into the URDF.
+
+        Args:
+            kind (str): One of ``"joint"`` or ``"link"``.
+            name (str | None): The original name.
+
+        Returns:
+            str | None: The normalized name, or the original value if the
+            kind is unknown or its mode is ``"none"``.
+        """
+
+        if name is None:
+            return None
+
+        mode = self._name_case.get(kind, "none")
+        if mode == "lower":
+            return name.lower()
+        if mode == "upper":
+            return name.upper()
+        return name
+
+    @property
+    def component_order_and_prefix(self):
+        """Get the internal component order with their name prefixes.
+
+        Note:
+            This exposes the internal list of ``(component_name, prefix)`` pairs
+            used when assembling URDFs. In most user code it is recommended to
+            use :attr:`component_prefix` instead, which focuses on configuring
+            prefixes rather than ordering.
+
+        Returns:
+            list[tuple[str, str | None]]: A list of tuples specifying component
+            names and their prefixes.
+        """
+        return self._component_order_and_prefix
+
+    @component_order_and_prefix.setter
+    def component_order_and_prefix(self, new_order):
+        """Set the internal component prefix configuration.
+        Args:
+            new_order: Value assigned directly to the internal
+                ``_component_order_and_prefix`` attribute, typically a list of
+                ``(component_name, prefix)`` tuples.
+        Note:
+            This setter performs no validation or patch-style merging; it
+            stores ``new_order`` as provided.
+        """
+        self._component_order_and_prefix = new_order
+
+    @property
+    def component_prefix(self):
+        """Configure name prefixes per component type.
+
+        This is a user-facing alias over :attr:`component_order_and_prefix`.
+
+        Semantics:
+            This setter is **patch-only**: it updates prefixes for components that
+            already exist in the current internal order and does **not** allow
+            introducing new component names.
+
+        Returns:
+            list[tuple[str, str | None]]: The internal list of
+            ``(component_name, prefix)`` pairs.
+        """
+
+        return self.component_order_and_prefix
+
+    @component_prefix.setter
+    def component_prefix(self, new_prefixes):
+        if not isinstance(new_prefixes, list) or not all(
+            isinstance(item, tuple) and len(item) == 2 for item in new_prefixes
+        ):
+            raise ValueError(
+                "component_prefix must be a list of (component_name, prefix) tuples."
+            )
+
+        # Treat new_prefixes as a patch on top of the existing/default order:
+        #  - For components already present in self._component_order_and_prefix, update their prefix.
+        #  - Preserve components that are not mentioned, keeping their relative order.
+        #
+        # Note: New/unknown component names are rejected to keep the assembly order
+        # controlled internally.
+
+        # Allowed components are exactly those already present in the default order.
+        existing_components = {comp for comp, _ in self._component_order_and_prefix}
+
+        # Build override map from the incoming list, but only for existing components.
+        override_map = {}
+        for comp, prefix in new_prefixes:
+            if not isinstance(comp, str):
+                raise ValueError("component name in component_prefix must be a string.")
+            if comp not in existing_components:
+                raise ValueError(
+                    f"component_prefix cannot introduce new component '{comp}'. "
+                    f"Allowed components: {sorted(existing_components)}"
+                )
+            override_map[comp] = prefix
+
+        merged_order: list[tuple[str, str | None]] = []
+
+        # First, walk the existing order and apply overrides where available.
+        # The relative order of components is kept internal and usually does
+        # not need to be changed by users.
+        for comp, prefix in self._component_order_and_prefix:
+            if comp in override_map:
+                merged_order.append((comp, override_map.pop(comp)))
+            else:
+                merged_order.append((comp, prefix))
+
+        self._component_order_and_prefix = merged_order
 
     def add_component(
         self,
@@ -536,6 +690,40 @@ class URDFAssemblyManager:
                 break  # No further links found in the chain
         return current_link
 
+    def _log_names_once(
+        self,
+        kind: str,
+        elems: list[ET.Element],
+        *,
+        max_items: int = 300,
+        max_chars: int = 8000,
+    ) -> None:
+        """Log element names in a single line (truncated)."""
+        names: list[str] = []
+        for e in elems:
+            n = e.get("name")
+            if n:
+                names.append(n)
+
+        total = len(names)
+        shown_names = names[:max_items]
+        text = ", ".join(shown_names)
+
+        truncated_items = max(0, total - len(shown_names))
+        truncated_chars = 0
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+            truncated_chars = 1
+
+        suffix_parts: list[str] = []
+        if truncated_items:
+            suffix_parts.append(f"truncated_items={truncated_items}")
+        if truncated_chars:
+            suffix_parts.append("truncated_chars=1")
+        suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+
+        self.logger.info(f"[merge_urdfs] {kind}: count={total} names=[{text}]{suffix}")
+
     @performance_monitor
     def merge_urdfs(
         self,
@@ -563,6 +751,16 @@ class URDFAssemblyManager:
         ]
         self.logger.info(f"🔧 Preparing to merge components: {available_components}")
 
+        order_items = " ".join(
+            f"[{comp}]({prefix})" for comp, prefix in self.component_order_and_prefix
+        )
+        self.logger.info(f"[component_order_and_prefix] {order_items}")
+
+        case_keys = [k for k in ("joint", "link") if k in self.name_case]
+        case_keys += [k for k in sorted(self.name_case) if k not in case_keys]
+        case_items = " ".join(f"[{k}]({self.name_case[k]})" for k in case_keys)
+        self.logger.info(f"[name_case] {case_items}")
+
         for comp in available_components:
             comp_obj = self.component_registry.get(comp)
             self.logger.info(f"  [{comp}]: {comp_obj.urdf_path}")
@@ -572,9 +770,21 @@ class URDFAssemblyManager:
                 self.logger.debug(f"    Transform: applied")
 
         if use_signature_check:
-            # Calculate current assembly signature
+            # Calculate current assembly signature. In addition to the component
+            # registry contents, include the current component_order_and_prefix
+            # so that changes to name prefixes also invalidate the cache.
+            component_info = self.component_registry.all().copy()
+            component_info["__component_order_and_prefix__"] = list(
+                self.component_order_and_prefix
+            )
+            # Also include the assembly-wide name_case policy so that
+            # renaming rules (e.g. link/joint casing) participate in the
+            # signature. This ensures that changing naming strategy forces
+            # a rebuild.
+            component_info["__name_case__"] = dict(self._name_case)
+
             assembly_signature = self.signature_manager.calculate_assembly_signature(
-                self.component_registry.all(), output_path
+                component_info, output_path
             )
 
             self.logger.info(f"Current assembly signature: [{assembly_signature}]")
@@ -606,6 +816,46 @@ class URDFAssemblyManager:
         robot_name = os.path.splitext(os.path.basename(output_path))[0]
         merged_urdf = ET.Element("robot", name=robot_name)
 
+        # Global <material> definitions live directly under <robot> and are not part
+        # of links/joints. To avoid polluting the merged URDF, we only merge global
+        # materials that are actually referenced by merged links' visuals.
+        materials: list[ET.Element] = []
+        material_names: set[str] = set()
+        material_sources: list[tuple[ET.Element, str]] = []
+
+        def _register_material_source(root: ET.Element, source: str) -> None:
+            material_sources.append((root, source))
+
+        def _merge_material_if_defined(mat_name: str) -> bool:
+            """Merge a global <material name=...> definition from known sources.
+
+            Only merges if the material is referenced and if a source URDF actually
+            defines it at the <robot> root. This prevents bringing in unused
+            materials from component URDFs.
+            """
+            if not mat_name or mat_name in material_names:
+                return False
+
+            matches: list[tuple[ET.Element, str]] = []
+            for root, source in material_sources:
+                for mat in root.findall("material"):
+                    if mat.get("name") == mat_name:
+                        matches.append((mat, source))
+
+            if not matches:
+                return False
+
+            if len(matches) > 1:
+                self.logger.debug(
+                    f"Material '{mat_name}' defined in multiple URDF sources; using the first: {matches[0][1]}"
+                )
+
+            mat, source = matches[0]
+            materials.append(copy.deepcopy(mat))
+            material_names.add(mat_name)
+            self.logger.debug(f"Merged referenced material '{mat_name}' from {source}")
+            return True
+
         # 2. Create single base link for the entire robot
         base_link = ET.Element("link", name=self.base_link_name)
         # Store links and joints separately for proper ordering
@@ -622,8 +872,12 @@ class URDFAssemblyManager:
         ensure_directory_exists(output_dir, self.logger)
         mesh_manager = URDFMeshManager(output_dir)
         mesh_manager.ensure_dirs()
-        component_manager = URDFComponentManager(mesh_manager)
-        connection_manager = URDFConnectionManager(self.base_link_name)
+        component_manager = URDFComponentManager(
+            mesh_manager, name_case=self._name_case
+        )
+        connection_manager = URDFConnectionManager(
+            self.base_link_name, name_case=self._name_case
+        )
 
         # Initialize sensor manager with mesh_manager
         sensor_manager = URDFSensorManager(mesh_manager)
@@ -647,7 +901,7 @@ class URDFAssemblyManager:
             if comp_obj and comp_obj.transform is not None:
                 component_transforms[comp] = comp_obj.transform
 
-        for comp, prefix in self.component_order:
+        for comp, prefix in self.component_order_and_prefix:
             comp_obj = self.component_registry.get(comp)
             if not comp_obj:
                 continue
@@ -658,6 +912,7 @@ class URDFAssemblyManager:
 
             # Parse component URDF to analyze its structure
             urdf_root = ET.parse(comp_obj.urdf_path).getroot()
+            _register_material_source(urdf_root, str(comp_obj.urdf_path))
 
             # Determine parent component and attachment point for current component
             parent_component = None
@@ -747,16 +1002,32 @@ class URDFAssemblyManager:
             component_transforms,
         )
 
-        # Track existing names for sensor processing
+        # Track existing names for sensor processing. Use the same case policy
+        # as the rest of the assembly so that collision checks are consistent
+        # with how names are written.
         existing_link_names = {
-            link.get("name").lower() for link in links if link.get("name")
+            self._apply_case("link", link.get("name"))
+            for link in links
+            if link.get("name")
         }
         existing_joint_names = {
-            joint.get("name").upper() for joint in joints if joint.get("name")
+            self._apply_case("joint", joint.get("name"))
+            for joint in joints
+            if joint.get("name")
         }
 
         # 5. Process sensor attachments using the new sensor manager
         for sensor_name, sensor_attach in self.sensor_registry.all().items():
+            # Register sensor URDF as a material source (do not merge materials eagerly).
+            try:
+                sensor_root = ET.parse(sensor_attach.sensor_urdf).getroot()
+            except Exception as exc:
+                self.logger.debug(
+                    f"Failed to parse sensor URDF for material sourcing ({sensor_attach.sensor_urdf}): {exc}"
+                )
+            else:
+                _register_material_source(sensor_root, str(sensor_attach.sensor_urdf))
+
             sensor_manager.attach_sensor(
                 sensor_name=sensor_name,
                 sensor_source=sensor_attach.sensor_urdf,
@@ -769,9 +1040,40 @@ class URDFAssemblyManager:
             links, joints, base_points, existing_link_names, existing_joint_names
         )
 
-        # 6. Add all links and joints to merged URDF in proper order
+        # 6. Merge only the global materials that are actually referenced by merged links.
+        # If a link references <material name="X"/> but no source URDF defines a global
+        # <material name="X"> under <robot>, we warn but do not inject guessed fallbacks.
+        referenced_materials: set[str] = set()
+        for link in links:
+            for mat in link.findall(".//visual/material"):
+                mat_name = mat.get("name")
+                if not mat_name:
+                    continue
+                # A material with children is already defined inline.
+                if list(mat):
+                    continue
+                referenced_materials.add(mat_name)
+
+        missing_materials: list[str] = []
+        for mat_name in sorted(referenced_materials):
+            if mat_name in material_names:
+                continue
+            if not _merge_material_if_defined(mat_name):
+                missing_materials.append(mat_name)
+
+        for mat_name in missing_materials:
+            self.logger.warning(
+                f"Material '{mat_name}' referenced but not defined in any source URDF"
+            )
+
+        # Add global materials, then links/joints to merged URDF in proper order
+        for mat in materials:
+            merged_urdf.append(mat)
+
+        self._log_names_once("links", links)
         for link in links:
             merged_urdf.append(link)
+        self._log_names_once("joints", joints)
         for joint in joints:
             merged_urdf.append(joint)
 

@@ -127,7 +127,7 @@ class URDFFileWriter:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Calculate proper spacing for centered content
-        header_width = 80
+        header_width = 120
         separator_line = "<!--" + "=" * (header_width - 8) + "-->"
 
         def center_comment(text: str) -> str:

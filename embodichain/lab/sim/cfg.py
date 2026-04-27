@@ -891,6 +891,34 @@ class URDFCfg:
     fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
     """Output directory prefix for the assembled URDF file."""
 
+    component_prefix: List[tuple[str, Union[str, None]]] = field(
+        default_factory=lambda: [
+            ("chassis", None),
+            ("legs", None),
+            ("torso", None),
+            ("head", None),
+            ("left_arm", "left_"),
+            ("right_arm", "right_"),
+            ("left_hand", "left_"),
+            ("right_hand", "right_"),
+            ("arm", None),
+            ("hand", None),
+        ]
+    )
+    """Component name prefixes used during URDF assembly.
+
+    Preferred form is a list of ``(component_name, prefix)`` tuples. For
+    convenience, a mapping ``{component_name: prefix}`` is also accepted when
+    constructing :class:`URDFCfg` and will be normalized internally.
+    """
+
+    name_case: dict[str, str] = field(
+        default_factory=lambda: {
+            "joint": "upper",
+            "link": "lower",
+        }
+    )
+
     def __init__(
         self,
         components: list[dict[str, str | np.ndarray]] | None = None,
@@ -900,6 +928,8 @@ class URDFCfg:
         fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled",
         use_signature_check: bool = True,
         base_link_name: str = "base_link",
+        component_prefix: list[tuple[str, str | None]] | None = None,
+        name_case: dict[str, str] | None = None,
     ):
         """
         Initialize URDFCfg with optional list of components and output path settings.
@@ -916,6 +946,9 @@ class URDFCfg:
             fpath_prefix (str): Output directory prefix for the assembled URDF file.
             use_signature_check (bool): Whether to use signature check when merging URDFs.
             base_link_name (str): Name of the base link in the assembled robot.
+            component_prefix (list[tuple[str, str | None]] | None): Optional
+                list of (component_type, prefix) pairs to override default
+                component name prefixes.
         """
         self.components = {}
         self.sensors = sensors or {}
@@ -924,6 +957,36 @@ class URDFCfg:
         self.base_link_name = base_link_name
         self.fname = fname
         self.fpath_prefix = fpath_prefix
+
+        # Initialize component prefixes (patch-style mapping per component type)
+        if component_prefix is None:
+            # Use the same default as the dataclass field
+            self.component_prefix = [
+                ("chassis", None),
+                ("legs", None),
+                ("torso", None),
+                ("head", None),
+                ("left_arm", "left_"),
+                ("right_arm", "right_"),
+                ("left_hand", "left_"),
+                ("right_hand", "right_"),
+                ("arm", None),
+                ("hand", None),
+            ]
+        elif isinstance(component_prefix, dict):
+            # Allow dict-style config: {"left_hand": "l_", ...}
+            self.component_prefix = list(component_prefix.items())
+        else:
+            # Assume caller provided a list of (component_name, prefix) tuples
+            self.component_prefix = component_prefix
+
+        if name_case is None:
+            self.name_case = {
+                "joint": "upper",
+                "link": "lower",
+            }
+        else:
+            self.name_case = name_case
 
         # Auto-add components if provided
         if components:
@@ -1086,6 +1149,22 @@ class URDFCfg:
         # If there are multiple components, merge them into a single URDF file.
         manager = URDFAssemblyManager()
         manager.base_link_name = self.base_link_name
+
+        if self.component_prefix is None:
+            self.component_prefix = [
+                ("left_arm", "left_"),
+                ("right_arm", "right_"),
+                ("left_hand", "left_"),
+                ("right_hand", "right_"),
+            ]
+        if isinstance(self.component_prefix, dict):
+            self.component_prefix = list(self.component_prefix.items())
+        # Forward configured component prefixes to the assembly manager
+        manager.component_prefix = self.component_prefix
+
+        if self.name_case is not None:
+            manager.name_case = self.name_case
+
         for comp_type, comp_config in components:
             params = comp_config.get("params", {})
             success = manager.add_component(
@@ -1139,12 +1218,16 @@ class URDFCfg:
         fpath = init_dict.get("fpath", None)
         use_signature_check = init_dict.get("use_signature_check", True)
         base_link_name = init_dict.get("base_link_name", "base_link")
+        component_prefix = init_dict.get("component_prefix", None)
+        name_case = init_dict.get("name_case", None)
         return cls(
             components=components,
             sensors=sensors,
             fpath=fpath,
             use_signature_check=use_signature_check,
             base_link_name=base_link_name,
+            component_prefix=component_prefix,
+            name_case=name_case,
         )
 
 

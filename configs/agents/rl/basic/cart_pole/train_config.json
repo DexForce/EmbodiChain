@@ -51,7 +51,7 @@
                 }
             }
         },
-        "renderer": "legacy"
+        "renderer": "fast-rt"
     },
     "policy": {
         "name": "actor_critic",

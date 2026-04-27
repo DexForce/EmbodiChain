@@ -275,7 +275,7 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            self._register_default_window_control()
+            # self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -580,7 +580,7 @@ class SimulationManager:
         """Open the simulation window."""
         self._world.open_window()
         self._window = self._world.get_windows()
-        self._register_default_window_control()
+        # self._register_default_window_control()
         self.is_window_opened = True
 
     def close_window(self) -> None:
@@ -674,6 +674,7 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
+                roughness=0.7
             )
         )
 

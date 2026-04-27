@@ -65,6 +65,10 @@ def initialize_simulation(args):
     )
     sim = SimulationManager(config)
 
+    light = sim.add_light(
+        cfg=LightCfg(uid="main_light", intensity=30.0, init_pos=(0, 0, 2.0))
+    )
+
     return sim
 
 
@@ -305,7 +309,7 @@ def create_ice_cubes(sim: SimulationManager):
         cfg=VisualMaterialCfg(
             base_color=[1.0, 1.0, 1.0, 1.0],
             ior=1.31,
-            roughness=0.05,
+            roughness=0.2,
             material_type="BSDF",
         )
     )
