@@ -146,19 +146,31 @@ class StereoCameraTest:
 
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER != "legacy":
+            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cpu")
 
 
 class TestStereoCameraRasterCUDA(StereoCameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER != "legacy":
+            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cuda")
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
+            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cpu")
 
 
 class TestStereoCameraFastRTCUDA(StereoCameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
+            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cuda")

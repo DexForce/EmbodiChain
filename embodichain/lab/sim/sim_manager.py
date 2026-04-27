@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import gc
 import sys
 import dexsim
 import torch
@@ -1799,4 +1800,30 @@ class SimulationManager:
         self._env.clean()
         self._world.quit()
 
+        # REMOVE INTSTANCE FROM POOL
+        instance_id = getattr(self, "_instance_id", 0)
+        SimulationManager.reset(instance_id)
+
+        # Explicitly clear Python references to trigger C++ object destructors
+        self._ps = None
+        self._env = None
+        self._world = None
+        self._default_plane = None
+        
+        self._robots.clear()
+        self._rigid_objects.clear()
+        self._rigid_object_groups.clear()
+        self._soft_objects.clear()
+        self._cloth_objects.clear()
+        self._articulations.clear()
+        self._sensors.clear()
+        self._lights.clear()
+        self._visual_materials.clear()
+        self._texture_cache.clear()
+        self._arenas.clear()
+        self._markers.clear()
+        self._gizmos.clear()
+
         SimulationManager.reset(self.instance_id)
+        gc.collect()
+

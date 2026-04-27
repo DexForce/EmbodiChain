@@ -143,21 +143,33 @@ class CameraTest:
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER != "legacy":
+            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cpu")
 
 
 class TestCameraRasterCUDA(CameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER != "legacy":
+            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cuda")
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
+            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cpu")
 
 
 class TestCameraFastRTCUDA(CameraTest):
     def setup_method(self):
+        from embodichain.lab.sim import cfg
+        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
+            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cuda")
 
 
