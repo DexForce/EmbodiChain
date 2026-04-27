@@ -46,7 +46,7 @@ class BaseRigidObjectTest:
             headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
         )
         self.sim = SimulationManager(config)
-
+        self.sim.enable_physics(False)
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
         table_path = get_data_path(TABLE_PATH)

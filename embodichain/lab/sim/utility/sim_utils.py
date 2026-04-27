@@ -25,7 +25,7 @@ from dexsim.types import (
     ArticulationFlag,
     LoadOption,
     RigidBodyShape,
-    # SDFConfig,
+    SDFConfig,
     PhysicalAttr,
 )
 from dexsim.engine import Articulation
