@@ -1,0 +1,55 @@
+{
+    "id": "DummyTask-v1",
+    "max_episodes": 5,
+    "env": {
+    },
+    "robot": {
+        "uid": "UR5",
+        "fpath": "UniversalRobots/UR10/UR10.urdf",
+        "init_pos": [0.0, 0.0, 0.7775],
+        "init_qpos": [1.57079, -1.57079, 1.57079, -1.57079, -1.57079, -3.14159]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 320.0, 240.0],
+            "extrinsics": {
+                "eye": [1, 0, 3],
+                "target": [0, 0, 1]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "wrist",
+            "width": 640,
+            "height": 480,
+            "enable_mask": true,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "extrinsics": {
+                "parent": "ee_link",
+                "pos": [-0.08, 0.0, 0.04],
+                "quat": [0.15304635, 0.69034543, -0.69034543, -0.15304635]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [0, 0, 3],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [],
+    "rigid_object": [
+    ],
+    "rigid_object_group": [],
+    "articulation": []
+}

@@ -1,0 +1,352 @@
+{
+    "id": "StackBowls-v1",
+    "max_episodes": 2,
+    "max_episode_steps": 300,
+    "env": {
+        "events": {
+            "record_camera": {
+                "func": "record_camera_data",
+                "mode": "interval",
+                "interval_step": 1,
+                "params": {
+                    "name": "cam1",
+                    "resolution": [320, 240],
+                    "eye": [2, 0, 2],
+                    "target": [0.5, 0, 1]
+                }
+            },
+            "randomize_table_height": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "table"},
+                    "position_range": [[0.0, 0.0, -0.02], [0.00, 0.00, 0.02]],
+                    "relative_position": true                
+                }
+            },
+            "init_bowl_max_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"},
+                    "position_range": [[-0.02, -0.02, 0.0], [0.02, 0.02, 0.0]],
+                    "relative_position": true,
+                    "physics_update_step": 10                
+                }
+            },
+            "init_bowl_mid_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"},
+                    "position_range": [[-0.02, -0.02, 0.0], [0.02, 0.02, 0.0]],
+                    "relative_position": true,
+                    "physics_update_step": 10                
+                }
+            },
+            "init_bowl_min_pose": {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"},
+                    "position_range": [[-0.02, -0.02, 0.0], [0.02, 0.02, 0.0]],
+                    "relative_position": true,
+                    "physics_update_step": 10             
+                }
+            },
+            "set_table_material": {
+                "func": "set_rigid_object_visual_material",
+                "mode": "startup",
+                "params": {
+                    "entity_cfg": {"uid": "table"},
+                    "mat_cfg": {
+                        "uid": "table_mat",
+                        "base_color": [1.0, 1.0, 1.0, 1.0],
+                        "metallic": 0.0,
+                        "roughness": 0.8
+                    }
+                }
+            },
+            "set_bowl_max_material": {
+                "func": "set_rigid_object_visual_material",
+                "mode": "startup",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"},
+                    "mat_cfg": {
+                        "uid": "bowl_max_mat",
+                        "base_color": [0.545, 0.505, 0.431, 1.0],
+                        "metallic": 0.2,
+                        "roughness": 0.8
+                    }
+                }
+            },
+            "set_bowl_mid_material": {
+                "func": "set_rigid_object_visual_material",
+                "mode": "startup",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"},
+                    "mat_cfg": {
+                        "uid": "bowl_mid_mat",
+                        "base_color": [0.329, 0.478, 0.589, 1.0],
+                        "metallic": 0.2,
+                        "roughness": 0.8
+                    }
+                }
+            },
+            "set_bowl_min_material": {
+                "func": "set_rigid_object_visual_material",
+                "mode": "startup",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"},
+                    "mat_cfg": {
+                        "uid": "bowl_min_mat",
+                        "base_color": [0.466, 0.558, 0.480, 1.0],
+                        "metallic": 0.2,
+                        "roughness": 0.8
+                    }
+                }
+            }
+        },
+        "observations": {
+            "table_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "table.pose",
+                "params": {
+                    "entity_cfg": {"uid": "table"},
+                    "to_matrix": false
+                }
+            },
+            "table_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "table.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "table"}
+                }
+            },
+            "bowl_max_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bowl_max.pose",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"},
+                    "to_matrix": false
+                }
+            },
+            "bowl_max_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "bowl_max.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"}
+                }
+            },
+            "bowl_mid_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bowl_mid.pose",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"},
+                    "to_matrix": false
+                }
+            },
+            "bowl_mid_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "bowl_mid.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"}
+                }
+            },
+            "bowl_min_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bowl_min.pose",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"},
+                    "to_matrix": false
+                }
+            },
+            "bowl_min_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "bowl_min.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"}
+                }
+            }
+        },
+        "dataset": {
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "Aloha",
+                        "control_freq": 25
+                    },
+                    "instruction": {
+                        "lang": "nest the bowls from largest to smallest."
+                    },
+                    "extra": {
+                        "scene_type": "domestic",
+                        "task_description": "Stack bowls",
+                        "data_type": "sim",
+                        "episode_info": {
+                            "rigid_object_physics_attributes": ["mass"]
+                        }
+                    },
+                    "use_videos": true
+                }
+            }
+        },
+        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
+        "extensions": {
+            "success_xy_tol": 0.05
+        },
+        "sim_steps_per_control": 4
+    },
+    "robot": {
+        "uid": "CobotMagic",
+        "robot_type": "CobotMagic",
+        "init_pos": [0.0, 0.0, 0.7775],
+        "init_qpos": [0, 0, 0, 0, 0, 0, 0.0,0.0,0, 0, 0,0.0, 0, 0, 0, 0]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "extrinsics": {
+                "pos": [0.35368, 0.0647, 1.6817],
+                "quat": [-0.14437, 0.68669, -0.6862489, 0.191473]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_right_wrist",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "extrinsics": {
+                "parent": "right_link6",
+                "pos": [-0.11, 0.0, 0.06],
+                "quat": [0.1949, 0.6797, -0.6797, -0.1949]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_left_wrist",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 322.7323303222656, 213.17434692382812],
+            "extrinsics": {
+                "parent": "left_link6",
+                "pos": [-0.11, 0.0, 0.06],
+                "quat": [0.1949, 0.6797, -0.6797, -0.1949]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [0.7, 0, 3]
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "MultiW1Data/table_a.obj",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 10.0,
+                "static_friction": 2.0,
+                "dynamic_friction": 1.5,
+                "restitution": 0.1
+            },
+            "body_scale": [1, 1, 1],
+            "body_type": "kinematic",
+            "init_pos": [0.73, 0.0, 0.05],
+            "init_rot": [0, 0, 0]
+        }
+    ],
+    "rigid_object": [
+        {
+            "uid": "bowl_mid",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "Bowl/bowl.glb",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 0.01,
+                "static_friction": 1.0,
+                "dynamic_friction": 1.0,
+                "max_depenetration_velocity": 2.0,
+                "linear_damping": 2.0,
+                "angular_damping": 2.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "init_pos": [0.53, -0.2, 0.8],
+            "init_rot": [90, 0, 0],
+            "body_scale": [0.16, 0.16, 0.16],
+            "max_convex_hull_num": 32
+        },
+        {
+            "uid": "bowl_max",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "Bowl/bowl.glb",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 0.01,
+                "static_friction": 1.0,
+                "dynamic_friction": 1.0,
+                "max_depenetration_velocity": 2.0,
+                "linear_damping": 2.0,
+                "angular_damping": 2.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "init_pos": [0.53, 0.05, 0.8],
+            "init_rot": [90, 0, 0],
+            "body_scale": [0.18, 0.18, 0.18],
+            "max_convex_hull_num": 32
+        },
+        {
+            "uid": "bowl_min",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "Bowl/bowl.glb",
+                "compute_uv": true
+            },
+            "attrs" : {
+                "mass": 0.01,
+                "static_friction": 1.0,
+                "dynamic_friction": 1.0,
+                "max_depenetration_velocity": 2.0,
+                "linear_damping": 2.0,
+                "angular_damping": 2.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "init_pos": [0.73, 0, 0.8],
+            "init_rot": [90, 0, 0],
+            "body_scale": [0.15, 0.15, 0.15],
+            "max_convex_hull_num": 32
+        }
+    ]
+}
