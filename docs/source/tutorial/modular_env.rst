@@ -235,3 +235,11 @@ This tutorial showcases the most advanced features of EmbodiChain environments:
 
 
 This tutorial demonstrates the full power of EmbodiChain's modular environment system, providing the foundation for creating sophisticated robotic learning scenarios.
+
+.. tip::
+   **Using an AI coding agent?** These skills can help you build on this tutorial:
+
+   - **/add-task-env** — Scaffold a new task environment with the correct file structure, ``@register_env`` decorator, base class methods, ``__init__.py`` update, and test stub.
+   - **/add-functor** — Add observation, reward, event, or randomization functors with the correct signature and module placement.
+   - **/add-test** — Write tests following project conventions (pytest or class style, mock patterns, correct file placement).
+   - **/pre-commit-check** — Run all local CI checks (black, headers, ``__all__``, type annotations) before committing.

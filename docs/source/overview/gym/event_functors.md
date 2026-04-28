@@ -5,6 +5,10 @@
 
 This page lists all available event functors that can be used with the Event Manager. Event functors are configured using {class}`~cfg.EventCfg` and can be triggered at different stages: ``startup``, ``reset``, or ``interval``.
 
+````{tip}
+**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new event or randomization functor with the correct signature (`env, env_ids, ...`), function or class style, and module placement. Use **`/add-test`** to generate mock-based tests.
+````
+
 ## Physics Randomization
 
 ```{list-table} Physics Randomization Functors

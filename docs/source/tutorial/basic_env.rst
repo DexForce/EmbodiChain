@@ -182,3 +182,6 @@ This tutorial showcases several important features of EmbodiChain environments:
 4. **Custom Objects**: Adding and manipulating scene objects
 5. **Flexible Actions**: Customizable action spaces and execution methods
 6. **Extensible Observations**: Adding task-specific observation data
+
+.. tip::
+   **Using an AI coding agent?** Once you're ready to create your own task environment, use the **/add-task-env** skill to scaffold the file with the correct structure, ``@register_env`` decorator, base class methods, and test stub. Use **/add-test** to write tests and **/pre-commit-check** to verify everything passes CI before committing.
