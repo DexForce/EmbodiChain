@@ -65,3 +65,19 @@ If the installation is successful, you will see a simulation window with a rende
 ```bash
 python scripts/tutorials/sim/create_scene.py --headless
 ```
+
+## Using an AI Coding Agent
+
+EmbodiChain ships with built-in skills for AI coding agents (Claude Code, Copilot CLI, etc.) that automate common development tasks:
+
+| Skill | Command | Purpose |
+|-------|---------|---------|
+| Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
+| Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
+| Add Test | `/add-test` | Write tests following project conventions |
+| Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
+| Create PR | `/pr` | Create a PR following the project template |
+| Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |
+
+Run `/pre-commit-check` before every commit to catch formatting, header, annotation, and export issues locally — the same checks the CI pipeline enforces.
+```
