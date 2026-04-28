@@ -39,3 +39,20 @@ def pytest_configure(config):
         from embodichain.lab.sim import cfg
 
         cfg.DEFAULT_RENDERER = renderer
+
+@pytest.fixture(autouse=True, scope="function")
+def wait_scene_destruction_after_test():
+    """Ensure C++ engine scenes are fully destructed globally after each test exits."""
+    yield
+    
+    # [改良方案 - 延迟销毁]: 顶层出队与报错清理。
+    # Pytest 会在失败时保留 Traceback，打断异常栈可以确保栈上的临时对象的局部变量能被垃圾回收。
+    import sys
+    import gc
+    sys.last_traceback = None
+    sys.last_value = None
+    sys.last_type = None
+    
+    # [核心修补]: 统一消费清理队列内的 SimManager 和相关对象
+    from embodichain.lab.sim.sim_manager import SimulationManager
+    SimulationManager.flush_cleanup_queue()
