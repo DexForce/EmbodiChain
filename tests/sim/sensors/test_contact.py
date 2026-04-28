@@ -254,7 +254,13 @@ class ContactTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        self.sim.destroy()
+        if hasattr(self, "contact_sensor") and getattr(self.contact_sensor, "uid", None) is not None and hasattr(self, "sim"):
+            self.sim.remove_asset(self.contact_sensor.uid)
+        if hasattr(self, "sim"):
+            self.sim.destroy()
+        import embodichain.lab.sim as om
+        om.SimulationManager.flush_cleanup_queue()
+        import gc; gc.collect()
 
 
 class TestContactRasterCuda(ContactTest):

@@ -1802,11 +1802,11 @@ class SimulationManager:
 
         import time
         wait_times = 0
-        scene_count = dexsim.World.get_alive_scene_count()
+        scene_count = dexsim.get_world_num()
         max_loops = timeout_ms // 10
         while scene_count > 0 and wait_times < max_loops:
             time.sleep(0.01)
-            scene_count = dexsim.World.get_alive_scene_count()
+            scene_count = dexsim.get_world_num()
             wait_times += 1
             if wait_times % 50 == 0:
                 from embodichain.utils import logger

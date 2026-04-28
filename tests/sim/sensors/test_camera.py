@@ -138,7 +138,13 @@ class CameraTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        self.sim.destroy()
+        if hasattr(self, "camera") and getattr(self.camera, "uid", None) is not None and hasattr(self, "sim"):
+            self.sim.remove_asset(self.camera.uid)
+        if hasattr(self, "sim"):
+            self.sim.destroy()
+        import embodichain.lab.sim as om
+        om.SimulationManager.flush_cleanup_queue()
+        import gc; gc.collect()
 
 
 class TestCameraRaster(CameraTest):
