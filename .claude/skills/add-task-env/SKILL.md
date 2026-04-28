@@ -1,6 +1,6 @@
 ---
 name: add-task-env
-description: Use when creating a new task environment for EmbodiChain, including expert demostraction tasks, RL tasks or any EmbodiedEnv subclass
+description: Use when creating a new task environment for EmbodiChain, including expert demonstration tasks, RL tasks or any EmbodiedEnv subclass
 ---
 
 # Add Task Environment
@@ -11,34 +11,23 @@ Scaffold a new task environment following EmbodiChain's conventions and patterns
 
 - User asks to create a new task or environment
 - User says "add a task", "new env", "create environment for X"
-- A new EmbodiedEnv or BaseEnv subclass is needed
 
 ## Steps
 
 ### 1. Determine Task Category
 
-Ask the user which category the task belongs to:
+Ask the user:
 
-| Category | Directory | Base Class | Typical Use |
-|----------|-----------|------------|-------------|
-| `tableware` | `embodichain/lab/gym/envs/tasks/tableware/` | `EmbodiedEnv` | Manipulation tasks (pouring, stacking, rearranging) |
-| `rl` | `embodichain/lab/gym/envs/tasks/rl/` | `EmbodiedEnv` | Reinforcement learning tasks (push, reach, lift) |
-| `special` | `embodichain/lab/gym/envs/tasks/special/` | `EmbodiedEnv` | Simple or demo tasks |
-
-Also ask:
-- Task name (snake_case, e.g. `pick_place`)
-- Gym registration ID (e.g. `PickPlace-v1`)
-- `max_episode_steps` value
-- Whether this is an RL task (needs reward functors) or an agent task (needs action bank / trajectory)
+- **Category**: `tableware`, `rl`, or `special` (maps to `embodichain/lab/gym/envs/tasks/<category>/`)
+- **Task name** (snake_case, e.g. `pick_place`)
+- **Gym ID** (e.g. `PickPlace-v1`)
+- **Task type**: RL task (needs reward functors) or expert demonstration task (needs `create_demo_action_list`)
 
 ### 2. Create the Task File
 
 Place at `embodichain/lab/gym/envs/tasks/<category>/<name>.py`.
 
-If the task needs multiple files (e.g. action bank), create a subdirectory package:
-`embodichain/lab/gym/envs/tasks/<category>/<name>/__init__.py` + `<name>.py`
-
-Use this template:
+Template:
 
 ```python
 # ----------------------------------------------------------------------------
@@ -69,7 +58,7 @@ from embodichain.lab.sim.types import EnvObs
 __all__ = ["<CamelCaseName>Env"]
 
 
-@register_env("<GymId>", max_episode_steps=<N>)
+@register_env("<GymId>")
 class <CamelCaseName>Env(EmbodiedEnv):
     """<One-line description of the task>.
 
@@ -81,96 +70,38 @@ class <CamelCaseName>Env(EmbodiedEnv):
             cfg = EmbodiedEnvCfg()
         super().__init__(cfg, **kwargs)
 
-    def compute_task_state(
-        self, **kwargs
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        """Compute success/fail state and metrics for the task.
-
-        Returns:
-            is_success: Boolean tensor of shape (num_envs,).
-            is_fail: Boolean tensor of shape (num_envs,).
-            metrics: Dictionary of metric tensors.
-        """
-        is_success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        is_fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        metrics: Dict[str, Any] = {}
-        return is_success, is_fail, metrics
-
-    def check_truncated(self, obs: EnvObs, info: Dict[str, Any]) -> torch.Tensor:
-        """Check if episodes should be truncated early.
-
-        Returns:
-            Boolean tensor of shape (num_envs,).
-        """
-        return torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-
-
-if __name__ == "__main__":
-    env = <CamelCaseName>Env()
+    # Expert demo tasks: implement `create_demo_action_list`.
+    # RL tasks: implement `check_truncated`, `get_reward`, `compute_task_state`.
 ```
 
-### 3. Key Methods to Implement
+### 3. Update Exports
 
-Based on task needs, implement these methods on the `EmbodiedEnv` subclass:
-
-| Method | Required? | Purpose |
-|--------|-----------|---------|
-| `compute_task_state` | **Yes** | Returns `(is_success, is_fail, metrics)` |
-| `check_truncated` | **Yes** | Returns early-truncation boolean tensor |
-| `_setup_scene` | If custom scene | Override to add task-specific objects/lights |
-| `_reset_idx` | If custom reset | Override for per-env reset logic |
-
-For **RL tasks**, also ensure the `EmbodiedEnvCfg` includes:
-- `event_cfg` with any randomization events
-- `observation_cfg` with observation functors
-- `reward_cfg` with reward functors
-
-For **agent tasks** (trajectory-based), consider adding:
-- An action bank at `tasks/<category>/<name>/action_bank.py`
-- A companion `BaseAgentEnv` subclass (see `tableware/base_agent_env.py`)
-
-### 4. Update `__init__.py`
-
-Add the import and `__all__` entry to `embodichain/lab/gym/envs/tasks/__init__.py`:
+Add to `embodichain/lab/gym/envs/tasks/__init__.py`:
 
 ```python
 from embodichain.lab.gym.envs.tasks.<category>.<name> import <CamelCaseName>Env
 ```
 
-And add `"<CamelCaseName>Env"` to the `__all__` list.
+Add `"<CamelCaseName>Env"` to the `__all__` list.
 
-If a new category directory was created, also add a new `__init__.py` in that directory.
+### 4. Create Test Stub
 
-### 5. Create a Test File
+Place at `tests/gym/envs/tasks/test_<name>.py`.
 
-Place at `tests/gym/envs/tasks/test_<name>.py`. For pure-logic tests (no GPU required), use pytest style. For sim-dependent tests, use class style with `setup_method`/`teardown_method`.
-
-### 6. Run `black`
+### 5. Format
 
 ```bash
 black embodichain/lab/gym/envs/tasks/<category>/<name>.py
 black tests/gym/envs/tasks/test_<name>.py
 ```
 
-## Common Mistakes
+## Checklist
 
-| Mistake | Fix |
-|---------|-----|
-| Forgetting `@register_env` decorator | Every task must be registered with a unique gym ID |
-| Missing `__all__` in the task module | Define `__all__` with the exported class name |
-| Not setting `cfg = EmbodiedEnvCfg()` default | Always provide a default config in `__init__` |
-| Using `self.device` before `super().__init__` | Call `super().__init__` first |
-| Forgetting Apache 2.0 header | Every file must start with the copyright block |
-| Adding task to `__init__.py` but not `__all__` | Both import AND `__all__` entry are required |
-| Missing `from __future__ import annotations` | Required at top of every file (after header) |
-
-## Quick Reference
-
-| Item | Pattern |
-|------|---------|
-| File location | `embodichain/lab/gym/envs/tasks/<category>/<name>.py` |
-| Base class | `EmbodiedEnv` (most cases), `BaseEnv` (rare) |
-| Registration | `@register_env("<GymId>", max_episode_steps=<N>)` |
-| Config class | `EmbodiedEnvCfg` (inherited or as-is) |
-| Required methods | `compute_task_state`, `check_truncated` |
-| Test location | `tests/gym/envs/tasks/test_<name>.py` |
+- [ ] File has Apache 2.0 header
+- [ ] Uses `from __future__ import annotations`
+- [ ] `@register_env` decorator with unique gym ID
+- [ ] `__all__` defined in the task module
+- [ ] Default `cfg = EmbodiedEnvCfg()` in `__init__`
+- [ ] Import and `__all__` added to `tasks/__init__.py`
+- [ ] Test stub created
+- [ ] `black` run on both files
