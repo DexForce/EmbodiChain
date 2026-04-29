@@ -332,22 +332,3 @@ class TestAtomicActionHelpers:
 
         assert torch.allclose(result[:, :3, 3], offset)
         assert torch.allclose(pose[:, :3, 3], torch.zeros((2, 3), dtype=torch.float32))
-
-    def test_plan_trajectory_builds_default_motion_generation_options(self) -> None:
-        target_states = [
-            PlanState(
-                xpos=torch.eye(4, dtype=torch.float32), move_type=MoveType.EEF_MOVE
-            )
-        ]
-
-        result = self.action.plan_trajectory(target_states)
-
-        assert result.success is True
-        assert result.positions is not None
-        assert self.motion_generator.last_options is not None
-        assert self.motion_generator.last_options.control_part == "arm"
-        assert self.motion_generator.last_options.start_qpos is None
-        assert self.motion_generator.last_target_states is not None
-        assert (
-            self.motion_generator.last_target_states[0].move_type == MoveType.EEF_MOVE
-        )

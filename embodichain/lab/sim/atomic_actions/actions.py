@@ -25,6 +25,7 @@ from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
 from .core import AtomicAction, ObjectSemantics, AntipodalAffordance, ActionCfg
 from embodichain.utils import logger
 from embodichain.utils import configclass
+from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 import numpy as np
 
 if TYPE_CHECKING:
@@ -159,20 +160,50 @@ class MoveAction(AtomicAction):
         start_qpos: torch.Tensor,
         n_waypoints: int,
         arm_dof: Optional[int] = None,
-    ) -> torch.Tensor:
+    ) -> tuple[bool, torch.Tensor]:
         """Plan batched arm trajectories for all environments."""
         arm_dof = self.dof if arm_dof is None else arm_dof
+
+        # TODO: 
+
+        n_state = len(target_states_list[0])
+        xpos_traj = torch.zeros(
+            size=(self.n_envs, n_state, 4, 4),
+            dtype=torch.float32, device=self.device
+        )
+        for i, target_states in enumerate(target_states_list):
+            for j, target_state in enumerate(target_states):
+                # [env_i, state_j, 4, 4]
+                xpos_traj[i, j] = target_state.xpos
+        
         trajectory = torch.zeros(
-            size=(self.n_envs, n_waypoints, arm_dof),
+            size=(self.n_envs, n_state, arm_dof),
             dtype=torch.float32,
             device=self.device,
         )
-        options = self._build_motion_gen_options(start_qpos, n_waypoints)
-        for i, target_states in enumerate(target_states_list):
-            options.start_qpos = start_qpos[i]
-            result = self.plan_trajectory(target_states, options)
-            trajectory[i, :, :] = result.positions
-        return trajectory
+        qpos_seed = start_qpos
+        for j in range(n_state):
+            is_success, qpos = self.robot.compute_ik(
+                pose=xpos_traj[:, j],
+                name=self.cfg.control_part,
+                joint_seed=qpos_seed
+            )
+            if not is_success:
+                logger.log_warning(
+                    f"Failed to compute IK for target state {j} in some environments. "
+                    "The resulting trajectory may be invalid."
+                )
+                return False, trajectory
+            else:
+                trajectory[:, j] = qpos
+                qpos_seed = qpos
+        trajectory = torch.concatenate([start_qpos.unsqueeze(1), trajectory], dim=1)
+        interp_traj = interpolate_with_distance(
+            trajectory=trajectory,
+            interp_num=n_waypoints,
+            device=self.device
+        )
+        return True, interp_traj
 
     def _interpolate_hand_qpos(
         self,
@@ -223,10 +254,10 @@ class MoveAction(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        trajectory = self._plan_arm_trajectory(
+        is_plan_success, trajectory = self._plan_arm_trajectory(
             target_states_list, start_qpos, self.cfg.sample_interval
         )
-        return True, trajectory, self.arm_joint_ids
+        return is_plan_success, trajectory, self.arm_joint_ids
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
@@ -324,11 +355,12 @@ class PickUpAction(MoveAction):
             return False, torch.empty(0), self.joint_ids
 
         # Compute pre-grasp pose
+        # TODO: only for parallel gripper, approach in negative grasp z direction
+        grasp_z = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = self._apply_offset(
             pose=grasp_xpos,
-            offset=-self.approach_direction * self.cfg.pre_grasp_distance,
+            offset=-grasp_z * self.cfg.pre_grasp_distance,
         )
-
         # Compute lift pose
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
@@ -354,12 +386,16 @@ class PickUpAction(MoveAction):
             dtype=torch.float32,
             device=self.device,
         )
-        pick_trajectory[:, :, : self.arm_dof] = self._plan_arm_trajectory(
+        is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
             start_qpos,
             n_approach_waypoint,
             self.arm_dof,
         )
+        if not is_success:
+            logger.log_warning("Failed to plan approach trajectory.")
+            return False, pick_trajectory, self.joint_ids
+        pick_trajectory[:, :, : self.arm_dof] = plan_traj
         # Padding hand open qpos to pick trajectory
         pick_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
 
@@ -396,12 +432,16 @@ class PickUpAction(MoveAction):
             ]
             for i in range(self.n_envs)
         ]
-        lift_trajectory[:, :, : self.arm_dof] = self._plan_arm_trajectory(
+        is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
             grasp_qpos,
             n_lift_waypoint,
             self.arm_dof,
         )
+        if not is_success:
+            logger.log_warning("Failed to plan lift trajectory.")
+            return False, lift_trajectory, self.joint_ids
+        lift_trajectory[:, :, : self.arm_dof] = plan_traj
         # padding hand close qpos to lift trajectory
         lift_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
 
@@ -538,12 +578,16 @@ class PlaceAction(MoveAction):
             ]
             for i in range(self.n_envs)
         ]
-        down_trajectory[:, :, : self.arm_dof] = self._plan_arm_trajectory(
+        is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
             start_qpos,
             n_down_waypoint,
             self.arm_dof,
         )
+        if not is_success:
+            logger.log_warning("Failed to plan down trajectory.")
+            return False, down_trajectory, self.joint_ids
+        down_trajectory[:, :, : self.arm_dof] = plan_traj
         # Padding hand open qpos to pick trajectory
         down_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
 
@@ -564,7 +608,7 @@ class PlaceAction(MoveAction):
         hand_open_trajectory[:, :, self.arm_dof :] = hand_open_path
 
         # get lift trajectory
-        lift_trajectory = torch.zeros(
+        back_trajectory = torch.zeros(
             size=(self.n_envs, n_lift_waypoint, self.dof),
             dtype=torch.float32,
             device=self.device,
@@ -575,18 +619,22 @@ class PlaceAction(MoveAction):
             ]
             for i in range(self.n_envs)
         ]
-        lift_trajectory[:, :, : self.arm_dof] = self._plan_arm_trajectory(
+        is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
             reach_qpos,
             n_lift_waypoint,
             self.arm_dof,
         )
-        # padding hand open qpos to lift trajectory
-        lift_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
+        if not is_success:
+            logger.log_warning("Failed to plan back trajectory.")
+            return False, back_trajectory, self.joint_ids
+        back_trajectory[:, :, : self.arm_dof] = plan_traj
+        # padding hand open qpos to back trajectory
+        back_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
 
         # concatenate trajectories
         trajectory = torch.cat(
-            [down_trajectory, hand_open_trajectory, lift_trajectory], dim=1
+            [down_trajectory, hand_open_trajectory, back_trajectory], dim=1
         )
         return True, trajectory, self.joint_ids
 
