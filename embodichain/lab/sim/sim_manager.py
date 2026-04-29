@@ -669,7 +669,7 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
-                roughness=0.7
+                roughness=0.7,
             )
         )
 
