@@ -36,9 +36,9 @@ The figure below illustrates the overall architecture of EmbodiChain:
 
 To get started with EmbodiChain, follow these steps:
 
-- [Installation Guide](https://dexforce.github.io/EmbodiChain/quick_start/install.html)
-- [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/tutorial/index.html)
-- [API Reference](https://dexforce.github.io/EmbodiChain/api_reference/index.html)
+- [Installation Guide](https://dexforce.github.io/EmbodiChain/main/quick_start/install.html)
+- [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html)
+- [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html)
 
 ## Contribution Guide
 
