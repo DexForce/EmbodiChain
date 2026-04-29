@@ -5,6 +5,10 @@
 
 This page lists all available observation functors that can be used with the Observation Manager. Observation functors are configured using {class}`~cfg.ObservationCfg` and can operate in two modes: ``modify`` (update existing observations) or ``add`` (add new observations).
 
+````{tip}
+**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new observation functor with the correct signature (`env, obs, entity_cfg, ...`), module placement in `observations.py`, and `__all__` export. Use **`/add-test`** to generate mock-based tests.
+````
+
 ## Pose Computations
 
 ```{list-table} Pose Computation Functors

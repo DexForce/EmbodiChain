@@ -62,6 +62,7 @@ EmbodiChain/
   ```bash
   black .
   ```
+- Use the `/pre-commit-check` skill before committing to catch all CI violations locally.
 
 ### File Headers
 
@@ -108,22 +109,14 @@ class MyManagerCfg:
 
 ### Functor / Manager Pattern
 
-Managers (observation, event, reward, randomization) use a `Functor`/`FunctorCfg` pattern:
+Managers (observation, event, reward, randomization) use a `Functor`/`FunctorCfg` pattern with two styles:
 
 - **Function-style**: a plain function with signature `(env, env_ids, ...) -> None`.
 - **Class-style**: a class inheriting `Functor`, with `__init__(cfg, env)` and `__call__(env, env_ids, ...)`.
-- Registered in a manager config via `FunctorCfg(func=..., params={...})`.
 
-```python
-from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
+Registered in a manager config via `FunctorCfg(func=..., params={...})`.
 
-class my_randomizer(Functor):
-    def __init__(self, cfg: FunctorCfg, env):
-        super().__init__(cfg, env)
-
-    def __call__(self, env, env_ids, my_param: float = 0.5):
-        ...
-```
+Use the `/add-functor` skill to scaffold new functors with the correct signature and module placement.
 
 ### Docstrings
 
@@ -203,17 +196,7 @@ Include:
 3. **Format** the code with `black==24.3.0` before submitting.
 4. **Update documentation** for any public API changes.
 5. **Add tests** that prove your fix or feature works.
-6. **Submit** using the PR template (`.github/PULL_REQUEST_TEMPLATE.md`):
-   - Summarize changes and link the related issue (`Fixes #123`).
-   - Specify the type of change (bug fix / enhancement / new feature / breaking change / docs).
-   - Attach before/after screenshots for visual changes.
-   - Complete the checklist:
-     - [ ] `black .` has been run
-     - [ ] Documentation updated
-     - [ ] Tests added
-     - [ ] Dependencies updated (if applicable)
-
-> It is recommended to open an issue and discuss the design before opening a large PR.
+6. Use the `/pr` skill to create PRs following the project's template and label conventions.
 
 ### Adding a New Robot
 
@@ -231,107 +214,25 @@ Also add robot documentation in `docs/source/resources/robot/` (see existing exa
 
 ### Adding a New Task Environment
 
-Refer to `embodichain/lab/gym/envs/tasks/` for existing examples. Tasks subclass `EmbodiedEnv` or `BaseAgentEnv` and implement `_setup_scene`, `_reset_idx`, and evaluation logic.
+Use the `/add-task-env` skill to scaffold a new task with the correct file structure, `@register_env` decorator, base class, and test stub.
+
+### Adding Functors
+
+Use the `/add-functor` skill to scaffold observation, reward, event, action, dataset, or randomization functors with the correct signature, style, and module placement.
+
+### Writing Tests
+
+Use the `/add-test` skill to scaffold tests with the correct file placement, style (pytest vs class), mock patterns, and project conventions.
 
 ---
 
-## Unit Tests
+## Skills Quick Reference
 
-### Structure
-
-Tests live in `tests/` and mirror the source tree:
-
-```text
-tests/
-├── toolkits/
-│   └── test_pg_grasp.py
-├── gym/
-│   └── action_bank/
-│       └── test_configurable_action.py
-└── sim/
-    ├── objects/
-    │   ├── test_light.py
-    │   └── test_rigid_object_group.py
-    ├── sensors/
-    │   ├── test_camera.py
-    │   └── test_stereo.py
-    └── planners/
-        └── test_motion_generator.py
-```
-
-Place new test files at `tests/<subpackage>/test_<module>.py`, matching the layout of `embodichain/`.
-
-### Two accepted styles
-
-**pytest style** — for pure-Python logic with no test ordering dependency:
-
-```python
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# ...
-# ----------------------------------------------------------------------------
-
-from embodichain.my_module import my_function
-
-
-def test_expected_output():
-    result = my_function(input_value)
-    assert result == expected_value
-
-
-def test_edge_case():
-    result = my_function(edge_input)
-    assert result is not None
-```
-
-**`Class` style** — when tests must run in a specific order or share `setup_method`/`teardown_method` state:
-
-```python
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# ...
-# ----------------------------------------------------------------------------
-
-from embodichain.my_module import MyClass
-
-
-class TestMyClass():
-    def setup_method(self):
-        self.obj = MyClass(param=1.0)
-
-    def teardown_method(self):
-        pass
-
-    def test_basic_behavior(self):
-        result = self.obj.run()
-        assert result == expected_result
-
-    def test_raises_on_bad_input(self):
-        with pytest.raises(ValueError):
-            self.obj.run(bad_input)
-
-### Conventions
-
-- **File header**: include the standard Apache 2.0 copyright block (same as all source files).
-- **Naming**: test files are `test_<module>.py`; test functions/methods are `test_<scenario>`.
-- **Simulation-dependent tests**: tests that require a running `SimulationManager` (GPU, sensors, robots) must initialize and teardown the sim inside `setUp`/`tearDown` or a pytest fixture. Keep them isolated from pure-logic tests.
-- **No magic numbers**: define expected values as named constants or comments explaining their origin.
-- **`if __name__ == "__main__"`**: include this block for tests that support optional visual/interactive output (pass `is_visual=True` manually when debugging).
-
-### Running tests
-
-```bash
-# Run all tests
-pytest tests/
-
-# Run a specific file
-pytest tests/toolkits/test_pg_grasp.py
-
-# Run a specific test function
-pytest tests/toolkits/test_pg_grasp.py::test_antipodal_score_selector
-
-# Run with verbose output
-pytest -v tests/
-```
+| Skill | Command | Purpose |
+|-------|---------|---------|
+| Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
+| Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
+| Add Test | `/add-test` | Scaffold tests following project conventions |
+| Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
+| Create PR | `/pr` | Create a PR following the project template |
+| Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |
