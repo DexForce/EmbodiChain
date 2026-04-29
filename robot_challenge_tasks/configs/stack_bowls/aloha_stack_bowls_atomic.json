@@ -1,5 +1,5 @@
 {
-    "id": "StackBowls-v1",
+    "id": "StackBowlsAtomic-v1",
     "max_episodes": 1,
     "max_episode_steps": 300,
     "env": {
@@ -120,7 +120,9 @@
             }
         },
         "extensions": {
-            "success_xy_tol": 0.05
+            "success_xy_tol": 0.05,
+            "force_reannotate": true,
+            "atomic_annotator_port": 11801
         },
         "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"],
         "sim_steps_per_control": 4

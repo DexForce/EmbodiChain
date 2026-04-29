@@ -19,6 +19,8 @@ This script demonstrates the creation and simulation of a robot with a soft obje
 and performs a pressing task in a simulated environment.
 """
 
+# python ./scripts/tutorials/sim/atom_test_for_bowls.py 
+
 import argparse
 import numpy as np
 import time
@@ -146,9 +148,10 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
                 tcp=[
                     [0.0, 1.0, 0.0, 0.0],
                     [-1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.12],
+                    [0.0, 0.0, 1.0, 0.16],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
+                num_samples=20
             )
         },
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
@@ -157,24 +160,25 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
     return sim.add_robot(cfg=cfg)
 
 
-def create_mug(sim: SimulationManager) -> RigidObject:
-    mug_cfg = RigidObjectCfg(
-        uid="table",
+def create_bowl(sim: SimulationManager) -> RigidObject:
+    bowl_cfg = RigidObjectCfg(
+        uid="bowl_mid",
         shape=MeshCfg(
-            fpath=get_data_path("CoffeeCup/cup.ply"),
+            fpath=get_data_path("Bowl/bowl.glb"),
+            compute_uv=True,
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.01,
-            dynamic_friction=0.97,
-            static_friction=0.99,
+            dynamic_friction=1.0,
+            static_friction=1.0,
         ),
-        max_convex_hull_num=16,
-        init_pos=[0.55, 0.0, 0.01],
-        init_rot=[0.0, 0.0, -90],
-        body_scale=(4, 4, 4),
+        max_convex_hull_num=32,
+        init_pos=[0.55, 0.0, 0.03],
+        init_rot=[90.0, 0.0, 0.0],
+        body_scale=(0.16, 0.16, 0.16),
     )
-    mug = sim.add_rigid_object(cfg=mug_cfg)
-    return mug
+    bowl = sim.add_rigid_object(cfg=bowl_cfg)
+    return bowl
 
 
 def run_trajactory(
@@ -187,7 +191,7 @@ def run_trajactory(
     for i in range(n_waypoint):
         robot.set_qpos(trajectory[:, i, :], joint_ids=joint_ids)
         sim.update(step=4)
-        time.sleep(1e-2)
+        time.sleep(5e-2)
 
 
 def main():
@@ -200,7 +204,7 @@ def main():
     args = parse_arguments()
     sim: SimulationManager = initialize_simulation(args)
     robot = create_robot(sim)
-    mug = create_mug(sim)
+    bowl = create_bowl(sim)
 
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
@@ -248,7 +252,7 @@ def main():
     sim.init_gpu_physics()
     sim.open_window()
 
-    # Define object semantics and affordances for the mug
+    # Define object semantics and affordances for the bowl
     gripper_collision_cfg = GripperCollisionCfg(
         max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
     )
@@ -257,31 +261,32 @@ def main():
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
         ),
+        max_deviation_angle=np.pi / 3
     )
-    mug_grasp_affordance = AntipodalAffordance(
-        object_label="mug",
+    bowl_grasp_affordance = AntipodalAffordance(
+        object_label="bowl_mid",
         force_reannotate=True,  # set to True if you want to re-annotate affordance even if the object has been seen before, which is useful when you have changed the grasp generator configuration and want to see the effect of new configuration, but it will take more time to annotate. So usually set it to False and only set it to True when you have changed the grasp generator configuration or you want to debug the annotation process.
         custom_config={
             "gripper_collision_cfg": gripper_collision_cfg,
             "generator_cfg": generator_cfg,
         },
     )
-    mug_semantics = ObjectSemantics(
-        label="mug",
+    bowl_semantics = ObjectSemantics(
+        label="bowl_mid",
         geometry={
-            "mesh_vertices": mug.get_vertices(env_ids=[0], scale=True)[0],
-            "mesh_triangles": mug.get_triangles(env_ids=[0])[0],
+            "mesh_vertices": bowl.get_vertices(env_ids=[0], scale=True)[0],
+            "mesh_triangles": bowl.get_triangles(env_ids=[0])[0],
         },
-        affordance=mug_grasp_affordance,
-        entity=mug,  # in order to fetch object pose
+        affordance=bowl_grasp_affordance,
+        entity=bowl,  # in order to fetch object pose
     )
     start_qpos = robot.get_qpos(name="arm")
 
     target_grasp_xpos = torch.tensor(
         [
-            [-0.0539, -0.9985, -0.0022, 0.4489],
-            [-0.9977, 0.0540, -0.0401, -0.0030],
-            [0.0401, 0.0000, -0.9992, 0.1400],
+            [1.0, 0.0000, -0.0, 0.5500],
+            [0.0000, -1.0000, 0.0000, -0.0600],
+            [-0.0, 0.0000, -1, 0.0400],
             [0.0000, 0.0000, 0.0000, 1.0000],
         ],
         dtype=torch.float32,
@@ -291,8 +296,7 @@ def main():
     is_success, pick_trajectory, joint_ids = atom_engine.execute(
         start_qpos=start_qpos,
         action_name="pick_up",
-        target=mug_semantics,
-        # target=target_grasp_xpos,   # can directly specify target grasp pose without semantics, but then no affordance will be used and no grasp generator will be called, which is not recommended
+        target=bowl_semantics,
         control_part="arm",
     )
     arm_joint_ids = robot.get_joint_ids("arm")

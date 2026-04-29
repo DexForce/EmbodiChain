@@ -16,3 +16,4 @@
 
 from robot_challenge_tasks.tasks.dummy_task import DummyTaskEnv
 from robot_challenge_tasks.tasks.stack_bowls import StackBowlsEnv
+from robot_challenge_tasks.tasks.stack_bowls_atomic import StackBowlsAtomicEnv

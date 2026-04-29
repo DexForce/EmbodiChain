@@ -227,3 +227,9 @@ class SugarBox(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class Bowl:
+    def __init__(self, data_root: str = None):
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        self.extract_dir = os.path.join(path, "extract", type(self).__name__)

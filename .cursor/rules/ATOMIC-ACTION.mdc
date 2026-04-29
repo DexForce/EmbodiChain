@@ -1,0 +1,17 @@
+---
+alwaysApply: true
+---
+
+该项目的目标是使用一系列原子技能来代替现有的动作生成部分,使用的conda环境是embodichain，使用的仿真器是Dexsim，
+  你可以参考 @scripts/tutorials 和 @docs 来了解一些简单的接口调用和相关的API接口，注意不要乱编API，有不清楚的地
+  方向我确认。目前使用的仿真环境构建可以参考 @robot_challenge_tasks/scripts/run_env.py @robot_challenge_tasks/
+  configs/stack_bowls/aloha_stack_bowls.json ，目前的动作实现脚本是@robot_challenge_tasks/
+  robot_challenge_tasks/tasks/stack_bowls.py ，我们需要使用现有的三个原子技能（参考使用实例 @scripts/tutorials/
+  sim/atom_action.py ）来完成相同的叠碗任务。注意现在虽然环境当中是双臂，但是我们可以每次只规划一个机械臂的动
+  作，和原始实现 [stack_bowls.py](robot_challenge_tasks/robot_challenge_tasks/tasks/stack_bowls.py) 一样按照规
+  则的方式选取机械臂，但是中间的动作规划全部换成原子技能的实现。现在 scripts/tutorials/sim/
+  atom_test_for_bowls.py 文件已经用一个碗成功验证了原子动作的可行性，该脚本能够很好的用原子技能抓取碗并摆放到正
+  确的位置，你可以重点参考下是怎么做的。现在你需要在 robot_challenge_tasks/robot_challenge_tasks/tasks/
+  stack_bowls_atomic.py 里面实现叠碗的操作。你可以参考 ATOMIC_ACTION.md 的思路然后继续完成
+  robot_challenge_tasks/robot_challenge_tasks/tasks/stack_bowls_atomic.py 。注意代码的易读性，我已为你创造好了
+  环境配置文件 robot_challenge_tasks/configs/stack_bowls/aloha_stack_bowls_atomic.json

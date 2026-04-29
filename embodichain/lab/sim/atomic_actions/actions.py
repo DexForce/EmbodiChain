@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 import torch
 from typing import Optional, Union, TYPE_CHECKING, Any
 
@@ -182,26 +183,90 @@ class MoveAction(AtomicAction):
             device=self.device,
         )
         qpos_seed = start_qpos
+        debug_verbose = 1
+
+        all_pose_t_env0: list[list[float]] = [
+            xpos_traj[0, k, :3, 3].detach().cpu().tolist() for k in range(n_state)
+        ]
+
+        state_success_by_index: list[bool] = []
+        first_failure_j: int | None = None
+
         for j in range(n_state):
             is_success, qpos = self.robot.compute_ik(
                 pose=xpos_traj[:, j],
                 name=self.cfg.control_part,
-                joint_seed=qpos_seed
+                joint_seed=qpos_seed,
             )
-            if not is_success:
+
+            success_scalar = (
+                bool(is_success.item())
+                if isinstance(is_success, torch.Tensor)
+                else bool(is_success)
+            )
+            state_success_by_index.append(success_scalar)
+
+            if not success_scalar:
+                failed_envs: list[int] | None = None
+                try:
+                    if isinstance(is_success, torch.Tensor) and is_success.numel() > 1:
+                        failed_envs = (
+                            (~is_success).nonzero(as_tuple=False).view(-1).tolist()
+                        )
+                    elif isinstance(is_success, torch.Tensor) and is_success.numel() == 1:
+                        failed_envs = [0]
+                except Exception:
+                    failed_envs = None
+
+                pose_t_env0 = xpos_traj[0, j, :3, 3].detach().cpu().tolist()
+                rot_env0 = xpos_traj[0, j, :3, :3].detach().cpu().tolist()
+
+                if debug_verbose:
+                    qpos_seed_env0 = qpos_seed[0].detach().cpu().tolist()
+                    logger.log_warning(
+                        f"[Atomic IK Debug] control_part={self.cfg.control_part}, "
+                        f"failed_state_index={j}, failed_envs={failed_envs}, "
+                        f"pose_t_env0={pose_t_env0}, qpos_seed_env0={qpos_seed_env0}"
+                    )
+                else:
+                    logger.log_warning(
+                        f"[Atomic IK Debug] control_part={self.cfg.control_part}, "
+                        f"failed_state_index={j}, failed_envs={failed_envs}, "
+                        f"pose_t_env0={pose_t_env0}"
+                    )
+
                 logger.log_warning(
-                    f"Failed to compute IK for target state {j} in some environments. "
-                    "The resulting trajectory may be invalid."
+                    f"[Atomic IK Debug] pose_R_env0_row_major={rot_env0}"
                 )
-                return False, trajectory
-            else:
-                trajectory[:, j] = qpos
-                qpos_seed = qpos
+                logger.log_warning(
+                    f"[Atomic IK Debug] all_pose_t_env0_by_state_index={all_pose_t_env0}"
+                )
+
+                # Keep this summary for quick debugging.
+                logger.log_warning(
+                    f"[Atomic IK Debug] state_success_by_index={state_success_by_index}"
+                )
+
+                if first_failure_j is None:
+                    first_failure_j = j
+                continue
+
+            trajectory[:, j] = qpos
+            qpos_seed = qpos
+
+        if first_failure_j is not None:
+            logger.log_warning(
+                f"[Atomic IK Debug] final_state_success_by_index={state_success_by_index}"
+            )
+            logger.log_warning(
+                f"Failed to compute IK for target state {first_failure_j} in some environments. "
+                "The resulting trajectory may be invalid."
+            )
+            return False, trajectory
+
         trajectory = torch.concatenate([start_qpos.unsqueeze(1), trajectory], dim=1)
         interp_traj = interpolate_with_distance(
-            trajectory=trajectory,
-            interp_num=n_waypoints,
-            device=self.device
+            trajectory=trajectory, interp_num=n_waypoints, device=self.device
         )
         return True, interp_traj
 
@@ -357,10 +422,26 @@ class PickUpAction(MoveAction):
         # Compute pre-grasp pose
         # TODO: only for parallel gripper, approach in negative grasp z direction
         grasp_z = grasp_xpos[:, :3, 2]
+        debug_verbose = 1
+        if debug_verbose:
+            # Log grasp/pre-grasp in env0 to understand IK failure cause.
+            grasp_t_env0 = grasp_xpos[0, :3, 3].detach().cpu().tolist()
+            pre_grasp_offset_env0 = (-grasp_z[0] * self.cfg.pre_grasp_distance).detach().cpu().tolist()
+            # pre_grasp translation will be grasp_t_env0 + offset (in local arena frame)
         pre_grasp_xpos = self._apply_offset(
             pose=grasp_xpos,
             offset=-grasp_z * self.cfg.pre_grasp_distance,
         )
+        if debug_verbose:
+            pre_grasp_t_env0 = pre_grasp_xpos[0, :3, 3].detach().cpu().tolist()
+            grasp_z_env0 = grasp_z[0].detach().cpu().tolist()
+            logger.log_warning(
+                "[Atomic PickUp Debug] pre_grasp_from_grasp "
+                f"grasp_t_env0={grasp_t_env0}, grasp_z_env0={grasp_z_env0}, "
+                f"expected_pre_grasp_t_env0={(torch.tensor(grasp_t_env0, device=self.device) + torch.tensor(pre_grasp_offset_env0, device=self.device)).tolist()}, "
+                f"actual_pre_grasp_t_env0={pre_grasp_t_env0}, "
+                f"pre_grasp_distance={self.cfg.pre_grasp_distance}"
+            )
         # Compute lift pose
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 

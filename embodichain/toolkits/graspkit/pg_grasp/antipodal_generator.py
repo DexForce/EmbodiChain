@@ -375,14 +375,17 @@ class GraspGenerator:
                     )
                     return_flag = True
 
-        while True:
-            if return_flag:
-                if hit_point_pairs is not None:
-                    self._hit_point_pairs = hit_point_pairs
-                    cache_path = self._get_cache_dir(self.vertices, self.triangles)
-                    self._save_cache(cache_path, hit_point_pairs)
-                break
-            time.sleep(0.5)
+        try:
+            while True:
+                if return_flag:
+                    if hit_point_pairs is not None:
+                        self._hit_point_pairs = hit_point_pairs
+                        cache_path = self._get_cache_dir(self.vertices, self.triangles)
+                        self._save_cache(cache_path, hit_point_pairs)
+                    break
+                time.sleep(0.5)
+        finally:
+            server.stop()
         return self._hit_point_pairs
 
     def _get_cache_dir(self, vertices: torch.Tensor, triangles: torch.Tensor):
