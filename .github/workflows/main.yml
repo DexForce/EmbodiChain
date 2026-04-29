@@ -74,6 +74,7 @@ jobs:
         run: |
           pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           pip install -r docs/requirements.txt
+          python3 docs/scripts/sync_readme.py
           cd ${GITHUB_WORKSPACE}/docs
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3

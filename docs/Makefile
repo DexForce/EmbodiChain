@@ -14,15 +14,20 @@ help:
 
 .PHONY: help Makefile
 
+# Sync README.md -> introduction.rst before building
+.PHONY: sync-readme
+sync-readme:
+	@python3 "$(CURDIR)/scripts/sync_readme.py"
+
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
-%: Makefile
+%: Makefile sync-readme
 	@rm -rf "$(BUILDDIR)"
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 # Build current version only (for local development / PR verification)
 .PHONY: current-docs
-current-docs:
+current-docs: sync-readme
 	@rm -rf "$(BUILDDIR)/html"
 	@$(SPHINXBUILD) -W --keep-going "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS) $(O)
 	@python3 "$(CURDIR)/scripts/generate_versions_json.py" --build-dir "$(BUILDDIR)/html"
