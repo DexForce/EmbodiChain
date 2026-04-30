@@ -20,7 +20,6 @@ import torch
 from typing import Sequence, Union
 from tensordict import TensorDict
 
-
 Array = Union[torch.Tensor, np.ndarray, Sequence]
 Device = Union[str, torch.device]
 

@@ -23,7 +23,6 @@ from typing import Union, List
 
 from embodichain.utils import logger
 
-
 __all__ = [
     "TrajectorySampleMethod",
     "MovePart",

@@ -33,7 +33,6 @@ from embodichain.utils import logger, configclass
 from .utils import MovePart, MoveType, PlanState, PlanResult
 from .utils import calculate_point_allocations, interpolate_xpos
 
-
 __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
 
 

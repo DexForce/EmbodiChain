@@ -26,7 +26,6 @@ from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.cfg import ArticulationCfg
 from embodichain.data import get_data_path
 
-
 NUM_ENVS = 4
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 

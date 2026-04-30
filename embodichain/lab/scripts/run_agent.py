@@ -27,7 +27,6 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.utils.logger import log_error
 from .run_env import main
 
-
 if __name__ == "__main__":
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
