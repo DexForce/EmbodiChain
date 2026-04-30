@@ -15,15 +15,14 @@ Currently, EmbodiChain is under active development. Our roadmap includes the fol
         - Add more physical sensors (eg, force sensor) with examples.
     - Motion Generation:
         - Add more advanced motion generation methods with examples.
-    - Useful Tools:
-        - We are working on USD support for EmbodiChain to enable better asset management and interoperability.
+        - Atomic actions for motion generation and easier integration with data generation pipeline.
     - Robots Integration:
         - Add support for more robot models (eg: LeRobot, Unitree H1/G1, etc).
 
 - Data Pipeline Coming Soon:
     - We will release a Real2Sim pipeline, which enables automatic data generation and scaling from real-world seeding priors.
     - We will release an agentic skill generation framework for automated expert trajectory generation.
-    - Add assets and scenes generator and the integration with data pipeline.
+    - We will release a sim-ready asset and scene layout generation framework for fast environment prototyping.
 
 - Models & Training Infrastructure Coming Soon:
     - We will release a modular VLA framework for fast prototyping and training of embodied agents.

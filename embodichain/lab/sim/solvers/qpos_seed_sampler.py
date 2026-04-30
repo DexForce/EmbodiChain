@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import torch
+from embodichain.utils import logger
 
 
 class QposSeedSampler:
@@ -52,22 +53,29 @@ class QposSeedSampler:
         Returns:
             torch.Tensor: (batch_size * num_samples, dof) joint seeds.
         """
-        joint_seeds_list = []
-        for i in range(batch_size):
-            current_seed = (
-                qpos_seed[i].unsqueeze(0)
-                if qpos_seed.shape[0] == batch_size
-                else qpos_seed
+        if qpos_seed.shape == (batch_size, self.dof):
+            seed_head = qpos_seed[:, None, :]
+        elif qpos_seed.shape == (self.dof,):
+            seed_head = qpos_seed.unsqueeze(0).repeat(batch_size, 1)[:, None, :]
+        else:
+            logger.log_error(
+                f"Invalid qpos_seed shape {qpos_seed.shape} for batch_size {batch_size} and dof {self.dof}",
+                ValueError,
             )
-            if self.num_samples > 1:
-                rand_part = lower_limits + (upper_limits - lower_limits) * torch.rand(
-                    (self.num_samples - 1, self.dof), device=self.device
-                )
-            else:
-                rand_part = torch.empty((0, self.dof), device=self.device)
-            seeds = torch.cat([current_seed, rand_part], dim=0)
-            joint_seeds_list.append(seeds)
-        return torch.cat(joint_seeds_list, dim=0)
+        n_random_samples = self.num_samples - 1
+
+        # seed_random = torch.rand(
+        #     size=(batch_size, n_random_samples, self.dof), device=self.device
+        # )
+
+        # save sampling time, repeat for each batch and sample in one go
+        seed_random = torch.rand(
+            size=(1, n_random_samples, self.dof), device=self.device
+        )
+        seed_random = seed_random.repeat(batch_size, 1, 1)
+        seed_random = lower_limits + (upper_limits - lower_limits) * seed_random
+        joint_seeds = torch.cat([seed_head, seed_random], dim=1)
+        return joint_seeds.reshape(-1, self.dof)
 
     def repeat_target_xpos(
         self, target_xpos: torch.Tensor, num_samples: int
@@ -81,8 +89,6 @@ class QposSeedSampler:
         Returns:
             torch.Tensor: (batch_size * num_samples, 4, 4) or (batch_size * num_samples, 3, 3)
         """
-        repeated_list = [
-            target_xpos[i].unsqueeze(0).repeat(num_samples, 1, 1)
-            for i in range(target_xpos.shape[0])
-        ]
-        return torch.cat(repeated_list, dim=0)
+
+        target_xpos_repeated = target_xpos.unsqueeze(1).repeat(1, num_samples, 1, 1)
+        return target_xpos_repeated.reshape(-1, 4, 4)
