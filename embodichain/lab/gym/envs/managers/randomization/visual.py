@@ -741,3 +741,6 @@ class randomize_visual_material(Functor):
                         random_texture_prob=random_texture_prob,
                         idx=i,
                     )
+
+        env = self._env.sim.get_env()
+        env.clean_materials()

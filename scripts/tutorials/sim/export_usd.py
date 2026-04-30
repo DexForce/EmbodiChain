@@ -21,8 +21,10 @@ This script demonstrates how to export a simulation scene to a usd file using th
 import argparse
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     LightCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
@@ -46,17 +48,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument("--headless", action="store_true", help="Enable headless mode")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -73,14 +65,14 @@ def initialize_simulation(args) -> SimulationManager:
     config = SimulationManagerCfg(
         headless=True,
         sim_device=args.device,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=1,
         arena_space=2.5,
     )
     sim = SimulationManager(config)
 
-    if args.enable_rt:
+    if args.renderer != "legacy":
         light = sim.add_light(
             cfg=LightCfg(
                 uid="main_light",

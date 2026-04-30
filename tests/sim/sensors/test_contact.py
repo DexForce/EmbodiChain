@@ -23,6 +23,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.sensors import (
@@ -38,7 +39,7 @@ NUM_ENVS = 4
 
 
 class ContactTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device):
         sim_cfg = SimulationManagerCfg(
             width=1920,
             height=1080,
@@ -46,7 +47,6 @@ class ContactTest:
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device=sim_device,
-            enable_rt=enable_rt,  # Enable ray tracing for better visuals
         )
 
         # Create the simulation instance
@@ -246,22 +246,22 @@ class ContactTest:
 
 class TestContactRaster(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+        self.setup_simulation("cpu")
 
 
 class TestContactRasterCuda(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+        self.setup_simulation("cuda")
 
 
 class TestContactFastRT(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+        self.setup_simulation("cpu")
 
 
 class TestContactFastRTCuda(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+        self.setup_simulation("cuda")
 
 
 def test_contact_sensor_from_dict():
@@ -295,6 +295,6 @@ def test_contact_sensor_from_dict():
 
 
 if __name__ == "__main__":
-    test = ContactTest()
-    test.setup_simulation("cuda", enable_rt=True)
+    test = TestContactRasterCuda()
+    test.setup_simulation("cuda")
     test.test_fetch_contact()

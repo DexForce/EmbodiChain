@@ -42,7 +42,7 @@ class VisualMaterialCfg:
     metallic: float = 0.0
     """Metallic factor (0.0 = dielectric, 1.0 = metallic)"""
 
-    roughness: float = 0.5
+    roughness: float = 0.7
     """Surface roughness (0.0 = smooth, 1.0 = rough)"""
 
     # Additional PBR properties
@@ -405,4 +405,4 @@ class VisualMaterialInst:
             return
         self.ior = ior
         inst = self._mat.get_inst(self.uid)
-        inst.set_rt_param("ior", ior)
+        inst.set_pbr_param("ior", ior)

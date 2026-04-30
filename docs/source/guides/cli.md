@@ -64,7 +64,7 @@ python -m embodichain preview-asset \
 | ``--fix_base`` | ``True`` | Fix the base of articulations |
 | ``--sim_device`` | ``cpu`` | Simulation device |
 | ``--headless`` | ``False`` | Run without rendering window |
-| ``--enable_rt`` | ``False`` | Enable ray tracing |
+| ``--renderer`` | ``hybrid`` | Renderer backend: ``legacy``, ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |
 
 ### Preview Mode
@@ -108,7 +108,7 @@ python -m embodichain run-env --gym_config config.json --headless
 | ``--num_envs`` | ``1`` | Number of parallel environments |
 | ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
 | ``--headless`` | ``False`` | Run in headless mode |
-| ``--enable_rt`` | ``False`` | Use RTX rendering backend |
+| ``--renderer`` | ``hybrid`` | Renderer backend: ``legacy``, ``hybrid``, ``fast-rt`` or ``rt`` |
 | ``--arena_space`` | ``5.0`` | Arena space size |
 | ``--gpu_id`` | ``0`` | GPU ID to use |
 | ``--preview`` | ``False`` | Enter interactive preview mode |

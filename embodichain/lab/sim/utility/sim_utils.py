@@ -152,7 +152,11 @@ def is_rt_enabled() -> bool:
     """
     config = dexsim.get_world_config()
 
-    return config.renderer == dexsim.types.Renderer.FASTRT
+    return (
+        config.renderer == dexsim.types.Renderer.FASTRT
+        or config.renderer == dexsim.types.Renderer.HYBRID
+        or config.renderer == dexsim.types.Renderer.OFFLINERT
+    )
 
 
 def create_cube(

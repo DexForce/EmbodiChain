@@ -35,6 +35,7 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     RigidObjectCfg,
@@ -47,51 +48,7 @@ from embodichain.lab.sim.cfg import (
 import os
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 import tempfile
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments, device, and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    return parser.parse_args()
-
-
-def initialize_simulation(args):
-    """
-    Initialize the simulation environment based on the provided arguments.
-
-    Args:
-        args (argparse.Namespace): Parsed command-line arguments.
-
-    Returns:
-        SimulationManager: Configured simulation manager instance.
-    """
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device="cuda",
-        enable_rt=args.enable_rt,
-        physics_dt=1.0 / 100.0,
-        num_envs=args.num_envs,
-    )
-    sim = SimulationManager(config)
-
-    light = sim.add_light(
-        cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
-    )
-
-    return sim
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
@@ -148,18 +105,18 @@ def create_padding_box(sim: SimulationManager):
     padding_box_cfg = RigidObjectCfg(
         uid="padding_box",
         shape=CubeCfg(
-            size=[0.01, 0.04, 0.03],
+            size=[0.02, 0.07, 0.05],
         ),
         attrs=RigidBodyAttributesCfg(
             mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
+            static_friction=0.01,
+            dynamic_friction=0.00,
             restitution=0.01,
             min_position_iters=32,
             min_velocity_iters=8,
         ),
         body_type="kinematic",
-        init_pos=[0.5, 0.0, 0.01],
+        init_pos=[0.5, 0.0, 0.026],
         init_rot=[0.0, 0.0, 0.0],
     )
     padding_box = sim.add_rigid_object(cfg=padding_box_cfg)
@@ -219,7 +176,7 @@ def create_cloth(sim: SimulationManager):
                 mass=0.01,
                 youngs=1e10,
                 poissons=0.4,
-                thickness=0.04,
+                thickness=0.06,
                 bending_stiffness=0.01,
                 bending_damping=0.1,
                 dynamic_friction=0.95,
@@ -283,8 +240,26 @@ def main():
     This function initializes the simulation, creates the robot and other objects,
     and performs the press softbody task.
     """
-    args = parse_arguments()
-    sim = initialize_simulation(args)
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args()
+    # Configure the simulation
+    sim_cfg = SimulationManagerCfg(
+        width=1920,
+        height=1080,
+        num_envs=args.num_envs,
+        headless=True,
+        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
+        sim_device="cuda",
+        render_cfg=RenderCfg(
+            renderer=args.renderer
+        ),  # Enable ray tracing for better visuals
+    )
+
+    # Create the simulation instance
+    sim = SimulationManager(sim_cfg)
 
     robot = create_robot(sim)
     cloth = create_cloth(sim)
@@ -312,8 +287,7 @@ def main():
     n_waypoint = grab_traj.shape[1]
     for i in range(n_waypoint):
         robot.set_qpos(grab_traj[:, i, :])
-        sim.update(step=4)
-        time.sleep(1e-2)
+        sim.update(step=3)
     input("Press Enter to exit the simulation...")
 
 

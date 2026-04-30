@@ -76,7 +76,7 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     gym_config = load_json(config_path)
 
     gym_config["headless"] = True
-    gym_config["enable_rt"] = True
+    gym_config.get("renderer", "legacy") = True
     gym_config["gpu_id"] = 0
     gym_config["device"] = args.device
     cfg = OnlineDataEngineCfg(

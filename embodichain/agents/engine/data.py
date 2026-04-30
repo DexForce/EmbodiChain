@@ -25,6 +25,7 @@ from multiprocessing.synchronize import Event as MpEvent
 from tensordict import TensorDict
 from tqdm import tqdm
 
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 
@@ -112,7 +113,7 @@ def _sim_worker_fn(
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config.get("headless", True),
         sim_device=gym_config.get("device", "cpu"),
-        enable_rt=gym_config.get("enable_rt", True),
+        render_cfg=RenderCfg(renderer=gym_config.get("renderer", "legacy")),
         gpu_id=gym_config.get("gpu_id", 0),
     )
 

@@ -16,6 +16,8 @@
 
 import pytest
 import torch
+
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import StereoCamera, SensorCfg
 
@@ -23,10 +25,12 @@ NUM_ENVS = 4
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
+            headless=True,
+            sim_device=sim_device,
+            num_envs=NUM_ENVS,
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
@@ -67,13 +71,13 @@ class StereoCameraTest:
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Position data shape mismatch"
         assert data["mask"].shape == (NUM_ENVS, 480, 640, 1), "Mask data shape mismatch"
         assert data["disparity"].shape == (
@@ -142,19 +146,19 @@ class StereoCameraTest:
 
 class TestStereoCameraRaster(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+        self.setup_simulation("cpu")
 
 
-class TestStereoCameraRaster(StereoCameraTest):
+class TestStereoCameraRasterCUDA(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+        self.setup_simulation("cuda")
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+        self.setup_simulation("cpu")
 
 
-class TestStereoCameraFastRT(StereoCameraTest):
+class TestStereoCameraFastRTCUDA(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+        self.setup_simulation("cuda")

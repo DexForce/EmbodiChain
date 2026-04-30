@@ -907,7 +907,6 @@ class Articulation(BatchEntity):
                 logger.log_error(
                     f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
                 )
-
             # TODO: in manual physics mode, the update should be explicitly called after
             # setting the pose to synchronize the state to renderer.
             self._world.update(0.001)

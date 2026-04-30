@@ -212,10 +212,7 @@ class Gizmo:
             camera_pos, camera_rot_matrix, "Camera"
         )
         # New API uses set_flush_localpose_callback
-        try:
-            self._gizmo.set_flush_localpose_callback(self._proxy_gizmo_callback)
-        except Exception as e:
-            logger.log_warning(f"Failed to set gizmo callback for camera: {e}")
+        self._gizmo.set_flush_localpose_callback(self._proxy_gizmo_callback)
 
     def _proxy_gizmo_callback(self, *args):
         """Generic callback for proxy-based gizmo.

@@ -24,11 +24,18 @@ from pathlib import Path
 import math
 import embodichain.utils.logger as logger
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, LightCfg, RobotCfg, URDFCfg
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    RigidBodyAttributesCfg,
+    LightCfg,
+    RobotCfg,
+    URDFCfg,
+)
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.data.assets.scene_assets import SceneData
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def resolve_asset_path(scene_name: str) -> str:
@@ -91,18 +98,7 @@ def main():
         choices=["kitchen", "factory", "office", "local"],
         help="Choose which scene to load",
     )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
-    )
-    parser.add_argument(
-        "--disable_rt",
-        action="store_true",
-        default=False,
-        help="Disable ray tracing for better visuals",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     logger.log_info(f"Initializing scene '{args.scene}'")
@@ -121,7 +117,7 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
-        enable_rt=not args.disable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=10.0,
     )

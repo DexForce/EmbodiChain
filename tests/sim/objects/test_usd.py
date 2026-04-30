@@ -23,6 +23,7 @@ from embodichain.lab.sim import (
 )
 from embodichain.lab.sim.objects import Articulation, RigidObject
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     ArticulationCfg,
     RigidObjectCfg,
     JointDrivePropertiesCfg,
@@ -39,7 +40,9 @@ class BaseUsdTest:
 
     def setup_simulation(self, sim_device):
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS, enable_rt=False
+            headless=True,
+            sim_device=sim_device,
+            num_envs=NUM_ARENAS,
         )
         self.sim = SimulationManager(config)
 

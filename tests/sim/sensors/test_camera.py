@@ -23,7 +23,7 @@ from tensordict import TensorDict
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, SensorCfg, CameraCfg
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
 from embodichain.data import get_data_path
 
 NUM_ENVS = 4
@@ -31,10 +31,12 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
+            headless=True,
+            sim_device=sim_device,
+            num_envs=NUM_ENVS,
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
@@ -75,13 +77,13 @@ class CameraTest:
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
             NUM_ENVS,
             480,
             640,
-            3,
+            4,
         ), "Position data shape mismatch"
         assert data["mask"].shape == (NUM_ENVS, 480, 640), "Mask data shape mismatch"
 
@@ -141,25 +143,25 @@ class CameraTest:
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+        self.setup_simulation("cpu")
 
 
-class TestCameraRaster(CameraTest):
+class TestCameraRasterCUDA(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+        self.setup_simulation("cuda")
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+        self.setup_simulation("cpu")
 
 
-class TestCameraFastRT(CameraTest):
+class TestCameraFastRTCUDA(CameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+        self.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
     test = CameraTest()
-    test.setup_simulation("cpu", enable_rt=False)
+    test.setup_simulation("cpu")
     test.test_attach_to_parent()

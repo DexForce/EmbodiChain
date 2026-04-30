@@ -81,6 +81,12 @@ class RigidBodyData:
         self._ang_vel = torch.zeros(
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
+        self._lin_acc = torch.zeros(
+            (self.num_instances, 3), dtype=torch.float32, device=self.device
+        )
+        self._ang_acc = torch.zeros(
+            (self.num_instances, 3), dtype=torch.float32, device=self.device
+        )
         # center of mass pose in format (x, y, z, qw, qx, qy, qz)
         self.default_com_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
@@ -161,6 +167,51 @@ class RigidBodyData:
             torch.Tensor: The linear and angular velocities concatenated, with shape (N, 6).
         """
         return torch.cat((self.lin_vel, self.ang_vel), dim=-1)
+
+    @property
+    def lin_acc(self) -> torch.Tensor:
+        if self.device.type == "cpu":
+            self._lin_acc = torch.as_tensor(
+                np.array(
+                    [entity.get_linear_acceleration() for entity in self.entities],
+                ),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            self.ps.gpu_fetch_rigid_body_data(
+                data=self._lin_acc,
+                gpu_indices=self.gpu_indices,
+                data_type=RigidBodyGPUAPIReadType.LINEAR_ACCELERATION,
+            )
+        return self._lin_acc
+
+    @property
+    def ang_acc(self) -> torch.Tensor:
+        if self.device.type == "cpu":
+            self._ang_acc = torch.as_tensor(
+                np.array(
+                    [entity.get_angular_acceleration() for entity in self.entities],
+                ),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            self.ps.gpu_fetch_rigid_body_data(
+                data=self._ang_acc,
+                gpu_indices=self.gpu_indices,
+                data_type=RigidBodyGPUAPIReadType.ANGULAR_ACCELERATION,
+            )
+        return self._ang_acc
+
+    @property
+    def acc(self) -> torch.Tensor:
+        """Get the linear and angular accelerations of the rigid bodies.
+
+        Returns:
+            torch.Tensor: The linear and angular accelerations concatenated, with shape (N, 6).
+        """
+        return torch.cat((self.lin_acc, self.ang_acc), dim=-1)
 
     @property
     def com_pose(self) -> torch.Tensor:

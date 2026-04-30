@@ -68,6 +68,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
@@ -105,14 +106,8 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run the simulation in headless mode (no Window)."""
 
-    enable_rt: bool = False
-    """Whether to enable ray tracing rendering."""
-
-    enable_denoiser: bool = True
-    """Whether to enable denoising for ray tracing rendering."""
-
-    spp: int = 64
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when ray tracing is enabled and enable_denoiser is False."""
+    render_cfg: RenderCfg = field(default_factory=RenderCfg)
+    """The rendering configuration parameters."""
 
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
@@ -189,11 +184,6 @@ class SimulationManager:
         # Mark as initialized
         self.instance_id = instance_id
 
-        if sim_config.enable_rt and instance_id > 0:
-            logger.log_error(
-                f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
-            )
-
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
@@ -221,10 +211,6 @@ class SimulationManager:
         self._window: Windows | None = None
         self._is_registered_window_control = False
 
-        fps = int(1.0 / sim_config.physics_dt)
-        self._world.set_physics_fps(fps)
-
-        self._world.set_time_scale(1.0)
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
@@ -241,7 +227,7 @@ class SimulationManager:
 
         # set unique material path to accelerate material creation.
         # TODO: This will be removed.
-        if self.sim_config.enable_rt is False:
+        if self.sim_config.render_cfg.is_legacy:
             self._env.set_unique_mat_path(
                 os.path.join(self._material_cache_dir, "default_mat")
             )
@@ -284,7 +270,7 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            self._register_default_window_control()
+            # self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -334,7 +320,7 @@ class SimulationManager:
         """
         return instance_id in cls._instances
 
-    @property
+    @cached_property
     def num_envs(self) -> int:
         """Get the number of arenas in the simulation.
 
@@ -349,10 +335,10 @@ class SimulationManager:
         world_config = dexsim.get_world_config()
         return self.device.type == "cuda" and world_config.enable_gpu_sim
 
-    @property
+    @cached_property
     def is_rt_enabled(self) -> bool:
         """Check if Ray Tracing rendering backend is enabled."""
-        return self.sim_config.enable_rt
+        return not self.sim_config.render_cfg.is_legacy
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -395,11 +381,10 @@ class SimulationManager:
         world_config.length_tolerance = sim_config.physics_config.length_tolerance
         world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
 
-        if sim_config.enable_rt:
-            world_config.renderer = dexsim.types.Renderer.FASTRT
-            if sim_config.enable_denoiser is False:
-                world_config.raytrace_config.spp = sim_config.spp
-                world_config.raytrace_config.open_denoise = False
+        world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+        if sim_config.render_cfg.enable_denoiser is False:
+            world_config.raytrace_config.spp = sim_config.render_cfg.spp
+            world_config.raytrace_config.open_denoise = False
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
@@ -458,28 +443,30 @@ class SimulationManager:
         if self._is_initialized_gpu_physics:
             return
 
-        # init rigid body.
-        rigid_body_num = (
-            0
-            if self._get_non_static_rigid_obj_num() == 0
-            else len(self._ps.get_gpu_rigid_indices())
-        )
-        self._rigid_body_pose = torch.zeros(
-            (rigid_body_num, 7), dtype=torch.float32, device=self.device
-        )
+        if not self.is_rt_enabled:
+            # init rigid body.
+            rigid_body_num = (
+                0
+                if not self.has_non_static_rigid_object()
+                else len(self._ps.get_gpu_rigid_indices())
+            )
+            self._rigid_body_pose = torch.zeros(
+                (rigid_body_num, 7), dtype=torch.float32, device=self.device
+            )
 
-        # init articulation.
-        articulation_num = (
-            0
-            if len(self._articulations) == 0 and len(self._robots) == 0
-            else len(self._ps.get_gpu_articulation_indices())
-        )
-        max_link_count = self._ps.gpu_get_articulation_max_link_count()
-        self._link_pose = torch.zeros(
-            (articulation_num, max_link_count, 7),
-            dtype=torch.float32,
-            device=self.device,
-        )
+            # init articulation.
+            articulation_num = (
+                0
+                if len(self._articulations) == 0 and len(self._robots) == 0
+                else len(self._ps.get_gpu_articulation_indices())
+            )
+            max_link_count = self._ps.gpu_get_articulation_max_link_count()
+            self._link_pose = torch.zeros(
+                (articulation_num, max_link_count, 7),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
         for art in self._articulations.values():
             art.reallocate_body_data()
         for robot in self._robots.values():
@@ -524,7 +511,7 @@ class SimulationManager:
             for i in range(step):
                 self._world.update(physics_dt)
 
-            if self.sim_config.enable_rt is False:
+            if not self.is_rt_enabled:
                 self._sync_gpu_data()
 
         else:
@@ -555,7 +542,6 @@ class SimulationManager:
                     data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
                 )
 
-            # TODO: might be optimized.
             self._world.sync_poses_gpu_to_cpu(
                 rigid_pose=CudaArray(self._rigid_body_pose),
                 link_pose=CudaArray(self._link_pose),
@@ -589,7 +575,7 @@ class SimulationManager:
         """Open the simulation window."""
         self._world.open_window()
         self._window = self._world.get_windows()
-        self._register_default_window_control()
+        # self._register_default_window_control()
         self.is_window_opened = True
 
     def close_window(self) -> None:
@@ -662,6 +648,7 @@ class SimulationManager:
         plane_collision = self._env.create_cube(
             default_length, default_length, default_length / 10
         )
+        plane_collision.set_visible(False)
         plane_collision_pose = np.eye(4, dtype=float)
         plane_collision_pose[2, 3] = -default_length / 20 - 0.001
         plane_collision.set_local_pose(plane_collision_pose)
@@ -682,11 +669,12 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
+                roughness=0.7,
             )
         )
 
-        if self.sim_config.enable_rt:
-            self.set_emission_light([1.0, 1.0, 1.0], 80.0)
+        if self.is_rt_enabled:
+            self.set_emission_light([1.0, 1.0, 1.0], 120.0)
         else:
             self.set_indirect_lighting("lab_day")
 
@@ -1064,17 +1052,20 @@ class SimulationManager:
             )
         return arena_offsets
 
-    def _get_non_static_rigid_obj_num(self) -> int:
-        """Get the number of non-static rigid objects in the scene.
+    def has_non_static_rigid_object(self) -> bool:
+        """Check if there is any non-static rigid object in the simulation.
 
         Returns:
-            int: The number of non-static rigid objects.
+            bool: True if there is at least one non-static rigid object, False otherwise.
         """
-        count = 0
-        for obj in self._rigid_objects.values():
-            if obj.cfg.body_type != "static":
-                count += 1
-        return count
+        for rigid_obj in self._rigid_objects.values():
+            if rigid_obj.body_type != "static":
+                return True
+
+        if len(self._rigid_object_groups) > 0:
+            return True
+
+        return False
 
     def add_articulation(
         self,
@@ -1105,7 +1096,9 @@ class SimulationManager:
             if len(env_list) > 1:
                 logger.log_error(f"Currently not supporting multiple arenas for USD.")
             env = self._env
-            results = env.import_from_usd_file(cfg.fpath, return_object=True)
+            results = env.import_from_usd_file(
+                cfg.fpath, return_object=True, cache_dir=self._convex_decomp_dir
+            )
             # print("USD import results:", results)
 
             articulations_found = []
