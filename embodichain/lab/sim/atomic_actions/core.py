@@ -33,6 +33,8 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import logger
+from embodichain.lab.sim.sim_manager import SimulationManager
+from embodichain.lab.sim.cfg import MarkerCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenOptions
@@ -121,6 +123,9 @@ class AntipodalAffordance(Affordance):
     force_reannotate: bool = False
     """Whether to force re-annotation of grasp generator on each access."""
 
+    is_draw_grasp_xpos: bool = False
+    """Whether to visualize grasp poses in the simulator."""
+
     def _init_generator(self):
         if (
             self.geometry.get("mesh_vertices", None) is None
@@ -176,7 +181,22 @@ class AntipodalAffordance(Affordance):
         open_length = torch.tensor(
             open_length_list, dtype=torch.float32, device=self.generator.device
         )
+        if self.is_draw_grasp_xpos:
+            self._draw_grasp_xpos(grasp_xpos, open_length)
         return is_success, grasp_xpos, open_length
+
+    def _draw_grasp_xpos(self, grasp_xpos: torch.Tensor, open_length: torch.Tensor):
+        sim = SimulationManager.get_instance()
+        axis_xpos = []
+        for i in range(grasp_xpos.shape[0]):
+            axis_xpos.append(grasp_xpos[i].to("cpu").numpy())
+        sim.draw_marker(
+            cfg=MarkerCfg(
+                name="grasp_xpos",
+                axis_xpos=axis_xpos,
+                axis_len=0.05,
+            )
+        )
 
 
 @dataclass

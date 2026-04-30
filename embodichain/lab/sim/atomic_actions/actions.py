@@ -164,18 +164,15 @@ class MoveAction(AtomicAction):
         """Plan batched arm trajectories for all environments."""
         arm_dof = self.dof if arm_dof is None else arm_dof
 
-        # TODO: 
-
         n_state = len(target_states_list[0])
         xpos_traj = torch.zeros(
-            size=(self.n_envs, n_state, 4, 4),
-            dtype=torch.float32, device=self.device
+            size=(self.n_envs, n_state, 4, 4), dtype=torch.float32, device=self.device
         )
         for i, target_states in enumerate(target_states_list):
             for j, target_state in enumerate(target_states):
                 # [env_i, state_j, 4, 4]
                 xpos_traj[i, j] = target_state.xpos
-        
+
         trajectory = torch.zeros(
             size=(self.n_envs, n_state, arm_dof),
             dtype=torch.float32,
@@ -184,9 +181,7 @@ class MoveAction(AtomicAction):
         qpos_seed = start_qpos
         for j in range(n_state):
             is_success, qpos = self.robot.compute_ik(
-                pose=xpos_traj[:, j],
-                name=self.cfg.control_part,
-                joint_seed=qpos_seed
+                pose=xpos_traj[:, j], name=self.cfg.control_part, joint_seed=qpos_seed
             )
             if not is_success:
                 logger.log_warning(
@@ -199,9 +194,7 @@ class MoveAction(AtomicAction):
                 qpos_seed = qpos
         trajectory = torch.concatenate([start_qpos.unsqueeze(1), trajectory], dim=1)
         interp_traj = interpolate_with_distance(
-            trajectory=trajectory,
-            interp_num=n_waypoints,
-            device=self.device
+            trajectory=trajectory, interp_num=n_waypoints, device=self.device
         )
         return True, interp_traj
 
