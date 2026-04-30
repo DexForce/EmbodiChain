@@ -33,8 +33,6 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import logger
-from embodichain.lab.sim.sim_manager import SimulationManager
-from embodichain.lab.sim.cfg import MarkerCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenOptions

@@ -22,3 +22,4 @@ Overview of the Simulation Framework:
    sim_sensor.md
    solvers/index
    planners/index
+   atomic_actions.md

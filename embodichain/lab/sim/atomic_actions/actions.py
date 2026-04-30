@@ -42,6 +42,29 @@ class MoveActionCfg(ActionCfg):
     """Number of waypoints to sample for the motion trajectory. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
 
 
+@configclass
+class GraspActionCfg(MoveActionCfg):
+    """Shared configuration for actions that involve gripper open/close motions."""
+
+    hand_open_qpos: torch.Tensor | None = None
+    """[hand_dof,] of float. Joint positions for open hand state."""
+
+    hand_close_qpos: torch.Tensor | None = None
+    """[hand_dof,] of float. Joint positions for closed hand state."""
+
+    hand_control_part: str = "hand"
+    """Name of the robot part that controls the hand joints."""
+
+    lift_height: float = 0.1
+    """Height (m) to lift the end-effector after the gripper phase."""
+
+    sample_interval: int = 80
+    """Number of waypoints for the full trajectory (approach + hand + lift/back)."""
+
+    hand_interp_steps: int = 5
+    """Number of waypoints for the gripper open/close interpolation phase."""
+
+
 class MoveAction(AtomicAction):
     def __init__(
         self,
@@ -261,33 +284,17 @@ class MoveAction(AtomicAction):
 
 
 @configclass
-class PickUpActionCfg(MoveActionCfg):
+class PickUpActionCfg(GraspActionCfg):
     name: str = "pick_up"
     """Name of the action, used for identification and logging."""
 
-    hand_open_qpos: torch.Tensor | None = None
-    """[hand_dof,] of float. Joint positions for open hand state. Must be specified for PickUpAction."""
-
-    hand_close_qpos: torch.Tensor | None = None
-    """[hand_dof,] of float. Joint positions for closed hand state. Must be specified for PickUpAction."""
-
-    hand_control_part: str = "hand"
-    """Name of the robot part that controls the hand joints. Must correspond to a valid control part in the robot definition."""
-
     pre_grasp_distance: float = 0.15
-    """Distance to offset back from the grasp pose along the approach direction to get the pre-grasp pose. Should be large enough to avoid collision during approach, but not too large to cause unnecessary detour."""
+    """Distance to offset back from the grasp pose along the approach direction to get
+    the pre-grasp pose. Should be large enough to avoid collision during approach."""
 
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
-    """Direction from which the gripper approaches the object for grasping, expressed in the object local frame. Should be a unit vector. Default is [0, 0, -1], which means approaching from above along the negative z-axis."""
-
-    lift_height: float = 0.1
-    """Height to lift the object after grasping, expressed in meters. Should be large enough to avoid collision with the environment, but not too large to cause unnecessary motion."""
-
-    sample_interval: int = 80
-    """Number of waypoints to sample for the entire pick up motion trajectory, including approach, hand closing, and lifting. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
-
-    hand_interp_steps: int = 5
-    """Number of waypoints to interpolate for the hand closing motion. Should be at least 2 to ensure smooth interpolation between open and closed hand states, but not too large to cause unnecessary computation overhead."""
+    """Direction from which the gripper approaches the object for grasping, expressed
+    in the object local frame. Default [0, 0, -1] means approaching from above."""
 
 
 class PickUpAction(MoveAction):
@@ -474,27 +481,9 @@ class PickUpAction(MoveAction):
 
 
 @configclass
-class PlaceActionCfg(MoveActionCfg):
+class PlaceActionCfg(GraspActionCfg):
     name: str = "place"
     """Name of the action, used for identification and logging."""
-
-    hand_open_qpos: torch.Tensor | None = None
-    """[hand_dof,] of float. Joint positions for open hand state. Must be specified for PickUpAction."""
-
-    hand_close_qpos: torch.Tensor | None = None
-    """[hand_dof,] of float. Joint positions for closed hand state. Must be specified for PickUpAction."""
-
-    hand_control_part: str = "hand"
-    """Name of the robot part that controls the hand joints. Must correspond to a valid control part in the robot definition."""
-
-    lift_height: float = 0.1
-    """Height to lift the object after grasping, expressed in meters. Should be large enough to avoid collision with the environment, but not too large to cause unnecessary motion."""
-
-    sample_interval: int = 80
-    """Number of waypoints to sample for the entire pick up motion trajectory, including approach, hand closing, and lifting. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
-
-    hand_interp_steps: int = 5
-    """Number of waypoints to interpolate for the hand closing motion. Should be at least 2 to ensure smooth interpolation between open and closed hand states, but not too large to cause unnecessary computation overhead."""
 
 
 class PlaceAction(MoveAction):

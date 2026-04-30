@@ -15,7 +15,19 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates the atomic action abstraction layer in the SimulationManager. 
+Tutorial: Atomic Actions for Robot Motion Generation
+=====================================================
+
+This script shows how to use the atomic action system to plan and execute
+a pick-and-place task with a robot arm.
+
+Key concepts covered:
+  1. Setting up a MotionGenerator and AtomicActionEngine
+  2. Describing what to pick using ObjectSemantics and AntipodalAffordance
+  3. Running a pick → place → move sequence with execute_static()
+
+Run with:
+    python atomic_actions.py [--num_envs N] [--enable_rt]
 """
 
 import argparse
@@ -37,8 +49,6 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.shapes import MeshCfg
-
 from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
@@ -47,12 +57,12 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     GraspGeneratorCfg,
     AntipodalSamplerCfg,
 )
-from embodichain.lab.sim.atomic_actions.engine import (
+
+# Import everything from the public atomic_actions API
+from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
-    register_action,
-)
-from embodichain.lab.sim.atomic_actions.core import ObjectSemantics, AntipodalAffordance
-from embodichain.lab.sim.atomic_actions.actions import (
+    ObjectSemantics,
+    AntipodalAffordance,
     PickUpActionCfg,
     PlaceActionCfg,
     MoveActionCfg,
@@ -156,7 +166,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
 
 def create_mug(sim: SimulationManager) -> RigidObject:
     mug_cfg = RigidObjectCfg(
-        uid="table",
+        uid="mug",
         shape=MeshCfg(
             fpath=get_data_path("CoffeeCup/cup.ply"),
         ),
@@ -175,46 +185,55 @@ def create_mug(sim: SimulationManager) -> RigidObject:
 
 
 def main():
-    """
-    Main function to demonstrate robot simulation.
-
-    This function initializes the simulation, creates the robot and mug objects,
-    and performs the pickup action task.
-    """
+    """Pick up a mug and place it at a new location using atomic actions."""
     args = parse_arguments()
+
+    # ------------------------------------------------------------------ #
+    # Step 1: Set up simulation, robot, and object                        #
+    # ------------------------------------------------------------------ #
     sim: SimulationManager = initialize_simulation(args)
     robot = create_robot(sim)
     mug = create_mug(sim)
 
+    # ------------------------------------------------------------------ #
+    # Step 2: Create a MotionGenerator for the robot                      #
+    # MotionGenerator handles trajectory planning (IK + TOPPRA smoothing) #
+    # ------------------------------------------------------------------ #
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
 
+    # ------------------------------------------------------------------ #
+    # Step 3: Configure the three atomic actions                          #
+    #                                                                     #
+    #  PickUpAction  — approach → close gripper → lift                   #
+    #  PlaceAction   — lower → open gripper → retract                    #
+    #  MoveAction    — free-space move to a target EEF pose               #
+    # ------------------------------------------------------------------ #
+    # Gripper joint values for this robot (DH_PGC_140):
+    #   open  = [0.00, 0.00]   (fully open)
+    #   close = [0.025, 0.025] (grasping width)
+    hand_open = torch.tensor([0.00, 0.00], dtype=torch.float32, device=sim.device)
+    hand_close = torch.tensor([0.025, 0.025], dtype=torch.float32, device=sim.device)
+
     pickup_cfg = PickUpActionCfg(
-        hand_open_qpos=torch.tensor(
-            [0.00, 0.00], dtype=torch.float32, device=sim.device
-        ),
-        hand_close_qpos=torch.tensor(
-            [0.025, 0.025], dtype=torch.float32, device=sim.device
-        ),
         control_part="arm",
         hand_control_part="hand",
+        hand_open_qpos=hand_open,
+        hand_close_qpos=hand_close,
+        # Approach the object from directly above (negative world-Z)
         approach_direction=torch.tensor(
             [0.0, 0.0, -1.0], dtype=torch.float32, device=sim.device
         ),
-        pre_grasp_distance=0.15,
-        lift_height=0.15,
+        pre_grasp_distance=0.15,  # hover 15 cm above before descending
+        lift_height=0.15,  # lift 15 cm after grasping
     )
 
     place_cfg = PlaceActionCfg(
-        hand_open_qpos=torch.tensor(
-            [0.00, 0.00], dtype=torch.float32, device=sim.device
-        ),
-        hand_close_qpos=torch.tensor(
-            [0.025, 0.025], dtype=torch.float32, device=sim.device
-        ),
         control_part="arm",
         hand_control_part="hand",
+        hand_open_qpos=hand_open,
+        hand_close_qpos=hand_close,
         lift_height=0.15,
     )
 
@@ -222,30 +241,41 @@ def main():
         control_part="arm",
     )
 
+    # ------------------------------------------------------------------ #
+    # Step 4: Build the AtomicActionEngine                                #
+    #                                                                     #
+    # actions_cfg_list defines the ORDER of actions that execute_static() #
+    # will run. Each entry is matched positionally to target_list.        #
+    # ------------------------------------------------------------------ #
     atom_engine = AtomicActionEngine(
         motion_generator=motion_gen,
-        actions_cfg_list=(pickup_cfg, place_cfg, move_cfg),
+        actions_cfg_list=[pickup_cfg, place_cfg, move_cfg],
     )
 
     sim.init_gpu_physics()
     sim.open_window()
 
-    # Define object semantics and affordances for the mug
-    gripper_collision_cfg = GripperCollisionCfg(
-        max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
-    )
-    generator_cfg = GraspGeneratorCfg(
-        viser_port=11801,
-        antipodal_sampler_cfg=AntipodalSamplerCfg(
-            n_sample=20000, max_length=0.088, min_length=0.003
-        ),
-    )
+    # ------------------------------------------------------------------ #
+    # Step 5: Describe the mug with ObjectSemantics                       #
+    #                                                                     #
+    # ObjectSemantics bundles together:                                   #
+    #   - geometry (mesh vertices/triangles for grasp annotation)         #
+    #   - affordance (how to grasp the object — here antipodal grasps)   #
+    #   - entity reference (so the action can read the live object pose)  #
+    # ------------------------------------------------------------------ #
     mug_grasp_affordance = AntipodalAffordance(
         object_label="mug",
-        force_reannotate=False,  # set to True if you want to re-annotate affordance even if the object has been seen before, which is useful when you have changed the grasp generator configuration and want to see the effect of new configuration, but it will take more time to annotate. So usually set it to False and only set it to True when you have changed the grasp generator configuration or you want to debug the annotation process.
+        force_reannotate=False,
         custom_config={
-            "gripper_collision_cfg": gripper_collision_cfg,
-            "generator_cfg": generator_cfg,
+            "gripper_collision_cfg": GripperCollisionCfg(
+                max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
+            ),
+            "generator_cfg": GraspGeneratorCfg(
+                viser_port=11801,
+                antipodal_sampler_cfg=AntipodalSamplerCfg(
+                    n_sample=20000, max_length=0.088, min_length=0.003
+                ),
+            ),
         },
     )
     mug_semantics = ObjectSemantics(
@@ -255,13 +285,21 @@ def main():
             "mesh_triangles": mug.get_triangles(env_ids=[0])[0],
         },
         affordance=mug_grasp_affordance,
-        entity=mug,  # in order to fetch object pose
+        entity=mug,  # needed so PickUpAction can read the mug's live pose
     )
 
-    target_grasp_xpos = torch.tensor(
+    # ------------------------------------------------------------------ #
+    # Step 6: Define target poses for place and final rest                #
+    #                                                                     #
+    # Poses are 4×4 homogeneous transforms (rotation | translation).     #
+    # For PickUpAction the target is mug_semantics — the action computes  #
+    # the grasp pose automatically from the affordance.                   #
+    # ------------------------------------------------------------------ #
+    # Place the mug 20 cm to the left and 40 cm forward from its pickup pose
+    place_xpos = torch.tensor(
         [
-            [-0.0539, -0.9985, -0.0022, 0.4489],
-            [-0.9977, 0.0540, -0.0401, -0.0030],
+            [-0.0539, -0.9985, -0.0022, 0.2489],
+            [-0.9977, 0.0540, -0.0401, 0.3970],
             [0.0401, 0.0000, -0.9992, 0.1400],
             [0.0000, 0.0000, 0.0000, 1.0000],
         ],
@@ -269,17 +307,36 @@ def main():
         device=sim.device,
     )
 
-    place_xpos = target_grasp_xpos.clone()
-    place_xpos[:3, 3] += torch.tensor([-0.2, 0.4, 0.1], device=sim.device)
+    # Move the arm to a safe resting pose after placing
+    rest_xpos = torch.tensor(
+        [
+            [-0.0539, -0.9985, -0.0022, 0.5000],
+            [-0.9977, 0.0540, -0.0401, 0.0000],
+            [0.0401, 0.0000, -0.9992, 0.5000],
+            [0.0000, 0.0000, 0.0000, 1.0000],
+        ],
+        dtype=torch.float32,
+        device=sim.device,
+    )
 
-    rest_xpos = target_grasp_xpos.clone()
-    rest_xpos[:3, 3] = torch.tensor([0.5, 0.0, 0.5], device=sim.device)
-
+    # ------------------------------------------------------------------ #
+    # Step 7: Plan and execute the full sequence                          #
+    #                                                                     #
+    # execute_static() plans all three actions in order and returns a     #
+    # single concatenated joint trajectory (n_envs, n_waypoints, dof).   #
+    # We then replay it frame-by-frame in the simulator.                 #
+    # ------------------------------------------------------------------ #
+    print("Planning pick → place → move trajectory...")
     is_success, traj = atom_engine.execute_static(
         target_list=[mug_semantics, place_xpos, rest_xpos]
     )
-    n_waypoint = traj.shape[1]
-    for i in range(n_waypoint):
+
+    if not is_success:
+        print("Planning failed. Check that the target poses are reachable.")
+        return
+
+    print(f"Success! Replaying {traj.shape[1]} waypoints...")
+    for i in range(traj.shape[1]):
         robot.set_qpos(traj[:, i])
         sim.update(step=4)
         time.sleep(1e-2)

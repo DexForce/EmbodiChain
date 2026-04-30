@@ -15,8 +15,9 @@
       shapes
       objects
       sensors
-      planners
       solvers
+      planners
+      atomic_actions
       utility
 
 .. currentmodule:: embodichain.lab.sim
@@ -100,6 +101,14 @@ Planners
    :maxdepth: 1
 
    embodichain.lab.sim.planners
+
+Atomic Actions
+--------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.atomic_actions
 
 Utility
 -------

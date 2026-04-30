@@ -139,8 +139,6 @@ class SemanticAnalyzer:
 
         grasp_affordance = AntipodalAffordance(
             object_label=label,
-            poses=default_poses,
-            grasp_types=["default"],
             custom_config=custom_config or {},
         )
 
@@ -182,34 +180,44 @@ class AtomicActionEngine:
         self._semantic_analyzer = SemanticAnalyzer()
 
         # Initialize default actions
-        self._actions: List[AtomicAction] = self._init_actions(actions_cfg_list)
+        self._actions: Dict[str, AtomicAction] = self._init_actions(actions_cfg_list)
 
-    def _init_actions(self, actions_cfg_list: Optional[List[ActionCfg]] = None):
-        actions: List[AtomicAction] = []
+    def _init_actions(
+        self, actions_cfg_list: Optional[List[ActionCfg]] = None
+    ) -> Dict[str, "AtomicAction"]:
+        actions: Dict[str, AtomicAction] = {}
         from .actions import MoveAction, PickUpAction, PlaceAction
 
-        name_action_map = {
+        builtin_action_map: Dict[str, Type[AtomicAction]] = {
             "move": MoveAction,
             "pick_up": PickUpAction,
             "place": PlaceAction,
         }
         if actions_cfg_list is not None:
             for cfg in actions_cfg_list:
-                action_class = name_action_map.get(cfg.name)
+                action_class = builtin_action_map.get(
+                    cfg.name
+                ) or _global_action_registry.get(cfg.name)
                 if action_class is None:
                     logger.log_error(f"Unknown action name in config: {cfg.name}")
+                    continue
                 instance = action_class(motion_generator=self.motion_generator, cfg=cfg)
-                actions.append(instance)
+                actions[cfg.name] = instance
         return actions
 
     def execute_static(
         self,
         target_list: List[Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]]],
     ) -> tuple[bool, torch.Tensor]:
-        """Execute a static move action to target poses without motion planning."""
-        if len(target_list) != len(self._actions):
+        """Execute a sequence of actions to target poses.
+
+        Each element in ``target_list`` corresponds to an action in the order they
+        were registered via ``actions_cfg_list``.
+        """
+        action_names = list(self._actions.keys())
+        if len(target_list) != len(action_names):
             logger.log_error(
-                f"Length of target_list ({len(target_list)}) must match number of actions ({len(self._actions)})."
+                f"Length of target_list ({len(target_list)}) must match number of actions ({len(action_names)})."
             )
         start_qpos = self.motion_generator.robot.get_qpos()
         n_envs = start_qpos.shape[0]
@@ -218,8 +226,8 @@ class AtomicActionEngine:
             size=(n_envs, 0, all_dof), dtype=torch.float32, device=self.device
         )
 
-        for i, target in enumerate(target_list):
-            atom_action = self._actions[i]
+        for action_name, target in zip(action_names, target_list):
+            atom_action = self._actions[action_name]
             target = self._resolve_target(target)
             control_part = atom_action.control_part
             arm_joint_ids = self.motion_generator.robot.get_joint_ids(name=control_part)
@@ -227,6 +235,8 @@ class AtomicActionEngine:
             is_success, traj, joint_ids = atom_action.execute(
                 target=target, start_qpos=start_qpos_part
             )
+            if not is_success:
+                return False, all_trajectory
             n_waypoints = traj.shape[1]
 
             traj_full = torch.zeros(
@@ -237,33 +247,23 @@ class AtomicActionEngine:
             traj_full[:, :] = start_qpos
             traj_full[:, :, joint_ids] = traj
             all_trajectory = torch.cat((all_trajectory, traj_full), dim=1)
-            if is_success:
-                # update start qpos
-                start_qpos[:, joint_ids] = traj[:, -1, :]
-            else:
-                return False, all_trajectory
+            # update start qpos for the next action
+            start_qpos[:, joint_ids] = traj[:, -1, :]
         return True, all_trajectory
 
     def validate(
         self,
         action_name: str,
         target: Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]],
-        control_part: Optional[str] = None,
         **kwargs,
     ) -> bool:
-        """Validate if an action is feasible without executing."""
-        if control_part:
-            action_key = f"{action_name}_{control_part}"
-        else:
-            action_key = action_name
-
-        if action_key not in self._actions:
+        """Validate if a named action is feasible without executing."""
+        if action_name not in self._actions:
+            logger.log_warning(f"Action '{action_name}' is not registered.")
             return False
 
-        action = self._actions[action_key]
-
+        action = self._actions[action_name]
         target = self._resolve_target(target)
-
         return action.validate(target, **kwargs)
 
     def _resolve_target(
