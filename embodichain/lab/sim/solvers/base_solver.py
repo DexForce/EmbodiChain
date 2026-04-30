@@ -171,6 +171,11 @@ class BaseSolver(metaclass=ABCMeta):
                 root_link_name=self.root_link_name,
                 device=self.device,
             )
+            self.compiled_fk = torch.compile(
+                self.pk_serial_chain.forward_kinematics_tensor,
+                fullgraph=True,
+                dynamic=True,
+            )
 
         self._init_qpos_limits()
 
@@ -423,35 +428,18 @@ class BaseSolver(metaclass=ABCMeta):
         )
         qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
 
+        if self.pk_serial_chain is None:
+            logger.log_error("Kinematic chain is not initialized.")
+            return torch.eye(4, device=self.device)
         # Compute forward kinematics
-        result = self.pk_serial_chain.forward_kinematics(
-            qpos, end_only=(self.end_link_name is None)
-        )
-
-        # Extract transformation matrices
-        if isinstance(result, dict):
-            matrices = result[self.end_link_name].get_matrix()
-        elif isinstance(result, list):
-            matrices = torch.stack([xpos.get_matrix().squeeze() for xpos in result])
-        else:
-            matrices = result.get_matrix()
-
-        # Ensure batch format
-        if matrices.dim() == 2:
-            matrices = matrices.unsqueeze(0)
-
-        # Create result tensor with proper homogeneous coordinates
-        result = (
-            torch.eye(4, device=self.device).expand(matrices.shape[0], 4, 4).clone()
-        )
-        result[:, :3, :] = matrices[:, :3, :]
+        ee_link_xpos = self.compiled_fk(qpos)[-1, :, :, :]
 
         # Ensure batch format for TCP
-        batch_size = result.shape[0]
+        batch_size = qpos.shape[0]
         tcp_xpos_batch = tcp_xpos.unsqueeze(0).expand(batch_size, -1, -1)
 
         # Apply TCP transformation
-        return torch.bmm(result, tcp_xpos_batch)
+        return torch.bmm(ee_link_xpos, tcp_xpos_batch)
 
     def get_jacobian(
         self,

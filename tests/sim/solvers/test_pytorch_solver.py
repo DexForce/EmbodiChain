@@ -23,6 +23,46 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.data import get_data_path
+from embodichain.utils.utility import reset_all_seeds
+
+
+def grid_sample_qpos_from_limits(
+    qpos_limits: torch.Tensor,
+    steps_per_joint: int = 4,
+    device=None,
+    max_samples: int = 4096,
+) -> torch.Tensor:
+    """Generate grid samples for qpos from qpos_limits.
+
+    Args:
+        qpos_limits: tensor of shape (1, n, 2) or (n, 2) where each row is [low, high].
+        steps_per_joint: number of values per joint (defaults to 2: low and high).
+        device: torch device to place the samples on.
+        max_samples: cap the number of returned samples (take first N if grid is larger).
+
+    Returns:
+        Tensor of shape (N, n) where N <= max_samples.
+    """
+    if device is None:
+        device = qpos_limits.device
+
+    limits = qpos_limits.squeeze(0) if qpos_limits.dim() == 3 else qpos_limits
+    lows = limits[:, 0].to(device) + 1e-2
+    highs = limits[:, 1].to(device) - 1e-2
+
+    # create per-joint linspaces
+    grids = [
+        torch.linspace(l.item(), h.item(), steps_per_joint, device=device)
+        for l, h in zip(lows, highs)
+    ]
+
+    # meshgrid and stack
+    mesh = torch.meshgrid(*grids, indexing="ij")
+    stacked = torch.stack([m.reshape(-1) for m in mesh], dim=1)
+
+    if stacked.shape[0] > max_samples:
+        return stacked[:max_samples]
+    return stacked
 
 
 # Base test class for CPU and CUDA
@@ -50,11 +90,13 @@ class BaseSolverTest:
                     "end_link_name": "left_ee",
                     "root_link_name": "left_arm_base",
                     "ik_nearest_weight": [1.0, 1.0, 1.0, 0.9, 0.9, 0.1, 0.1],
+                    "num_samples": 30,
                 },
                 "right_arm": {
                     "class_type": solver_type,
                     "end_link_name": "right_ee",
                     "root_link_name": "right_arm_base",
+                    "num_samples": 30,
                 },
             },
         }
@@ -66,27 +108,46 @@ class BaseSolverTest:
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str):
-        # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
+        reset_all_seeds(0)
+        qpos_limit = torch.tensor(
+            [
+                [0.2, 0.8],
+                [0.2, 0.8],
+                [0.2, 0.8],
+                [0.2, 0.8],
+                [0.2, 0.8],
+                [0.2, 0.8],
+                [0.2, 0.8],
+            ]
+        )
+        # generate a small grid of qpos samples from the joint limits (low/high)
+        sample_qpos = grid_sample_qpos_from_limits(
+            qpos_limit, steps_per_joint=3, device=self.robot.device, max_samples=200
+        )
+        sample_qpos = sample_qpos[None, :, :]
 
-        qpos_fk = torch.tensor(
-            [[0.0, 0.0, 0.0, -np.pi / 4, 0.0, 0.0, 0.0]], dtype=torch.float32
+        fk_xpos = self.robot.compute_batch_fk(
+            qpos=sample_qpos, name=arm_name, to_matrix=True
+        )
+        fk_xpos_xyzquat = self.robot.compute_batch_fk(
+            qpos=sample_qpos, name=arm_name, to_matrix=False
         )
 
-        fk_xpos = self.robot.compute_fk(qpos=qpos_fk, name=arm_name, to_matrix=True)
+        res, ik_qpos = self.robot.compute_batch_ik(
+            pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
+        )
 
-        res, ik_qpos = self.robot.compute_ik(pose=fk_xpos, name=arm_name)
+        res, ik_qpos_xyzquat = self.robot.compute_batch_ik(
+            pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
+        )
 
-        if ik_qpos.dim() == 3:
-            ik_xpos = self.robot.compute_fk(
-                qpos=ik_qpos[0][0], name=arm_name, to_matrix=True
-            )
-        else:
-            ik_xpos = self.robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
+        ik_xpos = self.robot.compute_batch_fk(
+            qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
+        )
 
         assert torch.allclose(
-            fk_xpos, ik_xpos, atol=1e-2, rtol=1e-2
-        ), f"FK and IK results do not match for {arm_name}"
-
+            fk_xpos, ik_xpos, atol=5e-3, rtol=5e-3
+        ), f"FK and IK xpos do not match for {arm_name}"
         # test for failed xpos
         invalid_pose = torch.tensor(
             [
@@ -101,10 +162,10 @@ class BaseSolverTest:
             device=self.robot.device,
         )
         res, ik_qpos = self.robot.compute_ik(
-            pose=invalid_pose, joint_seed=ik_qpos, name=arm_name
+            pose=invalid_pose, joint_seed=ik_qpos[:, 0, :], name=arm_name
         )
         dof = ik_qpos.shape[-1]
-        assert res[0] == False
+        assert res[0].item() == False
         assert ik_qpos.shape == (1, dof)
 
     def teardown_method(self):
