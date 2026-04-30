@@ -28,7 +28,7 @@ streaming live simulation data.  Two DataLoader patterns are shown:
 
 Usage::
 
-    python examples/agents/datasets/online_dataset_demo.py 
+    python examples/agents/datasets/online_dataset_demo.py
 """
 
 from __future__ import annotations

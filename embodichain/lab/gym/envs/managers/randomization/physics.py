@@ -25,7 +25,6 @@ from embodichain.utils.math import sample_uniform
 from embodichain.utils.string import resolve_matching_names
 from embodichain.utils import logger
 
-
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
