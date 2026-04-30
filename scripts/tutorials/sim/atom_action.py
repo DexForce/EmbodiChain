@@ -239,9 +239,7 @@ def main():
     )
 
     atom_engine = AtomicActionEngine(
-        robot=robot,
         motion_generator=motion_gen,
-        device=sim.device,
         actions_cfg_dict={"pick_up": pickup_cfg, "place": place_cfg, "move": move_cfg},
     )
 

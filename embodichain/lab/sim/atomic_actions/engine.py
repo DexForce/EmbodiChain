@@ -171,14 +171,12 @@ class AtomicActionEngine:
 
     def __init__(
         self,
-        robot: "Robot",
         motion_generator: "MotionGenerator",
-        device: torch.device = torch.device("cuda"),
         actions_cfg_dict: Optional[Dict[str, ActionCfg]] = dict(),
     ):
-        self.robot = robot
         self.motion_generator = motion_generator
-        self.device = device
+        self.robot = self.motion_generator.robot
+        self.device = self.motion_generator.device
 
         # Registry of action instances
         self._actions: Dict[str, AtomicAction] = {}
