@@ -69,25 +69,23 @@ def main():
                 static_friction=0.5,
                 restitution=0.1,
             ),
-            init_pos=[0.5, 0.0, 1.0],
+            init_pos=[0, 0.0, 1.0],
         )
     )
 
-    # Add toy_duck object to the scene
-    toy_duck_path = get_data_path("ToyDuck/toy_duck.glb")
-    toy_duck: RigidObject = sim.add_rigid_object(
+    # Add chair object to the scene
+    path = get_data_path("Chair/chair.glb")
+    chair: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
-            uid="toy_duck",
-            shape=MeshCfg(fpath=toy_duck_path),
+            uid="chair",
+            shape=MeshCfg(fpath=path),
             body_type="dynamic",
             attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+                mass=3.0,
             ),
+            body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.2],
-            init_rot=[0.0, 0.0, 0.0],
+            init_rot=[90.0, 0.0, 0.0],
         )
     )
 

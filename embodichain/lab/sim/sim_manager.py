@@ -1096,7 +1096,9 @@ class SimulationManager:
             if len(env_list) > 1:
                 logger.log_error(f"Currently not supporting multiple arenas for USD.")
             env = self._env
-            results = env.import_from_usd_file(cfg.fpath, return_object=True)
+            results = env.import_from_usd_file(
+                cfg.fpath, return_object=True, cache_dir=self._convex_decomp_dir
+            )
             # print("USD import results:", results)
 
             articulations_found = []
