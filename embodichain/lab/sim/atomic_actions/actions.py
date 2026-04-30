@@ -35,6 +35,9 @@ if TYPE_CHECKING:
 
 @configclass
 class MoveActionCfg(ActionCfg):
+    name: str = "move"
+    """Name of the action, used for identification and logging."""
+
     sample_interval: int = 50
     """Number of waypoints to sample for the motion trajectory. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead."""
 
@@ -259,6 +262,9 @@ class MoveAction(AtomicAction):
 
 @configclass
 class PickUpActionCfg(MoveActionCfg):
+    name: str = "pick_up"
+    """Name of the action, used for identification and logging."""
+
     hand_open_qpos: torch.Tensor | None = None
     """[hand_dof,] of float. Joint positions for open hand state. Must be specified for PickUpAction."""
 
@@ -469,6 +475,9 @@ class PickUpAction(MoveAction):
 
 @configclass
 class PlaceActionCfg(MoveActionCfg):
+    name: str = "place"
+    """Name of the action, used for identification and logging."""
+
     hand_open_qpos: torch.Tensor | None = None
     """[hand_dof,] of float. Joint positions for open hand state. Must be specified for PickUpAction."""
 

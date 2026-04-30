@@ -172,134 +172,77 @@ class AtomicActionEngine:
     def __init__(
         self,
         motion_generator: "MotionGenerator",
-        actions_cfg_dict: Optional[Dict[str, ActionCfg]] = dict(),
+        actions_cfg_list: Optional[List[ActionCfg]] = None,
     ):
         self.motion_generator = motion_generator
         self.robot = self.motion_generator.robot
         self.device = self.motion_generator.device
 
-        # Registry of action instances
-        self._actions: Dict[str, AtomicAction] = {}
-
         # Semantic analyzer for object understanding
         self._semantic_analyzer = SemanticAnalyzer()
 
         # Initialize default actions
-        self._init_default_actions(actions_cfg_dict)
+        self._actions: List[AtomicAction] = self._init_actions(actions_cfg_list)
 
-    def _init_default_actions(
-        self,
-        actions_cfg_dict: Optional[Dict[str, ActionCfg]] = dict(),
-    ):
-        """Initialize default atomic action instances."""
+    def _init_actions(self, actions_cfg_list: Optional[List[ActionCfg]] = None):
+        actions: List[AtomicAction] = []
         from .actions import MoveAction, PickUpAction, PlaceAction
 
-        control_parts = getattr(self.robot, "control_parts", None) or ["default"]
-        default_action_dict = {
+        name_action_map = {
             "move": MoveAction,
             "pick_up": PickUpAction,
             "place": PlaceAction,
         }
+        if actions_cfg_list is not None:
+            for cfg in actions_cfg_list:
+                action_class = name_action_map.get(cfg.name)
+                if action_class is None:
+                    logger.log_error(f"Unknown action name in config: {cfg.name}")
+                instance = action_class(motion_generator=self.motion_generator, cfg=cfg)
+                actions.append(instance)
+        return actions
 
-        # set default actions for each control part
-        for part in control_parts:
-            for action_name, action_class in default_action_dict.items():
-                action_key = f"{action_name}_{part}"
-                if action_key not in self._actions:
-                    if action_name in actions_cfg_dict:
-                        cfg = actions_cfg_dict[action_name]
-                    else:
-                        cfg = None
-                    instance = action_class(
-                        motion_generator=self.motion_generator, cfg=cfg
-                    )
-                    self._actions[action_key] = instance
-
-        # Register user defined action classes for dynamic instantiation
-        for action_name, action_class in _global_action_registry.items():
-            # Don't override default actions
-            if action_name not in list(default_action_dict.keys()):
-                for part in control_parts:
-                    action_key = f"{action_name}_{part}"
-                    if action_key not in self._actions:
-                        if action_name in actions_cfg_dict:
-                            cfg = actions_cfg_dict[action_name]
-                        else:
-                            cfg = None
-                        instance = action_class(
-                            motion_generator=self.motion_generator, cfg=cfg
-                        )
-                        self._actions[action_key] = instance
-
-    def register_action(self, name: str, action: AtomicAction):
-        """Register a custom atomic action."""
-        self._actions[name] = action
-
-    def unregister_action(self, name: str) -> bool:
-        """Unregister an action by name.
-
-        Args:
-            name: Name of the action to unregister
-
-        Returns:
-            True if action was found and removed, False otherwise
-        """
-        if name in self._actions:
-            del self._actions[name]
-            return True
-        return False
-
-    def get_action_names(self) -> List[str]:
-        """Get list of registered action names."""
-        return list(self._actions.keys())
-
-    def execute(
+    def execute_static(
         self,
-        action_name: str,
-        target: Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]],
-        control_part: Optional[str] = None,
-        **kwargs,
-    ) -> tuple[bool, torch.Tensor, list[float]]:
-        """Execute an atomic action.
+        target_list: List[Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]]],
+    ) -> tuple[bool, torch.Tensor]:
+        """Execute a static move action to target poses without motion planning."""
+        if len(target_list) != len(self._actions):
+            logger.log_error(
+                f"Length of target_list ({len(target_list)}) must match number of actions ({len(self._actions)})."
+            )
+        start_qpos = self.motion_generator.robot.get_qpos()
+        n_envs = start_qpos.shape[0]
+        all_dof = self.motion_generator.robot.dof
+        all_trajectory = torch.empty(
+            size=(n_envs, 0, all_dof), dtype=torch.float32, device=self.device
+        )
 
-        Args:
-            action_name: Name of registered action
-            target: One of:
-                - Target pose tensor [4, 4]
-                - Object label string
-                - ObjectSemantics instance
-                - Dict convenience spec. Supported keys include:
-                    - ``label`` (required unless using ``pose``/``semantics``)
-                    - ``geometry`` (e.g., mesh tensors)
-                    - ``custom_config`` (affordance custom config)
-                    - ``use_cache`` (bool, default ``True``)
-                    - ``properties`` (merged into semantics properties)
-                    - ``uid`` (assigned to semantics uid)
-                    - ``pose`` (direct tensor passthrough)
-                    - ``semantics`` (direct ObjectSemantics passthrough)
-            control_part: Robot control part to use
-            **kwargs: Additional action parameters
+        for i, target in enumerate(target_list):
+            atom_action = self._actions[i]
+            target = self._resolve_target(target)
+            control_part = atom_action.control_part
+            arm_joint_ids = self.motion_generator.robot.get_joint_ids(name=control_part)
+            start_qpos_part = start_qpos[:, arm_joint_ids]
+            is_success, traj, joint_ids = atom_action.execute(
+                target=target, start_qpos=start_qpos_part
+            )
+            n_waypoints = traj.shape[1]
 
-        Returns:
-            tuple[bool, torch.Tensor, list[float]]:
-            is_success,
-            trajectory of shape (n_envs, n_waypoints, dof),
-            joint_ids corresponding to trajectory
-        """
-        # Resolve action
-        if control_part:
-            action_key = f"{action_name}_{control_part}"
-        else:
-            action_key = action_name
-        if action_key not in self._actions:
-            logger.log_error(f"Unknown action: {action_key}")
-
-        action = self._actions[action_key]
-
-        target = self._resolve_target(target)
-
-        # Execute action - returns PlanResult directly
-        return action.execute(target, **kwargs)
+            traj_full = torch.zeros(
+                size=(n_envs, n_waypoints, all_dof),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            traj_full[:, :] = start_qpos
+            traj_full[:, :, joint_ids] = traj
+            all_trajectory = torch.cat((all_trajectory, traj_full), dim=1)
+            if is_success:
+                # update start qpos
+                start_qpos[:, joint_ids] = traj[:, -1, :]
+            else:
+                return False, all_trajectory
+        return True, all_trajectory
 
     def validate(
         self,

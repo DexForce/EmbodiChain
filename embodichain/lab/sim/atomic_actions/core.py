@@ -310,6 +310,9 @@ class ObjectSemantics:
 class ActionCfg:
     """Configuration for atomic actions."""
 
+    name: str = "default"
+    """Name of the action, used for identification and logging."""
+
     control_part: str = "arm"
     """Control part name for the action."""
 

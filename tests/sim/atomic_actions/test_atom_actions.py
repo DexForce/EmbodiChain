@@ -12,12 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------,
 
-"""
-This script demonstrates the creation and simulation of a robot with a soft object,
-and performs a pressing task in a simulated environment.
-"""
 
 import argparse
 import numpy as np
@@ -62,26 +58,7 @@ from embodichain.lab.sim.atomic_actions.actions import (
 )
 
 
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments, device, and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    return parser.parse_args()
-
-
-def initialize_simulation(args):
+def initialize_simulation():
     """
     Initialize the simulation environment based on the provided arguments.
 
@@ -94,9 +71,8 @@ def initialize_simulation(args):
     config = SimulationManagerCfg(
         headless=True,
         sim_device="cuda",
-        enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
-        num_envs=args.num_envs,
+        num_envs=1,
     )
     sim = SimulationManager(config)
 
@@ -177,15 +153,8 @@ def create_mug(sim: SimulationManager) -> RigidObject:
     return mug
 
 
-def main():
-    """
-    Main function to demonstrate robot simulation.
-
-    This function initializes the simulation, creates the robot and other objects,
-    and performs the press softbody task.
-    """
-    args = parse_arguments()
-    sim: SimulationManager = initialize_simulation(args)
+def test_atomic_actions():
+    sim: SimulationManager = initialize_simulation()
     robot = create_robot(sim)
     mug = create_mug(sim)
 
@@ -231,7 +200,6 @@ def main():
     )
 
     sim.init_gpu_physics()
-    sim.open_window()
 
     # Define object semantics and affordances for the mug
     gripper_collision_cfg = GripperCollisionCfg(
@@ -279,16 +247,11 @@ def main():
     rest_xpos[:3, 3] = torch.tensor([0.5, 0.0, 0.5], device=sim.device)
 
     is_success, traj = atom_engine.execute_static(
-        target_list=[mug_semantics, place_xpos, rest_xpos]
+        target_list=[target_grasp_xpos, place_xpos, rest_xpos]
     )
-    n_waypoint = traj.shape[1]
-    for i in range(n_waypoint):
-        robot.set_qpos(traj[:, i])
-        sim.update(step=4)
-        time.sleep(1e-2)
-
-    input("Press Enter to exit...")
+    assert is_success, "Atomic action execution failed."
+    assert traj.shape == torch.Size([1, 210, 8])
 
 
 if __name__ == "__main__":
-    main()
+    test_atomic_actions()
