@@ -3,6 +3,12 @@ embodichain.agents.rl
 
 .. automodule:: embodichain.agents.rl
 
+Overview
+--------
+
+The ``embodichain.agents.rl`` package contains algorithm registries, rollout
+collection logic, policy/model builders, and training entry points.
+
    .. rubric:: Submodules
 
    .. autosummary::
@@ -10,6 +16,7 @@ embodichain.agents.rl
 
       algo
       buffer
+      collector
       models
       train
       utils
@@ -26,6 +33,14 @@ Rollout Buffer
 --------------
 
 .. automodule:: embodichain.agents.rl.buffer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Collectors
+----------
+
+.. automodule:: embodichain.agents.rl.collector
    :members:
    :undoc-members:
    :show-inheritance:
