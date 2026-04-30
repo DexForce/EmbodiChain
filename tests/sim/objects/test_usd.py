@@ -169,6 +169,10 @@ class BaseUsdTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        import embodichain.lab.sim as om
+        om.SimulationManager.flush_cleanup_queue()
+        self.__dict__.clear()
+        import gc; gc.collect()
 
 
 class TestUsdCPU(BaseUsdTest):

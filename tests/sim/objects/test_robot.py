@@ -49,10 +49,13 @@ CONTROL_PARTS = {
 
 # Base test class for CPU and CUDA
 class BaseRobotTest:
-    def setup_simulation(self, sim_device):
+    @classmethod
+    def setup_simulation(cls, sim_device):
+        if hasattr(cls, "sim"):
+            return
         # Set up simulation with specified device (CPU or CUDA)
         config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=10)
-        self.sim = SimulationManager(config)
+        cls.sim = SimulationManager(config)
 
         cfg = DexforceW1Cfg.from_dict(
             {
@@ -62,11 +65,11 @@ class BaseRobotTest:
             }
         )
 
-        self.robot: Robot = self.sim.add_robot(cfg=cfg)
+        cls.robot: Robot = cls.sim.add_robot(cfg=cfg)
 
         # Initialize GPU physics if needed
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
+        if sim_device == "cuda" and getattr(cls.sim, "is_use_gpu_physics", False):
+            cls.sim.init_gpu_physics()
 
     def test_get_joint_ids(self):
         left_joint_ids = self.robot.get_joint_ids("left_arm")
@@ -286,8 +289,17 @@ class BaseRobotTest:
         ), "Solver config merge failed."
 
     def teardown_method(self):
-        """Clean up resources after each test method."""
-        self.sim.destroy()
+        pass
+
+    @classmethod
+    def teardown_class(cls):
+        """Clean up resources after each test class."""
+        if hasattr(cls, "sim"):
+            cls.sim.destroy()
+            import embodichain.lab.sim as om
+            om.SimulationManager.flush_cleanup_queue()
+            del cls.sim
+            import gc; gc.collect()
 
     def test_set_physical_visible(self):
         self.robot.set_physical_visible(
@@ -307,13 +319,21 @@ class BaseRobotTest:
 
 class TestRobotCPU(BaseRobotTest):
     def setup_method(self):
-        self.setup_simulation("cpu")
+        pass
+
+    @classmethod
+    def setup_class(cls):
+        cls.setup_simulation("cpu")
 
 
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRobotCUDA(BaseRobotTest):
     def setup_method(self):
-        self.setup_simulation("cuda")
+        pass
+
+    @classmethod
+    def setup_class(cls):
+        cls.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
