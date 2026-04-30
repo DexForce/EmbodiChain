@@ -46,7 +46,7 @@ class BaseRigidObjectTest:
             headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
         )
         self.sim = SimulationManager(config)
-
+        self.sim.enable_physics(False)
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
         table_path = get_data_path(TABLE_PATH)
@@ -581,6 +581,10 @@ class BaseRigidObjectTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        import embodichain.lab.sim as om
+        om.SimulationManager.flush_cleanup_queue()
+        self.__dict__.clear()
+        import gc; gc.collect()
 
 
 class TestRigidObjectCPU(BaseRigidObjectTest):
