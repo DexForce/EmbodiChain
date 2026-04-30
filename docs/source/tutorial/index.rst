@@ -17,5 +17,6 @@ Tutorials
    gizmo
    basic_env
    modular_env
+   data_generation
    rl
    
