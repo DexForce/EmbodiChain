@@ -15,14 +15,12 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates the creation and simulation of a robot with a soft object,
-and performs a pressing task in a simulated environment.
+This script demonstrates the atomic action abstraction layer in the SimulationManager. 
 """
 
 import argparse
 import numpy as np
 import time
-import open3d as o3d
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -30,7 +28,6 @@ from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
-from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
@@ -181,8 +178,8 @@ def main():
     """
     Main function to demonstrate robot simulation.
 
-    This function initializes the simulation, creates the robot and other objects,
-    and performs the press softbody task.
+    This function initializes the simulation, creates the robot and mug objects,
+    and performs the pickup action task.
     """
     args = parse_arguments()
     sim: SimulationManager = initialize_simulation(args)
