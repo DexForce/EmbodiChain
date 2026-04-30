@@ -90,7 +90,7 @@ def generate_function(
 
             if not valid:
                 # Failed execution: reset without saving invalid data
-                _, _ = env.reset(options={"save_data": False})
+                # _, _ = env.reset(options={"save_data": False})
                 break
 
         if valid:

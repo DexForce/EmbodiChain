@@ -87,7 +87,7 @@ class StackBowlsAtomicEnv(StackBowlsEnv):
             point_sample_dense=0.012,
         )
         self.approach_direction = torch.tensor(
-            [0.0, -0.5, -1.0], dtype=torch.float32, device=self.device
+            [0.0, 0.0, -1.0], dtype=torch.float32, device=self.device
         )
         self.approach_direction /= self.approach_direction.norm()
 
@@ -140,35 +140,35 @@ class StackBowlsAtomicEnv(StackBowlsEnv):
             return None
         segment_list.extend(mid_segments)
 
-        if (arm_to_use_mid != arm_to_use_min) or (arm_to_use_mid == arm_to_use_min):
-            return_home_segment, full_qpos = self._plan_move_segment(
-                arm_name=arm_to_use_mid,
-                target_pose=self._get_home_pose(arm_to_use_mid),
-                start_full_qpos=full_qpos,
-            )
-            if return_home_segment is None:
-                return None
-            segment_list.append(return_home_segment)
+        # if (arm_to_use_mid != arm_to_use_min) or (arm_to_use_mid == arm_to_use_min):
+        #     return_home_segment, full_qpos = self._plan_move_segment(
+        #         arm_name=arm_to_use_mid,
+        #         target_pose=self._get_home_pose(arm_to_use_mid),
+        #         start_full_qpos=full_qpos,
+        #     )
+        #     if return_home_segment is None:
+        #         return None
+        #     segment_list.append(return_home_segment)
 
-        min_segments, full_qpos = self._plan_stack_stage(
-            bowl_uid="bowl_min",
-            arm_name=arm_to_use_min,
-            place_pose=bowl_min_place_pose,
-            start_full_qpos=full_qpos,
-            annotator_port=self.atomic_annotator_port + 1,
-        )
-        if min_segments is None:
-            return None
-        segment_list.extend(min_segments)
+        # min_segments, full_qpos = self._plan_stack_stage(
+        #     bowl_uid="bowl_min",
+        #     arm_name=arm_to_use_min,
+        #     place_pose=bowl_min_place_pose,
+        #     start_full_qpos=full_qpos,
+        #     annotator_port=self.atomic_annotator_port + 1,
+        # )
+        # if min_segments is None:
+        #     return None
+        # segment_list.extend(min_segments)
 
-        final_return_segment, full_qpos = self._plan_move_segment(
-            arm_name=arm_to_use_min,
-            target_pose=self._get_home_pose(arm_to_use_min),
-            start_full_qpos=full_qpos,
-        )
-        if final_return_segment is None:
-            return None
-        segment_list.append(final_return_segment)
+        # final_return_segment, full_qpos = self._plan_move_segment(
+        #     arm_name=arm_to_use_min,
+        #     target_pose=self._get_home_pose(arm_to_use_min),
+        #     start_full_qpos=full_qpos,
+        # )
+        # if final_return_segment is None:
+        #     return None
+        # segment_list.append(final_return_segment)
 
         full_trajectory = torch.cat(segment_list, dim=1)
         return full_trajectory.permute(1, 0, 2)[:, :, self.active_joint_ids]
@@ -358,6 +358,7 @@ class StackBowlsAtomicEnv(StackBowlsEnv):
                     max_deviation_angle=np.pi / 3,
                 ),
             },
+            is_draw_grasp_xpos=True,
         )
         return ObjectSemantics(
             label=bowl_uid,
@@ -380,29 +381,7 @@ class StackBowlsAtomicEnv(StackBowlsEnv):
         place_pose[:, :3, :3] = self._get_down_rotation(arm_name)
         place_pose[:, :3, 3] = place_pose[:, :3, 3] + place_offset
 
-        debug_verbose = 1
-        if debug_verbose:
-            # This task only supports a single env in demo generation,
-            # so we log env0 for readability.
-            bowl_max_xyz = bowl_max_pose[0, :3, 3].detach().cpu().tolist()
-            place_xyz = place_pose[0, :3, 3].detach().cpu().tolist()
-            place_rot = place_pose[0, :3, :3].detach().cpu().tolist()
-            left_mid_offset = (
-                self.left_bowl_mid_place_offset.detach().cpu().tolist()
-            )
-            left_min_offset = (
-                self.left_bowl_min_place_offset.detach().cpu().tolist()
-            )
-            logger.log_warning(
-                f"[StackBowlsAtomic Pose Debug] arm_name={arm_name}, "
-                f"bowl_max_pose[:3,3]={bowl_max_xyz}, "
-                f"left_bowl_mid_place_offset={left_mid_offset}, "
-                f"left_bowl_min_place_offset={left_min_offset}, "
-                f"place_pose[:3,3]={place_xyz}"
-            )
-            logger.log_warning(
-                f"[StackBowlsAtomic Pose Debug] place_pose[:3,:3]={place_rot}"
-            )
+        
         return place_pose
 
     def _get_extension_value(self, key: str, default: Any) -> Any:
