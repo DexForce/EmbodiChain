@@ -23,17 +23,18 @@ custom action registration.
 
 from .core import (
     Affordance,
-    GraspPose,
     InteractionPoints,
     ObjectSemantics,
     ActionCfg,
     AtomicAction,
 )
 from .actions import (
-    ReachAction,
-    GraspAction,
-    ReleaseAction,
     MoveAction,
+    PickUpAction,
+    PlaceAction,
+    MoveActionCfg,
+    PickUpActionCfg,
+    PlaceActionCfg,
 )
 from .engine import (
     AtomicActionEngine,
@@ -51,10 +52,12 @@ __all__ = [
     "ActionCfg",
     "AtomicAction",
     # Action implementations
-    "ReachAction",
-    "GraspAction",
-    "ReleaseAction",
     "MoveAction",
+    "PickUpAction",
+    "PlaceAction",
+    "MoveActionCfg",
+    "PickUpActionCfg",
+    "PlaceActionCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",

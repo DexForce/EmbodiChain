@@ -508,7 +508,11 @@ class MotionGenerator:
 
         qpos_seed = options.start_qpos
         if qpos_seed is None and qpos_list is not None:
+            # first waypoint as seed
             qpos_seed = qpos_list[0]
+        if qpos_seed is None:
+            # fallback to current robot state as seed
+            qpos_seed = self.robot.get_qpos(name=control_part)[0]
 
         # Generate trajectory
         interpolate_qpos_list = []
@@ -551,9 +555,14 @@ class MotionGenerator:
             # compute_batch_ik expects (n_envs, n_batch, 7) or (n_envs, n_batch, 4, 4)
             # Here we assume n_envs = 1 or we want to apply this to all envs if available.
             # Since MotionGenerator usually works with self.robot.device, we use its batching capabilities.
+            qpos_seed_repeat = (
+                qpos_seed.unsqueeze(0)
+                .repeat(total_interpolated_poses.shape[0], 1)
+                .unsqueeze(0)
+            )
             success_batch, qpos_batch = self.robot.compute_batch_ik(
                 pose=total_interpolated_poses.unsqueeze(0),
-                joint_seed=None,  # Or use qpos_seed if properly shaped
+                joint_seed=qpos_seed_repeat,  # Or use qpos_seed if properly shaped
                 name=control_part,
             )
 

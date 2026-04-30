@@ -73,7 +73,7 @@ class GraspGeneratorCfg:
     number of sampled surface points, ray perturbation angle, and gripper jaw
     distance limits. See :class:`AntipodalSamplerCfg` for details."""
 
-    max_deviation_angle: float = np.pi / 12
+    max_deviation_angle: float = np.pi / 6
     """Maximum allowed angle (in radians) between the specified approach
     direction and the axis connecting an antipodal point pair. Pairs that
     deviate more than this threshold from perpendicular to the approach are

@@ -191,11 +191,9 @@ class ToppraPlanner(BasePlanner):
             )
 
         # Build waypoints
-        waypoints = []
-        for target in target_states:
-            waypoints.append(np.array(target.qpos))
-
-        waypoints = np.array(waypoints)
+        waypoints = np.array(
+            [target.qpos.to("cpu").numpy() for target in target_states]
+        )
         # Create spline interpolation
         # NOTE: Suitable for dense waypoints
         ss = np.linspace(0, 1, len(waypoints))
