@@ -35,7 +35,6 @@ from embodichain.lab.sim.utility.solver_utils import (
     compute_pinocchio_fk,
 )
 
-
 if TYPE_CHECKING:
     from typing import Self
 

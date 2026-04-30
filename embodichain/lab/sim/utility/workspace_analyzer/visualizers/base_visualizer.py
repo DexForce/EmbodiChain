@@ -40,7 +40,6 @@ from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config
     VisualizationConfig,
 )
 
-
 __all__ = [
     "IVisualizer",
     "BaseVisualizer",

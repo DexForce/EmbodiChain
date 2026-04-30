@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates how to export a simulation scene to a usd file using the SimulationManager. 
+This script demonstrates how to export a simulation scene to a usd file using the SimulationManager.
 """
 
 import argparse

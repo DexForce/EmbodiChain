@@ -22,7 +22,6 @@ from typing import Any
 
 import yaml
 
-
 BENCHMARK_ROOT = Path(__file__).resolve().parent
 
 

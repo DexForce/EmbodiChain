@@ -17,7 +17,6 @@
 Gizmo: A reusable controller for interactive manipulation of simulation elements (object, robot, camera, etc.)
 """
 
-
 import numpy as np
 import torch
 import dexsim

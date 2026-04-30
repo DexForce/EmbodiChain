@@ -25,7 +25,6 @@ from embodichain.utils.math import (
     compute_pose_error,
 )
 
-
 if TYPE_CHECKING:
     from typing import Self
 

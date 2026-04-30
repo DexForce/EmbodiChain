@@ -22,7 +22,6 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-
 COLORS = ["#1768ac", "#f26419", "#2a9134", "#c44536", "#6a4c93", "#1982c4"]
 
 
