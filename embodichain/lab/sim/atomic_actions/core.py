@@ -156,7 +156,7 @@ class AntipodalAffordance(Affordance):
         open_length_list = []
         for i, obj_pose in enumerate(obj_poses):
             is_success, grasp_xpos, open_length = self.generator.get_grasp_poses(
-                obj_pose, approach_direction
+                obj_pose, approach_direction, visualize_pose=True
             )
             if is_success:
                 grasp_xpos_list.append(grasp_xpos.unsqueeze(0))

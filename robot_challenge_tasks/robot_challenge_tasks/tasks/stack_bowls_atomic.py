@@ -87,8 +87,9 @@ class StackBowlsAtomicEnv(StackBowlsEnv):
             point_sample_dense=0.012,
         )
         self.approach_direction = torch.tensor(
-            [0.0, 0.0, -1.0], dtype=torch.float32, device=self.device
+            [0.0, -0.5, -1.0], dtype=torch.float32, device=self.device
         )
+        self.approach_direction /= self.approach_direction.norm()
 
         self.atomic_engines = {
             "left_arm": self._build_atomic_engine("left_arm"),
@@ -272,6 +273,7 @@ class StackBowlsAtomicEnv(StackBowlsEnv):
         eef_name = self._get_eef_name(arm_name)
         hand_open_qpos = self.robot.get_qpos_limits(name=eef_name)[0, :, 1].clone()
         hand_close_qpos = self.robot.get_qpos_limits(name=eef_name)[0, :, 0].clone()
+        print("***********self.approach_direction\t", self.approach_direction)
         pickup_cfg = PickUpActionCfg(
             control_part=arm_name,
             hand_control_part=eef_name,
