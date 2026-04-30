@@ -165,18 +165,15 @@ class MoveAction(AtomicAction):
         """Plan batched arm trajectories for all environments."""
         arm_dof = self.dof if arm_dof is None else arm_dof
 
-        # TODO: 
-
         n_state = len(target_states_list[0])
         xpos_traj = torch.zeros(
-            size=(self.n_envs, n_state, 4, 4),
-            dtype=torch.float32, device=self.device
+            size=(self.n_envs, n_state, 4, 4), dtype=torch.float32, device=self.device
         )
         for i, target_states in enumerate(target_states_list):
             for j, target_state in enumerate(target_states):
                 # [env_i, state_j, 4, 4]
                 xpos_traj[i, j] = target_state.xpos
-        
+
         trajectory = torch.zeros(
             size=(self.n_envs, n_state, arm_dof),
             dtype=torch.float32,
@@ -194,6 +191,7 @@ class MoveAction(AtomicAction):
 
         for j in range(n_state):
             is_success, qpos = self.robot.compute_ik(
+<<<<<<< HEAD
                 pose=xpos_traj[:, j],
                 name=self.cfg.control_part,
                 joint_seed=qpos_seed,
@@ -203,6 +201,9 @@ class MoveAction(AtomicAction):
                 bool(is_success.item())
                 if isinstance(is_success, torch.Tensor)
                 else bool(is_success)
+=======
+                pose=xpos_traj[:, j], name=self.cfg.control_part, joint_seed=qpos_seed
+>>>>>>> origin/cj/atomic-action-init
             )
             state_success_by_index.append(success_scalar)
 
