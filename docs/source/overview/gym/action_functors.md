@@ -5,6 +5,10 @@
 
 This page lists all available action terms that can be used with the Action Manager. Action terms are configured using {class}`~cfg.ActionTermCfg` and are responsible for processing raw actions from the policy and converting them to the format expected by the robot (e.g., qpos, qvel, qf).
 
+````{tip}
+**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new action term with the correct class structure, `ActionTermCfg` registration, and module placement in `actions.py`.
+````
+
 ## Joint Position Control
 
 ```{list-table} Joint Position Action Terms

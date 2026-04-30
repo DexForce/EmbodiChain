@@ -21,7 +21,6 @@ from typing import Protocol, Union, TYPE_CHECKING
 
 from embodichain.utils import logger
 
-
 __all__ = [
     "ISampler",
     "BaseSampler",

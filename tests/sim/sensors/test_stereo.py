@@ -19,7 +19,6 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import StereoCamera, SensorCfg
 
-
 NUM_ENVS = 4
 
 

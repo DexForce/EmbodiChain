@@ -62,6 +62,12 @@ class URDFAssemblySignatureManager:
         signature_data = {
             "output_filename": os.path.basename(output_path),
             "components": {},
+            # Optional metadata that can affect the assembly even if the
+            # component URDF files themselves do not change. For example,
+            # the processing order and name prefixes for each component,
+            # and the global casing policy for links/joints.
+            "component_order_and_prefix": [],
+            "name_case": {},
         }
 
         def to_serializable(obj):
@@ -85,8 +91,20 @@ class URDFAssemblySignatureManager:
             else:
                 return obj
 
-        # Process each component
+        # Process each entry passed in from the assembly manager. Most entries
+        # are components (with URDF files), but some may be metadata such as
+        # the component_order_and_prefix or name_case used during assembly.
         for comp_type, comp_obj in urdf_dict.items():
+            # Special key reserved for component order/prefix metadata
+            if comp_type == "__component_order_and_prefix__":
+                signature_data["component_order_and_prefix"] = to_serializable(comp_obj)
+                continue
+
+            # Special key reserved for global name_case policy (link/joint casing)
+            if comp_type == "__name_case__":
+                signature_data["name_case"] = to_serializable(comp_obj)
+                continue
+
             if comp_obj is None:
                 continue
 

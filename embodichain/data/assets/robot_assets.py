@@ -23,7 +23,6 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
-
 robot_assets = "robot_assets"
 
 

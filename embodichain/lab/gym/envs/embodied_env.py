@@ -55,7 +55,6 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.utils import configclass, logger
 
-
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
 
