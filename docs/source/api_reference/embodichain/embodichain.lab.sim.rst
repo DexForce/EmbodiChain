@@ -3,22 +3,30 @@
 
 .. automodule:: embodichain.lab.sim
 
-   .. rubric:: Submodules
+Overview
+--------
 
-   .. autosummary::
-      :toctree: .
+The ``sim`` package provides simulation-core APIs including scene/object
+management, materials, sensors, planning/IK utilities, and action helpers.
 
-      sim_manager
-      cfg
-      common
-      material
-      shapes
-      objects
-      sensors
-      solvers
-      planners
-      atomic_actions
-      utility
+.. rubric:: Submodules
+
+.. autosummary::
+   :toctree: .
+
+   sim_manager
+   cfg
+   common
+   material
+   shapes
+   objects
+   robots
+   sensors
+   solvers
+   planners
+   atomic_actions
+   types
+   utility
 
 .. currentmodule:: embodichain.lab.sim
 
@@ -36,8 +44,8 @@ Simulation Manager
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-Configurations
-------------------
+Configuration
+-------------
 
 .. automodule:: embodichain.lab.sim.cfg
    :members:
@@ -45,8 +53,8 @@ Configurations
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-Common Conponents
-------------------
+Common Components
+-----------------
 
 .. automodule:: embodichain.lab.sim.common
    :members:
@@ -54,7 +62,7 @@ Common Conponents
    :show-inheritance:
 
 Materials
-------------------
+---------
 
 .. automodule:: embodichain.lab.sim.material
    :members:
@@ -62,13 +70,21 @@ Materials
    :show-inheritance:
 
 Shapes
-------------------
+------
 
 .. automodule:: embodichain.lab.sim.shapes
    :members:
    :undoc-members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+Atomic Actions
+--------------
+
+.. automodule:: embodichain.lab.sim.atom_actions
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Objects
 -------
@@ -85,6 +101,14 @@ Sensors
    :maxdepth: 1
 
    embodichain.lab.sim.sensors
+
+Robot Configurations
+--------------------
+
+.. automodule:: embodichain.lab.sim.robots
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Solvers
 -------
@@ -109,6 +133,13 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+Shared Types
+------------
+
+.. automodule:: embodichain.lab.sim.types
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Utility
 -------

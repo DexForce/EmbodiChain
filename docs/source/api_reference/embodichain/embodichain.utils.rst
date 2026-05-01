@@ -3,13 +3,16 @@
 
 .. automodule:: embodichain.utils
 
-   .. Rubric:: Submodules
+   .. rubric:: Submodules
 
    .. autosummary::
 
       warp
+      cfg
       configclass
+      device_utils
       file
+      img_utils
       logger
       math
       module_utils
