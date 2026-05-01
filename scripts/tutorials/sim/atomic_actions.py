@@ -247,7 +247,7 @@ def main():
     # actions_cfg_list defines the ORDER of actions that execute_static() #
     # will run. Each entry is matched positionally to target_list.        #
     # ------------------------------------------------------------------ #
-    atom_engine = AtomicActionEngine(
+    atomic_engine = AtomicActionEngine(
         motion_generator=motion_gen,
         actions_cfg_list=[pickup_cfg, place_cfg, move_cfg],
     )
@@ -298,9 +298,9 @@ def main():
     # Place the mug 20 cm to the left and 40 cm forward from its pickup pose
     place_xpos = torch.tensor(
         [
-            [-0.0539, -0.9985, -0.0022, 0.4489],
-            [-0.9977, 0.0540, -0.0401, -0.0030],
-            [0.0401, 0.0000, -0.9992, 0.1400],
+            [-0.0539, -0.9985, -0.0022, 0.2489],
+            [-0.9977, 0.0540, -0.0401, 0.3970],
+            [0.0401, 0.0000, -0.9992, 0.2400],
             [0.0000, 0.0000, 0.0000, 1.0000],
         ],
         dtype=torch.float32,
@@ -308,8 +308,16 @@ def main():
     )
 
     # Move the arm to a safe resting pose after placing
-    rest_xpos = place_xpos.clone()
-    rest_xpos[:3, 3] = torch.tensor([0.5, 0.0, 0.5], device=sim.device)
+    rest_xpos = torch.tensor(
+        [
+            [-0.0539, -0.9985, -0.0022, 0.5000],
+            [-0.9977, 0.0540, -0.0401, 0.0000],
+            [0.0401, 0.0000, -0.9992, 0.5000],
+            [0.0000, 0.0000, 0.0000, 1.0000],
+        ],
+        dtype=torch.float32,
+        device=sim.device,
+    )
 
     # ------------------------------------------------------------------ #
     # Step 7: Plan and execute the full sequence                          #
@@ -319,7 +327,7 @@ def main():
     # We then replay it frame-by-frame in the simulator.                 #
     # ------------------------------------------------------------------ #
     print("Planning pick → place → move trajectory...")
-    is_success, traj = atom_engine.execute_static(
+    is_success, traj = atomic_engine.execute_static(
         target_list=[mug_semantics, place_xpos, rest_xpos]
     )
 
