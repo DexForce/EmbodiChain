@@ -22,8 +22,9 @@ management, materials, sensors, planning/IK utilities, and action helpers.
    objects
    robots
    sensors
-   planners
    solvers
+   planners
+   atomic_actions
    types
    utility
 
@@ -125,6 +126,13 @@ Planners
 
    embodichain.lab.sim.planners
 
+Atomic Actions
+--------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.atomic_actions
 Shared Types
 ------------
 
