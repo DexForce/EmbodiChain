@@ -24,11 +24,13 @@ from .base import BaseAlgorithm
 from .common import compute_gae
 from .ppo import PPOCfg, PPO
 from .grpo import GRPOCfg, GRPO
+from .apg import APGCfg, APG, RunningObsNormalizer
 
 # name -> (CfgClass, AlgoClass)
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
     "ppo": (PPOCfg, PPO),
     "grpo": (GRPOCfg, GRPO),
+    "apg": (APGCfg, APG),
 }
 
 
@@ -73,6 +75,9 @@ __all__ = [
     "PPO",
     "GRPOCfg",
     "GRPO",
+    "APGCfg",
+    "APG",
+    "RunningObsNormalizer",
     "compute_gae",
     "get_registered_algo_names",
     "build_algo",

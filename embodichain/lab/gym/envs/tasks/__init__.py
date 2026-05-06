@@ -46,6 +46,11 @@ from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
 from embodichain.lab.gym.envs.tasks.rl.basic.cart_pole import CartPoleEnv
+from embodichain.lab.gym.envs.tasks.rl.diff_reach import (
+    ReachDiffEnv,
+    ReachDiffEnvCfg,
+    FrankaReachDiffEnvCfg,
+)
 
 # Special environments
 from embodichain.lab.gym.envs.tasks.special.simple_task import SimpleTaskEnv
@@ -64,5 +69,8 @@ __all__ = [
     "RearrangementAgentEnv",
     "PushCubeEnv",
     "CartPoleEnv",
+    "ReachDiffEnv",
+    "ReachDiffEnvCfg",
+    "FrankaReachDiffEnvCfg",
     "SimpleTaskEnv",
 ]
