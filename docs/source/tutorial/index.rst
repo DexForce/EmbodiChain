@@ -14,6 +14,7 @@ Tutorials
    solver
    sensor
    motion_gen
+   atomic_actions
    gizmo
    basic_env
    modular_env

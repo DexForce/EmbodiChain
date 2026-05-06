@@ -44,11 +44,11 @@ Getting Started
 To get started with EmbodiChain, follow these steps:
 
 - `Installation
-  Guide <https://dexforce.github.io/EmbodiChain/quick_start/install.html>`__
+  Guide <https://dexforce.github.io/EmbodiChain/main/quick_start/install.html>`__
 - `Quick Start
-  Tutorial <https://dexforce.github.io/EmbodiChain/tutorial/index.html>`__
+  Tutorial <https://dexforce.github.io/EmbodiChain/main/tutorial/index.html>`__
 - `API
-  Reference <https://dexforce.github.io/EmbodiChain/api_reference/index.html>`__
+  Reference <https://dexforce.github.io/EmbodiChain/main/api_reference/index.html>`__
 
 Contribution Guide
 ------------------
