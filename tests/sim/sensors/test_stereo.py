@@ -25,12 +25,13 @@ NUM_ENVS = 4
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
             num_envs=NUM_ENVS,
+            render_cfg=RenderCfg(renderer=renderer),
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
@@ -157,37 +158,25 @@ class StereoCameraTest:
         gc.collect()
 
 
-class TestStereoCameraRaster(StereoCameraTest):
+class TestStereoCameraHybrid(StereoCameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER != "legacy":
-            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", renderer="hybrid")
 
 
-class TestStereoCameraRasterCUDA(StereoCameraTest):
+class TestStereoCameraHybridCUDA(StereoCameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER != "legacy":
-            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cuda")
+        self.setup_simulation("cuda", renderer="hybrid")
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
-            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", renderer="fast-rt")
 
 
 class TestStereoCameraFastRTCUDA(StereoCameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
-            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cuda")
+        self.setup_simulation("cuda", renderer="fast-rt")

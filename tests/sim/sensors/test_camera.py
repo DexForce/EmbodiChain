@@ -31,11 +31,12 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
+            render_cfg=RenderCfg(renderer=renderer),
             num_envs=NUM_ENVS,
         )
         self.sim = SimulationManager(config)
@@ -154,43 +155,30 @@ class CameraTest:
         gc.collect()
 
 
-class TestCameraRaster(CameraTest):
+class TestCameraHybrid(CameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER != "legacy":
-            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", renderer="hybrid")
 
 
-class TestCameraRasterCUDA(CameraTest):
+class TestCameraHybridCUDA(CameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER != "legacy":
-            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cuda")
+        self.setup_simulation("cuda", renderer="hybrid")
 
 
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
-
-        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
-            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", renderer="fast-rt")
 
 
 class TestCameraFastRTCUDA(CameraTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
-            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cuda")
+        self.setup_simulation("cuda", renderer="fast-rt")
 
 
 if __name__ == "__main__":
-    test = CameraTest()
-    test.setup_simulation("cpu")
+    test = TestCameraFastRT()
+    test.setup_method()
     test.test_attach_to_parent()
