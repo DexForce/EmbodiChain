@@ -297,9 +297,12 @@ class BaseRobotTest:
         if hasattr(cls, "sim"):
             cls.sim.destroy()
             import embodichain.lab.sim as om
+
             om.SimulationManager.flush_cleanup_queue()
             del cls.sim
-            import gc; gc.collect()
+            import gc
+
+            gc.collect()
 
     def test_set_physical_visible(self):
         self.robot.set_physical_visible(

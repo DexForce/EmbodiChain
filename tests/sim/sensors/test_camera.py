@@ -138,18 +138,26 @@ class CameraTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        if hasattr(self, "camera") and getattr(self.camera, "uid", None) is not None and hasattr(self, "sim"):
+        if (
+            hasattr(self, "camera")
+            and getattr(self.camera, "uid", None) is not None
+            and hasattr(self, "sim")
+        ):
             self.sim.remove_asset(self.camera.uid)
         if hasattr(self, "sim"):
             self.sim.destroy()
         import embodichain.lab.sim as om
+
         om.SimulationManager.flush_cleanup_queue()
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
 
 
 class TestCameraRaster(CameraTest):
     def setup_method(self):
         from embodichain.lab.sim import cfg
+
         if cfg.DEFAULT_RENDERER != "legacy":
             pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cpu")
@@ -158,6 +166,7 @@ class TestCameraRaster(CameraTest):
 class TestCameraRasterCUDA(CameraTest):
     def setup_method(self):
         from embodichain.lab.sim import cfg
+
         if cfg.DEFAULT_RENDERER != "legacy":
             pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cuda")
@@ -166,6 +175,7 @@ class TestCameraRasterCUDA(CameraTest):
 class TestCameraFastRT(CameraTest):
     def setup_method(self):
         from embodichain.lab.sim import cfg
+
         if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
             pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cpu")
@@ -174,6 +184,7 @@ class TestCameraFastRT(CameraTest):
 class TestCameraFastRTCUDA(CameraTest):
     def setup_method(self):
         from embodichain.lab.sim import cfg
+
         if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
             pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
         self.setup_simulation("cuda")

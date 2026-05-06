@@ -38,7 +38,6 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import load_json
 
-
 EVENT_MODULES = [
     "embodichain.lab.gym.envs.managers.randomization",
     "embodichain.lab.gym.envs.managers.record",

@@ -28,7 +28,7 @@ streaming live simulation data.  Two DataLoader patterns are shown:
 
 Usage::
 
-    python examples/agents/datasets/online_dataset_demo.py 
+    python examples/agents/datasets/online_dataset_demo.py
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     gym_config = load_json(config_path)
 
     gym_config["headless"] = True
-    gym_config.get("renderer", "legacy") = True
+    gym_config.setdefault("renderer", True)
     gym_config["gpu_id"] = 0
     gym_config["device"] = args.device
     cfg = OnlineDataEngineCfg(

@@ -92,9 +92,12 @@ class BaseSoftObjectTest:
         """Clean up resources after each test method."""
         self.sim.destroy()
         import embodichain.lab.sim as om
+
         om.SimulationManager.flush_cleanup_queue()
         self.__dict__.clear()
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
 
 
 class TestSoftObjectCUDA(BaseSoftObjectTest):

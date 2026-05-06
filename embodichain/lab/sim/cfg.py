@@ -41,7 +41,6 @@ from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
 
-
 # Global default renderer settings for simulation
 DEFAULT_RENDERER: Literal["legacy", "hybrid", "fast-rt", "rt"] = "hybrid"
 

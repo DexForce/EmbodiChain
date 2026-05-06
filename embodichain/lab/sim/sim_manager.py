@@ -162,7 +162,7 @@ class SimulationManager:
     """
 
     _instances = {}
-    
+
     _cleanup_queue: queue.Queue = queue.Queue()
 
     SUPPORTED_SENSOR_TYPES = {
@@ -1738,7 +1738,8 @@ class SimulationManager:
 
     def clean_materials(self):
         self._visual_materials = {}
-        self._env.clean_materials()
+        if self._env:
+            self._env.clean_materials()
 
     def reset_objects_state(
         self,
@@ -1793,11 +1794,12 @@ class SimulationManager:
         """A public helper to wait for the underlying C++ scenes (dexsim.World) to destruct completely."""
         import dexsim
         import gc
-        
+
         # Force garbage collection to break cycle references
         gc.collect()
 
         import time
+
         wait_times = 0
         scene_count = dexsim.get_world_num()
         max_loops = timeout_ms // 10
@@ -1807,19 +1809,26 @@ class SimulationManager:
             wait_times += 1
             if wait_times % 50 == 0:
                 from embodichain.utils import logger
-                logger.log_info(f"Waiting for dexsim.World scenes to destruct. Remaining scenes: {scene_count}")
+
+                logger.log_info(
+                    f"Waiting for dexsim.World scenes to destruct. Remaining scenes: {scene_count}"
+                )
         if scene_count > 0:
             from embodichain.utils import logger
-            logger.log_warning(f"Scene destruction wait timeout, {scene_count} C++ scene(s) still alive!")
+
+            logger.log_warning(
+                f"Scene destruction wait timeout, {scene_count} C++ scene(s) still alive!"
+            )
 
     def destroy(self) -> None:
         """
-        不再原地由于深层局部变量残留导致 C++ 对象无法析构，
-        而是将自身打包成销毁任务，投递到清理队列，等待顶层进行延迟消费。
+        No longer destructs C++ objects in place due to lingering deep local variables;
+        instead, packages itself into a destruction task, submits to the cleanup queue,
+        and waits for top-level delayed consumption.
         """
         self._is_pending_kill = True
-        
-        # 转移真正的销毁逻辑到清理队列
+
+        # Transfer the actual destruction logic to the cleanup queue
         SimulationManager._cleanup_queue.put(self._deferred_destroy)
 
     def _deferred_destroy(self) -> None:
@@ -1829,7 +1838,7 @@ class SimulationManager:
             self.disable_gizmo(uid)
 
         import sys, gc
-        
+
         self.clean_materials()
 
         if self._env:
@@ -1843,26 +1852,32 @@ class SimulationManager:
 
         # Helper to aggressively decouple C++ wrapped objects
         def _sever_wrapper_refs(obj_registry):
-            if not hasattr(self, obj_registry): return
+            if not hasattr(self, obj_registry):
+                return
             registry = getattr(self, obj_registry)
-            if not isinstance(registry, dict): return
+            if not isinstance(registry, dict):
+                return
             for uid, obj in registry.items():
-                if hasattr(obj, '_world'): obj._world = None
-                if hasattr(obj, '_ps'): obj._ps = None
-                if hasattr(obj, '_env'): obj._env = None
-                if hasattr(obj, '_entities'): obj._entities = []
+                if hasattr(obj, "_world"):
+                    obj._world = None
+                if hasattr(obj, "_ps"):
+                    obj._ps = None
+                if hasattr(obj, "_env"):
+                    obj._env = None
+                if hasattr(obj, "_entities"):
+                    obj._entities = []
             registry.clear()
 
-        _sever_wrapper_refs('_gizmos')
-        _sever_wrapper_refs('_markers')
-        _sever_wrapper_refs('_rigid_objects')
-        _sever_wrapper_refs('_rigid_object_groups')
-        _sever_wrapper_refs('_soft_objects')
-        _sever_wrapper_refs('_cloth_objects')
-        _sever_wrapper_refs('_articulations')
-        _sever_wrapper_refs('_robots')
-        _sever_wrapper_refs('_sensors')
-        _sever_wrapper_refs('_lights')
+        _sever_wrapper_refs("_gizmos")
+        _sever_wrapper_refs("_markers")
+        _sever_wrapper_refs("_rigid_objects")
+        _sever_wrapper_refs("_rigid_object_groups")
+        _sever_wrapper_refs("_soft_objects")
+        _sever_wrapper_refs("_cloth_objects")
+        _sever_wrapper_refs("_articulations")
+        _sever_wrapper_refs("_robots")
+        _sever_wrapper_refs("_sensors")
+        _sever_wrapper_refs("_lights")
 
         # Explicitly clear Python references to trigger C++ object destructors
         self._ps = None
@@ -1884,25 +1899,26 @@ class SimulationManager:
         # Forcefully drop underlying C++ object wrappers
         self._env = None
         self._world = None
-        
+
         gc.collect()
 
     @staticmethod
     def flush_cleanup_queue():
-        """提供给顶层主循环 / Pytest Fixture 调用的出队执行器和同步栅栏"""
+        """Dequeue executor and synchronization barrier provided for top-level main loop / Pytest Fixture calls"""
         import gc
+
         while not SimulationManager._cleanup_queue.empty():
             task = SimulationManager._cleanup_queue.get_nowait()
             try:
                 task()
             except Exception as e:
                 from embodichain.utils import logger
+
                 logger.log_error(f"Error during delayed destruction: {e}")
                 pass
-        
-        # 队列排空后，做一次顶层的全量 GC，彻底回收死掉但还没释放 RefPtr 的对象
-        gc.collect()
-        
-        # 此时再等待 C++ 的 Scene 归零，因为栈是顶层，绝对不会卡死
-        SimulationManager.wait_scene_destruction()
 
+        # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
+        gc.collect()
+
+        # At this point, wait for the C++ Scene to return to zero, since the stack is at the top level, there will definitely be no deadlock
+        SimulationManager.wait_scene_destruction()
