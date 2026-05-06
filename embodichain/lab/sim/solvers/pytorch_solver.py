@@ -303,6 +303,19 @@ class PytorchSolver(BaseSolver):
         is_within_limits = (qpos_mapped >= self.lower_qpos_limits) & (
             qpos_mapped <= self.upper_qpos_limits
         )
+
+        # if qpos_mapped is valid near zero, use it
+        k_zero = torch.ceil(
+            (-torch.pi - qpos) / two_pi
+        )  # [-pi, pi] is the valid range near zero
+        qpos_mapped_near_zero = qpos + k_zero * two_pi
+        is_within_limits_near_zero = (
+            qpos_mapped_near_zero >= self.lower_qpos_limits
+        ) & (qpos_mapped_near_zero <= self.upper_qpos_limits)
+        qpos_mapped[is_within_limits_near_zero] = qpos_mapped_near_zero[
+            is_within_limits_near_zero
+        ]
+
         return is_within_limits.all(dim=1), qpos_mapped
 
     @ensure_pose_shape
