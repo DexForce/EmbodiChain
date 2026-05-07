@@ -78,13 +78,13 @@ class CameraTest:
             NUM_ENVS,
             480,
             640,
-            4,
+            3,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
             NUM_ENVS,
             480,
             640,
-            4,
+            3,
         ), "Position data shape mismatch"
         assert data["mask"].shape == (NUM_ENVS, 480, 640), "Mask data shape mismatch"
 

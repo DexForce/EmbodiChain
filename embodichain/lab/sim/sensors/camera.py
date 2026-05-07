@@ -329,14 +329,14 @@ class Camera(BaseSensor):
                 self._data_buffer["mask"].squeeze_(-1)
 
         if self.cfg.enable_normal:
-            data = self._frame_buffer.get_normal_gpu_buffer().to(self.device)
+            data = self._frame_buffer.get_normal_gpu_buffer().to(self.device)[..., :3]
             if self.is_rt_enabled:
                 self._data_buffer["normal"] = data
             else:
                 self._update_buffer_impl(data, self._data_buffer["normal"])
 
         if self.cfg.enable_position:
-            data = self._frame_buffer.get_position_gpu_buffer().to(self.device)
+            data = self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             if self.is_rt_enabled:
                 self._data_buffer["position"] = data
             else:

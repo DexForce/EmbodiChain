@@ -46,8 +46,10 @@ def to_numpy(tensor):
 
 
 class BaseTestMotionGenerator(object):
-    @classmethod
-    def setup_class(cls):
+    def setup_simulation(self):
+        cls = type(self)
+        if hasattr(cls, "robot_sim"):
+            return
         cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
         cls.robot_sim.set_manual_update(False)
@@ -158,11 +160,15 @@ class BaseTestMotionGenerator(object):
 
     @classmethod
     def teardown_class(cls):
-        try:
+        if hasattr(cls, "robot_sim"):
             cls.robot_sim.destroy()
-            print("robot_sim destroyed successfully")
-        except Exception as e:
-            print(f"Error during robot_sim.destroy(): {e}")
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()
+            del cls.robot_sim
+            import gc
+
+            gc.collect()
 
     def _execute_forward_trajectory(self, robot, qpos_list, delay=0.1):
         """Helper method to execute trajectory"""
@@ -183,6 +189,12 @@ class BaseTestMotionGenerator(object):
 
 class TestMotionGenerator(BaseTestMotionGenerator):
     """Test suite for MotionGenerator trajectory generation"""
+
+    def setup_method(self):
+        self.setup_simulation()
+
+    def teardown_method(self):
+        pass
 
     @pytest.mark.parametrize("is_linear", [True, False])
     def test_create_trajectory_with_xpos(self, is_linear):
