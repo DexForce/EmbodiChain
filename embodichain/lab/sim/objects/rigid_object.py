@@ -939,12 +939,9 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match scale length {len(scale)}."
             )
 
-        if self.device.type == "cpu":
-            for i, env_idx in enumerate(local_env_ids):
-                scale_np = scale[i].cpu().numpy()
-                self._entities[env_idx].set_body_scale(*scale_np)
-        else:
-            logger.log_error(f"Setting body scale on GPU is not supported yet.")
+        for i, env_idx in enumerate(local_env_ids):
+            scale_np = scale[i].cpu().numpy()
+            self._entities[env_idx].set_body_scale(*scale_np)
 
     def set_com_pose(
         self, com_pose: torch.Tensor, env_ids: Sequence[int] | None = None
