@@ -90,22 +90,29 @@ class BaseAgentEnv:
 
     def update_obj_info(self):
         # store some useful obj information
-        obj_info = {}
+        obj_info = getattr(self, "obj_info", {})
         obj_uids = self.sim.get_rigid_object_uid_list()
         for obj_name in obj_uids:
             obj = self.sim.get_rigid_object(obj_name)
             obj_pose = obj.get_local_pose(to_matrix=True).squeeze(0)
-            obj_height = obj_pose[2, 3]  # Extract the height (z-coordinate)
-            obj_grasp_pose = self.affordance_datas.get(
-                f"{obj_name}_grasp_pose_object", None
-            )
-            obj_info[obj_name] = {
-                "pose": obj_pose,  # Store the full pose (4x4 matrix)
-                "height": obj_height,  # Store the height (z-coordinate)
-                "grasp_pose_obj": (
-                    obj_grasp_pose.squeeze(0) if obj_grasp_pose is not None else None
-                ),  # Store the grasp pose if available
-            }
+
+            if obj_name not in obj_info:
+                obj_height = obj_pose[2, 3]  # Extract the height (z-coordinate)
+                obj_grasp_pose = self.affordance_datas.get(
+                    f"{obj_name}_grasp_pose_object", None
+                )
+                obj_info[obj_name] = {
+                    "pose": obj_pose,  # Store the full pose (4x4 matrix)
+                    "height": obj_height,  # Store the initial height (z-coordinate)
+                    "grasp_pose_obj": (
+                        obj_grasp_pose.squeeze(0)
+                        if obj_grasp_pose is not None
+                        else None
+                    ),  # Store the grasp pose if available
+                }
+            else:
+                obj_info[obj_name]["pose"] = obj_pose
+
         self.obj_info = obj_info
 
     # -------------------- Common getters / setters --------------------
@@ -180,6 +187,7 @@ class BaseAgentEnv:
         # Failure anticipation
         anticipated_failures = ''
         if recovery:
+            assert self.code_agent.prompt_name == "generate_recovery_code"
             print(f"\033[91m\nStart failure anticipation for recovery.\n\033[0m")
             failure_anticipation_input = self.failure_anticipation_agent.get_composed_observations(
                 env=self, regenerate=regenerate, task_plan=task_plan, **kwargs
@@ -187,6 +195,8 @@ class BaseAgentEnv:
             anticipated_failures = self.failure_anticipation_agent.generate(
                 **failure_anticipation_input
             )
+        else:
+            assert self.code_agent.prompt_name == "generate_code"
 
         # Code generation
         print(f"\033[94m\nStart code generation.\n\033[0m")
