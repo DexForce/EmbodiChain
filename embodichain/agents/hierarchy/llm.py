@@ -15,41 +15,28 @@
 # ----------------------------------------------------------------------------
 
 import os
-from langchain_openai import AzureChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 
 # ------------------------------------------------------------------------------
 # Environment configuration
 # ------------------------------------------------------------------------------
 
-# Clear proxy if not needed (optional, can be set via environment variables)
-
-os.environ["ALL_PROXY"] = ""
-os.environ["all_proxy"] = ""
-
-# Proxy configuration (optional, uncomment if needed)
-# os.environ["HTTP_PROXY"] = "http://127.0.0.1:7890"
-# os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
-
-# API version (optional, defaults to "2024-10-21" if not set)
-# os.environ["OPENAI_API_VERSION"] = "2024-10-21"
-
-# Note: AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY must be set via environment variables
-# Example in bash:
-#   export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
-#   export AZURE_OPENAI_API_KEY="your-api-key"
-
+os.environ['ALL_PROXY'] = ''
+os.environ['all_proxy'] = ''
+os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
+os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
+os.environ['LLM_URL'] = 'https://api.shubiaobiao.cn/v1/'
 # ------------------------------------------------------------------------------
 # LLM factory
 # ------------------------------------------------------------------------------
 
 
 def create_llm(*, temperature=0.0, model="gpt-4o"):
-    return AzureChatOpenAI(
+    return ChatOpenAI(
         temperature=temperature,
         model=model,
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-10-21"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("LLM_URL"),
     )
 
 
@@ -67,6 +54,14 @@ def _create_llm_safe(*, temperature=0.0, model="gpt-4o"):
 
 
 task_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
+failure_anticipation_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
 code_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
-validation_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
-view_selection_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
+
+if __name__ == "__main__":
+    def call_llm(prompt, temperature=0.0, model="gpt-4o"):
+        llm = create_llm(temperature=temperature, model=model)
+        response = llm.invoke(prompt)
+        return response.content
+
+    response = call_llm(prompt="Which model you are?", temperature=0.0, model="gpt-4o")
+    print(response)

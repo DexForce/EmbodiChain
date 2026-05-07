@@ -284,6 +284,22 @@ def get_replaced_pose(
         pose_to_change[axis, 3] = replace_quantity
     return pose_to_change
 
+def apply_rotation(pose, axis, angle_deg):
+    rot3 = R.from_euler(axis, angle_deg, degrees=True).as_matrix()  # (3,3)
+
+    # numpy
+    if isinstance(pose, np.ndarray):
+        rot4 = np.eye(4, dtype=pose.dtype)
+        rot4[:3, :3] = rot3.astype(pose.dtype, copy=False)
+        return pose @ rot4
+
+    # torch
+    if torch.is_tensor(pose):
+        rot4 = torch.eye(4, dtype=pose.dtype, device=pose.device)
+        rot4[:3, :3] = torch.tensor(rot3, dtype=pose.dtype, device=pose.device)
+        return pose @ rot4
+
+    raise TypeError(f"pose must be np.ndarray or torch.Tensor, got {type(pose)}")
 
 def get_offset_pose(
     pose_to_change: np.ndarray,

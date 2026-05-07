@@ -25,95 +25,35 @@ from pathlib import Path
 import re
 import importlib.util
 from datetime import datetime
+import ast
 
+class NormalizePartialMonitors(ast.NodeTransformer):
+    """Rewrite partial(monitor_fn(...)) into partial(monitor_fn, ...)."""
 
-def format_execution_history(execution_history):
-    if not execution_history or len(execution_history) == 0:
-        return "None."
+    def visit_Call(self, node):
+        self.generic_visit(node)
 
-    return "\n\n".join(f"{i}. {entry}" for i, entry in enumerate(execution_history, 1))
-
-
-def extract_python_code_and_text(llm_response: str) -> Tuple[str, str]:
-    """
-    Extract exactly ONE python code block from the LLM response,
-    and return:
-      - code: the content inside the python block
-      - text: all remaining explanation text (outside the code block)
-
-    Raises ValueError if zero or multiple python blocks are found.
-    """
-
-    pattern = r"```python\s*(.*?)\s*```"
-    matches = list(re.finditer(pattern, llm_response, re.DOTALL))
-
-    if len(matches) == 0:
-        raise ValueError("No python code block found in LLM response.")
-    if len(matches) > 1:
-        raise ValueError("Multiple python code blocks found in LLM response.")
-
-    match = matches[0]
-    code = match.group(1).strip()
-
-    # Optional sanity check
-    if not code.startswith("#") and not code.startswith("drive("):
-        raise ValueError(
-            f"Invalid code block content. Expected `drive(...)` or `# TASK_COMPLETE`, got:\n{code}"
+        is_partial_call = (
+                isinstance(node.func, ast.Name) and node.func.id == "partial"
         )
+        if not is_partial_call or not node.args:
+            return node
 
-    # Extract remaining text (before + after the code block)
-    text_before = llm_response[: match.start()].strip()
-    text_after = llm_response[match.end() :].strip()
+        first_arg = node.args[0]
+        if not isinstance(first_arg, ast.Call):
+            return node
 
-    explanation_text = "\n\n".join(part for part in [text_before, text_after] if part)
+        normalized_args = [first_arg.func, *first_arg.args, *node.args[1:]]
+        normalized_keywords = [*first_arg.keywords, *node.keywords]
 
-    return code, explanation_text
-
-
-def format_llm_response_md(
-    llm_analysis: str,  # plain-text explanation (NO code)
-    extracted_code: str,  # validated executable code
-    step_id: int = None,
-    execution_history: str = None,
-    obs_image_path: Path = None,
-    md_file_path: Path = None,
-) -> str:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header = f"## Step: {step_id if step_id is not None else '-'} | {ts}\n\n"
-
-    history_block = ""
-    if execution_history:
-        history_block = (
-            "### Execution History (Input to LLM)\n\n"
-            "```\n"
-            f"{execution_history}\n"
-            "```\n\n"
+        return ast.copy_location(
+            ast.Call(
+                func=node.func,
+                args=normalized_args,
+                keywords=normalized_keywords,
+            ),
+            node,
         )
-
-    image_block = ""
-    if obs_image_path is not None and md_file_path is not None:
-        try:
-            rel_path = obs_image_path.relative_to(md_file_path.parent)
-        except ValueError:
-            # Fallback: just use filename
-            rel_path = obs_image_path.name
-
-        image_block = (
-            "### Observation Image\n\n" f"![]({Path(rel_path).as_posix()})\n\n"
-        )
-
-    body = (
-        image_block + history_block + "### LLM Analysis\n\n"
-        f"{llm_analysis.strip()}\n\n"
-        "### Executed Code\n\n"
-        "```python\n"
-        f"{extracted_code.strip()}\n"
-        "```\n\n"
-        "---\n\n"
-    )
-
-    return header + body
-
 
 class CodeAgent(AgentBase):
     query_prefix = "# "
@@ -150,30 +90,11 @@ class CodeAgent(AgentBase):
         prompt = getattr(CodePrompt, self.prompt_name)(
             **kwargs,
         )
-
-        # insert feedback if exists
-        if len(kwargs.get("error_messages", [])) != 0:
-            # just use the last one
-            last_code = kwargs["generated_codes"][-1]
-            last_error = kwargs["error_messages"][-1]
-            last_observation = (
-                kwargs.get("observation_feedbacks")[-1]
-                if kwargs.get("observation_feedbacks")
-                else None
-            )
-
-            # Add extra human message with feedback
-            feedback_msg = self.build_feedback_message(
-                last_code, last_error, last_observation
-            )
-            prompt.messages.append(feedback_msg)
-
         llm_code = self.llm.invoke(prompt)
 
         # Normalize content
         llm_code = getattr(llm_code, "content", str(llm_code))
-
-        print(f"\033[92m\nCode agent output:\n{llm_code}\n\033[0m")
+        print(f"\033[94m\nCode agent output:\n{llm_code}\n\033[0m")
 
         # Write the code to the file if it does not exist
         match = re.search(r"```python\n(.*?)\n```", llm_code, re.DOTALL)
@@ -196,34 +117,50 @@ class CodeAgent(AgentBase):
         1. If code defines 'create_agent_action_list' function, call it
         2. If code contains module-level drive() calls, execute them directly
         """
-        import ast
 
         # Read the generated code file
         with open(code_file_path, "r") as f:
             code_content = f.read()
+
+        # Keep only runtime kwargs for execution. Prompt/template contents should not be
+        # forwarded into generated function calls, otherwise prompt keys can collide
+        # with explicit drive call arguments such as `monitor_sequences`.
+        prompt_only_keys = set(getattr(self, "prompt_kwargs", {}).keys())
+        prompt_only_keys.update(
+            {
+                "task_plan",
+                "anticipated_failures",
+                "observations",
+            }
+        )
+        runtime_kwargs = {
+            key: value for key, value in kwargs.items() if key not in prompt_only_keys
+        }
 
         # Build execution namespace with necessary imports
         ns = {
             "__builtins__": __builtins__,
             "__name__": "__main__",
             "__file__": str(code_file_path),
-            "kwargs": kwargs,  # Make kwargs available for injection
+            "kwargs": runtime_kwargs,  # Make runtime kwargs available for injection
         }
 
         # Import atom action functions into namespace
         try:
             exec(
-                "from embodichain.lab.sim.atom_actions import *",
+                "from embodichain.lab.sim.agent.atom_actions import *",
                 ns,
                 ns,
             )
         except Exception as e:
             raise RuntimeError(
-                "Failed to import embodichain.lab.sim.atom_actions"
+                "Failed to import embodichain.lab.sim.agent.atom_actions"
             ) from e
 
         # Parse code to check if it defines a function or contains module-level calls
         tree = ast.parse(code_content)
+        tree = NormalizePartialMonitors().visit(tree)
+        ast.fix_missing_locations(tree)
 
         # Check if code defines create_agent_action_list function
         has_function = any(
@@ -234,7 +171,8 @@ class CodeAgent(AgentBase):
 
         if has_function:
             # Execute code (function will be defined in namespace)
-            exec(code_content, ns, ns)
+            compiled_code = compile(tree, filename=str(code_file_path), mode="exec")
+            exec(compiled_code, ns, ns)
 
             # Call the function if it exists
             if "create_agent_action_list" in ns:
@@ -276,8 +214,8 @@ class CodeAgent(AgentBase):
 
             # Collect actions from drive() calls if they were executed
             # drive() function stores actions in env._episode_action_list
-            if "env" in kwargs:
-                env = kwargs["env"]
+            if "env" in runtime_kwargs:
+                env = runtime_kwargs["env"]
                 if hasattr(env, "_episode_action_list") and env._episode_action_list:
                     print(
                         f"Collected {len(env._episode_action_list)} actions from module-level drive() calls."

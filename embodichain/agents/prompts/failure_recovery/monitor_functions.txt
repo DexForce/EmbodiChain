@@ -1,0 +1,61 @@
+All monitor functions are designed to be passed into `drive(..., monitor_sequences=[...])`.
+Each monitor function returns:
+- `True`: the monitor is triggered and the failure condition is detected
+- `False`: the monitor is not triggered and the failure condition is not detected
+
+When wrapping a monitor with `partial`, pass the function object itself, for example:
+`partial(monitor_object_moved, obj_name="cup", threshold=0.02)`
+
+1. `monitor_object_moved`
+Purpose:
+- Detect whether a rigid object has moved from the last frame by more than a translation threshold.
+
+Typical failure meanings:
+- object was unexpectedly pushed
+- object shifted during grasping
+- placed object slid away
+
+Signature:
+- `monitor_object_moved(env, obj_name, last_frame_pose=None, threshold=0.01, **kwargs)`
+
+Key arguments:
+- `obj_name`: target rigid object name, such as `"cup"` or `"bottle"`
+- `last_frame_pose`: previous-frame pose; if not provided, it falls back to `env.obj_info[obj_name]["pose"]`. Typically, no need to provide
+- `threshold`: maximum allowed position change in meters
+
+Returns `True` when:
+- the Euclidean distance between current object position and previous object position is greater than `threshold`
+
+Recommended use:
+- use when the arm attempts to grasp an object, where the object is expected to be stationary
+- when operating the arm with the grasped object, do not use this function, as the object movement is expected and does not necessarily indicate a failure; instead, use `monitor_object_held` to detect hold failure
+
+2. `monitor_object_held`
+Purpose:
+- Detect whether an object is no longer close enough to the corresponding arm end-effector and should be treated as no longer held.
+
+Typical failure meanings:
+- object slipped out of hand
+- grasp was lost
+- held object is no longer attached to the arm region
+
+Signature:
+- `monitor_object_held(env, robot_name, obj_name, threshold=0.05, **kwargs)`
+
+Key arguments:
+- `robot_name`: arm identifier containing `"left"` or `"right"`
+- `obj_name`: target rigid object name
+- `threshold`: maximum allowed distance between object center and the corresponding arm end-effector
+
+Returns `True` when:
+- the object is farther than the threshold distance from the selected arm end-effector
+- in other words, grasp loss / hold failure is detected
+
+Important note:
+- the function name is historical, but its return semantics are unified with the other monitor functions
+- `True` always means trigger / failure occurred
+- for this function specifically, `True` means the object is no longer held successfully
+
+Recommended use:
+- use when the object is already grasped in the arm
+- do not use this function when grasping or placing an object, as the object is not yet securely held during the grasping phase

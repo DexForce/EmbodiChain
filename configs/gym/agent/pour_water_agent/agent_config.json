@@ -1,8 +1,9 @@
-{    "TaskAgent": {
-        "prompt_name": "one_stage_prompt"
+{
+    "TaskAgent": {
+        "prompt_name": "generate_task_plan"
     },
     "CodeAgent": {
-        "prompt_name": "one_stage_prompt_according_to_task_plan"
+        "prompt_name": "generate_code"
     },
     "Agent": {
         "prompt_kwargs": {

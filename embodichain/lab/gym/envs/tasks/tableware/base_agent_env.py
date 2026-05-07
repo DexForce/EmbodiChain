@@ -23,38 +23,29 @@ class BaseAgentEnv:
     def _init_agents(self, agent_config, task_name, agent_config_path=None):
         from embodichain.agents.hierarchy.task_agent import TaskAgent
         from embodichain.agents.hierarchy.code_agent import CodeAgent
-        from embodichain.agents.hierarchy.validation_agent import ValidationAgent
-        from embodichain.agents.hierarchy.llm import (
-            task_llm,
-            code_llm,
-            validation_llm,
-        )
+        from embodichain.agents.hierarchy.failure_anticipation_agent import FailureAnticipationAgent
+        from embodichain.agents.hierarchy.llm import task_llm, code_llm, failure_anticipation_llm
 
-        if agent_config.get("TaskAgent") is not None:
-            self.task_agent = TaskAgent(
-                task_llm,
-                **agent_config["Agent"],
-                **agent_config["TaskAgent"],
-                task_name=task_name,
-                config_dir=agent_config_path,
-            )
-        self.code_agent = CodeAgent(
-            code_llm,
+        self.task_agent = TaskAgent(
+            task_llm,
             **agent_config["Agent"],
-            **agent_config.get("CodeAgent"),
+            **agent_config["TaskAgent"],
             task_name=task_name,
             config_dir=agent_config_path,
         )
-        self.validation_agent = ValidationAgent(
-            validation_llm,
+        self.failure_anticipation_agent = FailureAnticipationAgent(
+            failure_anticipation_llm,
+            **agent_config["Agent"],
+            **agent_config["FailureAnticipationAgent"],
             task_name=task_name,
-            task_description=self.code_agent.prompt_kwargs.get("task_prompt")[
-                "content"
-            ],
-            basic_background=self.code_agent.prompt_kwargs.get("basic_background")[
-                "content"
-            ],
-            atom_actions=self.code_agent.prompt_kwargs.get("atom_actions")["content"],
+            config_dir=agent_config_path,
+        )
+        self.code_agent = CodeAgent(
+            code_llm,
+            **agent_config["Agent"],
+            **agent_config["CodeAgent"],
+            task_name=task_name,
+            config_dir=agent_config_path,
         )
 
     def get_states(self):
@@ -95,8 +86,11 @@ class BaseAgentEnv:
         self.left_arm_current_gripper_state = self.open_state
         self.right_arm_current_gripper_state = self.open_state
 
+        self.update_obj_info()
+
+    def update_obj_info(self):
         # store some useful obj information
-        init_obj_info = {}
+        obj_info = {}
         obj_uids = self.sim.get_rigid_object_uid_list()
         for obj_name in obj_uids:
             obj = self.sim.get_rigid_object(obj_name)
@@ -105,14 +99,14 @@ class BaseAgentEnv:
             obj_grasp_pose = self.affordance_datas.get(
                 f"{obj_name}_grasp_pose_object", None
             )
-            init_obj_info[obj_name] = {
+            obj_info[obj_name] = {
                 "pose": obj_pose,  # Store the full pose (4x4 matrix)
                 "height": obj_height,  # Store the height (z-coordinate)
                 "grasp_pose_obj": (
                     obj_grasp_pose.squeeze(0) if obj_grasp_pose is not None else None
                 ),  # Store the grasp pose if available
             }
-        self.init_obj_info = init_obj_info
+        self.obj_info = obj_info
 
     # -------------------- Common getters / setters --------------------
 
@@ -169,34 +163,44 @@ class BaseAgentEnv:
         return xpos.squeeze(0)
 
     # -------------------- get only code for action list --------------------
-    def generate_code_for_actions(self, regenerate=False, **kwargs):
+    def generate_code_for_actions(self, regenerate=False, recovery=False, **kwargs):
         logger.log_info(
-            f"Generate code for creating action list for {self.code_agent.task_name}.",
-            color="green",
+            f"Generate code for creating {'recovery' if recovery else ''} action list for {self.code_agent.task_name}.",
+            color="yellow" if recovery else "green",
         )
 
         # Task planning
         print(f"\033[92m\nStart task planning.\n\033[0m")
 
         task_agent_input = self.task_agent.get_composed_observations(
-            env=self, regenerate=regenerate, **kwargs
+            env=self, regenerate=regenerate, observations=self.get_obs_for_agent(), **kwargs
         )
         task_plan = self.task_agent.generate(**task_agent_input)
+
+        # Failure anticipation
+        anticipated_failures = ''
+        if recovery:
+            print(f"\033[91m\nStart failure anticipation for recovery.\n\033[0m")
+            failure_anticipation_input = self.failure_anticipation_agent.get_composed_observations(
+                env=self, regenerate=regenerate, task_plan=task_plan, **kwargs
+            )
+            anticipated_failures = self.failure_anticipation_agent.generate(
+                **failure_anticipation_input
+            )
 
         # Code generation
         print(f"\033[94m\nStart code generation.\n\033[0m")
         code_agent_input = self.code_agent.get_composed_observations(
-            env=self, regenerate=regenerate, **kwargs
+            env=self, regenerate=regenerate, task_plan=task_plan, anticipated_failures=anticipated_failures, **kwargs
         )
-        code_agent_input["task_plan"] = task_plan
-
         code_file_path, kwargs, code = self.code_agent.generate(**code_agent_input)
+
         return code_file_path, kwargs, code
 
     # -------------------- get action list --------------------
-    def create_demo_action_list(self, regenerate=False, *args, **kwargs):
+    def create_demo_action_list(self, regenerate=False, recovery=False, *args, **kwargs):
         code_file_path, kwargs, _ = self.generate_code_for_actions(
-            regenerate=regenerate
+            regenerate=regenerate, recovery=recovery
         )
         action_list = self.code_agent.act(code_file_path, **kwargs)
         return action_list

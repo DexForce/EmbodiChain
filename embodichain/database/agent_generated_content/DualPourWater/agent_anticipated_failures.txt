@@ -1,0 +1,60 @@
+[ANTICIPATED_FAILURES]:
+Step 1:
+Errors:
+E1.1 [error_type=misplaced_object] cup shifts before or during the simultaneous grasp, so the left arm reaches the old grasp location
+E1.2 [error_type=misplaced_object] bottle shifts before or during the simultaneous grasp, so the right arm reaches the old grasp location
+E1.3 [error_type=wrong_affordance] left_arm is perturbed toward an off-center cup grasp approach
+E1.4 [error_type=wrong_affordance] right_arm is perturbed toward an off-center bottle grasp approach
+Policies:
+M1.1: monitor_object_moved(obj_name="cup", threshold=0.02)
+R1.1: grasp(robot_name='left_arm', obj_name='cup', pre_grasp_dis=0.10)
+M1.2: monitor_object_moved(obj_name="bottle", threshold=0.02)
+R1.2: grasp(robot_name='right_arm', obj_name='bottle', pre_grasp_dis=0.10)
+
+Step 2:
+Errors:
+E2.1 [error_type=wrong_affordance] left_arm lift trajectory is perturbed so the cup slips or is no longer securely held while being raised
+Policies:
+M2.1: monitor_object_held(robot_name="left_arm", obj_name="cup", threshold=0.05)
+R2.1: grasp(robot_name='left_arm', obj_name='cup', pre_grasp_dis=0.10) -> move_by_relative_offset(robot_name='left_arm', dx=0.0, dy=0.0, dz=0.10, mode='extrinsic')
+
+Step 3:
+Errors:
+E3.1 [error_type=wrong_affordance] left_arm transport toward [0.55, 0.05] is perturbed and the cup is lost during motion
+Policies:
+M3.1: monitor_object_held(robot_name="left_arm", obj_name="cup", threshold=0.05)
+R3.1: grasp(robot_name='left_arm', obj_name='cup', pre_grasp_dis=0.10) -> move_by_relative_offset(robot_name='left_arm', dx=0.0, dy=0.0, dz=0.10, mode='extrinsic') -> move_to_absolute_position(robot_name='left_arm', x=0.55, y=0.05, z=None)
+
+Step 4:
+Errors:
+E4.1 [error_type=wrong_affordance] right_arm approach relative to the cup is perturbed, causing bottle transport failure or grasp loss while the left arm is holding the cup
+Policies:
+M4.1: monitor_object_held(robot_name="right_arm", obj_name="bottle", threshold=0.05)
+R4.1: grasp(robot_name='right_arm', obj_name='bottle', pre_grasp_dis=0.10) -> move_relative_to_object(robot_name='right_arm', obj_name='cup', x_offset=0.05, y_offset=-0.10, z_offset=0.125)
+
+Step 5:
+Errors:
+E5.1 [error_type=wrong_affordance] right_arm wrist rotation for pouring is perturbed and the bottle slips from the gripper during tilt
+Policies:
+M5.1: monitor_object_held(robot_name="right_arm", obj_name="bottle", threshold=0.05)
+R5.1: grasp(robot_name='right_arm', obj_name='bottle', pre_grasp_dis=0.10) -> move_relative_to_object(robot_name='right_arm', obj_name='cup', x_offset=0.05, y_offset=-0.10, z_offset=0.125) -> rotate_eef(robot_name='right_arm', degree=-45)
+
+Step 6:
+Errors:
+E6.1 [error_type=wrong_affordance] right_arm return rotation after pouring is perturbed and the bottle is no longer securely held
+Policies:
+M6.1: monitor_object_held(robot_name="right_arm", obj_name="bottle", threshold=0.05)
+R6.1: grasp(robot_name='right_arm', obj_name='bottle', pre_grasp_dis=0.10) -> rotate_eef(robot_name='right_arm', degree=45)
+
+Step 7:
+Errors:
+E7.1 [error_type=wrong_affordance] left_arm place trajectory is perturbed and the cup is dropped or no longer held before reaching the placement pose
+E7.2 [error_type=wrong_affordance] right_arm place trajectory is perturbed and the bottle is dropped or no longer held before reaching the placement pose
+Policies:
+M7.1: monitor_object_held(robot_name="left_arm", obj_name="cup", threshold=0.05)
+R7.1: grasp(robot_name='left_arm', obj_name='cup', pre_grasp_dis=0.10) -> place_on_table(robot_name='left_arm', obj_name='cup', x=0.6, y=0.1, pre_place_dis=0.08)
+M7.2: monitor_object_held(robot_name="right_arm", obj_name="bottle", threshold=0.05)
+R7.2: grasp(robot_name='right_arm', obj_name='bottle', pre_grasp_dis=0.10) -> place_on_table(robot_name='right_arm', obj_name='bottle', x=0.7, y=-0.1, pre_place_dis=0.08)
+
+Step 8:
+None
