@@ -62,7 +62,7 @@ class CodePrompt:
         return prompt.invoke(kwargs)
 
     @staticmethod
-    def generate_monitor_code(**kwargs) -> ChatPromptTemplate:
+    def generate_recovery_code(**kwargs) -> ChatPromptTemplate:
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessage(

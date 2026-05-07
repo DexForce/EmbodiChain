@@ -6,7 +6,7 @@
         "prompt_name": "anticipate_potential_failure"
     },
     "CodeAgent": {
-        "prompt_name": "generate_monitor_code"
+        "prompt_name": "generate_recovery_code"
     },
     "Agent": {
         "prompt_kwargs": {

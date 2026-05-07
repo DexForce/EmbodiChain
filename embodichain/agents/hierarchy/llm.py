@@ -21,10 +21,10 @@ from langchain_openai import AzureChatOpenAI, ChatOpenAI
 # Environment configuration
 # ------------------------------------------------------------------------------
 
-os.environ['ALL_PROXY'] = ''
-os.environ['all_proxy'] = ''
-os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
-os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
+# os.environ['ALL_PROXY'] = ''
+# os.environ['all_proxy'] = ''
+# os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7897'
+# os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7897'
 os.environ['LLM_URL'] = 'https://api.shubiaobiao.cn/v1/'
 # ------------------------------------------------------------------------------
 # LLM factory
