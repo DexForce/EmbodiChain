@@ -141,6 +141,7 @@ class BaseRobotTest:
                 ],
             ],
             dtype=torch.float32,
+            device=self.sim.device,
         ).unsqueeze_(0)
 
         assert torch.allclose(
@@ -322,24 +323,16 @@ class BaseRobotTest:
 
 class TestRobotCPU(BaseRobotTest):
     def setup_method(self):
-        pass
-
-    @classmethod
-    def setup_class(cls):
-        cls.setup_simulation("cpu")
+        self.setup_simulation("cpu")
 
 
 class TestRobotCUDA(BaseRobotTest):
     def setup_method(self):
-        pass
-
-    @classmethod
-    def setup_class(cls):
-        cls.setup_simulation("cuda")
+        self.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
     # Run tests directly
-    test_cpu = TestRobotCPU()
+    test_cpu = TestRobotCUDA()
     test_cpu.setup_method()
-    test_cpu.test_fk("left_arm")
+    test_cpu.test_compute_jacobian()

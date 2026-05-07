@@ -89,9 +89,6 @@ def load_assets(sim: SimulationManager, args: argparse.Namespace):
     )
     from embodichain.lab.sim.shapes import MeshCfg
 
-    # --- light -----------------------------------------------------------
-    sim.set_emission_light(intensity=150)
-
     asset_paths = args.asset_path
     init_pos = tuple(args.init_pos)
     init_rot = tuple(args.init_rot)

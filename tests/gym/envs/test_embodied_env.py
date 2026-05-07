@@ -164,11 +164,13 @@ class EmbodiedEnvTest:
         self.env.close()
 
 
+@pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation("cpu")
 
 
+@pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation("cuda")

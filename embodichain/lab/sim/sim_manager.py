@@ -677,7 +677,7 @@ class SimulationManager:
         )
 
         if self.is_rt_enabled:
-            self.set_emission_light([1.0, 1.0, 1.0], 120.0)
+            self.set_emission_light([1.5, 1.5, 1.5], 150.0)
         else:
             self.set_indirect_lighting("lab_day")
 

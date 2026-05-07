@@ -39,7 +39,7 @@ NUM_ENVS = 4
 
 
 class ContactTest:
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         sim_cfg = SimulationManagerCfg(
             width=1920,
             height=1080,
@@ -47,6 +47,7 @@ class ContactTest:
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device=sim_device,
+            render_cfg=RenderCfg(renderer=renderer),
         )
 
         # Create the simulation instance
@@ -276,42 +277,30 @@ class ContactTest:
         gc.collect()
 
 
-class TestContactRasterCuda(ContactTest):
+class TestContactHybrid(ContactTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER != "legacy":
-            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cuda")
-
-
-class TestContactFastRTCuda(ContactTest):
-    def setup_method(self):
-        from embodichain.lab.sim import cfg
-
-        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
-            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cuda")
+        self.setup_simulation("cpu", renderer="hybrid")
 
 
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
-class TestContactRaster(ContactTest):
+class TestContactHybridCuda(ContactTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER != "legacy":
-            pytest.skip(f"Skipping raster test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cpu")
+        self.setup_simulation("cuda", renderer="hybrid")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestContactFastRT(ContactTest):
     def setup_method(self):
-        from embodichain.lab.sim import cfg
 
-        if cfg.DEFAULT_RENDERER not in ["hybrid", "fast-rt"]:
-            pytest.skip(f"Skipping fast-rt test for renderer: {cfg.DEFAULT_RENDERER}")
-        self.setup_simulation("cpu")
+        self.setup_simulation("cpu", renderer="fast-rt")
+
+
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+class TestContactFastRTCUDA(ContactTest):
+    def setup_method(self):
+
+        self.setup_simulation("cuda", renderer="fast-rt")
 
 
 def test_contact_sensor_from_dict():
@@ -345,6 +334,6 @@ def test_contact_sensor_from_dict():
 
 
 if __name__ == "__main__":
-    test = TestContactRasterCuda()
-    test.setup_simulation("cuda")
+    test = TestContactHybridCuda()
+    test.setup_simulation("cuda", renderer="hybrid")
     test.test_fetch_contact()

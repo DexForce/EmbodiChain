@@ -1681,6 +1681,7 @@ class Articulation(BatchEntity):
                 chain=self.pk_chain,
                 root_link_name=root_link_name,
                 end_link_name=end_link_name,
+                device=self.device,
             )
             result = pk_serial_chain.forward_kinematics(th=qpos, end_only=True)
 
@@ -1781,9 +1782,10 @@ class Articulation(BatchEntity):
 
         # Create pk_serial_chain
         pk_serial_chain = create_pk_serial_chain(
-            chain=self.pk_chain,
+            urdf_path=self.cfg.fpath,
             root_link_name=root_link_name,
             end_link_name=end_link_name,
+            device=self.device,
         )
 
         # Compute the Jacobian using the kinematics chain
