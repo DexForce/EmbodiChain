@@ -87,7 +87,7 @@ class AgentBase(metaclass=ABCMeta):
         pass
 
     def get_composed_observations(self, **kwargs):
-        ret = {"observations": kwargs.get("env").get_obs_for_agent()}
+        ret = {}
         for key, val in self.prompt_kwargs.items():
             ret[key] = val["content"]
         ret.update(kwargs)

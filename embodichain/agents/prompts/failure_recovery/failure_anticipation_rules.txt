@@ -1,0 +1,34 @@
+- Cover every step from Step 1 to Step N in order.
+- This is for generating useful error-recovery data, not exhaustive safety analysis.
+- It is valid for a step to have no useful injected failure. In that case output exactly `None` under that step.
+- A step may contain one or more Errors.
+- A step may contain one or more `M/R` policy pairs.
+- Each `M<i>.<j>` with matching `R<i>.<j>` represents one `monitor_sequence` and one matching `recovery_sequence` for that step.
+- If one policy is not enough, add more `M/R` pairs for the same step.
+- Different errors may share a policy, and different policies may cover different failure states within the same step.
+- Keep the output focused: include only high-value errors and policies that are common, supported, and recoverable.
+- Number every error exactly as E<step_index>.<error_index>.
+- Each error line must name the exact runtime error function by including `error_type=...`.
+- Each monitor line must contain exact monitor calls using only the listed monitor functions and valid kwargs.
+- Write monitor calls as plain function calls, for example: `monitor_object_moved(obj_name="cup", threshold=0.02)`.
+- If a single policy needs multiple monitor functions, put them on the same M-line joined by ` | `.
+- Use multiple monitor calls only when they are alternative detectors for the same failure state and should trigger the same recovery.
+- Prefer a single monitor call when it is sufficient.
+- If you list any Errors for a step, also list at least one valid `M/R` pair for that step.
+- Each recovery must be a short ordered sequence of one or more atomic actions chosen only from the provided atomic actions.
+- Express each recovery as atomic action names joined by ` -> `, for example: `back_to_initial_pose -> grasp -> move_to_target_pose`.
+- Recovery lines must contain only the ordered atomic actions, not explanations or prose.
+- Prefer failures that are common and easy to imagine in real execution, such as external disturbance moving a target object, an object falling, or an arm being perturbed toward a wrong affordance, when these are supported by the provided error functions.
+- Only output failures that could plausibly arise from the provided runtime error functions.
+- Only output failures that can be detected by the provided monitor functions.
+- Only output failures that are recoverable with the provided atomic actions.
+- Skip failures whose recovery would be ambiguous, excessively long, or unlikely to restore the task.
+- Skip failures that would destroy the task setup, make the task impossible, or require human intervention.
+- Do not invent failures that require an unlisted error source.
+- Do not invent monitor functions or monitor kwargs outside the provided monitor list.
+- Do not invent recovery actions outside the provided atomic actions.
+- When choosing recovery actions, prefer minimal sequences that restore the intended preconditions for continuing the plan.
+- Do not rewrite the task plan.
+- Do not include validation conditions or any extra sections.
+- If a failure occurs during grasping, there is no need to first open the gripper before re-grasping; just directly re-grasp.
+- During grasping, no need to monitor whether the object is held since the grasp action includes moving towards the object and at last grasp it.

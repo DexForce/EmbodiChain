@@ -26,13 +26,6 @@ import numpy as np
 import time
 import re
 
-USEFUL_INFO = """The error may be caused by: 
-1. You did not follow the basic background information, especially the world coordinate system with its xyz directions.
-2. You did not take into account the NOTE given in the atom actions or in the example functions.
-3. You did not follow the steps of the task descriptions.\n
-"""
-
-
 def extract_plan_and_validation(text: str) -> Tuple[str, List[str], List[str]]:
     def get_section(src: str, name: str, next_name) -> str:
         if next_name:
@@ -112,39 +105,8 @@ class TaskAgent(AgentBase):
 
         # Generate query via LLM
         prompts_ = getattr(TaskPrompt, self.prompt_name)(**kwargs)
-        if isinstance(prompts_, list):
-            # TODO: support two-stage prompts with feedback
-            start_time = time.time()
-            response = self.llm.invoke(prompts_[0])
-            query = response.content
-            print(
-                f"\033[92m\nSystem tasks output ({np.round(time.time()-start_time, 4)}s):\n{query}\n\033[0m"
-            )
-            for prompt in prompts_[1:]:
-                temp = prompt["kwargs"]
-                temp.update({"query": query})
-                start_time = time.time()
-                response = self.llm.invoke(prompt["prompt"].invoke(temp))
-                query = response.content
-                print(
-                    f"\033[92m\nSystem tasks output({np.round(time.time()-start_time, 4)}s):\n{query}\n\033[0m"
-                )
-        else:
-            # insert feedback if exists
-            if len(kwargs.get("error_messages", [])) != 0:
-                # just use the last one
-                last_plan = kwargs["generated_plans"][-1]
-                last_code = kwargs["generated_codes"][-1]
-                last_error = kwargs["error_messages"][-1]
-
-                # Add extra human message with feedback
-                feedback_msg = self.build_feedback_message(
-                    last_plan, last_code, last_error
-                )
-                prompts_.messages.append(feedback_msg)
-
-            response = self.llm.invoke(prompts_)
-            print(f"\033[92m\nTask agent output:\n{response.content}\n\033[0m")
+        response = self.llm.invoke(prompts_)
+        print(f"\033[92m\nTask agent output:\n{response.content}\n\033[0m")
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "w") as f:

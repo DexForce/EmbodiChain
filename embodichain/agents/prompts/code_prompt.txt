@@ -1,7 +1,16 @@
+Drive Function (Trajectory Synchronization)
+"drive":
+    def drive(left_arm_action=..., right_arm_action=...) -> list[torch.Tensor]
+    Wraps one or two arm trajectories into synchronized full-robot actions.
+    • If only one arm action is provided, the other arm stays idle.
+    • If both are provided, they are temporally aligned and executed together.
+    • The actions are obtained from the output of the above functions.
+    Example:
+        drive(left_arm_action=left_actions, right_arm_action=right_actions)
+
 Constraints:
 - Every atomic action MUST be executed via a single drive(...) call.
 - Each drive(...) call must directly contain the atomic action(s); do NOT define actions separately and then pass them into drive.
 - For single-arm execution: specify the active arm’s action and explicitly set the unused arm to None within the same drive(...) call.
 - For dual-arm execution: both arms’ actions MUST be specified within the same drive(...) call.
 - Use exactly one drive(...) call per step; no exceptions.
-- Output MUST be executable Python code only: no explanations, no comments, no markdown, and no extra text.

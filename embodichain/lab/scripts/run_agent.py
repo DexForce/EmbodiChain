@@ -25,7 +25,8 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
 )
 from embodichain.utils.logger import log_error
-from .run_env import main
+from embodichain.lab.scripts.run_env import main
+
 
 if __name__ == "__main__":
     np.set_printoptions(5, suppress=True)
@@ -49,6 +50,12 @@ if __name__ == "__main__":
         "--regenerate",
         action="store_true",
         help="Whether to regenerate code if already existed.",
+        default=False,
+    )
+    parser.add_argument(
+        "--recovery",
+        action="store_true",
+        help="Whether to generate recovery actions.",
         default=False,
     )
 

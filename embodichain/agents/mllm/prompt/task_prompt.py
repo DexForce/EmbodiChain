@@ -25,7 +25,7 @@ from embodichain.utils.utility import encode_image
 
 class TaskPrompt:
     @staticmethod
-    def one_stage_prompt(observations, **kwargs):
+    def generate_task_plan(observations, **kwargs):
         """
         Hybrid one-pass prompt:
         Step 1: VLM analyzes the image and extracts object IDs.
@@ -49,6 +49,8 @@ class TaskPrompt:
                         "a clear, step-by-step task plan for a robotic arm. "
                         "All actions must strictly use the provided atomic API functions, "
                         "and the plan must be executable without ambiguity."
+                        # "After generating the plan, generate the corresponding validation conditions for each step, "
+                        # "which can be directly verified from the image observation."
                     )
                 ),
                 HumanMessagePromptTemplate.from_template(
@@ -61,14 +63,30 @@ class TaskPrompt:
                         },
                         {
                             "type": "text",
-                            "text": (
-                                "Here is the latest camera observation.\n"
+                            "text":
+                                "Here is the current camera observation.\n"
                                 "First, analyze the scene in the image.\n"
-                                "Then, using the context below, produce an actionable task plan.\n\n"
+                                "Then, given the scene, use the context below to generate an actionable task plan that achieves the task goal:\n\n"
                                 "**Environment background:** \n{basic_background}\n\n"
                                 '**Task goal:** \n"{task_prompt}"\n\n'
                                 "**Available atomic actions:** \n{atom_actions}\n"
-                            ),
+                                "**REQUIRED OUTPUT**\n"
+                                "[PLANS]:\n"
+                                "Step 1: <intent> — <left atomic_action>(...) <right atomic_action>(...)\n"
+                                "..."
+                                "Step N: <intent> — <left atomic_action>(...) <right atomic_action>(...)\n\n"
+
+                                # "[VALIDATION_CONDITIONS]:\n"
+                                # "Step 1: <explicit, image-verifiable post-condition>\n"
+                                # "..."
+                                # "Step N: <explicit, image-verifiable post-condition>\n\n"
+                                #
+                                # "Note that the atomic action specified at each step may be None if no action is taken.\n"
+                                # "Note that the VALIDATION_CONDITIONS MUST explicitly describe:\n"
+                                # "(1) the state of each robot arm and gripper, "
+                                # "(2) the state of each relevant object, and "
+                                # "(3) the arm–object relationship. Specifically, whether each object should be actively grasped by the gripper or released to be stably supported by the environment."
+                            ,
                         },
                     ]
                 ),
@@ -77,68 +95,3 @@ class TaskPrompt:
 
         # Return the prompt template and kwargs to be executed by the caller
         return prompt.invoke(kwargs)
-
-    @staticmethod
-    def two_stage_prompt(observations, **kwargs):
-        # for VLM generate image descriptions
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                SystemMessage(
-                    content="You are a helpful assistant to operate a robotic arm with a camera to generate task plans according to descriptions."
-                ),
-                HumanMessagePromptTemplate.from_template(
-                    [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/jpg;base64,{observation}",
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": "What is in the image? Return answer with their potential effects.",
-                        },
-                    ]
-                ),
-            ]
-        )
-
-        observation = (
-            observations["rgb"].cpu().numpy()
-            if isinstance(observations["rgb"], torch.Tensor)
-            else observations["rgb"]
-        )
-        kwargs.update({"observation": encode_image(observation)})
-        # for LLM generate task descriptions
-        prompt_query = ChatPromptTemplate.from_messages(
-            [
-                SystemMessage(
-                    content="You are a helpful assistant to operate a robotic arm with a camera to generate task plans according to descriptions."
-                ),
-                HumanMessagePromptTemplate.from_template(
-                    [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/jpg;base64,{observation}",
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": "Here is analysis for this image: {query}.",
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Using the context below, produce an actionable task plan.\n\n"
-                                "**Environment background:** \n{basic_background}\n\n"
-                                '**Task goal:** \n"{task_prompt}"\n\n'
-                                "**Available atomic actions:** \n{atom_actions}\n"
-                            ),
-                        },
-                    ]
-                ),
-            ]
-        )
-
-        return [prompt.invoke(kwargs), {"prompt": prompt_query, "kwargs": kwargs}]

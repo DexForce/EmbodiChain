@@ -1,0 +1,60 @@
+Drive Function (Trajectory Synchronization)
+"drive":
+    def drive(
+        left_arm_action=...,
+        right_arm_action=...,
+        monitor_sequences=[...],
+        error_functions=[...],
+        recovery_sequences=[...],
+    ) -> list[torch.Tensor]
+    Wraps one or two arm trajectories into synchronized full-robot actions.
+    • If only one arm action is provided, the other arm stays idle.
+    • If both are provided, they are temporally aligned and executed together.
+    • The actions are obtained from the output of the atomic action functions.
+    • `error_functions` optionally inject runtime disturbances before and during execution.
+    • `action_error_types` are applied once before the whole action trajectory.
+    • `object_error_types` are checked before each execution step.
+    • `recovery_sequences` maps each monitor sequence to a recovery sequence.
+
+Core Constraints
+- import "from functools import partial" and "from embodichain.lab.sim.agent.atom_actions import *" at the beginning of the code.
+- Every atomic action MUST be executed via a single `drive(...)` call.
+- Each `drive(...)` call must directly contain the atomic action(s); do NOT define actions separately and then pass them into `drive`.
+- For single-arm execution: specify the active arm’s action and explicitly set the unused arm to `None` within the same `drive(...)` call.
+- For dual-arm execution: both arms’ actions MUST be specified within the same `drive(...)` call.
+- Use exactly one `drive(...)` call per step; no exceptions.
+- Preserve the original task-plan step order and action semantics.
+
+Unified Monitor Semantics
+- All monitor functions follow the same meaning:
+    `True` = monitor triggered = failure occurred
+    `False` = monitor not triggered = failure not detected
+- This rule must be followed consistently for all monitor selection and code generation.
+- Even if a function name sounds state-like, treat `True` as failure trigger.
+- In particular:
+    `monitor_object_held(...) == True` means the object is no longer held successfully.
+
+Recovery and Error Injection Semantics
+- `error_functions` is optional.
+- `error_functions` must be passed into `drive(..., error_functions=[...])`.
+- When wrapping an error function with `partial`, pass the function object itself rather than calling it eagerly.
+- Object-level error functions should normally be written as a callable partial of `inject_object_error(...)`, for example:
+    `partial(inject_object_error, error_type="misplaced_object", error_obj="bottle")`
+- Action-level error functions should normally be written as a callable partial of `inject_action_error(...)`, for example:
+    `partial(inject_action_error, error_type="wrong_affordance", error_arm="right_arm")`
+- `error_type` must be chosen only from the listed runtime error functions.
+- `object_error_types` are triggered at each execution step.
+- `action_error_types` are triggered once before the whole action trajectory.
+- `drive(...)` decides internally whether each error function is actually triggered during execution.
+- `monitor_sequences` and `recovery_sequences` align one-to-one by outer index.
+- Each outer `monitor_sequences` entry may contain one or more monitor callables.
+- If any monitor callable inside the same outer entry returns `True`, that failure chain is treated as triggered.
+- Multiple monitor callables should only be grouped together when they are alternative detectors for the same failure and should share the same recovery sequence.
+- `error_functions` does not need to align one-to-one with `monitor_sequences`.
+- Multiple error functions may share the same monitor-and-recovery policy.
+- A single `drive(...)` call may contain multiple `monitor_sequences` / `recovery_sequences` pairs for the same step.
+- Each recovery entry should be a sequence of callable `partial(drive, ...)` steps.
+- Each recovery `partial(drive, ...)` step may contain either single-arm or dual-arm actions.
+- Inside each recovery `partial(drive, ...)`, arm actions must be passed lazily as callables such as `partial(grasp, ...)` or `partial(move_to_absolute_position, ...)`.
+- Do not eagerly evaluate atomic actions inside recovery definitions. For example, write `right_arm_action=partial(grasp, robot_name="right_arm", obj_name="bottle")`, not `right_arm_action=grasp(...)`.
+- Recovery actions must only use the provided atomic actions. Do not invent a separate recovery API.

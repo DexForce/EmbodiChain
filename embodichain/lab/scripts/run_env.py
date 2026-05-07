@@ -121,6 +121,7 @@ def main(args, env, gym_config):
             save_video=getattr(args, "save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
+            recovery=getattr(args, "recovery", False),
         )
 
     # Final reset.
