@@ -29,7 +29,7 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
     ```bash
     black .
     ```
-    > Currently, we use black==24.3.0 for formatting. Make sure to use the same version to avoid inconsistencies.
+    > Currently, we use black==26.3.1 for formatting. Make sure to use the same version to avoid inconsistencies.
 4.  **Submit a Pull Request**.
     *   Use the [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
     *   Keep PRs small and focused.

@@ -31,7 +31,7 @@ jobs:
         run: |
           echo "Workspace: ${GITHUB_WORKSPACE}"
           ls
-          pip install black==24.3.0
+          pip install black==26.3.1
           black --check --diff --color ./
           if [ $? -ne 0 ]; then
             echo "Code style check failed, please run [black ./] before commit!"

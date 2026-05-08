@@ -58,7 +58,7 @@ EmbodiChain/
 
 ### Formatting
 
-- **Formatter**: `black==24.3.0` — run before every commit.
+- **Formatter**: `black==26.3.1` — run before every commit.
   ```bash
   black .
   ```
@@ -193,7 +193,7 @@ Include:
 
 1. **Fork** the repository and create a focused branch.
 2. **Keep PRs small** — one logical change per PR.
-3. **Format** the code with `black==24.3.0` before submitting.
+3. **Format** the code with `black==26.3.1` before submitting.
 4. **Update documentation** for any public API changes.
 5. **Add tests** that prove your fix or feature works.
 6. Use the `/pr` skill to create PRs following the project's template and label conventions.
