@@ -27,7 +27,6 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
-
 material_assets = "materials"
 
 

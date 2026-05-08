@@ -5,6 +5,10 @@
 
 This page lists all available dataset functors that can be used with the Dataset Manager. Dataset functors are configured using {class}`~cfg.DatasetFunctorCfg` and are responsible for collecting and saving episode data during environment interaction.
 
+````{tip}
+**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new dataset functor with the correct signature, `DatasetFunctorCfg` registration, and module placement in `datasets.py`.
+````
+
 ## Recording Functors
 
 ```{list-table} Dataset Recording Functors

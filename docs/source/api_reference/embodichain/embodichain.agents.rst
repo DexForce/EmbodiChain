@@ -48,6 +48,7 @@ Reinforcement Learning
 
       algo
       buffer
+      collector
       models
       train
       utils

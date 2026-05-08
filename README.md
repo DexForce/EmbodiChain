@@ -2,14 +2,14 @@
 
 ![teaser](assets/imgs/teaser.jpg)
 
-[![License](https://img.shields.io/github/license/DexForce/EmbodiChain)](LICENSE)
-[![Website](https://img.shields.io/badge/website-dexforce.com-yellow?logo=google-chrome&logoColor=white)](https://dexforce.com/embodichain/index.html#/)
-[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-docs-blue?logo=github&logoColor=white)](https://dexforce.github.io/EmbodiChain/main/index.html)
-[![Python](https://img.shields.io/badge/python-3.10%20|%203.11-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
-[![Version](https://img.shields.io/github/v/release/DexForce/EmbodiChain?label=version)](https://github.com/DexForce/EmbodiChain/releases)
+[![License](https://img.shields.io/github/license/DexForce/EmbodiChain?style=for-the-badge)](LICENSE)
+[![Website](https://img.shields.io/badge/website-dexforce.com-yellow?style=for-the-badge&logo=google-chrome&logoColor=white)](https://dexforce.com/embodichain/index.html#/)
+[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-docs-blue?style=for-the-badge&logo=github&logoColor=white)](https://dexforce.github.io/EmbodiChain/main/index.html)
+[![Python](https://img.shields.io/badge/python-3.10%20|%203.11-blue?style=for-the-badge&logo=python&logoColor=white)](https://docs.python.org/3/whatsnew/3.10.html)
+[![Version](https://img.shields.io/github/v/release/DexForce/EmbodiChain?style=for-the-badge&label=version)](https://github.com/DexForce/EmbodiChain/releases)
 ---
 
-EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, real-to-sim data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
+EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, automated generative data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
 
 > [!NOTE]
 > EmbodiChain is in Alpha and under active development:
@@ -36,9 +36,9 @@ The figure below illustrates the overall architecture of EmbodiChain:
 
 To get started with EmbodiChain, follow these steps:
 
-- [Installation Guide](https://dexforce.github.io/EmbodiChain/quick_start/install.html)
-- [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/tutorial/index.html)
-- [API Reference](https://dexforce.github.io/EmbodiChain/api_reference/index.html)
+- [Installation Guide](https://dexforce.github.io/EmbodiChain/main/quick_start/install.html)
+- [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html)
+- [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html)
 
 ## Contribution Guide
 

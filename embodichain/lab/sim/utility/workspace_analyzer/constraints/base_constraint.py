@@ -21,7 +21,6 @@ import torch
 
 from embodichain.utils import logger
 
-
 __all__ = [
     "IConstraintChecker",
     "BaseConstraintChecker",

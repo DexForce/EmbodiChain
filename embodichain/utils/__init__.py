@@ -16,7 +16,6 @@
 
 from .configclass import configclass, is_configclass
 
-
 GLOBAL_SEED = 1024
 
 
