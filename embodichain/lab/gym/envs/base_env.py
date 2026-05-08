@@ -239,8 +239,7 @@ class BaseEnv(gym.Env):
         """
         if not hasattr(self, "_camera_group_ids"):
             self._camera_group_ids: List[int] = []
-        if self.sim.is_rt_enabled:
-            self._camera_group_ids.append(group_id)
+        self._camera_group_ids.append(group_id)
 
     def _setup_scene(self, **kwargs):
         # Init sim manager.
@@ -273,10 +272,9 @@ class BaseEnv(gym.Env):
 
         # Setup camera groups for rendering.
         self._camera_group_ids: List[int] = []
-        if self.sim.is_rt_enabled:
-            for sensor in self.sensors.values():
-                if isinstance(sensor, Camera):
-                    self._camera_group_ids.append(sensor.group_id)
+        for sensor in self.sensors.values():
+            if isinstance(sensor, Camera):
+                self._camera_group_ids.append(sensor.group_id)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Load the robot agent, setup the controller and action space.
@@ -367,10 +365,8 @@ class BaseEnv(gym.Env):
         """
         obs = TensorDict({}, batch_size=[self.num_envs], device=self.device)
 
-        fetch_only = False
-        if self.sim.is_rt_enabled:
-            fetch_only = True
-            self.sim.render_camera_group(self._camera_group_ids)
+        fetch_only = True
+        self.sim.render_camera_group(self._camera_group_ids)
 
         for sensor_name, sensor in self.sensors.items():
             sensor.update(fetch_only=fetch_only)
