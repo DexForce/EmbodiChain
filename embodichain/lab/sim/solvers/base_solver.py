@@ -171,8 +171,14 @@ class BaseSolver(metaclass=ABCMeta):
                 root_link_name=self.root_link_name,
                 device=self.device,
             )
+            # Use forward_kinematics_tensor if available, otherwise forward_kinematics
+            fk_func = getattr(
+                self.pk_serial_chain, 
+                "forward_kinematics_tensor", 
+                self.pk_serial_chain.forward_kinematics
+            )
             self.compiled_fk = torch.compile(
-                self.pk_serial_chain.forward_kinematics_tensor,
+                fk_func,
                 fullgraph=True,
                 dynamic=True,
             )

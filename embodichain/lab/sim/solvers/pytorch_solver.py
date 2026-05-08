@@ -161,16 +161,22 @@ class PytorchSolver(BaseSolver):
         )
 
         # Inverse kinematics is available via damped least squares (iterative steps with Jacobian pseudo-inverse damped to avoid oscillation near singularlities).
+        import inspect
+        ik_kwargs = {
+            "pos_tolerance": self._pos_eps,
+            "rot_tolerance": self._rot_eps,
+            "joint_limits": self.lim.T,
+            "early_stopping_any_converged": True,
+            "max_iterations": self._max_iterations,
+            "lr": self._dt,
+            "num_retries": 1,
+        }
+        if "use_compile" in inspect.signature(self.pk.PseudoInverseIK.__init__).parameters:
+            ik_kwargs["use_compile"] = True
+
         self.pik = self.pk.PseudoInverseIK(
             self.pk_serial_chain,
-            pos_tolerance=self._pos_eps,
-            rot_tolerance=self._rot_eps,
-            joint_limits=self.lim.T,
-            early_stopping_any_converged=True,
-            max_iterations=self._max_iterations,
-            lr=self._dt,
-            num_retries=1,
-            use_compile=True,
+            **ik_kwargs
         )
 
         self.dof = self.pk_serial_chain.n_joints
