@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 from embodichain.utils import logger
 
@@ -22,9 +24,13 @@ class BaseAgentEnv:
 
     def _init_agents(self, agent_config, task_name, agent_config_path=None):
         from embodichain.agents.hierarchy.task_agent import TaskAgent
-        from embodichain.agents.hierarchy.code_agent import CodeAgent
-        from embodichain.agents.hierarchy.failure_anticipation_agent import FailureAnticipationAgent
-        from embodichain.agents.hierarchy.llm import task_llm, code_llm, failure_anticipation_llm
+        from embodichain.agents.hierarchy.compile_agent import CompileAgent
+        from embodichain.agents.hierarchy.recovery_agent import RecoveryAgent
+        from embodichain.agents.hierarchy.llm import (
+            task_llm,
+            compile_llm,
+            recovery_llm,
+        )
 
         self.task_agent = TaskAgent(
             task_llm,
@@ -33,17 +39,17 @@ class BaseAgentEnv:
             task_name=task_name,
             config_dir=agent_config_path,
         )
-        self.failure_anticipation_agent = FailureAnticipationAgent(
-            failure_anticipation_llm,
+        self.recovery_agent = RecoveryAgent(
+            recovery_llm,
             **agent_config["Agent"],
-            **agent_config["FailureAnticipationAgent"],
+            **agent_config["RecoveryAgent"],
             task_name=task_name,
             config_dir=agent_config_path,
         )
-        self.code_agent = CodeAgent(
-            code_llm,
+        self.compile_agent = CompileAgent(
+            compile_llm,
             **agent_config["Agent"],
-            **agent_config["CodeAgent"],
+            **agent_config["CompileAgent"],
             task_name=task_name,
             config_dir=agent_config_path,
         )
@@ -169,48 +175,54 @@ class BaseAgentEnv:
         )
         return xpos.squeeze(0)
 
-    # -------------------- get only code for action list --------------------
-    def generate_code_for_actions(self, regenerate=False, recovery=False, **kwargs):
+    # -------------------- get compiled graph for action list --------------------
+    def generate_graph_for_actions(self, regenerate=False, recovery=False, **kwargs):
         logger.log_info(
-            f"Generate code for creating {'recovery' if recovery else ''} action list for {self.code_agent.task_name}.",
+            f"Generate graph for creating {'recovery' if recovery else ''} action list for {self.compile_agent.task_name}.",
             color="yellow" if recovery else "green",
         )
 
-        # Task planning
-        print(f"\033[92m\nStart task planning.\n\033[0m")
-
+        print(f"\033[92m\nStart task graph generation.\n\033[0m")
         task_agent_input = self.task_agent.get_composed_observations(
-            env=self, regenerate=regenerate, observations=self.get_obs_for_agent(), **kwargs
+            env=self,
+            regenerate=regenerate,
+            observations=self.get_obs_for_agent(),
+            **kwargs,
         )
-        task_plan = self.task_agent.generate(**task_agent_input)
+        task_graph = self.task_agent.generate(**task_agent_input)
 
-        # Failure anticipation
-        anticipated_failures = ''
+        recovery_spec = None
         if recovery:
-            assert self.code_agent.prompt_name == "generate_recovery_code"
-            print(f"\033[91m\nStart failure anticipation for recovery.\n\033[0m")
-            failure_anticipation_input = self.failure_anticipation_agent.get_composed_observations(
-                env=self, regenerate=regenerate, task_plan=task_plan, **kwargs
+            print(f"\033[91m\nStart recovery spec generation.\n\033[0m")
+            recovery_agent_input = self.recovery_agent.get_composed_observations(
+                env=self,
+                regenerate=regenerate,
+                task_graph=task_graph,
+                **kwargs,
             )
-            anticipated_failures = self.failure_anticipation_agent.generate(
-                **failure_anticipation_input
-            )
-        else:
-            assert self.code_agent.prompt_name == "generate_code"
+            recovery_spec = self.recovery_agent.generate(**recovery_agent_input)
 
-        # Code generation
-        print(f"\033[94m\nStart code generation.\n\033[0m")
-        code_agent_input = self.code_agent.get_composed_observations(
-            env=self, regenerate=regenerate, task_plan=task_plan, anticipated_failures=anticipated_failures, **kwargs
+        print(f"\033[94m\nStart graph compilation.\n\033[0m")
+        compile_agent_input = self.compile_agent.get_composed_observations(
+            env=self,
+            regenerate=regenerate,
+            task_graph=task_graph,
+            recovery_spec=recovery_spec,
+            recovery_enabled=recovery,
+            **kwargs,
         )
-        code_file_path, kwargs, code = self.code_agent.generate(**code_agent_input)
+        graph_file_path, kwargs, graph_content = self.compile_agent.generate(
+            **compile_agent_input
+        )
 
-        return code_file_path, kwargs, code
+        return graph_file_path, kwargs, graph_content
 
     # -------------------- get action list --------------------
-    def create_demo_action_list(self, regenerate=False, recovery=False, *args, **kwargs):
-        code_file_path, kwargs, _ = self.generate_code_for_actions(
+    def create_demo_action_list(
+        self, regenerate=False, recovery=False, *args, **kwargs
+    ):
+        graph_file_path, kwargs, _ = self.generate_graph_for_actions(
             regenerate=regenerate, recovery=recovery
         )
-        action_list = self.code_agent.act(code_file_path, **kwargs)
+        action_list = self.compile_agent.act(graph_file_path, **kwargs)
         return action_list

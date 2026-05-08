@@ -17,36 +17,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
-
-import numpy as np
-from langchain_core.prompts import ChatPromptTemplate
+from typing import Any
 
 from embodichain.agents.hierarchy.agent_base import AgentBase
-from embodichain.agents.mllm.prompt import FailureAnticipationPrompt
+from embodichain.agents.mllm.prompt import RecoveryPrompt
 from embodichain.data import database_agent_prompt_dir
+from embodichain.utils.llm_json import normalize_json_content
 from embodichain.utils.utility import load_txt
 
-import re
-from typing import List
+__all__ = ["RecoveryAgent"]
 
-class FailureAnticipationAgent(AgentBase):
-    prompt: ChatPromptTemplate
-    object_list: List[str]
-    target: np.ndarray
+
+class RecoveryAgent(AgentBase):
+    """Generate lightweight recovery bindings for a nominal task graph."""
+
     prompt_name: str
-    prompt_kwargs: Dict[str, Dict]
+    prompt_kwargs: dict[str, dict[str, Any]]
 
     def __init__(self, llm, **kwargs) -> None:
         super().__init__(**kwargs)
         if llm is None:
             raise ValueError(
                 "LLM is None. Please set the following environment variables:\n"
-                "  - AZURE_OPENAI_ENDPOINT\n"
-                "  - AZURE_OPENAI_API_KEY\n"
-                "Example:\n"
-                "  export AZURE_OPENAI_ENDPOINT='https://your-endpoint.openai.azure.com/'\n"
-                "  export AZURE_OPENAI_API_KEY='your-api-key'"
+                "  - OPENAI_API_KEY\n"
+                "  - LLM_URL"
             )
         self.llm = llm
 
@@ -54,23 +48,19 @@ class FailureAnticipationAgent(AgentBase):
         log_dir = kwargs.get(
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
-        file_path = log_dir / "agent_anticipated_failures.txt"
+        file_path = Path(log_dir) / "agent_recovery_spec.json"
 
         if not kwargs.get("regenerate", False) and file_path.exists():
-            print(
-                f"Anticipated failures file already exists at {file_path}, skipping writing."
-            )
+            print(f"Recovery spec already exists at {file_path}.")
             return load_txt(file_path)
 
-        prompts_ = getattr(FailureAnticipationPrompt, self.prompt_name)(**kwargs)
-        response = self.llm.invoke(prompts_)
-        print(
-            f"\033[91m\nFailure anticipation agent output:\n{response.content}\n\033[0m"
-        )
+        prompt = getattr(RecoveryPrompt, self.prompt_name)(**kwargs)
+        response = self.llm.invoke(prompt)
+        print(f"\033[91m\nRecovery agent output:\n{response.content}\n\033[0m")
 
+        content = normalize_json_content(response.content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "w") as f:
-            f.write(response.content)
-        print(f"Generated anticipated failures saved to {file_path}")
+        file_path.write_text(content, encoding="utf-8")
+        print(f"Generated recovery spec saved to {file_path}")
 
-        return response.content
+        return content

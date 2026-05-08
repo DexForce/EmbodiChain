@@ -177,7 +177,6 @@ cache
 materials
 
 embodichain/toolkits/outputs/*
-embodichain/toolkits/outputs/*
 
 embodichain/database/tmp/*
 embodichain/database/train/*
