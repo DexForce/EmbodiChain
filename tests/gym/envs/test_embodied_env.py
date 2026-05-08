@@ -28,7 +28,7 @@ from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.data import get_data_path
 
-NUM_ENVS = 10
+NUM_ENVS = 2
 
 urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
 METADATA = {
@@ -161,16 +161,23 @@ class EmbodiedEnvTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        self.env.close()
+        if hasattr(self, "env") and self.env is not None:
+            self.env.close()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        import gc
+
+        gc.collect()
 
 
-@pytest.mark.skip(reason="Skipping tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation("cuda")

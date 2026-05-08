@@ -30,15 +30,39 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     renderer = config.getoption("--renderer")
     if renderer:
-        if renderer not in ["legacy", "hybrid", "fast-rt"]:
+        if renderer not in ["hybrid", "fast-rt"]:
             pytest.exit(
-                f"Invalid renderer: {renderer}. Must be one of 'legacy', 'hybrid', 'fast-rt'"
+                f"Invalid renderer: {renderer}. Must be one of 'hybrid', 'fast-rt'"
             )
 
         # Override the global default renderer in the simulation config
         from embodichain.lab.sim import cfg
 
         cfg.DEFAULT_RENDERER = renderer
+
+        # PREVENT IMPLICIT INITIALIZATION BY EXPLICITLY INITIALIZING DEXSIM HERE
+        import dexsim
+        import dexsim.types
+
+        # Map string to dexsim configuration types
+        renderer_map = {
+            "hybrid": dexsim.types.Renderer.HYBRID,
+            "fast-rt": dexsim.types.Renderer.FASTRT,
+        }
+        backend_map = {
+            "hybrid": dexsim.types.Backend.VULKAN,
+            "fast-rt": dexsim.types.Backend.VULKAN,
+        }
+
+        if dexsim.get_world_num() == 0:
+            sim_config = dexsim.WorldConfig()
+            sim_config.renderer = renderer_map.get(
+                renderer, dexsim.types.Renderer.HYBRID
+            )
+            sim_config.backend = backend_map.get(renderer, dexsim.types.Backend.VULKAN)
+            sim_config.open_windows = False
+            # This triggers initialization with the correct properties immediately.
+            dexsim.init_sim_engine(sim_config)
 
 
 @pytest.fixture(autouse=True, scope="function")
