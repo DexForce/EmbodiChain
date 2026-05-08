@@ -22,6 +22,7 @@ from embodichain.lab.sim.utility.workspace_analyzer import (
     WorkspaceAnalyzerConfig,
     AnalysisMode
 )
+from embodichain.lab.sim.utility.workspace_analyzer.configs import VisualizationConfig
 
 # Setup simulation
 sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
