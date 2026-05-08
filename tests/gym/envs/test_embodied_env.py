@@ -160,17 +160,34 @@ class EmbodiedEnvTest:
         assert obs.get("robot") is not None, "Expected 'robot' info in the info dict"
 
     def teardown_method(self):
+        pass
+
+    @classmethod
+    def teardown_class(cls):
         """Clean up resources after each test method."""
-        self.env.close()
+        if hasattr(cls, "env") and cls.env is not None:
+            cls.env.close()
+        import embodichain.lab.sim as om
+        om.SimulationManager.flush_cleanup_queue()
+        import gc; gc.collect()
+
 
 
 @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation("cpu")
+        pass
+
+    @classmethod
+    def setup_class(cls):
+        cls.setup_simulation("cpu")
 
 
 @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
-        self.setup_simulation("cuda")
+        pass
+
+    @classmethod
+    def setup_class(cls):
+        cls.setup_simulation("cuda")
