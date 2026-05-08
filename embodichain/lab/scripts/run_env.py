@@ -38,6 +38,10 @@ def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
+    if getattr(action_list, "already_executed", False):
+        log_info("Action list was already executed by the agent runtime.")
+        return True
+
     for action in tqdm.tqdm(
         action_list, desc=f"Executing action list #{idx}", unit="step"
     ):

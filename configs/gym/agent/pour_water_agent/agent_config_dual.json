@@ -1,12 +1,12 @@
 {
     "TaskAgent": {
-        "prompt_name": "generate_task_plan"
+        "prompt_name": "generate_task_graph"
     },
-    "FailureAnticipationAgent": {
-        "prompt_name": "anticipate_potential_failure"
+    "RecoveryAgent": {
+        "prompt_name": "augment_task_graph"
     },
-    "CodeAgent": {
-        "prompt_name": "generate_recovery_code"
+    "CompileAgent": {
+        "prompt_name": "compile_agent_graph"
     },
     "Agent": {
         "prompt_kwargs": {
@@ -22,33 +22,17 @@
                 "type": "text",
                 "name": "atom_actions.txt"
             },
-            "code_prompt": {
-                "type": "text",
-                "name": "code_prompt.txt"
-            },
-            "code_example": {
-                "type": "text",
-                "name": "code_example.txt"
-            },
             "error_functions": {
                 "type": "text",
-                "name": "failure_recovery/error_functions.txt"
+                "name": "error_functions.txt"
             },
             "monitor_functions": {
                 "type": "text",
-                "name": "failure_recovery/monitor_functions.txt"
+                "name": "monitor_functions.txt"
             },
-            "failure_anticipation_rules": {
+            "recovery_rules": {
                 "type": "text",
-                "name": "failure_recovery/failure_anticipation_rules.txt"
-            },
-            "recovery_code_prompt": {
-                "type": "text",
-                "name": "failure_recovery/recovery_code_prompt.txt"
-            },
-            "recovery_code_example": {
-                "type": "text",
-                "name": "failure_recovery/recovery_code_example.txt"
+                "name": "recovery_rules.txt"
             }
         }
     }

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 import ast
@@ -160,7 +162,9 @@ def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=
 
     if force_valid:
         try:
-            ret, qpos = env.get_arm_ik(solved_pose, is_left=is_left, qpos_seed=qpos_seed)
+            ret, qpos = env.get_arm_ik(
+                solved_pose, is_left=is_left, qpos_seed=qpos_seed
+            )
             if not ret:
                 log_error(f"Generate {name} qpos failed.\n")
         except Exception as e:
@@ -169,7 +173,9 @@ def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=
             )
             solved_pose = find_nearest_valid_pose(env, select_arm, solved_pose)
 
-            ret, qpos = env.get_arm_ik(solved_pose, is_left=is_left, qpos_seed=qpos_seed)
+            ret, qpos = env.get_arm_ik(
+                solved_pose, is_left=is_left, qpos_seed=qpos_seed
+            )
     else:
         ret, qpos = env.get_arm_ik(solved_pose, is_left=is_left, qpos_seed=qpos_seed)
         if not ret:
@@ -309,26 +315,34 @@ def extract_drive_calls(code_str: str) -> List[str]:
 
     return drive_blocks
 
+
 def apply_offset_to_pose(pose, offset: list):
     pose[0, 3] += offset[0]
     pose[1, 3] += offset[1]
     pose[2, 3] += offset[2]
     return pose
 
+
 def resolve_action(action, env, kwargs):
     if callable(action):
         return action(env=env, **kwargs)
     return action
 
-def get_error_probability(error_function, default_probability):
-    probability = default_probability
-    keywords = getattr(error_function, "keywords", None)
-    if keywords is not None:
-        probability = keywords.get("probability", default_probability)
+def sync_agent_state_from_robot(env) -> None:
+    """Synchronize cached agent arm states from the physical robot state."""
+    action = env.robot.get_qpos().squeeze(0)
+    env.left_arm_current_qpos = action[env.left_arm_joints]
+    env.left_arm_current_xpos = env.robot.compute_fk(
+        qpos=env.left_arm_current_qpos,
+        name="left_arm",
+        to_matrix=True,
+    ).squeeze(0)
+    env.left_arm_current_gripper_state = action[env.left_eef_joints][0].unsqueeze(0)
 
-    probability = float(probability)
-    if probability < 0.0 or probability > 1.0:
-        raise ValueError(
-            f"Error function probability must be in [0, 1], got {probability}."
-        )
-    return probability
+    env.right_arm_current_qpos = action[env.right_arm_joints]
+    env.right_arm_current_xpos = env.robot.compute_fk(
+        qpos=env.right_arm_current_qpos,
+        name="right_arm",
+        to_matrix=True,
+    ).squeeze(0)
+    env.right_arm_current_gripper_state = action[env.right_eef_joints][0].unsqueeze(0)

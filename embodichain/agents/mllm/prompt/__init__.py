@@ -5,5 +5,5 @@
 # ----------------------------------------------------------------------------
 
 from .task_prompt import TaskPrompt
-from .code_prompt import CodePrompt
-from .failure_anticipation_prompt import FailureAnticipationPrompt
+from .compile_prompt import CompilePrompt
+from .recovery_prompt import RecoveryPrompt

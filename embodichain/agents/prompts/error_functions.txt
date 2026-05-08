@@ -1,0 +1,30 @@
+Possible external failure descriptions for recovery spec generation.
+
+These entries are prompt context only. They describe failures that may happen outside the agent during execution, such as physics randomization, object motion, grasp loss, or an externally disturbed trajectory. Do not output these as executable `error_functions`, do not set probabilities, and do not ask the compiler/runtime to inject them.
+
+1. `misplaced_object`
+Kind:
+- External object pose disturbance.
+
+Purpose:
+- A rigid object is shifted away from its expected pose before or during a nominal edge.
+
+Typical context:
+- The target object moved on the table.
+- A held or nearby object drifted far enough that the next planned action may miss.
+
+Useful monitor families:
+- Object movement or object pose monitors.
+
+2. `fallen_object`
+Kind:
+- External object orientation disturbance.
+
+Purpose:
+- A rigid object is tipped or fallen so its expected grasp, pour, or placement affordance is no longer valid.
+
+Typical context:
+- A cup, bottle, or container falls before grasping or while being manipulated.
+
+Useful monitor families:
+- Object pose, fallen-object, or held-object monitors.

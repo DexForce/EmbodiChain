@@ -14,80 +14,33 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from typing import List, Dict, Tuple
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
 from embodichain.agents.hierarchy.agent_base import AgentBase
-from langchain_core.prompts import ChatPromptTemplate
-from embodichain.data import database_2d_dir
-from embodichain.utils.utility import load_txt
 from embodichain.agents.mllm.prompt import TaskPrompt
 from embodichain.data import database_agent_prompt_dir
-from pathlib import Path
-import numpy as np
-import time
-import re
+from embodichain.utils.llm_json import normalize_json_content
+from embodichain.utils.utility import load_txt
 
-def extract_plan_and_validation(text: str) -> Tuple[str, List[str], List[str]]:
-    def get_section(src: str, name: str, next_name) -> str:
-        if next_name:
-            pat = re.compile(
-                rf"\[{name}\]\s*:\s*(.*?)\s*(?=\[{next_name}\]\s*:|\Z)",
-                re.DOTALL | re.IGNORECASE,
-            )
-        else:
-            pat = re.compile(
-                rf"\[{name}\]\s*:\s*(.*?)\s*\Z",
-                re.DOTALL | re.IGNORECASE,
-            )
-        m = pat.search(src)
-        return m.group(1).strip() if m else ""
-
-    step_re = re.compile(
-        r"Step\s*\d+\s*:.*?(?=Step\s*\d+\s*:|\Z)",
-        re.DOTALL | re.IGNORECASE,
-    )
-
-    # ---- plans ----
-    plans_raw = get_section(text, "PLANS", "VALIDATION_CONDITIONS")
-    plan_steps = [m.group(0).rstrip() for m in step_re.finditer(plans_raw)]
-    plan_str = "\n".join(plan_steps)
-
-    # normalized plan list (strip "Step k:")
-    plan_list = []
-    for step in plan_steps:
-        content = re.sub(r"^Step\s*\d+\s*:\s*", "", step, flags=re.IGNORECASE).strip()
-        if content:
-            plan_list.append(content)
-
-    # ---- validations ----
-    vals_raw = get_section(text, "VALIDATION_CONDITIONS", None)
-    validation_list = []
-    for m in step_re.finditer(vals_raw):
-        content = re.sub(
-            r"^Step\s*\d+\s*:\s*", "", m.group(0), flags=re.IGNORECASE
-        ).strip()
-        if content:
-            validation_list.append(content)
-
-    return plan_str, plan_list, validation_list
+__all__ = ["TaskAgent"]
 
 
 class TaskAgent(AgentBase):
-    prompt: ChatPromptTemplate
-    object_list: List[str]
-    target: np.ndarray
+    """Generate the nominal atomic-action task graph."""
+
     prompt_name: str
-    prompt_kwargs: Dict[str, Dict]
+    prompt_kwargs: dict[str, dict[str, Any]]
 
     def __init__(self, llm, **kwargs) -> None:
         super().__init__(**kwargs)
         if llm is None:
             raise ValueError(
                 "LLM is None. Please set the following environment variables:\n"
-                "  - AZURE_OPENAI_ENDPOINT\n"
-                "  - AZURE_OPENAI_API_KEY\n"
-                "Example:\n"
-                "  export AZURE_OPENAI_ENDPOINT='https://your-endpoint.openai.azure.com/'\n"
-                "  export AZURE_OPENAI_API_KEY='your-api-key'"
+                "  - OPENAI_API_KEY\n"
+                "  - LLM_URL"
             )
         self.llm = llm
 
@@ -95,25 +48,22 @@ class TaskAgent(AgentBase):
         log_dir = kwargs.get(
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
-        file_path = log_dir / "agent_generated_plan.txt"
+        file_path = Path(log_dir) / "agent_task_graph.json"
 
-        # Check if the file already exists
-        if not kwargs.get("regenerate", False):
-            if file_path.exists():
-                print(f"Plan file already exists at {file_path}, skipping writing.")
-                return load_txt(file_path)
+        if not kwargs.get("regenerate", False) and file_path.exists():
+            print(f"Task graph already exists at {file_path}.")
+            return load_txt(file_path)
 
-        # Generate query via LLM
-        prompts_ = getattr(TaskPrompt, self.prompt_name)(**kwargs)
-        response = self.llm.invoke(prompts_)
+        prompt = getattr(TaskPrompt, self.prompt_name)(**kwargs)
+        response = self.llm.invoke(prompt)
         print(f"\033[92m\nTask agent output:\n{response.content}\n\033[0m")
 
+        content = normalize_json_content(response.content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "w") as f:
-            f.write(response.content)
-        print(f"Generated task plan saved to {file_path}")
+        file_path.write_text(content, encoding="utf-8")
+        print(f"Generated task graph saved to {file_path}")
 
-        return response.content
+        return content
 
     def act(self, *args, **kwargs):
         return super().act(*args, **kwargs)

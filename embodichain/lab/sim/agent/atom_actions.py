@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 from embodichain.utils.logger import log_info, log_warning, log_error
 from copy import deepcopy
@@ -40,35 +42,35 @@ from embodichain.lab.sim.agent.atom_action_utils import (
     extract_drive_calls,
     apply_offset_to_pose,
     resolve_action,
-    get_error_probability,
+    sync_agent_state_from_robot,
 )
 from embodichain.lab.sim.agent.monitor_functions import *
-from embodichain.agents.hierarchy.error_agent import (
-    inject_object_error,
-    inject_action_error,
-    action_error_types,
-    object_error_types,
-)
-
 
 """
 --------------------------------------------Atom action functions----------------------------------------------------
 --------------------------------------------Atom action functions----------------------------------------------------
 --------------------------------------------Atom action functions----------------------------------------------------
 """
+
+
 def move_to_target_pose(
     robot_name: str,
     target_pose=None,
     sample_num: int = 20,
     env=None,
     force_valid=False,
-    **kwargs
+    **kwargs,
 ):
     select_qpos_traj = []
     ee_state_list_select = []
 
-    is_left, select_arm, select_arm_current_qpos, select_arm_current_pose, \
-        select_arm_current_gripper_state = get_arm_states(env, robot_name)
+    (
+        is_left,
+        select_arm,
+        select_arm_current_qpos,
+        select_arm_current_pose,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
 
     target_pose, move_target_qpos = get_qpos(
         env,
@@ -91,14 +93,18 @@ def move_to_target_pose(
         sample_num,
         select_arm_current_gripper_state,
         select_qpos_traj,
-        ee_state_list_select
+        ee_state_list_select,
     )
 
     actions = finalize_actions(select_qpos_traj, ee_state_list_select)
 
-    log_info(f"Total generated trajectory number for move to target: {len(actions)}.", color="green")
+    log_info(
+        f"Total generated trajectory number for move to target: {len(actions)}.",
+        color="green",
+    )
 
     return actions
+
 
 def grasp(
     robot_name: str,
@@ -831,7 +837,14 @@ def open_gripper(robot_name: str, env=None, **kwargs):
         select_arm_current_gripper_state,
     ) = get_arm_states(env, robot_name)
 
-    if select_arm_current_gripper_state >= (env.open_state - kwargs.get('open_threshold', 0.01)):
+    current_gripper_state = torch.as_tensor(
+        select_arm_current_gripper_state,
+        dtype=env.open_state.dtype,
+        device=env.open_state.device,
+    )
+    if torch.all(
+        current_gripper_state >= (env.open_state - kwargs.get("open_threshold", 0.01))
+    ).item():
         actions = finalize_actions(
             [select_arm_current_qpos],
             [select_arm_current_gripper_state],
@@ -867,50 +880,16 @@ def open_gripper(robot_name: str, env=None, **kwargs):
     return actions
 
 
-OBJECT_ERROR_TRIGGER_PROBABILITY = 0.1
-ACTION_ERROR_TRIGGER_PROBABILITY = 0
-
-
 def drive(
     left_arm_action=None,
     right_arm_action=None,
-    error_functions=None,
     monitor_sequences=None,
-    recovery_sequences=None,
     env=None,
+    return_result=False,
     **kwargs,
 ):
-
-    action_error_functions = []
-    object_error_functions = []
-
     left_arm_action = resolve_action(left_arm_action, env, kwargs)
     right_arm_action = resolve_action(right_arm_action, env, kwargs)
-
-    if error_functions is not None:
-        for error_function in error_functions:
-            error_type = error_function.keywords.get("error_type", None)
-            if error_type in object_error_types:
-                object_error_functions.append(error_function)
-            else:
-                action_error_functions.append(error_function)
-
-    for error_function in action_error_functions:
-        probability = get_error_probability(
-            error_function, ACTION_ERROR_TRIGGER_PROBABILITY
-        )
-        if np.random.rand() > probability:
-            continue
-
-        left_arm_action, right_arm_action = error_function(
-            left_arm_action=left_arm_action,
-            right_arm_action=right_arm_action,
-            env=env,
-            **kwargs,
-        )
-
-    original_left_arm_action_provided = left_arm_action is not None
-    original_right_arm_action_provided = right_arm_action is not None
 
     if left_arm_action is not None and right_arm_action is not None:
         len_left = len(left_arm_action)
@@ -975,26 +954,26 @@ def drive(
         action = actions[i]
 
         env.step(action)
-        env.update_obj_info()
 
-        for error_function in object_error_functions:
-            probability = get_error_probability(
-                error_function, OBJECT_ERROR_TRIGGER_PROBABILITY
-            )
-            if np.random.rand() > probability:
-                continue
-
-            error_function(actions=None, env=env, **kwargs)
-            error_function_name = getattr(
-                error_function.func, "__name__", error_function.__class__.__name__
-            )
-            print(f"\033[91mError function {error_function_name} triggered at step {i}.\033[0m")
+        # # sheng: debug only, remind to delete finally
+        # from embodichain.agents.hierarchy.error_agent import misplaced_object
+        #
+        # if i == len(actions) // 2:
+        #     print('123')
+        #         # misplaced_object(
+        #         #     env, "bottle", error_pose=None, relative_error_xyz=[0.02, 0.02, 0]
+        #         # )
+        # # if np.random.random() < 0.02:
+        # #     misplaced_object(
+        # #         env, "bottle", error_pose=None, relative_error_xyz=[0.02, 0.02, 0]
+        # #     )
 
         if monitor_sequences is not None:
             for monitor_idx, monitor_sequence in enumerate(monitor_sequences):
                 for function in monitor_sequence:
                     result = function()
                     if result == True:
+                        env.update_obj_info()
                         function_name = getattr(
                             function.func, "__name__", function.__class__.__name__
                         )
@@ -1002,86 +981,26 @@ def drive(
                             f"Monitor function {function_name} triggered at step {i}."
                         )
 
-                        if recovery_sequences is not None and monitor_idx < len(
-                            recovery_sequences
-                        ):
-                            recovery_sequence = recovery_sequences[monitor_idx]
-                            if recovery_sequence is not None:
-                                remaining_left_arm_action = None
-                                remaining_right_arm_action = None
-                                if (
-                                    original_left_arm_action_provided
-                                    and left_arm_action is not None
-                                    and i + 1 < len(left_arm_action)
-                                ):
-                                    remaining_left_arm_action = left_arm_action[i + 1 :]
-                                if (
-                                    original_right_arm_action_provided
-                                    and right_arm_action is not None
-                                    and i + 1 < len(right_arm_action)
-                                ):
-                                    remaining_right_arm_action = right_arm_action[i + 1 :]
-
-                                for recovery_step in recovery_sequence:
-
-                                    # update info
-                                    # TODO: do not set gripper state, even if when regrasping, it will first close
-                                    action = env.robot.get_qpos().squeeze(0)
-                                    env.left_arm_current_qpos = action[
-                                        env.left_arm_joints
-                                    ]
-                                    env.left_arm_current_xpos = env.robot.compute_fk(
-                                        qpos=env.left_arm_current_qpos,
-                                        name="left_arm",
-                                        to_matrix=True,
-                                    ).squeeze(0)
-                                    # env.left_arm_current_gripper_state = action[
-                                    #     env.left_eef_joints
-                                    # ][0].unsqueeze(0)
-
-                                    env.right_arm_current_qpos = action[
-                                        env.right_arm_joints
-                                    ]
-                                    env.right_arm_current_xpos = env.robot.compute_fk(
-                                        qpos=env.right_arm_current_qpos,
-                                        name="right_arm",
-                                        to_matrix=True,
-                                    ).squeeze(0)
-                                    # env.right_arm_current_gripper_state = action[
-                                    #     env.right_eef_joints
-                                    # ][0].unsqueeze(0)
-
-                                    recovery_step_keywords = getattr(
-                                        recovery_step, "keywords", {}
-                                    )
-                                    recovery_step_kwargs = dict(kwargs)
-                                    if (
-                                        recovery_step_keywords.get(
-                                            "left_arm_action", "__missing__"
-                                        )
-                                        is None
-                                        and remaining_left_arm_action is not None
-                                    ):
-                                        recovery_step_kwargs["left_arm_action"] = (
-                                            remaining_left_arm_action
-                                        )
-                                        remaining_left_arm_action = None
-                                    if (
-                                        recovery_step_keywords.get(
-                                            "right_arm_action", "__missing__"
-                                        )
-                                        is None
-                                        and remaining_right_arm_action is not None
-                                    ):
-                                        recovery_step_kwargs["right_arm_action"] = (
-                                            remaining_right_arm_action
-                                        )
-                                        remaining_right_arm_action = None
-
-                                    recovery_step(env=env, **recovery_step_kwargs)
+                        if return_result:
+                            sync_agent_state_from_robot(env)
+                            return {
+                                "actions": actions[: i + 1],
+                                "monitor_index": monitor_idx,
+                                "monitor_name": function_name,
+                                "step_index": i,
+                            }
 
                         return actions
 
+        env.update_obj_info()
+
     if monitor_sequences is not None:
         log_info("No monitor sequences triggered during execution.")
+    if return_result:
+        return {
+            "actions": actions,
+            "monitor_index": None,
+            "monitor_name": None,
+            "step_index": None,
+        }
     return actions

@@ -21,11 +21,11 @@ from langchain_openai import AzureChatOpenAI, ChatOpenAI
 # Environment configuration
 # ------------------------------------------------------------------------------
 
-# os.environ['ALL_PROXY'] = ''
-# os.environ['all_proxy'] = ''
-# os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7897'
-# os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7897'
-os.environ['LLM_URL'] = 'https://api.shubiaobiao.cn/v1/'
+os.environ["ALL_PROXY"] = ""
+os.environ["all_proxy"] = ""
+os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
+os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
+os.environ["LLM_URL"] = "https://api.shubiaobiao.cn/v1/"
 # ------------------------------------------------------------------------------
 # LLM factory
 # ------------------------------------------------------------------------------
@@ -53,9 +53,9 @@ def _create_llm_safe(*, temperature=0.0, model="gpt-4o"):
         return None
 
 
-task_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
-failure_anticipation_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
-code_llm = _create_llm_safe(temperature=0.0, model="gpt-4o")
+task_llm = _create_llm_safe(temperature=0.0, model="gpt-5")
+recovery_llm = _create_llm_safe(temperature=0.0, model="gpt-5")
+compile_llm = _create_llm_safe(temperature=0.0, model="gpt-5")
 
 if __name__ == "__main__":
     def call_llm(prompt, temperature=0.0, model="gpt-4o"):
@@ -63,5 +63,5 @@ if __name__ == "__main__":
         response = llm.invoke(prompt)
         return response.content
 
-    response = call_llm(prompt="Which model you are?", temperature=0.0, model="gpt-4o")
+    response = call_llm(prompt="Which model you are?", temperature=0.0, model="gpt-5")
     print(response)
