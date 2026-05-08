@@ -164,18 +164,20 @@ class EmbodiedEnvTest:
         if hasattr(self, "env") and self.env is not None:
             self.env.close()
         import embodichain.lab.sim as om
+
         om.SimulationManager.flush_cleanup_queue()
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
 
 
-
-#@pytest.mark.skip(reason="Skipping tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCPU(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation("cpu")
 
 
-#@pytest.mark.skip(reason="Skipping tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestCUDA(EmbodiedEnvTest):
     def setup_method(self):
         self.setup_simulation("cuda")

@@ -179,12 +179,14 @@ class BaseEnvTest:
         if hasattr(cls, "env") and cls.env is not None:
             cls.env.close()
         import embodichain.lab.sim as om
+
         om.SimulationManager.flush_cleanup_queue()
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
 
 
-
-#@pytest.mark.skip(reason="Skipping tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestBaseEnvCPU(BaseEnvTest):
     def setup_method(self):
         pass
@@ -194,7 +196,7 @@ class TestBaseEnvCPU(BaseEnvTest):
         cls.setup_simulation("cpu")
 
 
-#@pytest.mark.skip(reason="Skipping tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestBaseEnvCUDA(BaseEnvTest):
     def setup_method(self):
         pass
@@ -214,13 +216,17 @@ if __name__ == "__main__":
 # Patch BaseEnvTest
 import sys
 
+
 def new_setup_simulation(cls, sim_device):
     print(">>> ENTERING setup_simulation", file=sys.stderr)
-    if hasattr(cls, "env"): return
-    cls.env = gym.make("RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=sim_device)
+    if hasattr(cls, "env"):
+        return
+    cls.env = gym.make(
+        "RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=sim_device
+    )
     cls.device = cls.env.get_wrapper_attr("device")
     cls.num_envs = cls.env.get_wrapper_attr("num_envs")
     print(">>> EXITING setup_simulation", file=sys.stderr)
 
-BaseEnvTest.setup_simulation = classmethod(new_setup_simulation)
 
+BaseEnvTest.setup_simulation = classmethod(new_setup_simulation)
