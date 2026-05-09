@@ -42,19 +42,16 @@ from embodichain.utils.utility import key_in_nested_dict
 from .shapes import ShapeCfg, MeshCfg
 
 # Global default renderer settings for simulation
-DEFAULT_RENDERER: Literal["legacy", "hybrid", "fast-rt", "rt"] = "hybrid"
+DEFAULT_RENDERER: Literal["hybrid", "fast-rt", "rt"] = "hybrid"
 
 
 @configclass
 class RenderCfg:
-    renderer: Literal["legacy", "hybrid", "fast-rt", "rt"] = field(
-        default_factory=lambda: DEFAULT_RENDERER
-    )
-    """Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', 'fast-rt', and 'rt'.
-    
-    Note: 
-    - 'legacy' is the traditional rasterization-based renderer and the default for backward compatibility.
-    - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering, 
+    renderer: Literal["hybrid", "fast-rt", "rt"] = "hybrid"
+    """Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'.
+
+    Note:
+    - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering,
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
@@ -67,9 +64,7 @@ class RenderCfg:
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
 
     def to_dexsim_flags(self):
-        if self.renderer == "legacy":
-            return Renderer.FILAMENT
-        elif self.renderer == "hybrid":
+        if self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
             return Renderer.FASTRT
@@ -77,12 +72,8 @@ class RenderCfg:
             return Renderer.OFFLINERT
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'legacy', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'hybrid', 'fast-rt', or 'rt'."
             )
-
-    @property
-    def is_legacy(self):
-        return self.renderer == "legacy"
 
 
 @configclass

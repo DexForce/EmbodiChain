@@ -34,7 +34,7 @@
                 }
             }
         },
-        "renderer": "legacy"
+        "renderer": "hybrid"
     },
     "policy": {
         "name": "actor_critic",

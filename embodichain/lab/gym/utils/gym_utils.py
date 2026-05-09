@@ -737,7 +737,7 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         --num_envs: Number of environments to run in parallel (default: 1)
         --device: Device to run the environment on (default: 'cpu')
         --headless: Whether to perform the simulation in headless mode (default: False)
-        --renderer: Renderer backend to use for the simulation. Options are 'legacy', 'hybrid', and 'fast-rt'. (default: 'legacy')
+        --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
         --gpu_id: The GPU ID to use for the simulation (default: 0)
         --gym_config: Path to gym config file (default: '')
         --action_config: Path to action config file (default: None)
@@ -772,7 +772,7 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=["legacy", "hybrid", "fast-rt", "rt"],
+        choices=["hybrid", "fast-rt", "rt"],
         default="hybrid",
         help="Renderer backend to use for the simulation.",
     )

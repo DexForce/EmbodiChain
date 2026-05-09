@@ -37,10 +37,9 @@ if __name__ == "__main__":
 
     config = SimulationManagerCfg(
         headless=False,
-        sim_device="cpu",
+        sim_device="cuda",
         width=1080,
         height=1080,
-        render_cfg=RenderCfg(renderer="legacy"),
     )
     sim = SimulationManager(config)
 

@@ -52,7 +52,7 @@
                 }
             }
         },
-        "renderer": "legacy"
+        "renderer": "hybrid"
     },
     "policy": {
         "name": "actor_only",

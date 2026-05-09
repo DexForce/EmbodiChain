@@ -187,7 +187,7 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=True,
         sim_device=torch.device("cpu"),
-        render_cfg=RenderCfg(renderer="fast-rt" if False else "legacy"),
+        render_cfg=RenderCfg(renderer="hybrid"),
         gpu_id=0,
     )
 

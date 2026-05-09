@@ -40,7 +40,6 @@ if __name__ == "__main__":
         sim_device="cpu",
         width=1080,
         height=1080,
-        render_cfg=RenderCfg(renderer="legacy"),
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)

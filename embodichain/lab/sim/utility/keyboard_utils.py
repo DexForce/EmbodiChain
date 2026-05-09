@@ -47,12 +47,6 @@ def run_keyboard_control_for_camera(
 
     sim = SimulationManager.get_instance()
 
-    if vis_pose and sim.is_rt_enabled:
-        log_warning(
-            "'vis_pose' is not fully supported with ray tracing enabled. Will be fixed in future updates."
-        )
-        return
-
     if isinstance(sensor, str):
         sensor = sim.get_sensor(uid=sensor)
 
@@ -268,12 +262,6 @@ def run_keyboard_control_for_light(
     from embodichain.lab.sim import SimulationManager
 
     sim = SimulationManager.get_instance()
-
-    if vis_pose and sim.is_rt_enabled:
-        log_warning(
-            "'vis_pose' is not fully supported with ray tracing enabled. Will be fixed in future updates."
-        )
-        return
 
     if isinstance(light, str):
         light: Light = sim.get_light(uid=light)

@@ -42,7 +42,6 @@ from embodichain.utils.math import (
 from embodichain.lab.sim.utility.sim_utils import (
     get_dexsim_drive_type,
     set_dexsim_articulation_cfg,
-    is_rt_enabled,
 )
 from embodichain.lab.sim.utility.solver_utils import (
     create_pk_chain,
@@ -934,15 +933,6 @@ class Articulation(BatchEntity):
             )
             self._ps.gpu_compute_articulation_kinematic(gpu_indices=indices)
 
-            # TODO: To be removed when gpu articulation data sync is supported.
-            if is_rt_enabled() is False:
-                self.body_data.body_link_pose
-                link_pose = self.body_data._body_link_pose[local_env_ids]
-                self._world.sync_poses_gpu_to_cpu(
-                    link_pose=CudaArray(link_pose),
-                    articulation_gpu_indices=CudaArray(indices),
-                )
-
     def get_local_pose(self, to_matrix=False) -> torch.Tensor:
         """Get local pose (root link pose) of the articulation.
 
@@ -1565,16 +1555,6 @@ class Articulation(BatchEntity):
             self._ps.gpu_compute_articulation_kinematic(
                 gpu_indices=self.body_data.gpu_indices[local_env_ids]
             )
-
-            # TODO: To be removed when gpu articulation data sync is supported.
-            if is_rt_enabled() is False:
-                self.body_data.body_link_pose
-                link_pose = self.body_data._body_link_pose[local_env_ids]
-                indices = self.body_data.gpu_indices[local_env_ids]
-                self._world.sync_poses_gpu_to_cpu(
-                    link_pose=CudaArray(link_pose),
-                    articulation_gpu_indices=CudaArray(indices),
-                )
         else:
             self._world.update(0.001)
 

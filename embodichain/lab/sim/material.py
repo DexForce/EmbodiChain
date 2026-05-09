@@ -25,7 +25,6 @@ from typing import Dict, Union
 from functools import cached_property
 
 from dexsim.engine import MaterialInst, Material
-from embodichain.lab.sim.utility import is_rt_enabled
 from embodichain.utils import configclass, logger
 
 
@@ -120,10 +119,6 @@ class VisualMaterial:
 
         self._default_mat_inst = self.create_instance(self.uid)
 
-    @cached_property
-    def is_rt_enabled(self) -> bool:
-        return is_rt_enabled()
-
     @property
     def mat(self) -> Material:
         return self._mat
@@ -147,11 +142,8 @@ class VisualMaterial:
         mat_inst.set_normal_texture(cfg.normal_texture)
         mat_inst.set_ao_texture(cfg.ao_texture)
 
-        if self.is_rt_enabled:
-            mat_inst.set_ior(cfg.ior)
-            mat_inst.mat.update_pbr_material_type(
-                self.MAT_TYPE_MAPPING[cfg.material_type]
-            )
+        mat_inst.set_ior(cfg.ior)
+        mat_inst.mat.update_pbr_material_type(self.MAT_TYPE_MAPPING[cfg.material_type])
 
     def create_instance(self, uid: str) -> VisualMaterialInst:
         """Create a new material instance from this material template.
@@ -400,9 +392,7 @@ class VisualMaterialInst:
 
     def set_ior(self, ior: float) -> None:
         """Set index of refraction."""
-        if is_rt_enabled() is False:
-            logger.log_debug("Ray Tracing rendering not enabled, ignoring IOR setting.")
-            return
+
         self.ior = ior
         inst = self._mat.get_inst(self.uid)
         inst.set_pbr_param("ior", ior)

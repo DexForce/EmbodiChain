@@ -31,7 +31,6 @@ from embodichain.lab.sim import (
     VisualMaterialInst,
     BatchEntity,
 )
-from embodichain.lab.sim.utility import is_rt_enabled
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
@@ -461,10 +460,6 @@ class RigidObject(BatchEntity):
                 gpu_indices=indices,
                 data_type=RigidBodyGPUAPIWriteType.POSE,
             )
-            if is_rt_enabled() is False:
-                self._world.sync_poses_gpu_to_cpu(
-                    rigid_pose=CudaArray(pose), rigid_gpu_indices=CudaArray(indices)
-                )
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
         """Get local pose of the rigid object.

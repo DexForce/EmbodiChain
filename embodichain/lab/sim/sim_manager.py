@@ -269,13 +269,6 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        # set unique material path to accelerate material creation.
-        # TODO: This will be removed.
-        if self.sim_config.render_cfg.is_legacy:
-            self._env.set_unique_mat_path(
-                os.path.join(self._material_cache_dir, "default_mat")
-            )
-
         # arena is used as a standalone space for robots to simulate in.
         self._arenas: List[dexsim.environment.Arena] = []
 
@@ -377,11 +370,6 @@ class SimulationManager:
     def is_use_gpu_physics(self) -> bool:
         """Check if the physics simulation is using GPU."""
         return self.device.type == "cuda"
-
-    @cached_property
-    def is_rt_enabled(self) -> bool:
-        """Check if Ray Tracing rendering backend is enabled."""
-        return not self.sim_config.render_cfg.is_legacy
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -486,30 +474,6 @@ class SimulationManager:
         if self._is_initialized_gpu_physics:
             return
 
-        if not self.is_rt_enabled:
-            # init rigid body.
-            rigid_body_num = (
-                0
-                if not self.has_non_static_rigid_object()
-                else len(self._ps.get_gpu_rigid_indices())
-            )
-            self._rigid_body_pose = torch.zeros(
-                (rigid_body_num, 7), dtype=torch.float32, device=self.device
-            )
-
-            # init articulation.
-            articulation_num = (
-                0
-                if len(self._articulations) == 0 and len(self._robots) == 0
-                else len(self._ps.get_gpu_articulation_indices())
-            )
-            max_link_count = self._ps.gpu_get_articulation_max_link_count()
-            self._link_pose = torch.zeros(
-                (articulation_num, max_link_count, 7),
-                dtype=torch.float32,
-                device=self.device,
-            )
-
         for art in self._articulations.values():
             art.reallocate_body_data()
         for robot in self._robots.values():
@@ -528,12 +492,7 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
-        if self.is_rt_enabled:
-            self._world.render_camera_group(group_ids)
-        else:
-            logger.log_warning(
-                "This interface is only valid when Ray Tracing rendering backend is enabled."
-            )
+        self._world.render_camera_group(group_ids)
 
     def update(self, physics_dt: float | None = None, step: int = 10) -> None:
         """Update the physics.
@@ -554,41 +513,8 @@ class SimulationManager:
             for i in range(step):
                 self._world.update(physics_dt)
 
-            if not self.is_rt_enabled:
-                self._sync_gpu_data()
-
         else:
             logger.log_warning("Physics simulation is not manually updated.")
-
-    def _sync_gpu_data(self) -> None:
-        if not self.is_use_gpu_physics:
-            return
-
-        if not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                "GPU physics is not initialized. Skipping GPU data synchronization."
-            )
-            return
-
-        if self.is_window_opened or self._sensors:
-            if len(self._rigid_body_pose) > 0:
-                self._ps.gpu_fetch_rigid_body_data(
-                    data=CudaArray(self._rigid_body_pose),
-                    gpu_indices=self._ps.get_gpu_rigid_indices(),
-                    data_type=RigidBodyGPUAPIReadType.POSE,
-                )
-
-            if len(self._link_pose) > 0:
-                self._ps.gpu_fetch_link_data(
-                    data=CudaArray(self._link_pose),
-                    gpu_indices=self._ps.get_gpu_articulation_indices(),
-                    data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
-                )
-
-            self._world.sync_poses_gpu_to_cpu(
-                rigid_pose=CudaArray(self._rigid_body_pose),
-                link_pose=CudaArray(self._link_pose),
-            )
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -725,10 +651,7 @@ class SimulationManager:
             )
         )
 
-        if self.is_rt_enabled:
-            self.set_emission_light([1.5, 1.5, 1.5], 150.0)
-        else:
-            self.set_indirect_lighting("lab_day")
+        self.set_emission_light([1.5, 1.5, 1.5], 150.0)
 
         self._default_plane.set_material(mat.get_instance("plane_mat").mat)
         self._visual_materials[mat_name] = mat
@@ -1708,11 +1631,6 @@ class SimulationManager:
     def _register_default_window_control(self) -> None:
         """Register default window controls for better simulation interaction."""
         from dexsim.types import InputKey
-
-        # TODO: window control has stucking issue with extra sensor under Raster renderer backend.
-        # Will be fixed in next dexsim release.
-        if self.is_rt_enabled is False:
-            return
 
         if self._is_registered_window_control:
             return
