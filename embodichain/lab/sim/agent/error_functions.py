@@ -16,10 +16,8 @@
 
 from __future__ import annotations
 
-from abc import ABCMeta
 import random
 import re
-from typing import Sequence
 
 import numpy as np
 import torch
@@ -31,14 +29,20 @@ from embodichain.lab.sim.agent.atom_action_utils import (
     get_qpos,
     plan_trajectory,
 )
-from embodichain.utils.logger import log_info
+from embodichain.utils.logger import log_warning
 
 __all__ = [
     "judge_active_arms",
     "object_error_types",
     "action_error_types",
-    "inject_object_error",
-    "inject_action_error",
+    "update_scene",
+    "misplaced_object",
+    "fallen_object",
+    "setup_interactive_error_input",
+    "restore_interactive_error_input",
+    "interactive_error_requested",
+    "inject_interactive_error",
+    "wrong_affordance",
 ]
 
 
@@ -60,6 +64,7 @@ def judge_active_arms(action_str: str) -> list[str]:
         )
 
     return active_arms
+
 
 object_error_types = [
     "misplaced_object",
@@ -116,6 +121,140 @@ def fallen_object(env, error_obj, error_pose, relative_error_xyz) -> None:
     update_scene(env)
 
 
+def setup_interactive_error_input(enabled: bool = False):
+    if not enabled:
+        return None
+
+    import sys
+    import termios
+    import tty
+
+    stdin = sys.stdin
+    if not hasattr(stdin, "fileno") or not stdin.isatty():
+        return None
+
+    fd = stdin.fileno()
+    try:
+        old_settings = termios.tcgetattr(fd)
+    except termios.error:
+        return None
+
+    tty.setcbreak(fd)
+    return stdin, old_settings
+
+
+def restore_interactive_error_input(interactive_input) -> None:
+    if interactive_input is None:
+        return
+
+    import termios
+
+    stdin, old_settings = interactive_input
+    termios.tcsetattr(stdin.fileno(), termios.TCSADRAIN, old_settings)
+
+
+def interactive_error_requested(interactive_input) -> bool:
+    if interactive_input is None:
+        return False
+
+    import select
+
+    stdin, _ = interactive_input
+    readable, _, _ = select.select([stdin], [], [], 0)
+    if not readable:
+        return False
+
+    key = stdin.read(1)
+    return key.lower() == "f"
+
+
+def _parse_relative_error_xyz(value: str) -> list[float]:
+    value = value.strip().translate(
+        str.maketrans({"[": " ", "]": " ", "(": " ", ")": " "})
+    )
+    parts = [part for part in re.split(r"[,\s]+", value) if part]
+    if len(parts) != 3:
+        raise ValueError(
+            "relative_error_xyz must contain exactly three numbers, "
+            "for example: 0.02, 0.02, 0 or [0.02, 0.02, 0]"
+        )
+    try:
+        return [float(part) for part in parts]
+    except ValueError as exc:
+        raise ValueError(
+            "relative_error_xyz must contain exactly three numbers, "
+            "for example: 0.02, 0.02, 0 or [0.02, 0.02, 0]"
+        ) from exc
+
+
+def _get_interactive_error_objects(env) -> list[str]:
+    if hasattr(env, "sim") and hasattr(env.sim, "get_rigid_object_uid_list"):
+        return [obj for obj in env.sim.get_rigid_object_uid_list() if obj != "table"]
+    return [obj for obj in getattr(env, "obj_info", {}).keys() if obj != "table"]
+
+
+def _select_interactive_error_object(env) -> str:
+    object_names = _get_interactive_error_objects(env)
+    if len(object_names) == 0:
+        raise ValueError("No object is available for interactive error injection.")
+
+    print("Objects:")
+    for index, obj_name in enumerate(object_names, start=1):
+        print(f"{index}: {obj_name}")
+
+    selection = ""
+    while selection == "":
+        selection = input("Select error object: ").strip()
+    if not selection.isdigit():
+        raise ValueError(f"Unsupported object selection: {selection}.")
+
+    index = int(selection)
+    if index < 1 or index > len(object_names):
+        raise ValueError(f"Unsupported object selection: {selection}.")
+
+    return object_names[index - 1]
+
+
+def inject_interactive_error(env) -> None:
+    print("\nInteractive error injection requested.")
+    print("1: misplaced_object")
+    print("2: fallen_object")
+    print("E: exit without injecting failure")
+    error_choice = ""
+    while error_choice == "":
+        error_choice = input("Select error type: ").strip()
+    if error_choice.lower() == "e":
+        log_warning("Interactive error injection canceled.")
+        return
+    if error_choice not in {"1", "2"}:
+        raise ValueError(f"Unsupported interactive error selection: {error_choice}.")
+
+    error_obj = _select_interactive_error_object(env)
+    print("relative_error_xyz example: 0.02, 0.02, 0 or [0.02, 0.02, 0]")
+    relative_error_xyz = _parse_relative_error_xyz(
+        input("relative_error_xyz (x, y, z): ")
+    )
+
+    if error_choice == "1":
+        misplaced_object(
+            env,
+            error_obj=error_obj,
+            error_pose=None,
+            relative_error_xyz=relative_error_xyz,
+        )
+    elif error_choice == "2":
+        fallen_object(
+            env,
+            error_obj=error_obj,
+            error_pose=None,
+            relative_error_xyz=relative_error_xyz,
+        )
+
+    log_warning(
+        f"Injected interactive error {error_choice} on {error_obj} with relative_error_xyz={relative_error_xyz}."
+    )
+
+
 def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):
     if action is None:
         raise ValueError("wrong_affordance requires a compiled arm action ndarray.")
@@ -167,147 +306,3 @@ def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):
     )
 
     return finalize_actions(select_qpos_traj, gripper_state_traj)
-
-
-def inject_object_error(
-    env,
-    error_type=None,
-    error_obj=None,
-    error_pose=None,
-    relative_error_xyz=None,
-    **kwargs,
-):
-    if relative_error_xyz is not None:
-        if len(relative_error_xyz) != 3:
-            raise ValueError(
-                f"Expected relative_error_xyz with length 3, got {relative_error_xyz}."
-            )
-        relative_error_xyz = [float(value) for value in relative_error_xyz]
-
-    if error_type is None:
-        return None
-
-    if error_type == "random":
-        error_type = random.choice(object_error_types)
-
-    if error_type in object_error_types:
-        if error_obj is None:
-            object_candidates = [
-                obj for obj in env.sim.get_rigid_object_uid_list() if obj != "table"
-            ]
-            if len(object_candidates) == 0:
-                raise ValueError(
-                    "No rigid object is available for object-level error injection."
-                )
-            error_obj = random.choice(object_candidates)
-
-        if relative_error_xyz is None and error_pose is None:
-            if error_type == "misplaced_object":
-                relative_error_xyz = [
-                    random.uniform(-0.08, 0.08),
-                    random.uniform(-0.08, 0.08),
-                    0.0,
-                ]
-            elif error_type == "fallen_object":
-                relative_error_xyz = [
-                    random.uniform(-0.08, 0.08),
-                    random.uniform(-0.08, 0.08),
-                    0.0,
-                ]
-
-        if error_type == "misplaced_object":
-            misplaced_object(env, error_obj, error_pose, relative_error_xyz)
-        elif error_type == "fallen_object":
-            fallen_object(env, error_obj, error_pose, relative_error_xyz)
-
-        log_info(
-            f"Injected runtime error: type={error_type}, object={error_obj}, delta_xyz={relative_error_xyz}",
-            color="red",
-        )
-        return None
-
-    raise ValueError(
-        "Unsupported error_type "
-        f"'{error_type}'. Supported object errors: {object_error_types}."
-    )
-
-
-def inject_action_error(
-    left_arm_action=None,
-    right_arm_action=None,
-    env=None,
-    error_type=None,
-    error_arm=None,
-    error_pose=None,
-    relative_error_xyz=None,
-    **kwargs,
-):
-    if relative_error_xyz is not None:
-        if len(relative_error_xyz) != 3:
-            raise ValueError(
-                f"Expected relative_error_xyz with length 3, got {relative_error_xyz}."
-            )
-        relative_error_xyz = [float(value) for value in relative_error_xyz]
-
-    if error_type is None:
-        return left_arm_action, right_arm_action
-
-    if error_type not in action_error_types:
-        raise ValueError(
-            f"Unsupported action error_type '{error_type}'. Supported action errors: {action_error_types}."
-        )
-
-    active_arms = []
-    if left_arm_action is not None:
-        active_arms.append("left_arm")
-    if right_arm_action is not None:
-        active_arms.append("right_arm")
-
-    if len(active_arms) == 0:
-        raise ValueError(
-            "Action-level errors require at least one valid action string."
-        )
-
-    if error_arm is None:
-        error_arm = random.choice(active_arms)
-
-    if error_type == "wrong_affordance":
-        if relative_error_xyz is None:
-            relative_error_xyz = [
-                random.choice([-1.0, 1.0]) * random.uniform(0.015, 0.06),
-                random.choice([-1.0, 1.0]) * random.uniform(0.015, 0.06),
-                random.choice([-1.0, 1.0]) * random.uniform(0.005, 0.04),
-            ]
-
-        if "left" in error_arm:
-            if left_arm_action is None:
-                raise ValueError("left_arm_action is None for left-arm disturbance.")
-            left_arm_action = wrong_affordance(
-                env,
-                left_arm_action,
-                error_arm,
-                error_pose,
-                relative_error_xyz,
-            )
-        elif "right" in error_arm:
-            if right_arm_action is None:
-                raise ValueError("right_arm_action is None for right-arm disturbance.")
-            right_arm_action = wrong_affordance(
-                env,
-                right_arm_action,
-                error_arm,
-                error_pose,
-                relative_error_xyz,
-            )
-        else:
-            raise ValueError(f"Unsupported error_arm: {error_arm}.")
-
-        log_info(
-            f"Injected action error: type={error_type}, arm={error_arm}, delta_xyz={relative_error_xyz}",
-            color="red",
-        )
-        return left_arm_action, right_arm_action
-
-    raise ValueError(
-        f"Unsupported action error_type '{error_type}'. Supported action errors: {action_error_types}."
-    )
