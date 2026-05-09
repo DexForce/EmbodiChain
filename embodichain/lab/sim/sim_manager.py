@@ -1781,7 +1781,7 @@ class SimulationManager:
         frame: np.ndarray | None = None
         if self._window is not None and state.record_camera is not None:
             pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
-            state.record_camera.set_local_pose(pose)
+            state.record_camera.set_world_pose(pose)
             state.record_camera.render()
             rgb = np.asarray(state.record_camera.get_rgb_map())
             if rgb.size != 0:

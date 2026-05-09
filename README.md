@@ -13,7 +13,7 @@ EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It stre
 
 > [!NOTE]
 > EmbodiChain is in Alpha and under active development:
-> * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/resources/roadmap.html).
+> * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html).
 > * Since this is an early release, we welcome feedback (bug reports, feature requests, etc.) via GitHub Issues.
 
 
