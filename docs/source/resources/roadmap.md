@@ -22,16 +22,13 @@ under the area it improves.
 
 | Status | Planned capability |
 | --- | --- |
-| 🚧 | Improve ray-tracing backend performance and resolve known rendering issues. |
-| 📌 | Add a high-performance hybrid rendering backend for better visual-quality and speed trade-offs. |
-| 📌 | Support a more efficient real-time denoiser. |
-| 📌 | Add 3DGS support for rendering and data generation. |
+| 🚧 | Support a more efficient real-time denoiser. |
+| 🔬 | Add 3DGS support for rendering and data generation. |
 
 ### Physics
 
 | Status | Planned capability |
 | --- | --- |
-| 🚧 | Improve GPU physics throughput for large-scale simulation workloads. |
 | 🔬 | Develop a next-generation physics backend with high-accuracy simulation, differentiable dynamics, and neural physical models for end-to-end AI integration. |
 
 ### Sensors

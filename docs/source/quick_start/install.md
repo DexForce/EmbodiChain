@@ -32,6 +32,31 @@ Use the provided run script ([`docker/docker_run.sh`](../../../docker/docker_run
 ./docker/docker_run.sh <container_name> <data_path>
 ```
 
+### uv (Recommended for local development)
+
+> [!TIP]
+> [uv](https://github.com/astral-sh/uv) is an extremely fast Python package manager and project manager. We recommend using `uv` for local development due to its significantly faster dependency resolution and installation times compared to pip.
+
+**Install uv:**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Install from PyPI:**
+
+```bash
+uv pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+```
+
+**Install from source (editable mode):**
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+uv pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+```
+
 ### pip (PyPI)
 
 > [!TIP]
