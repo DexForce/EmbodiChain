@@ -48,8 +48,7 @@ def _load_drive_function():
     function_nodes = [
         node
         for node in module.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name in {"sync_agent_state_from_robot", "drive"}
+        if isinstance(node, ast.FunctionDef) and node.name == "drive"
     ]
     drive_module = ast.Module(body=function_nodes, type_ignores=[])
     namespace = {
@@ -63,7 +62,34 @@ def _load_drive_function():
         "log_info": lambda *args, **kwargs: None,
         "log_warning": lambda *args, **kwargs: None,
         "log_error": lambda *args, **kwargs: None,
+        "setup_interactive_error_input": lambda enabled=None: None,
+        "restore_interactive_error_input": lambda interactive_input: None,
+        "interactive_error_requested": lambda interactive_input: False,
+        "inject_interactive_error": lambda env: None,
     }
+
+    def _stub_sync_agent_state_from_robot(env) -> None:
+        action = env.robot.get_qpos().squeeze(0)
+        env.left_arm_current_qpos = action[env.left_arm_joints].numpy()
+        env.left_arm_current_xpos = env.robot.compute_fk(
+            qpos=env.left_arm_current_qpos,
+            name="left_arm",
+            to_matrix=True,
+        ).squeeze(0)
+        env.left_arm_current_gripper_state = action[env.left_eef_joints][0].numpy()[
+            None
+        ]
+        env.right_arm_current_qpos = action[env.right_arm_joints].numpy()
+        env.right_arm_current_xpos = env.robot.compute_fk(
+            qpos=env.right_arm_current_qpos,
+            name="right_arm",
+            to_matrix=True,
+        ).squeeze(0)
+        env.right_arm_current_gripper_state = action[env.right_eef_joints][0].numpy()[
+            None
+        ]
+
+    namespace["sync_agent_state_from_robot"] = _stub_sync_agent_state_from_robot
     exec(compile(drive_module, filename=str(source_path), mode="exec"), namespace)
     return namespace["drive"]
 

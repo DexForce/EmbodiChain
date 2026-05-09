@@ -44,6 +44,12 @@ from embodichain.lab.sim.agent.atom_action_utils import (
     resolve_action,
     sync_agent_state_from_robot,
 )
+from embodichain.lab.sim.agent.error_functions import (
+    inject_interactive_error,
+    interactive_error_requested,
+    restore_interactive_error_input,
+    setup_interactive_error_input,
+)
 from embodichain.lab.sim.agent.monitor_functions import *
 
 """
@@ -886,6 +892,7 @@ def drive(
     monitor_sequences=None,
     env=None,
     return_result=False,
+    interactive_error_injection=False,
     **kwargs,
 ):
     left_arm_action = resolve_action(left_arm_action, env, kwargs)
@@ -950,49 +957,48 @@ def drive(
     actions = torch.from_numpy(actions).to(dtype=torch.float32).unsqueeze(1)
     actions = list(actions.unbind(dim=0))
 
-    for i in tqdm(range(len(actions))):
-        action = actions[i]
+    interactive_input = setup_interactive_error_input(interactive_error_injection)
+    try:
+        for i in tqdm(range(len(actions))):
+            action = actions[i]
 
-        env.step(action)
+            env.step(action)
 
-        # # sheng: debug only, remind to delete finally
-        # from embodichain.agents.hierarchy.error_agent import misplaced_object
-        #
-        # if i == len(actions) // 2:
-        #     print('123')
-        #         # misplaced_object(
-        #         #     env, "bottle", error_pose=None, relative_error_xyz=[0.02, 0.02, 0]
-        #         # )
-        # # if np.random.random() < 0.02:
-        # #     misplaced_object(
-        # #         env, "bottle", error_pose=None, relative_error_xyz=[0.02, 0.02, 0]
-        # #     )
+            if interactive_error_requested(interactive_input):
+                restore_interactive_error_input(interactive_input)
+                interactive_input = None
+                inject_interactive_error(env)
+                interactive_input = setup_interactive_error_input(
+                    interactive_error_injection
+                )
 
-        if monitor_sequences is not None:
-            for monitor_idx, monitor_sequence in enumerate(monitor_sequences):
-                for function in monitor_sequence:
-                    result = function()
-                    if result == True:
-                        env.update_obj_info()
-                        function_name = getattr(
-                            function.func, "__name__", function.__class__.__name__
-                        )
-                        log_warning(
-                            f"Monitor function {function_name} triggered at step {i}."
-                        )
+            if monitor_sequences is not None:
+                for monitor_idx, monitor_sequence in enumerate(monitor_sequences):
+                    for function in monitor_sequence:
+                        result = function()
+                        if result == True:
+                            env.update_obj_info()
+                            function_name = getattr(
+                                function.func, "__name__", function.__class__.__name__
+                            )
+                            log_warning(
+                                f"Monitor function {function_name} triggered at step {i}."
+                            )
 
-                        if return_result:
-                            sync_agent_state_from_robot(env)
-                            return {
-                                "actions": actions[: i + 1],
-                                "monitor_index": monitor_idx,
-                                "monitor_name": function_name,
-                                "step_index": i,
-                            }
+                            if return_result:
+                                sync_agent_state_from_robot(env)
+                                return {
+                                    "actions": actions[: i + 1],
+                                    "monitor_index": monitor_idx,
+                                    "monitor_name": function_name,
+                                    "step_index": i,
+                                }
 
-                        return actions
+                            return actions
 
-        env.update_obj_info()
+            env.update_obj_info()
+    finally:
+        restore_interactive_error_input(interactive_input)
 
     if monitor_sequences is not None:
         log_info("No monitor sequences triggered during execution.")

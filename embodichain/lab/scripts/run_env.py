@@ -126,6 +126,9 @@ def main(args, env, gym_config):
             debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
             recovery=getattr(args, "recovery", False),
+            interactive_error_injection=getattr(
+                args, "interactive_error_injection", False
+            ),
         )
 
     # Final reset.

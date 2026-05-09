@@ -221,8 +221,11 @@ class BaseAgentEnv:
     def create_demo_action_list(
         self, regenerate=False, recovery=False, *args, **kwargs
     ):
-        graph_file_path, kwargs, _ = self.generate_graph_for_actions(
+        graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
             regenerate=regenerate, recovery=recovery
         )
-        action_list = self.compile_agent.act(graph_file_path, **kwargs)
+        compile_kwargs["interactive_error_injection"] = kwargs.get(
+            "interactive_error_injection", False
+        )
+        action_list = self.compile_agent.act(graph_file_path, **compile_kwargs)
         return action_list

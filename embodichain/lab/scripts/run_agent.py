@@ -27,7 +27,6 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.utils.logger import log_error
 from embodichain.lab.scripts.run_env import main
 
-
 if __name__ == "__main__":
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -56,6 +55,12 @@ if __name__ == "__main__":
         "--recovery",
         action="store_true",
         help="Whether to generate recovery actions.",
+        default=False,
+    )
+    parser.add_argument(
+        "--interactive_error_injection",
+        action="store_true",
+        help="Whether to enable terminal-triggered interactive error injection during drive execution.",
         default=False,
     )
 
