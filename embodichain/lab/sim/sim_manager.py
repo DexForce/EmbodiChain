@@ -544,12 +544,14 @@ class SimulationManager:
         """Open the simulation window."""
         self._world.open_window()
         self._window = self._world.get_windows()
+
+        # TODO: will open these features after fix the related blocking issues.
         # self._register_default_window_control()
-        if (
-            self._window_record_hotkey_cfg is not None
-            and self._window_record_input_control is None
-        ):
-            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        # if (
+        #     self._window_record_hotkey_cfg is not None
+        #     and self._window_record_input_control is None
+        # ):
+        #     self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
