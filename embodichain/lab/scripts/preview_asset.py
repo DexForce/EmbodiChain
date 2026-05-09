@@ -58,12 +58,13 @@ def build_sim_cfg(args: argparse.Namespace):
     Returns:
         SimulationManagerCfg: Simulation configuration.
     """
+    from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
     return SimulationManagerCfg(
         headless=args.headless,
-        enable_rt=args.enable_rt,
         sim_device=args.sim_device,
+        render_cfg=RenderCfg(renderer=args.renderer),
     )
 
 
@@ -87,9 +88,6 @@ def load_assets(sim: SimulationManager, args: argparse.Namespace):
         RigidObjectCfg,
     )
     from embodichain.lab.sim.shapes import MeshCfg
-
-    # --- light -----------------------------------------------------------
-    sim.set_emission_light(intensity=150)
 
     asset_paths = args.asset_path
     init_pos = tuple(args.init_pos)
@@ -286,7 +284,7 @@ def cli():
         "--body_type",
         type=str,
         choices=["dynamic", "kinematic", "static"],
-        default="kinematic",
+        default="dynamic",
         help="Body type for rigid objects (default: kinematic).",
     )
     parser.add_argument(
@@ -314,10 +312,11 @@ def cli():
         help="Run without rendering window.",
     )
     parser.add_argument(
-        "--enable_rt",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing.",
+        "--renderer",
+        type=str,
+        choices=["hybrid", "fast-rt", "rt"],
+        default="hybrid",
+        help="Renderer backend (default: hybrid).",
     )
     parser.add_argument(
         "--preview",

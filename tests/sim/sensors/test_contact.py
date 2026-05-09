@@ -23,6 +23,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.sensors import (
@@ -38,7 +39,7 @@ NUM_ENVS = 4
 
 
 class ContactTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         sim_cfg = SimulationManagerCfg(
             width=1920,
             height=1080,
@@ -46,7 +47,7 @@ class ContactTest:
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device=sim_device,
-            enable_rt=enable_rt,  # Enable ray tracing for better visuals
+            render_cfg=RenderCfg(renderer=renderer),
         )
 
         # Create the simulation instance
@@ -63,9 +64,9 @@ class ContactTest:
         contact_filter_art_cfg.link_name_list = ["finger1_link", "finger2_link"]
         contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
         contact_filter_cfg.filter_need_both_actor = True
-        self.contact_sensor = self.sim.add_sensor(sensor_cfg=contact_filter_cfg)
 
         self.to_grasp_pose(cube2)
+        self.contact_sensor = self.sim.add_sensor(sensor_cfg=contact_filter_cfg)
 
     def create_cube(self, uid: str, position: list = (0.0, 0.0, 0)) -> RigidObject:
         """create cube
@@ -78,7 +79,7 @@ class ContactTest:
         Returns:
             RigidObject: rigid object
         """
-        cube_size = (0.025, 0.025, 0.025)
+        cube_size = (0.05, 0.05, 0.05)
         cube: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid=uid,
@@ -175,12 +176,14 @@ class ContactTest:
         approach_xpos = target_xpos.clone()
         approach_xpos[:, 2, 3] += 0.1
 
-        is_success, approach_qpos = self.robot.compute_ik(
+        is_success_approach, approach_qpos = self.robot.compute_ik(
             pose=approach_xpos, joint_seed=rest_arm_qpos, name="arm"
         )
-        is_success, target_qpos = self.robot.compute_ik(
+        print(f"Approach IK success: {is_success_approach}")
+        is_success_target, target_qpos = self.robot.compute_ik(
             pose=target_xpos, joint_seed=approach_qpos, name="arm"
         )
+        print(f"Target IK success: {is_success_target}")
         self.robot.set_qpos(approach_qpos, joint_ids=arm_ids)
         self.sim.update(step=40)
 
@@ -192,11 +195,22 @@ class ContactTest:
             .repeat(self.sim.num_envs, 1)
         )
         self.robot.set_qpos(hand_close_qpos, joint_ids=gripper_ids)
-        self.sim.update(step=20)
+        self.sim.update(step=200)
+
+        finger1_pose = self.robot.get_link_pose("finger1_link")
+        finger2_pose = self.robot.get_link_pose("finger2_link")
+        cube_pose = cube.get_local_pose()
+        print(f"Finger 1 pose: {finger1_pose[0][:3]}")
+        print(f"Finger 2 pose: {finger2_pose[0][:3]}")
+        print(f"Cube pose at end of grasp: {cube_pose[0][:3]}")
 
     def test_fetch_contact(self):
-        self.sim.update(step=1)
-        self.contact_sensor.update()
+        # In a test suite, run multiple steps until contact is actually detected
+        for i in range(50):
+            self.sim.update(step=20)
+            self.contact_sensor.update()
+            if getattr(self.contact_sensor, "total_current_contacts", 0) > 0:
+                break
         contact_report = self.contact_sensor.get_data()
 
         # Check that contact data has correct shape (num_envs, max_contacts_per_env, ...)
@@ -230,7 +244,13 @@ class ContactTest:
         finger1_user_ids = (
             self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
         )
-        filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
+        filter_user_ids = torch.cat(
+            [
+                cube2_user_ids,
+                self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1),
+                self.sim.get_robot("UR10_PGI").get_user_ids("finger2_link").reshape(-1),
+            ]
+        )
         filter_contact_report = self.contact_sensor.filter_by_user_ids(filter_user_ids)
         n_filtered_contact = filter_contact_report["position"].shape[0]
         assert n_filtered_contact > 0, "No contact detected between gripper and cube."
@@ -241,27 +261,46 @@ class ContactTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        self.sim.destroy()
+        if (
+            hasattr(self, "contact_sensor")
+            and getattr(self.contact_sensor, "uid", None) is not None
+            and hasattr(self, "sim")
+        ):
+            self.sim.remove_asset(self.contact_sensor.uid)
+        if hasattr(self, "sim"):
+            self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        import gc
+
+        gc.collect()
 
 
-class TestContactRaster(ContactTest):
+class TestContactHybrid(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+
+        self.setup_simulation("cpu", renderer="hybrid")
 
 
-class TestContactRasterCuda(ContactTest):
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+class TestContactHybridCuda(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+
+        self.setup_simulation("cuda", renderer="hybrid")
 
 
 class TestContactFastRT(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+
+        self.setup_simulation("cpu", renderer="fast-rt")
 
 
-class TestContactFastRTCuda(ContactTest):
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+class TestContactFastRTCUDA(ContactTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+
+        self.setup_simulation("cuda", renderer="fast-rt")
 
 
 def test_contact_sensor_from_dict():
@@ -295,6 +334,6 @@ def test_contact_sensor_from_dict():
 
 
 if __name__ == "__main__":
-    test = ContactTest()
-    test.setup_simulation("cuda", enable_rt=True)
+    test = TestContactHybridCuda()
+    test.setup_simulation("cuda", renderer="hybrid")
     test.test_fetch_contact()

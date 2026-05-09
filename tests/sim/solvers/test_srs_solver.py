@@ -21,7 +21,7 @@ import numpy as np
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
 from embodichain.data import get_data_path
 
 from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
@@ -289,7 +289,6 @@ class TestSRSCPURobotSolver(BaseRobotSolverTest):
         self.setup_simulation(solver_type="SRSSolver", device="cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestSRSCUDARobotSolver(BaseRobotSolverTest):
     def setup_method(self):
         self.setup_simulation(solver_type="SRSSolver", device="cuda")

@@ -16,6 +16,8 @@
 
 import pytest
 import torch
+
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import StereoCamera, SensorCfg
 
@@ -23,10 +25,13 @@ NUM_ENVS = 4
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device, enable_rt):
+    def setup_simulation(self, sim_device, renderer="hybrid"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, enable_rt=enable_rt, num_envs=NUM_ENVS
+            headless=True,
+            sim_device=sim_device,
+            num_envs=NUM_ENVS,
+            render_cfg=RenderCfg(renderer=renderer),
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
@@ -137,24 +142,41 @@ class StereoCameraTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        self.sim.destroy()
+        if (
+            hasattr(self, "camera")
+            and getattr(self.camera, "uid", None) is not None
+            and hasattr(self, "sim")
+        ):
+            self.sim.remove_asset(self.camera.uid)
+        if hasattr(self, "sim"):
+            self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        import gc
+
+        gc.collect()
 
 
-class TestStereoCameraRaster(StereoCameraTest):
+class TestStereoCameraHybrid(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=False)
+
+        self.setup_simulation("cpu", renderer="hybrid")
 
 
-class TestStereoCameraRaster(StereoCameraTest):
+class TestStereoCameraHybridCUDA(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=False)
+
+        self.setup_simulation("cuda", renderer="hybrid")
 
 
 class TestStereoCameraFastRT(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cpu", enable_rt=True)
+
+        self.setup_simulation("cpu", renderer="fast-rt")
 
 
-class TestStereoCameraFastRT(StereoCameraTest):
+class TestStereoCameraFastRTCUDA(StereoCameraTest):
     def setup_method(self):
-        self.setup_simulation("cuda", enable_rt=True)
+
+        self.setup_simulation("cuda", renderer="fast-rt")

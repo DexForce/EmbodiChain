@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import select
 import sys
 import tty
@@ -24,8 +26,11 @@ import torch
 import numpy as np
 
 from scipy.spatial.transform import Rotation as R
+from typing import TYPE_CHECKING
 
-from embodichain.lab.sim.sensors import Camera
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sensors import Camera
+
 from embodichain.utils.logger import log_info, log_error, log_warning
 
 
@@ -46,12 +51,6 @@ def run_keyboard_control_for_camera(
     from embodichain.lab.sim import SimulationManager
 
     sim = SimulationManager.get_instance()
-
-    if vis_pose and sim.is_rt_enabled:
-        log_warning(
-            "'vis_pose' is not fully supported with ray tracing enabled. Will be fixed in future updates."
-        )
-        return
 
     if isinstance(sensor, str):
         sensor = sim.get_sensor(uid=sensor)
@@ -268,12 +267,6 @@ def run_keyboard_control_for_light(
     from embodichain.lab.sim import SimulationManager
 
     sim = SimulationManager.get_instance()
-
-    if vis_pose and sim.is_rt_enabled:
-        log_warning(
-            "'vis_pose' is not fully supported with ray tracing enabled. Will be fixed in future updates."
-        )
-        return
 
     if isinstance(light, str):
         light: Light = sim.get_light(uid=light)

@@ -18,6 +18,7 @@ import os
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
 )
@@ -39,7 +40,6 @@ class BaseSoftObjectTest:
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
             sim_device="cuda",
-            enable_rt=False,  # Enable ray tracing for better visuals
             num_envs=4,
             arena_space=3.0,
         )
@@ -91,6 +91,13 @@ class BaseSoftObjectTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        self.__dict__.clear()
+        import gc
+
+        gc.collect()
 
 
 class TestSoftObjectCUDA(BaseSoftObjectTest):

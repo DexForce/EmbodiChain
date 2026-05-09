@@ -658,8 +658,6 @@ class randomize_visual_material(Functor):
         roughness_range: tuple[float, float] | None = None,
         ior_range: tuple[float, float] | None = None,
     ):
-        from embodichain.lab.sim.utility import is_rt_enabled
-
         if self.entity_cfg.uid != "default_plane" and self.entity is None:
             return
 
@@ -700,7 +698,7 @@ class randomize_visual_material(Functor):
             )
             randomize_plan["roughness"] = roughness
 
-        if ior_range and is_rt_enabled():
+        if ior_range:
             ior = sample_uniform(
                 lower=torch.tensor(ior_range[0], dtype=torch.float32),
                 upper=torch.tensor(ior_range[1], dtype=torch.float32),
@@ -741,3 +739,6 @@ class randomize_visual_material(Functor):
                         random_texture_prob=random_texture_prob,
                         idx=i,
                     )
+
+        env = self._env.sim.get_env()
+        env.clean_materials()

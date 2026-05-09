@@ -80,8 +80,7 @@ class record_camera_data(Functor):
         )
 
         # Add this camera's group ID to the environment for batch rendering when RT is enabled.
-        if getattr(env.sim, "is_rt_enabled", False):
-            env.add_camera_group_id(self.camera.group_id)
+        env.add_camera_group_id(self.camera.group_id)
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
         self._current_episode = 0
@@ -158,7 +157,7 @@ class record_camera_data(Functor):
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
     ):
-        self.camera.update(fetch_only=self.camera.is_rt_enabled)
+        self.camera.update(fetch_only=True)
         data = self.camera.get_data()
         rgb = data["color"]
 
@@ -199,7 +198,7 @@ class record_camera_data_async(record_camera_data):
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
     ):
-        self.camera.update(fetch_only=self.camera.is_rt_enabled)
+        self.camera.update(fetch_only=True)
         data = self.camera.get_data()
         rgb = data["color"]  # shape: (num_envs, H, W, 4)
         if isinstance(rgb, torch.Tensor):

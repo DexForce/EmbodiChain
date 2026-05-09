@@ -9,6 +9,7 @@ The simulation window comes with a set of default controls that enable users to 
 | Events                        | Description                                                                                                                                      |
 |---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Raycast Information Display** | Press the right mouse button to select a point and the 'C' key to print the raycast distance and hit position of a surface (world coordinates) to the console. Useful for debugging and checking the position of objects in the simulation. |
+| **Viewer recording (toggle)** | Press **`r`** to **start** recording what the interactive viewer shows, and press **`r`** again to **stop** and save as MP4 videos. Recording uses a hidden camera that follows the live viewer camera pose, so the exported videos match the on-screen view. Useful for debugging and recording the demos.|
 
 > **Note:** We will add more interaction features in future releases. Stay tuned for updates!
 

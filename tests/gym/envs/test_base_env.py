@@ -116,15 +116,18 @@ class RandomReachEnv(BaseEnv):
 class BaseEnvTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
-        self.env = gym.make(
+    @classmethod
+    def setup_simulation_hook(cls, sim_device):
+        if hasattr(cls, "env"):
+            return
+        cls.env = gym.make(
             "RandomReach-v1",
             num_envs=NUM_ENVS,
             headless=True,
             device=sim_device,
         )
-        self.device = self.env.get_wrapper_attr("device")
-        self.num_envs = self.env.get_wrapper_attr("num_envs")
+        cls.device = cls.env.get_wrapper_attr("device")
+        cls.num_envs = cls.env.get_wrapper_attr("num_envs")
 
     def test_env_rollout(self):
         """Test environment rollout."""
@@ -168,19 +171,39 @@ class BaseEnvTest:
         assert obs.get("robot") is not None, "Expected 'robot' in the obs dict"
 
     def teardown_method(self):
+        pass
+
+    @classmethod
+    def teardown_class(cls):
         """Clean up resources after each test method."""
-        self.env.close()
+        if hasattr(cls, "env") and cls.env is not None:
+            cls.env.close()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        import gc
+
+        gc.collect()
 
 
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestBaseEnvCPU(BaseEnvTest):
     def setup_method(self):
-        self.setup_simulation("cpu")
+        pass
+
+    @classmethod
+    def setup_class(cls):
+        cls.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+# @pytest.mark.skip(reason="Skipping tests temporarily")
 class TestBaseEnvCUDA(BaseEnvTest):
     def setup_method(self):
-        self.setup_simulation("cuda")
+        pass
+
+    @classmethod
+    def setup_class(cls):
+        cls.setup_simulation("cuda")
 
 
 if __name__ == "__main__":
@@ -189,3 +212,21 @@ if __name__ == "__main__":
     test_cpu.setup_method()
     test_cpu.test_env_rollout()
     test_cpu.teardown_method()
+
+# Patch BaseEnvTest
+import sys
+
+
+def new_setup_simulation(cls, sim_device):
+    print(">>> ENTERING setup_simulation", file=sys.stderr)
+    if hasattr(cls, "env"):
+        return
+    cls.env = gym.make(
+        "RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=sim_device
+    )
+    cls.device = cls.env.get_wrapper_attr("device")
+    cls.num_envs = cls.env.get_wrapper_attr("num_envs")
+    print(">>> EXITING setup_simulation", file=sys.stderr)
+
+
+BaseEnvTest.setup_simulation = classmethod(new_setup_simulation)

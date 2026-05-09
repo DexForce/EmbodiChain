@@ -109,7 +109,7 @@ def create_pk_serial_chain(
     else:
         return pk.SerialChain(
             chain=chain, end_frame_name=end_link_name, root_frame_name=root_link_name
-        )
+        ).to(device=device)
 
 
 def build_reduced_pinocchio_robot(

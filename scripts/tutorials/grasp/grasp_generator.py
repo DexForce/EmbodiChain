@@ -30,8 +30,10 @@ from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
@@ -59,19 +61,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument("--headless", action="store_true", help="Enable headless mode")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -88,21 +78,20 @@ def initialize_simulation(args) -> SimulationManager:
     config = SimulationManagerCfg(
         headless=True,
         sim_device=args.device,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
     )
     sim = SimulationManager(config)
 
-    if args.enable_rt:
-        light = sim.add_light(
-            cfg=LightCfg(
-                uid="main_light",
-                color=(0.6, 0.6, 0.6),
-                intensity=30.0,
-                init_pos=(1.0, 0, 3.0),
-            )
+    light = sim.add_light(
+        cfg=LightCfg(
+            uid="main_light",
+            color=(0.6, 0.6, 0.6),
+            intensity=30.0,
+            init_pos=(1.0, 0, 3.0),
         )
+    )
 
     return sim
 

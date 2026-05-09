@@ -119,6 +119,13 @@ class BaseRigidObjectGroupTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        self.__dict__.clear()
+        import gc
+
+        gc.collect()
 
 
 class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):
@@ -126,7 +133,6 @@ class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):
         self.setup_simulation("cpu")
 
 
-# TODO: Fix CUDA tests issue.
 @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidObjectGroupCUDA(BaseRigidObjectGroupTest):
     def setup_method(self):
