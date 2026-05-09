@@ -31,7 +31,6 @@ from embodichain.lab.sim import (
     VisualMaterialInst,
     BatchEntity,
 )
-from embodichain.lab.sim.utility import is_rt_enabled
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
@@ -79,6 +78,12 @@ class RigidBodyData:
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
         self._ang_vel = torch.zeros(
+            (self.num_instances, 3), dtype=torch.float32, device=self.device
+        )
+        self._lin_acc = torch.zeros(
+            (self.num_instances, 3), dtype=torch.float32, device=self.device
+        )
+        self._ang_acc = torch.zeros(
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
         # center of mass pose in format (x, y, z, qw, qx, qy, qz)
@@ -161,6 +166,51 @@ class RigidBodyData:
             torch.Tensor: The linear and angular velocities concatenated, with shape (N, 6).
         """
         return torch.cat((self.lin_vel, self.ang_vel), dim=-1)
+
+    @property
+    def lin_acc(self) -> torch.Tensor:
+        if self.device.type == "cpu":
+            self._lin_acc = torch.as_tensor(
+                np.array(
+                    [entity.get_linear_acceleration() for entity in self.entities],
+                ),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            self.ps.gpu_fetch_rigid_body_data(
+                data=self._lin_acc,
+                gpu_indices=self.gpu_indices,
+                data_type=RigidBodyGPUAPIReadType.LINEAR_ACCELERATION,
+            )
+        return self._lin_acc
+
+    @property
+    def ang_acc(self) -> torch.Tensor:
+        if self.device.type == "cpu":
+            self._ang_acc = torch.as_tensor(
+                np.array(
+                    [entity.get_angular_acceleration() for entity in self.entities],
+                ),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            self.ps.gpu_fetch_rigid_body_data(
+                data=self._ang_acc,
+                gpu_indices=self.gpu_indices,
+                data_type=RigidBodyGPUAPIReadType.ANGULAR_ACCELERATION,
+            )
+        return self._ang_acc
+
+    @property
+    def acc(self) -> torch.Tensor:
+        """Get the linear and angular accelerations of the rigid bodies.
+
+        Returns:
+            torch.Tensor: The linear and angular accelerations concatenated, with shape (N, 6).
+        """
+        return torch.cat((self.lin_acc, self.ang_acc), dim=-1)
 
     @property
     def com_pose(self) -> torch.Tensor:
@@ -410,10 +460,6 @@ class RigidObject(BatchEntity):
                 gpu_indices=indices,
                 data_type=RigidBodyGPUAPIWriteType.POSE,
             )
-            if is_rt_enabled() is False:
-                self._world.sync_poses_gpu_to_cpu(
-                    rigid_pose=CudaArray(pose), rigid_gpu_indices=CudaArray(indices)
-                )
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
         """Get local pose of the rigid object.
@@ -888,12 +934,9 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match scale length {len(scale)}."
             )
 
-        if self.device.type == "cpu":
-            for i, env_idx in enumerate(local_env_ids):
-                scale_np = scale[i].cpu().numpy()
-                self._entities[env_idx].set_body_scale(*scale_np)
-        else:
-            logger.log_error(f"Setting body scale on GPU is not supported yet.")
+        for i, env_idx in enumerate(local_env_ids):
+            scale_np = scale[i].cpu().numpy()
+            self._entities[env_idx].set_body_scale(*scale_np)
 
     def set_com_pose(
         self, com_pose: torch.Tensor, env_ids: Sequence[int] | None = None

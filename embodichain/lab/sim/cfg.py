@@ -23,6 +23,7 @@ from typing import Sequence, Union, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
+    Renderer,
     PhysicalAttr,
     ActorType,
     AxisArrowType,
@@ -39,6 +40,40 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+
+# Global default renderer settings for simulation
+DEFAULT_RENDERER: Literal["hybrid", "fast-rt", "rt"] = "hybrid"
+
+
+@configclass
+class RenderCfg:
+    renderer: Literal["hybrid", "fast-rt", "rt"] = "hybrid"
+    """Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'.
+
+    Note:
+    - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering,
+        providing a balance between performance and visual quality.
+    - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
+    - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
+    """
+
+    enable_denoiser: bool = True
+    """Whether to enable denoising. Only valid when renderer is 'hybrid' or 'fast-rt'."""
+
+    spp: int = 64
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
+
+    def to_dexsim_flags(self):
+        if self.renderer == "hybrid":
+            return Renderer.HYBRID
+        elif self.renderer == "fast-rt":
+            return Renderer.FASTRT
+        elif self.renderer == "rt":
+            return Renderer.OFFLINERT
+        else:
+            logger.log_error(
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'hybrid', 'fast-rt', or 'rt'."
+            )
 
 
 @configclass
@@ -127,6 +162,26 @@ class MarkerCfg:
 
 
 @configclass
+class WindowRecordCfg:
+    """Configuration for interactive viewer window recording."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``r`` hotkey for viewer recording when the window opens."""
+
+    save_path: str | None = None
+    """Optional output path for viewer recordings. If None, use the default outputs directory."""
+
+    fps: int = 20
+    """Frames per second for viewer recording."""
+
+    max_memory: int = 1024
+    """Maximum buffered recording memory in MB before auto-stopping capture."""
+
+    video_prefix: str = "viewer_record"
+    """Video file prefix used when no explicit save path is provided."""
+
+
+@configclass
 class GPUMemoryCfg:
     """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
 
@@ -200,7 +255,7 @@ class RigidBodyAttributesCfg:
     contact_offset: float = 0.002
     """Contact offset for collision detection."""
 
-    rest_offset: float = 0.001
+    rest_offset: float = 0.0
     """Rest offset for collision detection."""
 
     enable_collision: bool = True

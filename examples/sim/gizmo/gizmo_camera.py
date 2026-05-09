@@ -28,9 +28,10 @@ torch.set_printoptions(precision=4, sci_mode=False)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, CameraCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def main():
@@ -40,20 +41,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create and simulate a camera with gizmo in SimulationManager"
     )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Device to run simulation on",
-    )
-    parser.add_argument("--headless", action="store_true", help="Run in headless mode")
-    parser.add_argument(
-        "--enable_rt",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing for better visuals",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Configure the simulation
@@ -62,7 +50,7 @@ def main():
         height=1080,
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
     )
 
     # Create simulation context

@@ -171,6 +171,7 @@ class BaseSolver(metaclass=ABCMeta):
                 root_link_name=self.root_link_name,
                 device=self.device,
             )
+
             self.compiled_fk = torch.compile(
                 self.pk_serial_chain.forward_kinematics_tensor,
                 fullgraph=True,

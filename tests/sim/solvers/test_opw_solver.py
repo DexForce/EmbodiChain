@@ -21,6 +21,7 @@ import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 def grid_sample_qpos_from_limits(
@@ -190,7 +191,6 @@ class TestOPWSolver(BaseSolverTest):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestOPWSolverCUDA(BaseSolverTest):
     def setup_method(self):
         self.setup_simulation("cuda")

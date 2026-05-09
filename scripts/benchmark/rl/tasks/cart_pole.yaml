@@ -7,7 +7,6 @@ base_config:
     exp_name: cart_pole
     device: cpu
     headless: true
-    enable_rt: false
     gpu_id: 0
     num_envs: 64
     iterations: 200

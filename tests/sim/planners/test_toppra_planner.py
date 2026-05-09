@@ -17,11 +17,14 @@ from embodichain.lab.sim.planners.toppra_planner import (
 from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 class TestToppraPlanner:
-    @classmethod
-    def setup_class(cls):
+    def setup_simulation(self):
+        cls = type(self)
+        if hasattr(cls, "sim"):
+            return
         cls.sim_config = SimulationManagerCfg(headless=True, sim_device="cpu")
         cls.sim = SimulationManager(cls.sim_config)
 
@@ -32,15 +35,27 @@ class TestToppraPlanner:
         }
         cls.robot = cls.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
 
-    @classmethod
-    def teardown_class(cls):
-        cls.sim.destroy()
-
     def setup_method(self):
+        self.setup_simulation()
         cfg = ToppraPlannerCfg(
             robot_uid="CobotMagic_toppra",
         )
         self.planner = ToppraPlanner(cfg=cfg)
+
+    def teardown_method(self):
+        pass
+
+    @classmethod
+    def teardown_class(cls):
+        if hasattr(cls, "sim"):
+            cls.sim.destroy()
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()
+            del cls.sim
+            import gc
+
+            gc.collect()
 
     def test_initialization(self):
         assert self.planner.device == torch.device("cpu")

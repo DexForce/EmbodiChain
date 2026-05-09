@@ -110,9 +110,12 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 | `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Get object local pose as (x, y, z, qw, qx, qy, qz) or 4x4 matrix per environment. |
 | `set_local_pose(pose, env_ids=None)` | `pose: (N, 7)` or `(N, 4, 4)` | Teleport object to given pose (requires calling `sim.update()` to apply). |
 | `body_data.pose` | `(N, 7)` | Access object pose directly (for dynamic/kinematic bodies). |
-| `body_data.lin_vel` | `(N, 3)` | Access linear velocity of object root (for dynamic/kinematic bodies). |
-| `body_data.ang_vel` | `(N, 3)` | Access angular velocity of object root (for dynamic/kinematic bodies). |
+| `body_data.lin_vel` | `(N, 3)` | Access linear velocity of object root (for dynamic bodies). |
+| `body_data.ang_vel` | `(N, 3)` | Access angular velocity of object root (for dynamic bodies). |
 | `body_data.vel` | `(N, 6)` | Concatenated linear and angular velocities. |
+| `body_data.lin_acc` | `(N, 3)` | Access linear acceleration of object root (for dynamic bodies). |
+| `body_data.ang_acc` | `(N, 3)` | Access angular acceleration of object root (for dynamic bodies). |
+| `body_data.acc` | `(N, 6)` | Concatenated linear and angular accelerations. |
 | `body_data.com_pose` | `(N, 7)` | Get center of mass pose of rigid bodies. |
 | `body_data.default_com_pose` | `(N, 7)` | Default center of mass pose. |
 | `body_state` | `(N, 13)` | Get full body state: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
