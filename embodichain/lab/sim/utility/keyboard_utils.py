@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import select
 import sys
 import tty
@@ -24,8 +26,11 @@ import torch
 import numpy as np
 
 from scipy.spatial.transform import Rotation as R
+from typing import TYPE_CHECKING
 
-from embodichain.lab.sim.sensors import Camera
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sensors import Camera
+
 from embodichain.utils.logger import log_info, log_error, log_warning
 
 

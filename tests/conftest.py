@@ -23,7 +23,7 @@ def pytest_addoption(parser):
         "--renderer",
         action="store",
         default="hybrid",
-        help="Specify the renderer backend: legacy, hybrid, or fast-rt",
+        help="Specify the renderer backend: hybrid, or fast-rt",
     )
 
 
