@@ -227,7 +227,7 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
         ),
-        is_partial_annotate=True
+        is_partial_annotate=True,
     )
     sim.open_window()
 
