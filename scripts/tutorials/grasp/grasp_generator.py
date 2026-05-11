@@ -227,6 +227,7 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
         ),
+        is_partial_annotate=True
     )
     sim.open_window()
 
@@ -266,7 +267,7 @@ if __name__ == "__main__":
     )[0]
     for i, obj_pose in enumerate(obj_poses):
         is_success, grasp_pose, open_length = grasp_generator.get_grasp_poses(
-            obj_pose, approach_direction, visualize_pose=False
+            obj_pose, approach_direction, visualize_pose=True
         )
         if is_success:
             grasp_xpos_list.append(grasp_pose.unsqueeze(0))
