@@ -160,15 +160,32 @@ class GripperCollisionChecker:
         collision_threshold: float = 0.0,
         is_visual: bool = False,
     ) -> torch.Tensor:
+        """query the collision status of the gripper with the object.
+        The gripper is represented as a point cloud generated from the grasp poses and
+        open lengths, and the collision status is determined by checking the distance
+        between the gripper points and the object mesh.
+
+        Args:
+            obj_pose (torch.Tensor): [4, 4] of float. The homogeneous transformation matrix of the object pose in the world frame.
+            grasp_poses (torch.Tensor): [B, 4, 4] of float. The homogeneous transformation matrices of the gripper root frame for B grasp poses.
+            open_lengths (torch.Tensor): [B, ] of float. The opening lengths of the gripper fingers for B grasp poses.
+            collision_threshold (float, optional): Collision distance threshold. Defaults to 0.0.
+            is_visual (bool, optional): whether to visualize collision result. Defaults to False.
+
+        Returns:
+            torch.Tensor: [B, ] boolean tensor indicating whether a grasp pose is collided.
+        """
         inv_obj_pose = obj_pose.clone()
         inv_obj_pose[:3, :3] = obj_pose[:3, :3].T
         inv_obj_pose[:3, 3] = -obj_pose[:3, 3] @ obj_pose[:3, :3]
         inv_obj_poses = inv_obj_pose[None, :, :].repeat(grasp_poses.shape[0], 1, 1)
         grasp_relative_pose = torch.bmm(inv_obj_poses, grasp_poses)
         gripper_pc = self._get_gripper_pc(grasp_relative_pose, open_lengths)
-        return self._checker.query_batch_points(
+        is_obj_gripper_collided, obj_gripper_dis = self._checker.query_batch_points(
             gripper_pc, collision_threshold=collision_threshold, is_visual=is_visual
         )
+
+        return is_obj_gripper_collided, obj_gripper_dis
 
 
 def box_surface_grid(

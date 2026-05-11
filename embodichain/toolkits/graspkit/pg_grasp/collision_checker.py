@@ -192,7 +192,10 @@ class ConvexCollisionChecker:
             collision_threshold: Collision threshold in meters. A point is considered colliding if its signed distance to the hull interior is <= this threshold. This allows for a margin of error in collision checking, where a small positive threshold can be used to consider points near the surface as colliding, and a small negative threshold can be used to allow for slight penetration without considering it a collision.
             is_visual: Whether to visualize the collision checking results for debugging purposes. If set to True, the code will generate visualizations of the query points colored by their collision status (e.g., red for colliding points and green for non-colliding points) along with the original mesh. This can help in understanding and verifying the collision checking process, especially during development and testing.
         Returns:
-            is_pose_collide: [B, ] boolean tensor indicating whether each point cloud in the
+            is_pc_collide: [B, ] boolean tensor indicating whether a point cloud is collided.
+            pc_obj_distance: [B, ] of float. Signed distance from the point cloud to the object surface.
+                Negative means the point cloud is penetrating into the object,
+                positive means the point cloud is outside the object.
         """
         n_batch = batch_points.shape[0]
         point_signed_distance, is_point_collide = (
