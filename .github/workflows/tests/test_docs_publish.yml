@@ -2,219 +2,156 @@ name: Test docs publish logic
 
 on:
   workflow_dispatch:
-    inputs:
-      scenario:
-        description: "Test scenario: main_push or tag_push"
-        required: true
-        default: main_push
 
 jobs:
   # -----------------------------------------------------------------------
-  # Scenario A: push to main branch — existing v0.1.0, v0.2.0 must survive
+  # Scenario A: push to main — existing v0.1.0, v0.2.0 must survive
+  # Simulates: cache holds v0.1.0 + v0.2.0, build adds/updates main/
   # -----------------------------------------------------------------------
   test-main-push:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up fake docs-build artifact (main branch build output)
+      - name: Set up fake "cache" (previous full-site with versioned dirs)
         run: |
-          mkdir -p docs-build/main
-          echo "<html><body>main docs</body></html>" > docs-build/main/index.html
+          mkdir -p docs/build/html/v0.1.0 docs/build/html/v0.2.0
+          echo "<html>v0.1.0</html>" > docs/build/html/v0.1.0/index.html
+          echo "<html>v0.2.0</html>" > docs/build/html/v0.2.0/index.html
 
-      - name: Set up fake gh-pages with existing versioned dirs
+      - name: Simulate build step — update main/ only
         run: |
-          mkdir -p gh-pages/v0.1.0 gh-pages/v0.2.0 gh-pages/main
-          echo "<html>v0.1.0</html>" > gh-pages/v0.1.0/index.html
-          echo "<html>v0.2.0</html>" > gh-pages/v0.2.0/index.html
-          echo "<html>old main</html>" > gh-pages/main/index.html
-
-      - name: Simulate publish step — update main subdir only
-        run: |
-          DEPLOY_DIR=main
-          IS_TAG=false
+          GITHUB_REF=refs/heads/main
           DOCS_MAX_VERSIONS=4
 
-          # Replace only the main subdir (mirrors the JamesIves deploy + clean)
-          rm -rf gh-pages/${DEPLOY_DIR}
-          cp -r docs-build/${DEPLOY_DIR} gh-pages/${DEPLOY_DIR}
+          # Mirrors the workflow: rm -rf build/html/main, then build
+          rm -rf docs/build/html/main
+          mkdir -p docs/build/html/main
+          echo "<html><body>main docs (new build)</body></html>" > docs/build/html/main/index.html
 
-          # No pruning for non-tag builds
-          if [[ "${IS_TAG}" == "true" ]]; then
-            cd gh-pages
-            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
-              echo "Pruning old version: ${TAG_DIRS[0]}"
-              rm -rf "${TAG_DIRS[0]}"
-              TAG_DIRS=("${TAG_DIRS[@]:1}")
-            done
-            cd ..
-          fi
+          cd docs/build/html
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py --build-dir .
 
-          # Regenerate metadata
-          python3 docs/scripts/generate_versions_json.py --build-dir gh-pages
-
-      - name: Assert — v0.1.0 and v0.2.0 still present
+      - name: Assert — v0.1.0 and v0.2.0 still present, main updated
         run: |
-          echo "=== gh-pages structure ==="
-          find gh-pages -maxdepth 1 | sort
-
-          [ -d gh-pages/v0.1.0 ] || (echo "FAIL: v0.1.0 was removed!" && exit 1)
-          [ -d gh-pages/v0.2.0 ] || (echo "FAIL: v0.2.0 was removed!" && exit 1)
-          [ -f gh-pages/main/index.html ] || (echo "FAIL: main/index.html missing!" && exit 1)
-          grep -q "main docs" gh-pages/main/index.html || (echo "FAIL: main/index.html not updated!" && exit 1)
-          [ -f gh-pages/versions.json ] || (echo "FAIL: versions.json missing!" && exit 1)
-          [ -f gh-pages/index.html ] || (echo "FAIL: root index.html missing!" && exit 1)
-
-          echo "=== versions.json ==="
-          cat gh-pages/versions.json
+          echo "=== docs/build/html structure ===" && find docs/build/html -maxdepth 1 | sort
+          [ -d docs/build/html/v0.1.0 ] || (echo "FAIL: v0.1.0 removed!" && exit 1)
+          [ -d docs/build/html/v0.2.0 ] || (echo "FAIL: v0.2.0 removed!" && exit 1)
+          grep -q "new build" docs/build/html/main/index.html || (echo "FAIL: main not updated!" && exit 1)
+          [ -f docs/build/html/versions.json ] || (echo "FAIL: versions.json missing!" && exit 1)
+          echo "=== versions.json ===" && cat docs/build/html/versions.json
           python3 -c "
-          import json, sys
-          data = json.load(open('gh-pages/versions.json'))
-          names = [v['name'] for v in data['versions']]
-          assert 'v0.1.0' in names, f'v0.1.0 missing from versions.json: {names}'
-          assert 'v0.2.0' in names, f'v0.2.0 missing from versions.json: {names}'
-          assert 'main' in names, f'main missing from versions.json: {names}'
-          print('PASS: versions.json contains all expected versions')
+          import json
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert 'v0.1.0' in names and 'v0.2.0' in names and 'main' in names, f'Missing versions: {names}'
+          print('PASS: all versions present:', names)
           "
-          echo "PASS: main_push scenario — existing versions preserved"
+          echo "PASS: main_push — existing versions preserved"
 
   # -----------------------------------------------------------------------
-  # Scenario B: push of tag v0.3.0 — v0.3.0 added, old dirs still present
+  # Scenario B: tag push v0.3.0 — new version added, old dirs untouched
   # -----------------------------------------------------------------------
   test-tag-push:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up fake docs-build artifact (tag build output)
+      - name: Set up fake "cache" (previous full-site)
         run: |
-          mkdir -p docs-build/v0.3.0
-          echo "<html><body>v0.3.0 docs</body></html>" > docs-build/v0.3.0/index.html
+          mkdir -p docs/build/html/v0.1.0 docs/build/html/v0.2.0 docs/build/html/main
+          echo "<html>v0.1.0</html>" > docs/build/html/v0.1.0/index.html
+          echo "<html>v0.2.0</html>" > docs/build/html/v0.2.0/index.html
+          echo "<html>main</html>"   > docs/build/html/main/index.html
 
-      - name: Set up fake gh-pages with existing versioned dirs
+      - name: Simulate build step — add v0.3.0
         run: |
-          mkdir -p gh-pages/v0.1.0 gh-pages/v0.2.0 gh-pages/main
-          echo "<html>v0.1.0</html>" > gh-pages/v0.1.0/index.html
-          echo "<html>v0.2.0</html>" > gh-pages/v0.2.0/index.html
-          echo "<html>main</html>" > gh-pages/main/index.html
-
-      - name: Simulate publish step — add v0.3.0 subdir
-        run: |
-          DEPLOY_DIR=v0.3.0
-          IS_TAG=true
+          GITHUB_REF=refs/tags/v0.3.0
           DOCS_MAX_VERSIONS=4
 
-          rm -rf gh-pages/${DEPLOY_DIR}
-          cp -r docs-build/${DEPLOY_DIR} gh-pages/${DEPLOY_DIR}
+          mkdir -p docs/build/html/v0.3.0
+          echo "<html>v0.3.0</html>" > docs/build/html/v0.3.0/index.html
 
-          if [[ "${IS_TAG}" == "true" ]]; then
-            cd gh-pages
-            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
-              echo "Pruning old version: ${TAG_DIRS[0]}"
-              rm -rf "${TAG_DIRS[0]}"
-              TAG_DIRS=("${TAG_DIRS[@]:1}")
-            done
-            cd ..
-          fi
+          cd docs/build/html
+          mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+          while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+            echo "Pruning: ${TAG_DIRS[0]}"
+            rm -rf "${TAG_DIRS[0]}"
+            TAG_DIRS=("${TAG_DIRS[@]:1}")
+          done
 
-          python3 docs/scripts/generate_versions_json.py --build-dir gh-pages
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py --build-dir .
 
-      - name: Assert — all versions present, latest is v0.3.0
+      - name: Assert — all four dirs present, latest is v0.3.0
         run: |
-          echo "=== gh-pages structure ==="
-          find gh-pages -maxdepth 1 | sort
-
-          [ -d gh-pages/v0.1.0 ] || (echo "FAIL: v0.1.0 was removed!" && exit 1)
-          [ -d gh-pages/v0.2.0 ] || (echo "FAIL: v0.2.0 was removed!" && exit 1)
-          [ -d gh-pages/v0.3.0 ] || (echo "FAIL: v0.3.0 was missing!" && exit 1)
-          [ -d gh-pages/main ]   || (echo "FAIL: main was removed!" && exit 1)
-
-          echo "=== versions.json ==="
-          cat gh-pages/versions.json
+          echo "=== docs/build/html structure ===" && find docs/build/html -maxdepth 1 | sort
+          for d in v0.1.0 v0.2.0 v0.3.0 main; do
+            [ -d "docs/build/html/$d" ] || (echo "FAIL: $d missing!" && exit 1)
+          done
+          echo "=== versions.json ===" && cat docs/build/html/versions.json
           python3 -c "
-          import json, sys
-          data = json.load(open('gh-pages/versions.json'))
-          names = [v['name'] for v in data['versions']]
-          assert 'v0.3.0' in names, f'v0.3.0 missing: {names}'
-          assert 'v0.1.0' in names, f'v0.1.0 missing: {names}'
-          assert 'v0.2.0' in names, f'v0.2.0 missing: {names}'
-          assert 'main' in names, f'main missing: {names}'
-          assert data['latest'] == 'v0.3.0', f'latest should be v0.3.0, got {data[\"latest\"]}'
-          print('PASS: versions.json correct, latest =', data['latest'])
+          import json
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert d['latest'] == 'v0.3.0', f'latest should be v0.3.0, got {d[\"latest\"]}'
+          assert all(n in names for n in ['v0.1.0','v0.2.0','v0.3.0','main']), f'Missing: {names}'
+          print('PASS: versions.json correct, latest =', d['latest'])
           "
-          echo "PASS: tag_push scenario — new version added, others preserved"
+          echo "PASS: tag_push — new version added, others preserved"
 
   # -----------------------------------------------------------------------
-  # Scenario C: pruning kicks in when tag count exceeds DOCS_MAX_VERSIONS
+  # Scenario C: 5th tag triggers pruning — oldest (v0.1.0) removed
   # -----------------------------------------------------------------------
   test-prune-old-versions:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up fake docs-build for v0.5.0 (5th tag)
-        run: |
-          mkdir -p docs-build/v0.5.0
-          echo "<html>v0.5.0</html>" > docs-build/v0.5.0/index.html
-
-      - name: Set up fake gh-pages with 4 existing tag dirs (at the limit)
+      - name: Set up fake "cache" with 4 existing tag dirs (at the limit)
         run: |
           for v in v0.1.0 v0.2.0 v0.3.0 v0.4.0; do
-            mkdir -p gh-pages/${v}
-            echo "<html>${v}</html>" > gh-pages/${v}/index.html
+            mkdir -p docs/build/html/${v}
+            echo "<html>${v}</html>" > docs/build/html/${v}/index.html
           done
-          mkdir -p gh-pages/main
-          echo "<html>main</html>" > gh-pages/main/index.html
+          mkdir -p docs/build/html/main
+          echo "<html>main</html>" > docs/build/html/main/index.html
 
-      - name: Simulate publish step for v0.5.0 (triggers prune)
+      - name: Simulate build step — push v0.5.0 triggers prune
         run: |
-          DEPLOY_DIR=v0.5.0
-          IS_TAG=true
+          GITHUB_REF=refs/tags/v0.5.0
           DOCS_MAX_VERSIONS=4
 
-          rm -rf gh-pages/${DEPLOY_DIR}
-          cp -r docs-build/${DEPLOY_DIR} gh-pages/${DEPLOY_DIR}
+          mkdir -p docs/build/html/v0.5.0
+          echo "<html>v0.5.0</html>" > docs/build/html/v0.5.0/index.html
 
-          if [[ "${IS_TAG}" == "true" ]]; then
-            cd gh-pages
-            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
-              echo "Pruning old version: ${TAG_DIRS[0]}"
-              rm -rf "${TAG_DIRS[0]}"
-              TAG_DIRS=("${TAG_DIRS[@]:1}")
-            done
-            cd ..
-          fi
+          cd docs/build/html
+          mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+          while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+            echo "Pruning: ${TAG_DIRS[0]}"
+            rm -rf "${TAG_DIRS[0]}"
+            TAG_DIRS=("${TAG_DIRS[@]:1}")
+          done
 
-          python3 docs/scripts/generate_versions_json.py --build-dir gh-pages
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py --build-dir .
 
-      - name: Assert — oldest v0.1.0 pruned, max 4 tags kept
+      - name: Assert — v0.1.0 pruned, max 4 tags kept, main untouched
         run: |
-          echo "=== gh-pages structure ==="
-          find gh-pages -maxdepth 1 | sort
-
-          [ ! -d gh-pages/v0.1.0 ] || (echo "FAIL: v0.1.0 should have been pruned!" && exit 1)
-          [ -d gh-pages/v0.2.0 ] || (echo "FAIL: v0.2.0 was over-pruned!" && exit 1)
-          [ -d gh-pages/v0.3.0 ] || (echo "FAIL: v0.3.0 was over-pruned!" && exit 1)
-          [ -d gh-pages/v0.4.0 ] || (echo "FAIL: v0.4.0 was over-pruned!" && exit 1)
-          [ -d gh-pages/v0.5.0 ] || (echo "FAIL: v0.5.0 was not added!" && exit 1)
-          [ -d gh-pages/main ]   || (echo "FAIL: main was removed by pruning!" && exit 1)
-
-          TAG_COUNT=$(ls -d gh-pages/v*/ 2>/dev/null | wc -l)
-          [ "${TAG_COUNT}" -le 4 ] || (echo "FAIL: ${TAG_COUNT} tag dirs exceed DOCS_MAX_VERSIONS=4" && exit 1)
-
-          echo "=== versions.json ==="
-          cat gh-pages/versions.json
+          echo "=== docs/build/html structure ===" && find docs/build/html -maxdepth 1 | sort
+          [ ! -d docs/build/html/v0.1.0 ] || (echo "FAIL: v0.1.0 should be pruned!" && exit 1)
+          for d in v0.2.0 v0.3.0 v0.4.0 v0.5.0 main; do
+            [ -d "docs/build/html/$d" ] || (echo "FAIL: $d was incorrectly removed!" && exit 1)
+          done
+          TAG_COUNT=$(ls -d docs/build/html/v*/ 2>/dev/null | wc -l)
+          [ "${TAG_COUNT}" -le 4 ] || (echo "FAIL: ${TAG_COUNT} tags exceed DOCS_MAX_VERSIONS=4" && exit 1)
+          echo "=== versions.json ===" && cat docs/build/html/versions.json
           python3 -c "
           import json
-          data = json.load(open('gh-pages/versions.json'))
-          names = [v['name'] for v in data['versions']]
-          assert 'v0.1.0' not in names, f'v0.1.0 should be pruned from versions.json: {names}'
-          assert data['latest'] == 'v0.5.0', f'latest should be v0.5.0, got {data[\"latest\"]}'
-          tag_count = sum(1 for v in data['versions'] if v['type'] == 'tag')
-          assert tag_count <= 4, f'Too many tags in versions.json: {tag_count}'
-          print('PASS: pruning correct, latest =', data['latest'], ', tag count =', tag_count)
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert 'v0.1.0' not in names, f'v0.1.0 should be pruned: {names}'
+          assert d['latest'] == 'v0.5.0', f'latest should be v0.5.0, got {d[\"latest\"]}'
+          tag_count = sum(1 for v in d['versions'] if v['type'] == 'tag')
+          assert tag_count <= 4, f'Too many tags: {tag_count}'
+          print('PASS: pruning correct, latest =', d['latest'], ', tag count =', tag_count)
           "
-          echo "PASS: prune scenario — oldest version removed, within limit"
+          echo "PASS: prune — oldest removed, within limit, main preserved"
