@@ -83,6 +83,10 @@ class GraspGeneratorCfg:
     """When ``True``, the annotator allows selecting a partial region of the 
     mesh for grasp sampling. If ``False``, the entire mesh is used."""
 
+    is_filter_ground_collision: bool = True
+    """Whether to filter out grasp poses that would cause the gripper to 
+    collide."""
+
 
 class GraspGenerator:
     """Antipodal grasp-pose generator for parallel-jaw grippers.
@@ -672,6 +676,7 @@ class GraspGenerator:
             object_pose,
             valid_grasp_poses,
             valid_open_lengths,
+            is_filter_ground_collision=self.cfg.is_filter_ground_collision,
             is_visual=visualize_collision,
             collision_threshold=0.0,
         )

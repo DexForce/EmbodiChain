@@ -17,7 +17,8 @@
 from __future__ import annotations
 
 import torch
-
+import open3d as o3d
+import numpy as np
 from typing import Sequence
 
 from embodichain.utils import configclass
@@ -93,6 +94,7 @@ class GripperCollisionChecker:
             base_mesh_faces=object_mesh_faces,
             max_decomposition_hulls=cfg.max_decomposition_hulls,
         )
+        self.obj_mesh_verts = object_mesh_verts
         self.device = object_mesh_verts.device
         self.cfg = cfg
         self._init_pc_template()
@@ -152,12 +154,21 @@ class GripperCollisionChecker:
         gripper_pc = torch.cat([root_pc, left_pc, right_pc], dim=1)
         return gripper_pc
 
+    def get_ground_height(self, obj_pose: torch.Tensor) -> float:
+        obj_r = obj_pose[:3, :3]
+        obj_t = obj_pose[:3, 3]
+        # obj_verts_world = (obj_r @ self.obj_mesh_verts.T).T + obj_t
+        obj_verts_world = self.obj_mesh_verts @ obj_r.T + obj_t
+        min_z = obj_verts_world[:, 2].min().item()
+        return min_z
+
     def query(
         self,
         obj_pose: torch.Tensor,
         grasp_poses: torch.Tensor,
         open_lengths: torch.Tensor,
         collision_threshold: float = 0.0,
+        is_filter_ground_collision: bool = True,
         is_visual: bool = False,
     ) -> torch.Tensor:
         """query the collision status of the gripper with the object.
@@ -180,12 +191,51 @@ class GripperCollisionChecker:
         inv_obj_pose[:3, 3] = -obj_pose[:3, 3] @ obj_pose[:3, :3]
         inv_obj_poses = inv_obj_pose[None, :, :].repeat(grasp_poses.shape[0], 1, 1)
         grasp_relative_pose = torch.bmm(inv_obj_poses, grasp_poses)
-        gripper_pc = self._get_gripper_pc(grasp_relative_pose, open_lengths)
+        gripper_pc_obj = self._get_gripper_pc(grasp_relative_pose, open_lengths)
         is_obj_gripper_collided, obj_gripper_dis = self._checker.query_batch_points(
-            gripper_pc, collision_threshold=collision_threshold, is_visual=is_visual
+            gripper_pc_obj, collision_threshold=collision_threshold, is_visual=is_visual
         )
 
-        return is_obj_gripper_collided, obj_gripper_dis
+        if is_filter_ground_collision:
+            gripper_pc_world = self._get_gripper_pc(grasp_poses, open_lengths)
+            ground_height = self.get_ground_height(obj_pose)
+            gripper_ground_dis = gripper_pc_world[:, :, 2] - ground_height
+            is_gripper_ground_collided = gripper_ground_dis < collision_threshold
+
+            is_gripper_collided = torch.logical_or(
+                is_obj_gripper_collided, is_gripper_ground_collided
+            )
+            gripper_dis = torch.min(obj_gripper_dis, gripper_ground_dis)
+        else:
+            is_gripper_collided = is_obj_gripper_collided
+            gripper_dis = obj_gripper_dis
+
+        if is_visual:
+            n_batch = grasp_poses.shape[0]
+            # visualize all collision result
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            for i in range(n_batch):
+                query_points_o3d = o3d.geometry.PointCloud()
+                query_points_np = gripper_pc_obj[i].cpu().numpy()
+                query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
+                query_points_color = np.zeros_like(query_points_np)
+                query_points_color[is_gripper_collided[i].cpu().numpy()] = [
+                    1.0,
+                    0,
+                    0,
+                ]  # red for colliding points
+                query_points_color[~is_gripper_collided[i].cpu().numpy()] = [
+                    0,
+                    1.0,
+                    0,
+                ]  # green for non-colliding points
+                query_points_o3d.colors = o3d.utility.Vector3dVector(query_points_color)
+                o3d.visualization.draw_geometries(
+                    [self._checker.mesh, query_points_o3d, frame],
+                    mesh_show_back_face=True,
+                )
+
+        return is_obj_gripper_collided.any(dim=1), obj_gripper_dis.min(dim=1).values
 
 
 def box_surface_grid(
