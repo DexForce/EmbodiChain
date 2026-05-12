@@ -1,0 +1,788 @@
+{
+  "task_graph": {
+    "task": "rearrange_fork_spoon_opposite_sides_plate",
+    "start": "v0_start",
+    "goal": "v5_done",
+    "nodes": [
+      {
+        "id": "v0_start",
+        "semantic": "both arms in initial poses; grippers open"
+      },
+      {
+        "id": "v1_grasped",
+        "semantic": "left arm holds fork; right arm holds spoon"
+      },
+      {
+        "id": "v2_eef_down",
+        "semantic": "both end-effectors oriented downward while holding utensils"
+      },
+      {
+        "id": "v3_at_targets",
+        "semantic": "arms moved to target positions relative to plate center"
+      },
+      {
+        "id": "v4_placed",
+        "semantic": "fork placed at y=+0.16; spoon placed at y=-0.16 relative to plate"
+      },
+      {
+        "id": "v5_done",
+        "semantic": "both arms returned to initial poses"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e01_grasp_objects",
+        "source": "v0_start",
+        "target": "v1_grasped",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1
+          }
+        },
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "pre_grasp_dis": 0.1
+          }
+        }
+      },
+      {
+        "id": "e02_orient_down",
+        "source": "v1_grasped",
+        "target": "v2_eef_down",
+        "left_arm_action": {
+          "fn": "orient_eef",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "direction": "down"
+          }
+        },
+        "right_arm_action": {
+          "fn": "orient_eef",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "direction": "down"
+          }
+        }
+      },
+      {
+        "id": "e03_move_to_plate_offsets",
+        "source": "v2_eef_down",
+        "target": "v3_at_targets",
+        "left_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "plate",
+            "x_offset": 0.0,
+            "y_offset": 0.16,
+            "z_offset": 0.0
+          }
+        },
+        "right_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "plate",
+            "x_offset": 0.0,
+            "y_offset": -0.16,
+            "z_offset": 0.0
+          }
+        }
+      },
+      {
+        "id": "e04_release",
+        "source": "v3_at_targets",
+        "target": "v4_placed",
+        "left_arm_action": {
+          "fn": "open_gripper",
+          "kwargs": {
+            "robot_name": "left_arm"
+          }
+        },
+        "right_arm_action": {
+          "fn": "open_gripper",
+          "kwargs": {
+            "robot_name": "right_arm"
+          }
+        }
+      },
+      {
+        "id": "e05_back_to_initial",
+        "source": "v4_placed",
+        "target": "v5_done",
+        "left_arm_action": {
+          "fn": "back_to_initial_pose",
+          "kwargs": {
+            "robot_name": "left_arm"
+          }
+        },
+        "right_arm_action": {
+          "fn": "back_to_initial_pose",
+          "kwargs": {
+            "robot_name": "right_arm"
+          }
+        }
+      }
+    ]
+  },
+  "recovery_spec": {
+    "task": "rearrange_fork_spoon_opposite_sides_plate",
+    "recovery_bindings": [
+      {
+        "edge_id": "e01_grasp_objects",
+        "failure_name": "object_shifted_during_grasp",
+        "monitors": [
+          {
+            "type": "object_moved",
+            "objects": [
+              "fork",
+              "spoon"
+            ],
+            "threshold": 0.02
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp_both",
+            "arms": {
+              "left_arm": "fork",
+              "right_arm": "spoon"
+            },
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        ],
+        "merge": "target",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e02_orient_down",
+        "failure_name": "hold_lost_during_orient",
+        "monitors": [
+          {
+            "type": "hold_lost",
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "threshold": 0.05
+          },
+          {
+            "type": "hold_lost",
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "threshold": 0.05
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp_both",
+            "arms": {
+              "left_arm": "fork",
+              "right_arm": "spoon"
+            },
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          },
+          {
+            "type": "retry_failed_edge"
+          }
+        ],
+        "merge": "target",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e03_move_to_plate_offsets",
+        "failure_name": "hold_lost_during_move",
+        "monitors": [
+          {
+            "type": "hold_lost",
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "threshold": 0.05
+          },
+          {
+            "type": "hold_lost",
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "threshold": 0.05
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp_both",
+            "arms": {
+              "left_arm": "fork",
+              "right_arm": "spoon"
+            },
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          },
+          {
+            "type": "replay_edge",
+            "edge_id": "e02_orient_down"
+          },
+          {
+            "type": "retry_failed_edge"
+          }
+        ],
+        "merge": "target",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e03_move_to_plate_offsets",
+        "failure_name": "plate_moved",
+        "monitors": [
+          {
+            "type": "object_moved",
+            "objects": [
+              "plate"
+            ],
+            "threshold": 0.02
+          }
+        ],
+        "recovery": [
+          {
+            "type": "retry_failed_edge"
+          }
+        ],
+        "merge": "target",
+        "repeat_until_success": true
+      }
+    ]
+  },
+  "recovery_graph": {
+    "task": "rearrange_fork_spoon_opposite_sides_plate",
+    "recovery_nodes": [
+      {
+        "id": "rn_e02_orient_down_1_regrasp_objects",
+        "semantic": "regrasp objects"
+      },
+      {
+        "id": "rn_e03_move_to_plate_offsets_1_regrasp_objects",
+        "semantic": "regrasp objects"
+      },
+      {
+        "id": "rn_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "semantic": "replay e02 orient down"
+      }
+    ],
+    "recovery_edges": [
+      {
+        "id": "re_e01_grasp_objects_1_regrasp_objects",
+        "source": "v0_start",
+        "target": "v1_grasped",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        },
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e02_orient_down_1_regrasp_objects",
+        "source": "v1_grasped",
+        "target": "rn_e02_orient_down_1_regrasp_objects",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        },
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e02_orient_down_2_retry_e02_orient_down",
+        "source": "rn_e02_orient_down_1_regrasp_objects",
+        "target": "v2_eef_down",
+        "left_arm_action": {
+          "fn": "orient_eef",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "direction": "down"
+          }
+        },
+        "right_arm_action": {
+          "fn": "orient_eef",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "direction": "down"
+          }
+        }
+      },
+      {
+        "id": "re_e02_orient_down_2_retry_e02_orient_down_repair_regrasp_fork",
+        "source": "rn_e02_orient_down_1_regrasp_objects",
+        "target": "rn_e02_orient_down_1_regrasp_objects",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        },
+        "right_arm_action": null
+      },
+      {
+        "id": "re_e03_move_to_plate_offsets_1_regrasp_objects",
+        "source": "v2_eef_down",
+        "target": "rn_e03_move_to_plate_offsets_1_regrasp_objects",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        },
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "source": "rn_e03_move_to_plate_offsets_1_regrasp_objects",
+        "target": "rn_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "left_arm_action": {
+          "fn": "orient_eef",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "direction": "down"
+          }
+        },
+        "right_arm_action": {
+          "fn": "orient_eef",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "direction": "down"
+          }
+        }
+      },
+      {
+        "id": "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets",
+        "source": "rn_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "target": "v3_at_targets",
+        "left_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "plate",
+            "x_offset": 0.0,
+            "y_offset": 0.16,
+            "z_offset": 0.0
+          }
+        },
+        "right_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "plate",
+            "x_offset": 0.0,
+            "y_offset": -0.16,
+            "z_offset": 0.0
+          }
+        }
+      },
+      {
+        "id": "re_e03_move_to_plate_offsets_2_replay_e02_orient_down_repair_regrasp_fork",
+        "source": "rn_e03_move_to_plate_offsets_1_regrasp_objects",
+        "target": "rn_e03_move_to_plate_offsets_1_regrasp_objects",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        },
+        "right_arm_action": null
+      },
+      {
+        "id": "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets_repair_regrasp_fork",
+        "source": "rn_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "target": "rn_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "left_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        },
+        "right_arm_action": null
+      },
+      {
+        "id": "re_e03_move_to_plate_offsets_1_retry_e03_move_to_plate_offsets",
+        "source": "v2_eef_down",
+        "target": "v3_at_targets",
+        "left_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "left_arm",
+            "obj_name": "plate",
+            "x_offset": 0.0,
+            "y_offset": 0.16,
+            "z_offset": 0.0
+          }
+        },
+        "right_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "plate",
+            "x_offset": 0.0,
+            "y_offset": -0.16,
+            "z_offset": 0.0
+          }
+        }
+      }
+    ],
+    "recovery_branches": [
+      {
+        "edge_id": "e01_grasp_objects",
+        "failure_name": "object_shifted_during_grasp",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          },
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "spoon",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e01_grasp_objects_1_regrasp_objects"
+        ]
+      },
+      {
+        "edge_id": "re_e01_grasp_objects_1_regrasp_objects",
+        "failure_name": "object_shifted_during_grasp_during_re_e01_grasp_objects_1_regrasp_objects",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          },
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "spoon",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e01_grasp_objects_1_regrasp_objects"
+        ]
+      },
+      {
+        "edge_id": "e02_orient_down",
+        "failure_name": "hold_lost_during_orient",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "left_arm",
+              "obj_name": "fork",
+              "threshold": 0.05
+            }
+          },
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "spoon",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e02_orient_down_1_regrasp_objects",
+          "re_e02_orient_down_2_retry_e02_orient_down"
+        ]
+      },
+      {
+        "edge_id": "re_e02_orient_down_1_regrasp_objects",
+        "failure_name": "hold_lost_during_orient_during_re_e02_orient_down_1_regrasp_objects",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          },
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "spoon",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e02_orient_down_1_regrasp_objects"
+        ]
+      },
+      {
+        "edge_id": "re_e02_orient_down_2_retry_e02_orient_down_repair_regrasp_fork",
+        "failure_name": "hold_lost_during_orient_during_re_e02_orient_down_2_retry_e02_orient_down_repair_regrasp_fork",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e02_orient_down_2_retry_e02_orient_down_repair_regrasp_fork"
+        ]
+      },
+      {
+        "edge_id": "re_e02_orient_down_2_retry_e02_orient_down",
+        "failure_name": "hold_lost_during_orient_during_re_e02_orient_down_2_retry_e02_orient_down",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "left_arm",
+              "obj_name": "fork",
+              "threshold": 0.05
+            }
+          },
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "spoon",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e02_orient_down_2_retry_e02_orient_down_repair_regrasp_fork"
+        ]
+      },
+      {
+        "edge_id": "e03_move_to_plate_offsets",
+        "failure_name": "hold_lost_during_move",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "left_arm",
+              "obj_name": "fork",
+              "threshold": 0.05
+            }
+          },
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "spoon",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_1_regrasp_objects",
+          "re_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+          "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets"
+        ]
+      },
+      {
+        "edge_id": "re_e03_move_to_plate_offsets_1_regrasp_objects",
+        "failure_name": "hold_lost_during_move_during_re_e03_move_to_plate_offsets_1_regrasp_objects",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          },
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "spoon",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_1_regrasp_objects"
+        ]
+      },
+      {
+        "edge_id": "re_e03_move_to_plate_offsets_2_replay_e02_orient_down_repair_regrasp_fork",
+        "failure_name": "hold_lost_during_move_during_re_e03_move_to_plate_offsets_2_replay_e02_orient_down_repair_regrasp_fork",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_2_replay_e02_orient_down_repair_regrasp_fork"
+        ]
+      },
+      {
+        "edge_id": "re_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "failure_name": "hold_lost_during_move_during_re_e03_move_to_plate_offsets_2_replay_e02_orient_down",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "left_arm",
+              "obj_name": "fork",
+              "threshold": 0.05
+            }
+          },
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "spoon",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_2_replay_e02_orient_down_repair_regrasp_fork"
+        ]
+      },
+      {
+        "edge_id": "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets_repair_regrasp_fork",
+        "failure_name": "hold_lost_during_move_during_re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets_repair_regrasp_fork",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "fork",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets_repair_regrasp_fork"
+        ]
+      },
+      {
+        "edge_id": "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets",
+        "failure_name": "hold_lost_during_move_during_re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "left_arm",
+              "obj_name": "fork",
+              "threshold": 0.05
+            }
+          },
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "spoon",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_3_retry_e03_move_to_plate_offsets_repair_regrasp_fork"
+        ]
+      },
+      {
+        "edge_id": "e03_move_to_plate_offsets",
+        "failure_name": "plate_moved",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "plate",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_1_retry_e03_move_to_plate_offsets"
+        ]
+      },
+      {
+        "edge_id": "re_e03_move_to_plate_offsets_1_retry_e03_move_to_plate_offsets",
+        "failure_name": "plate_moved_during_re_e03_move_to_plate_offsets_1_retry_e03_move_to_plate_offsets",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "plate",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_move_to_plate_offsets_1_retry_e03_move_to_plate_offsets"
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "recovery_enabled": true,
+    "schema_version": "recovery_bindings_v1",
+    "task_graph_hash": "fcd9c166fb17a8c24322f92186151c8ceacf46f3984ca9ae29cd265841747c0a",
+    "raw_recovery_spec_hash": "eca705a7cbc0d99a88433c53730c02794675f9704f7ffae20d9f98bb6069647c",
+    "recovery_spec_hash": "9ac7aacd8ee2847c19c52d19d37540ae8a0b5e6b65bd3afdeb3a945fb3b4b3f4"
+  }
+}
