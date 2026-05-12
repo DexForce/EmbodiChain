@@ -185,3 +185,11 @@ This tutorial showcases several important features of EmbodiChain environments:
 
 .. tip::
    **Using an AI coding agent?** Once you're ready to create your own task environment, use the **/add-task-env** skill to scaffold the file with the correct structure, ``@register_env`` decorator, base class methods, and test stub. Use **/add-test** to write tests and **/pre-commit-check** to verify everything passes CI before committing.
+
+Next Steps
+~~~~~~~~~~
+
+- :doc:`modular_env` — Build advanced config-driven environments with ``EmbodiedEnv``
+- :doc:`rl` — Train RL agents with PPO or GRPO
+- :doc:`/overview/gym/env` — Full environment architecture and manager reference
+- :doc:`/guides/custom_functors` — Write custom observation, reward, and event functors

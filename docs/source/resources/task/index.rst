@@ -6,6 +6,5 @@ Supported Tasks
 .. toctree::
    :maxdepth: 1
 
-    Push Cube
     Pour Water
 

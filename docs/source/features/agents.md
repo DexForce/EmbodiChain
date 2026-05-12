@@ -164,3 +164,12 @@ embodichain/agents/
 │   └── prompt/                # Prompt templates (LangChain)
 └── prompts/                   # Agent prompt templates
 ```
+
+---
+
+## See Also
+
+- [Online Data Streaming](online_data.md) — Streaming live simulation data for training
+- [RL Architecture](../overview/rl/index.rst) — RL training pipeline and algorithms
+- [Atomic Actions Tutorial](../tutorial/atomic_actions.rst) — Action primitives used by the CodeAgent
+- [Supported Tasks](../resources/task/index.rst) — Available task environments

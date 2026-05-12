@@ -305,6 +305,8 @@ For a complete example of a modular environment setup, please refer to the {ref}
 - {ref}`tutorial_modular_env` - Advanced modular environment setup
 - {ref}`tutorial_rl` - Reinforcement learning training guide
 - {doc}`/api_reference/embodichain/embodichain.lab.gym.envs` - Complete API reference for EmbodiedEnv and configurations
+- {doc}`/guides/custom_functors` - How to write custom functors
+- {doc}`/guides/configuration` - Configuration system guide
 
 ```{toctree}
 :maxdepth: 1
