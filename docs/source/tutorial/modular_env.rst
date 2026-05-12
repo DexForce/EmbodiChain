@@ -64,7 +64,7 @@ The ``randomize_table_mat`` event varies visual appearance:
 - **Mode**: ``"interval"`` - triggers every 10 steps
 - **Features**: Random textures from COCO dataset and base color variations
 
-for more randomization events, please refer
+For more randomization events, please refer to :doc:`/overview/gym/event_functors`.
 
 Observation Configuration
 -------------------------
