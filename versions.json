@@ -1,0 +1,10 @@
+{
+  "latest": "main",
+  "versions": [
+    {
+      "name": "main",
+      "url": "./main/index.html",
+      "type": "branch"
+    }
+  ]
+}
