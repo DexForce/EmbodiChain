@@ -54,6 +54,7 @@ Table of Contents
    resources/robot/index*
    resources/task/index*
    resources/roadmap.md
+   resources/publications/README.md
 
 .. toctree::
    :maxdepth: 2
