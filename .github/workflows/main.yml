@@ -117,9 +117,8 @@ jobs:
 
       - name: Upload docs artifact
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: docs-build
           path: ${{ github.workspace }}/docs/build/html
 
   test:
@@ -146,77 +145,13 @@ jobs:
   publish:
     if: github.event_name == 'push'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: Linux
     permissions:
-      contents: write  # Required to push to gh-pages branch
-    env:
-      DOCS_MAX_VERSIONS: "4"  # Max number of release versions to keep
+      pages: write
+      id-token: write
     steps:
-      - name: Checkout source repo (for scripts)
-        uses: actions/checkout@v4
-
-      - name: Determine deploy directory
-        id: vars
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "deploy_dir=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-            echo "is_tag=true" >> $GITHUB_OUTPUT
-          else
-            echo "deploy_dir=main" >> $GITHUB_OUTPUT
-            echo "is_tag=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Download docs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docs-build
-          path: docs-build
-
-      # Deploy only the specific version subdirectory to gh-pages.
-      # Using target-folder ensures other version dirs are never touched.
-      - name: Deploy docs subdir to gh-pages
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          branch: gh-pages
-          folder: docs-build/${{ steps.vars.outputs.deploy_dir }}
-          target-folder: ${{ steps.vars.outputs.deploy_dir }}
-          clean: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "docs: update ${{ steps.vars.outputs.deploy_dir }}"
-
-      - name: Checkout gh-pages for metadata update
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: gh-pages
-
-      - name: Prune old release versions and regenerate metadata
-        env:
-          DEPLOY_DIR: ${{ steps.vars.outputs.deploy_dir }}
-          IS_TAG: ${{ steps.vars.outputs.is_tag }}
-        run: |
-          cd gh-pages
-
-          # Remove outdated release versions when a new tag is pushed
-          if [[ "${IS_TAG}" == "true" ]]; then
-            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
-              echo "Pruning old version: ${TAG_DIRS[0]}"
-              rm -rf "${TAG_DIRS[0]}"
-              TAG_DIRS=("${TAG_DIRS[@]:1}")
-            done
-          fi
-
-          # Regenerate versions.json and root index.html from whatever dirs exist
-          python3 $GITHUB_WORKSPACE/docs/scripts/generate_versions_json.py --build-dir .
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --staged --quiet \
-            && echo "No metadata changes to commit" \
-            || git commit -m "docs: update metadata for ${DEPLOY_DIR}"
-          git push origin gh-pages
+      - name: Deploy GitHub Pages
+        uses: actions/deploy-pages@v4
 
 
   release-build:
