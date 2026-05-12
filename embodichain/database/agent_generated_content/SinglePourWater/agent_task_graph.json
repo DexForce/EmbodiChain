@@ -1,0 +1,126 @@
+{
+  "task": "Pour from bottle into cup and place bottle",
+  "start": "v0_start",
+  "goal": "v6_done",
+  "nodes": [
+    {
+      "id": "v0_start",
+      "semantic": "Both arms at initial poses; bottle and cup on table."
+    },
+    {
+      "id": "v1_bottle_grasped",
+      "semantic": "Right arm grasps the bottle."
+    },
+    {
+      "id": "v2_bottle_at_pour_offset",
+      "semantic": "Bottle held by right arm positioned at [0.05, -0.10, 0.125] offset relative to the cup for pouring."
+    },
+    {
+      "id": "v3_pouring",
+      "semantic": "Bottle tilted to pour into the cup."
+    },
+    {
+      "id": "v4_bottle_upright",
+      "semantic": "Bottle returned upright after pouring."
+    },
+    {
+      "id": "v5_bottle_placed_target",
+      "semantic": "Bottle placed on table at [0.7, -0.1]; gripper opened."
+    },
+    {
+      "id": "v6_done",
+      "semantic": "Both arms at initial poses; task complete."
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01_grasp_bottle",
+      "source": "v0_start",
+      "target": "v1_bottle_grasped",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "grasp",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "pre_grasp_dis": 0.1
+        }
+      }
+    },
+    {
+      "id": "e02_move_to_pour_offset",
+      "source": "v1_bottle_grasped",
+      "target": "v2_bottle_at_pour_offset",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "move_relative_to_object",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "cup",
+          "x_offset": 0.05,
+          "y_offset": -0.1,
+          "z_offset": 0.125
+        }
+      }
+    },
+    {
+      "id": "e03_tilt_to_pour",
+      "source": "v2_bottle_at_pour_offset",
+      "target": "v3_pouring",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "rotate_eef",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "degree": -90
+        }
+      }
+    },
+    {
+      "id": "e04_return_upright",
+      "source": "v3_pouring",
+      "target": "v4_bottle_upright",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "rotate_eef",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "degree": 90
+        }
+      }
+    },
+    {
+      "id": "e05_place_bottle_target",
+      "source": "v4_bottle_upright",
+      "target": "v5_bottle_placed_target",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "place_on_table",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "x": 0.7,
+          "y": -0.1,
+          "pre_place_dis": 0.08
+        }
+      }
+    },
+    {
+      "id": "e06_return_to_initial",
+      "source": "v5_bottle_placed_target",
+      "target": "v6_done",
+      "left_arm_action": {
+        "fn": "back_to_initial_pose",
+        "kwargs": {
+          "robot_name": "left_arm"
+        }
+      },
+      "right_arm_action": {
+        "fn": "back_to_initial_pose",
+        "kwargs": {
+          "robot_name": "right_arm"
+        }
+      }
+    }
+  ]
+}

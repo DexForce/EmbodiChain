@@ -1,0 +1,587 @@
+{
+  "task_graph": {
+    "task": "Pour from bottle into cup and place bottle",
+    "start": "v0_start",
+    "goal": "v6_done",
+    "nodes": [
+      {
+        "id": "v0_start",
+        "semantic": "Both arms at initial poses; bottle and cup on table."
+      },
+      {
+        "id": "v1_bottle_grasped",
+        "semantic": "Right arm grasps the bottle."
+      },
+      {
+        "id": "v2_bottle_at_pour_offset",
+        "semantic": "Bottle held by right arm positioned at [0.05, -0.10, 0.125] offset relative to the cup for pouring."
+      },
+      {
+        "id": "v3_pouring",
+        "semantic": "Bottle tilted to pour into the cup."
+      },
+      {
+        "id": "v4_bottle_upright",
+        "semantic": "Bottle returned upright after pouring."
+      },
+      {
+        "id": "v5_bottle_placed_target",
+        "semantic": "Bottle placed on table at [0.7, -0.1]; gripper opened."
+      },
+      {
+        "id": "v6_done",
+        "semantic": "Both arms at initial poses; task complete."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e01_grasp_bottle",
+        "source": "v0_start",
+        "target": "v1_bottle_grasped",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1
+          }
+        }
+      },
+      {
+        "id": "e02_move_to_pour_offset",
+        "source": "v1_bottle_grasped",
+        "target": "v2_bottle_at_pour_offset",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "cup",
+            "x_offset": 0.05,
+            "y_offset": -0.1,
+            "z_offset": 0.125
+          }
+        }
+      },
+      {
+        "id": "e03_tilt_to_pour",
+        "source": "v2_bottle_at_pour_offset",
+        "target": "v3_pouring",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "rotate_eef",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "degree": -90
+          }
+        }
+      },
+      {
+        "id": "e04_return_upright",
+        "source": "v3_pouring",
+        "target": "v4_bottle_upright",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "rotate_eef",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "degree": 90
+          }
+        }
+      },
+      {
+        "id": "e05_place_bottle_target",
+        "source": "v4_bottle_upright",
+        "target": "v5_bottle_placed_target",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "place_on_table",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "x": 0.7,
+            "y": -0.1,
+            "pre_place_dis": 0.08
+          }
+        }
+      },
+      {
+        "id": "e06_return_to_initial",
+        "source": "v5_bottle_placed_target",
+        "target": "v6_done",
+        "left_arm_action": {
+          "fn": "back_to_initial_pose",
+          "kwargs": {
+            "robot_name": "left_arm"
+          }
+        },
+        "right_arm_action": {
+          "fn": "back_to_initial_pose",
+          "kwargs": {
+            "robot_name": "right_arm"
+          }
+        }
+      }
+    ]
+  },
+  "recovery_spec": {
+    "task": "Pour from bottle into cup and place bottle",
+    "recovery_bindings": [
+      {
+        "edge_id": "e01_grasp_bottle",
+        "failure_name": "bottle_shifted_during_grasp",
+        "monitors": [
+          {
+            "type": "object_moved",
+            "objects": [
+              "bottle"
+            ],
+            "threshold": 0.02
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        ],
+        "merge": "target",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e02_move_to_pour_offset",
+        "failure_name": "bottle_hold_lost_during_move",
+        "monitors": [
+          {
+            "type": "hold_lost",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "threshold": 0.05
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        ],
+        "merge": "source",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e03_tilt_to_pour",
+        "failure_name": "bottle_hold_lost_during_pour",
+        "monitors": [
+          {
+            "type": "hold_lost",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "threshold": 0.05
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          },
+          {
+            "type": "action",
+            "left_arm_action": null,
+            "right_arm_action": {
+              "fn": "move_relative_to_object",
+              "kwargs": {
+                "robot_name": "right_arm",
+                "obj_name": "cup",
+                "x_offset": 0.05,
+                "y_offset": -0.1,
+                "z_offset": 0.125
+              }
+            }
+          }
+        ],
+        "merge": "source",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e04_return_upright",
+        "failure_name": "bottle_hold_lost_returning_upright",
+        "monitors": [
+          {
+            "type": "hold_lost",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "threshold": 0.05
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        ],
+        "merge": "target",
+        "repeat_until_success": true
+      },
+      {
+        "edge_id": "e05_place_bottle_target",
+        "failure_name": "bottle_hold_lost_during_place",
+        "monitors": [
+          {
+            "type": "hold_lost",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "threshold": 0.05
+          }
+        ],
+        "recovery": [
+          {
+            "type": "regrasp",
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        ],
+        "merge": "source",
+        "repeat_until_success": true
+      }
+    ]
+  },
+  "recovery_graph": {
+    "task": "Pour from bottle into cup and place bottle",
+    "recovery_nodes": [
+      {
+        "id": "rn_e03_tilt_to_pour_1_regrasp_bottle",
+        "semantic": "regrasp bottle"
+      }
+    ],
+    "recovery_edges": [
+      {
+        "id": "re_e01_grasp_bottle_1_regrasp_bottle",
+        "source": "v0_start",
+        "target": "v1_bottle_grasped",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e02_move_to_pour_offset_1_regrasp_bottle",
+        "source": "v1_bottle_grasped",
+        "target": "v1_bottle_grasped",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e03_tilt_to_pour_1_regrasp_bottle",
+        "source": "v2_bottle_at_pour_offset",
+        "target": "rn_e03_tilt_to_pour_1_regrasp_bottle",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e03_tilt_to_pour_2_action",
+        "source": "rn_e03_tilt_to_pour_1_regrasp_bottle",
+        "target": "v2_bottle_at_pour_offset",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "move_relative_to_object",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "cup",
+            "x_offset": 0.05,
+            "y_offset": -0.1,
+            "z_offset": 0.125
+          }
+        }
+      },
+      {
+        "id": "re_e03_tilt_to_pour_2_action_repair_regrasp_bottle",
+        "source": "rn_e03_tilt_to_pour_1_regrasp_bottle",
+        "target": "rn_e03_tilt_to_pour_1_regrasp_bottle",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e04_return_upright_1_regrasp_bottle",
+        "source": "v3_pouring",
+        "target": "v4_bottle_upright",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      },
+      {
+        "id": "re_e05_place_bottle_target_1_regrasp_bottle",
+        "source": "v4_bottle_upright",
+        "target": "v4_bottle_upright",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "bottle",
+            "pre_grasp_dis": 0.1,
+            "force_valid": false
+          }
+        }
+      }
+    ],
+    "recovery_branches": [
+      {
+        "edge_id": "e01_grasp_bottle",
+        "failure_name": "bottle_shifted_during_grasp",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e01_grasp_bottle_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "re_e01_grasp_bottle_1_regrasp_bottle",
+        "failure_name": "bottle_shifted_during_grasp_during_re_e01_grasp_bottle_1_regrasp_bottle",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e01_grasp_bottle_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "e02_move_to_pour_offset",
+        "failure_name": "bottle_hold_lost_during_move",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "bottle",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e02_move_to_pour_offset_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "re_e02_move_to_pour_offset_1_regrasp_bottle",
+        "failure_name": "bottle_hold_lost_during_move_during_re_e02_move_to_pour_offset_1_regrasp_bottle",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e02_move_to_pour_offset_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "e03_tilt_to_pour",
+        "failure_name": "bottle_hold_lost_during_pour",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "bottle",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_tilt_to_pour_1_regrasp_bottle",
+          "re_e03_tilt_to_pour_2_action"
+        ]
+      },
+      {
+        "edge_id": "re_e03_tilt_to_pour_1_regrasp_bottle",
+        "failure_name": "bottle_hold_lost_during_pour_during_re_e03_tilt_to_pour_1_regrasp_bottle",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_tilt_to_pour_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "re_e03_tilt_to_pour_2_action_repair_regrasp_bottle",
+        "failure_name": "bottle_hold_lost_during_pour_during_re_e03_tilt_to_pour_2_action_repair_regrasp_bottle",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_tilt_to_pour_2_action_repair_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "re_e03_tilt_to_pour_2_action",
+        "failure_name": "bottle_hold_lost_during_pour_during_re_e03_tilt_to_pour_2_action",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "bottle",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e03_tilt_to_pour_2_action_repair_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "e04_return_upright",
+        "failure_name": "bottle_hold_lost_returning_upright",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "bottle",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e04_return_upright_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "re_e04_return_upright_1_regrasp_bottle",
+        "failure_name": "bottle_hold_lost_returning_upright_during_re_e04_return_upright_1_regrasp_bottle",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e04_return_upright_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "e05_place_bottle_target",
+        "failure_name": "bottle_hold_lost_during_place",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_held",
+            "kwargs": {
+              "robot_name": "right_arm",
+              "obj_name": "bottle",
+              "threshold": 0.05
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e05_place_bottle_target_1_regrasp_bottle"
+        ]
+      },
+      {
+        "edge_id": "re_e05_place_bottle_target_1_regrasp_bottle",
+        "failure_name": "bottle_hold_lost_during_place_during_re_e05_place_bottle_target_1_regrasp_bottle",
+        "monitor_sequence": [
+          {
+            "fn": "monitor_object_moved",
+            "kwargs": {
+              "obj_name": "bottle",
+              "threshold": 0.02
+            }
+          }
+        ],
+        "recovery_edges": [
+          "re_e05_place_bottle_target_1_regrasp_bottle"
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "recovery_enabled": true,
+    "schema_version": "recovery_bindings_v1",
+    "task_graph_hash": "7d79d1ddc4f6826d3343adb68fb8c3ec876e77d20838b9fb39ac015c048b8069",
+    "raw_recovery_spec_hash": "41493eb346818a0a0b9df9b5199cc4a2378e6657fa4b4f1435079b7badd2a22a",
+    "recovery_spec_hash": "80d2b3f27c7098b0d2eae8400f0cac404916985aec2633e0f686adcd4da78a4c"
+  }
+}

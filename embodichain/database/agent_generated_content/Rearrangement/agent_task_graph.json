@@ -1,0 +1,132 @@
+{
+  "task": "rearrange_fork_spoon_opposite_sides_plate",
+  "start": "v0_start",
+  "goal": "v5_done",
+  "nodes": [
+    {
+      "id": "v0_start",
+      "semantic": "both arms in initial poses; grippers open"
+    },
+    {
+      "id": "v1_grasped",
+      "semantic": "left arm holds fork; right arm holds spoon"
+    },
+    {
+      "id": "v2_eef_down",
+      "semantic": "both end-effectors oriented downward while holding utensils"
+    },
+    {
+      "id": "v3_at_targets",
+      "semantic": "arms moved to target positions relative to plate center"
+    },
+    {
+      "id": "v4_placed",
+      "semantic": "fork placed at y=+0.16; spoon placed at y=-0.16 relative to plate"
+    },
+    {
+      "id": "v5_done",
+      "semantic": "both arms returned to initial poses"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01_grasp_objects",
+      "source": "v0_start",
+      "target": "v1_grasped",
+      "left_arm_action": {
+        "fn": "grasp",
+        "kwargs": {
+          "robot_name": "left_arm",
+          "obj_name": "fork",
+          "pre_grasp_dis": 0.1
+        }
+      },
+      "right_arm_action": {
+        "fn": "grasp",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "spoon",
+          "pre_grasp_dis": 0.1
+        }
+      }
+    },
+    {
+      "id": "e02_orient_down",
+      "source": "v1_grasped",
+      "target": "v2_eef_down",
+      "left_arm_action": {
+        "fn": "orient_eef",
+        "kwargs": {
+          "robot_name": "left_arm",
+          "direction": "down"
+        }
+      },
+      "right_arm_action": {
+        "fn": "orient_eef",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "direction": "down"
+        }
+      }
+    },
+    {
+      "id": "e03_move_to_plate_offsets",
+      "source": "v2_eef_down",
+      "target": "v3_at_targets",
+      "left_arm_action": {
+        "fn": "move_relative_to_object",
+        "kwargs": {
+          "robot_name": "left_arm",
+          "obj_name": "plate",
+          "x_offset": 0.0,
+          "y_offset": 0.16,
+          "z_offset": 0.0
+        }
+      },
+      "right_arm_action": {
+        "fn": "move_relative_to_object",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "plate",
+          "x_offset": 0.0,
+          "y_offset": -0.16,
+          "z_offset": 0.0
+        }
+      }
+    },
+    {
+      "id": "e04_release",
+      "source": "v3_at_targets",
+      "target": "v4_placed",
+      "left_arm_action": {
+        "fn": "open_gripper",
+        "kwargs": {
+          "robot_name": "left_arm"
+        }
+      },
+      "right_arm_action": {
+        "fn": "open_gripper",
+        "kwargs": {
+          "robot_name": "right_arm"
+        }
+      }
+    },
+    {
+      "id": "e05_back_to_initial",
+      "source": "v4_placed",
+      "target": "v5_done",
+      "left_arm_action": {
+        "fn": "back_to_initial_pose",
+        "kwargs": {
+          "robot_name": "left_arm"
+        }
+      },
+      "right_arm_action": {
+        "fn": "back_to_initial_pose",
+        "kwargs": {
+          "robot_name": "right_arm"
+        }
+      }
+    }
+  ]
+}
