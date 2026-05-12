@@ -1,0 +1,1429 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Workspace Analyzer Configurations &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'features/workspace_analyzer/configs';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Workspace Analyzer Samplers" href="samplers.html" />
+    <link rel="prev" title="Workspace Analyzer" href="workspace_analyzer.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Workspace Analyzer</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/features/workspace_analyzer/configs.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Workspace Analyzer Configurations</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#table-of-contents">Table of Contents</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features">Key Features</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-types">Configuration Types</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sampling-configuration">1. Sampling Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#available-sampling-strategies">Available Sampling Strategies</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-sampling-examples">Advanced Sampling Examples</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cache-configuration">2. Cache Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#cache-configuration-options">Cache Configuration Options</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metric-configuration">3. Metric Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#metric-types">Metric Types</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualization-configuration">4. Visualization Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#visualization-options">Visualization Options</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimension-constraints">5. Dimension Constraints</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#constraint-options">Constraint Options</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#usage-examples">Usage Examples</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#basic-workspace-analysis-setup">Basic Workspace Analysis Setup</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#high-performance-configuration">High-Performance Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#research-configuration">Research Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-composition">Configuration Composition</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#best-practices">Best Practices</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-management">Configuration Management</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#performance-optimization">Performance Optimization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-validation">Configuration Validation</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-reference">API Reference</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#samplingconfig">SamplingConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#parameters">Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cacheconfig">CacheConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#cacheconfig-parameters">CacheConfig Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metricconfig">MetricConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#metricconfig-parameters">MetricConfig Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualizationconfig">VisualizationConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#visualizationconfig-parameters">VisualizationConfig Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensionconstraint">DimensionConstraint</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensionconstraint-parameters">DimensionConstraint Parameters</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-examples">Configuration Examples</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#minimal-configuration">Minimal Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#production-configuration">Production Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#debug-configuration">Debug Configuration</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="workspace-analyzer-configurations">
+<h1>Workspace Analyzer Configurations<a class="headerlink" href="#workspace-analyzer-configurations" title="Link to this heading">#</a></h1>
+<p>The <strong>Workspace Analyzer Configs</strong> module provides a comprehensive configuration system for robotic workspace analysis. This module offers type-safe, well-documented configuration classes that control every aspect of workspace analysis, from sampling strategies to visualization options.</p>
+<p>Based on the <code class="docutils literal notranslate"><span class="pre">WorkspaceAnalyzerConfig</span></code> dataclass and its sub-configurations, this system provides modular, extensible configuration management for all aspects of workspace analysis.</p>
+<section id="table-of-contents">
+<h2>Table of Contents<a class="headerlink" href="#table-of-contents" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview"><span class="xref myst">Overview</span></a></p></li>
+<li><p><a class="reference internal" href="#configuration-types"><span class="xref myst">Configuration Types</span></a></p></li>
+<li><p><a class="reference internal" href="#usage-examples"><span class="xref myst">Usage Examples</span></a></p></li>
+<li><p><a class="reference internal" href="#best-practices"><span class="xref myst">Best Practices</span></a></p></li>
+<li><p><a class="reference internal" href="#api-reference"><span class="xref myst">API Reference</span></a></p></li>
+</ul>
+</section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>The configs module enables fine-grained control over:</p>
+<ul class="simple">
+<li><p><strong>Sampling Strategies</strong>: Control how joint space is sampled</p></li>
+<li><p><strong>Caching Behavior</strong>: Configure result caching and storage</p></li>
+<li><p><strong>Metric Calculation</strong>: Define which metrics to compute and how</p></li>
+<li><p><strong>Visualization Options</strong>: Customize visualization appearance and behavior</p></li>
+<li><p><strong>Dimensional Constraints</strong>: Set workspace bounds and exclusion zones</p></li>
+</ul>
+<section id="key-features">
+<h3>Key Features<a class="headerlink" href="#key-features" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong>Type Safety</strong>: All configurations use dataclasses with type hints</p></li>
+<li><p><strong>Validation</strong>: Built-in validation and sensible defaults</p></li>
+<li><p><strong>Extensibility</strong>: Easy to extend with custom configuration options</p></li>
+<li><p><strong>Documentation</strong>: Comprehensive docstrings for all parameters</p></li>
+<li><p><strong>Modularity</strong>: Separate configs for different analysis aspects</p></li>
+</ul>
+</section>
+</section>
+<section id="configuration-types">
+<h2>Configuration Types<a class="headerlink" href="#configuration-types" title="Link to this heading">#</a></h2>
+<section id="sampling-configuration">
+<h3>1. Sampling Configuration<a class="headerlink" href="#sampling-configuration" title="Link to this heading">#</a></h3>
+<p>Controls how the robot’s joint space is sampled for workspace analysis.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">SamplingConfig</span><span class="p">,</span> <span class="n">SamplingStrategy</span>
+<span class="p">)</span>
+
+<span class="c1"># Basic uniform sampling</span>
+<span class="n">config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">UNIFORM</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>
+    <span class="n">grid_resolution</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">42</span>
+<span class="p">)</span>
+
+<span class="c1"># Random sampling with larger batch size</span>
+<span class="n">random_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">RANDOM</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">50000</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">123</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<section id="available-sampling-strategies">
+<h4>Available Sampling Strategies<a class="headerlink" href="#available-sampling-strategies" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>UNIFORM</strong>: Uniform grid sampling across joint space</p></li>
+<li><p><strong>RANDOM</strong>: Pseudo-random sampling with specified seed</p></li>
+<li><p><strong>HALTON</strong>: Quasi-random Halton sequence (better coverage)</p></li>
+<li><p><strong>SOBOL</strong>: Quasi-random Sobol sequence (low-discrepancy)</p></li>
+<li><p><strong>LATIN_HYPERCUBE</strong>: Latin Hypercube Sampling (space-filling)</p></li>
+<li><p><strong>IMPORTANCE</strong>: Importance sampling with custom weight function</p></li>
+<li><p><strong>GAUSSIAN</strong>: Gaussian distribution around specified mean</p></li>
+</ul>
+</section>
+<section id="advanced-sampling-examples">
+<h4>Advanced Sampling Examples<a class="headerlink" href="#advanced-sampling-examples" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Quasi-random sampling for better coverage</span>
+<span class="n">halton_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">HALTON</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">25000</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">2500</span>
+<span class="p">)</span>
+
+<span class="c1"># Gaussian sampling around robot&#39;s nominal pose</span>
+<span class="n">gaussian_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">GAUSSIAN</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">15000</span><span class="p">,</span>
+    <span class="n">gaussian_mean</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>  <span class="c1"># Center of joint range</span>
+    <span class="n">gaussian_std</span><span class="o">=</span><span class="mf">0.3</span>    <span class="c1"># 30% of range as std dev</span>
+<span class="p">)</span>
+
+<span class="c1"># Importance sampling with custom weight function</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">weight_function</span><span class="p">(</span><span class="n">joint_values</span><span class="p">):</span>
+    <span class="c1"># Higher weight for configurations closer to zero</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">joint_values</span><span class="o">**</span><span class="mi">2</span><span class="p">))</span>
+
+<span class="n">importance_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">IMPORTANCE</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">20000</span><span class="p">,</span>
+    <span class="n">importance_weight_func</span><span class="o">=</span><span class="n">weight_function</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="cache-configuration">
+<h3>2. Cache Configuration<a class="headerlink" href="#cache-configuration" title="Link to this heading">#</a></h3>
+<p>Manages caching of analysis results for improved performance.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="n">CacheConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="c1"># Basic caching configuration</span>
+<span class="n">cache_config</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">cache_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./workspace_cache&quot;</span><span class="p">),</span>
+    <span class="n">use_hash</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">compression</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># High-performance caching setup</span>
+<span class="n">performance_cache</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">cache_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;/fast_storage/workspace_cache&quot;</span><span class="p">),</span>
+    <span class="n">use_hash</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">compression</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># Faster access, more storage</span>
+    <span class="n">max_cache_size_mb</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span>
+    <span class="n">cache_format</span><span class="o">=</span><span class="s2">&quot;npz&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<section id="cache-configuration-options">
+<h4>Cache Configuration Options<a class="headerlink" href="#cache-configuration-options" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>enabled</strong>: Enable/disable caching entirely</p></li>
+<li><p><strong>cache_dir</strong>: Custom cache directory (default: system cache)</p></li>
+<li><p><strong>use_hash</strong>: Hash-based cache keys for consistency</p></li>
+<li><p><strong>compression</strong>: Compress cache files to save space</p></li>
+<li><p><strong>max_cache_size_mb</strong>: Automatic cleanup of old cache files</p></li>
+<li><p><strong>cache_format</strong>: Storage format (‘npz’, ‘pkl’, ‘h5’)</p></li>
+</ul>
+</section>
+</section>
+<section id="metric-configuration">
+<h3>3. Metric Configuration<a class="headerlink" href="#metric-configuration" title="Link to this heading">#</a></h3>
+<p>Defines which workspace metrics to compute and their parameters.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">MetricConfig</span><span class="p">,</span> <span class="n">MetricType</span><span class="p">,</span> <span class="n">ReachabilityConfig</span><span class="p">,</span> 
+    <span class="n">ManipulabilityConfig</span><span class="p">,</span> <span class="n">DensityConfig</span>
+<span class="p">)</span>
+
+<span class="c1"># Comprehensive metric analysis</span>
+<span class="n">metric_config</span> <span class="o">=</span> <span class="n">MetricConfig</span><span class="p">(</span>
+    <span class="n">enabled_metrics</span><span class="o">=</span><span class="p">[</span><span class="n">MetricType</span><span class="o">.</span><span class="n">ALL</span><span class="p">],</span>
+    <span class="n">reachability</span><span class="o">=</span><span class="n">ReachabilityConfig</span><span class="p">(</span>
+        <span class="n">voxel_size</span><span class="o">=</span><span class="mf">0.005</span><span class="p">,</span>  <span class="c1"># High resolution</span>
+        <span class="n">min_points_per_voxel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+        <span class="n">compute_coverage</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">),</span>
+    <span class="n">manipulability</span><span class="o">=</span><span class="n">ManipulabilityConfig</span><span class="p">(</span>
+        <span class="n">jacobian_threshold</span><span class="o">=</span><span class="mf">0.001</span><span class="p">,</span>
+        <span class="n">compute_isotropy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">compute_heatmap</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">),</span>
+    <span class="n">density</span><span class="o">=</span><span class="n">DensityConfig</span><span class="p">(</span>
+        <span class="n">radius</span><span class="o">=</span><span class="mf">0.03</span><span class="p">,</span>
+        <span class="n">k_neighbors</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+        <span class="n">compute_distribution</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">),</span>
+    <span class="n">save_results</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="o">=</span><span class="s2">&quot;json&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<section id="metric-types">
+<h4>Metric Types<a class="headerlink" href="#metric-types" title="Link to this heading">#</a></h4>
+<p><strong>Reachability Metrics</strong>:</p>
+<ul class="simple">
+<li><p>Workspace volume calculation</p></li>
+<li><p>Coverage percentage</p></li>
+<li><p>Reachable point density</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">reachability_config</span> <span class="o">=</span> <span class="n">ReachabilityConfig</span><span class="p">(</span>
+    <span class="n">voxel_size</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>           <span class="c1"># Voxel resolution for volume</span>
+    <span class="n">min_points_per_voxel</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>    <span class="c1"># Occupancy threshold</span>
+    <span class="n">compute_coverage</span><span class="o">=</span><span class="kc">True</span>      <span class="c1"># Coverage vs bounding box</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Manipulability Metrics</strong>:</p>
+<ul class="simple">
+<li><p>Manipulability index throughout workspace</p></li>
+<li><p>Isotropy analysis</p></li>
+<li><p>Dexterity heatmaps</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">manipulability_config</span> <span class="o">=</span> <span class="n">ManipulabilityConfig</span><span class="p">(</span>
+    <span class="n">jacobian_threshold</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>   <span class="c1"># Minimum valid manipulability</span>
+    <span class="n">compute_isotropy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>     <span class="c1"># Condition number analysis</span>
+    <span class="n">compute_heatmap</span><span class="o">=</span><span class="kc">False</span>      <span class="c1"># Generate spatial heatmap</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Density Metrics</strong>:</p>
+<ul class="simple">
+<li><p>Local point density</p></li>
+<li><p>Distribution statistics</p></li>
+<li><p>Clustering analysis</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">density_config</span> <span class="o">=</span> <span class="n">DensityConfig</span><span class="p">(</span>
+    <span class="n">radius</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>              <span class="c1"># Local neighborhood radius</span>
+    <span class="n">k_neighbors</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>           <span class="c1"># Number of neighbors to consider</span>
+    <span class="n">compute_distribution</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Statistical distribution</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="visualization-configuration">
+<h3>4. Visualization Configuration<a class="headerlink" href="#visualization-configuration" title="Link to this heading">#</a></h3>
+<p>Controls the appearance and behavior of workspace visualizations.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">VisualizationConfig</span><span class="p">,</span> <span class="n">VisualizationType</span>
+<span class="p">)</span>
+
+<span class="c1"># High-quality point cloud visualization</span>
+<span class="n">viz_config</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">vis_type</span><span class="o">=</span><span class="n">VisualizationType</span><span class="o">.</span><span class="n">POINT_CLOUD</span><span class="p">,</span>
+    <span class="n">point_size</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>
+    <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span>
+    <span class="n">color_by_distance</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">voxel_size</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span>
+    <span class="n">is_voxel_down</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">show_unreachable_points</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># Sphere visualization for presentations</span>
+<span class="n">sphere_viz_config</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+    <span class="n">vis_type</span><span class="o">=</span><span class="n">VisualizationType</span><span class="o">.</span><span class="n">SPHERE</span><span class="p">,</span>
+    <span class="n">sphere_radius</span><span class="o">=</span><span class="mf">0.008</span><span class="p">,</span>
+    <span class="n">sphere_resolution</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span>
+    <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">,</span>
+    <span class="n">show_unreachable_points</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<section id="visualization-options">
+<h4>Visualization Options<a class="headerlink" href="#visualization-options" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>vis_type</strong>: Visualization method (POINT_CLOUD, VOXEL, SPHERE, MESH, HEATMAP)</p></li>
+<li><p><strong>point_size</strong>: Size of rendered points</p></li>
+<li><p><strong>alpha</strong>: Transparency level (0.0-1.0)</p></li>
+<li><p><strong>color_by_distance</strong>: Color-code by distance from base</p></li>
+<li><p><strong>voxel_size</strong>: Downsampling resolution</p></li>
+<li><p><strong>show_unreachable_points</strong>: Display unreachable regions</p></li>
+</ul>
+</section>
+</section>
+<section id="dimension-constraints">
+<h3>5. Dimension Constraints<a class="headerlink" href="#dimension-constraints" title="Link to this heading">#</a></h3>
+<p>Defines workspace bounds, exclusion zones, and physical constraints.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="n">DimensionConstraint</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="c1"># Basic workspace bounds</span>
+<span class="n">dimension_config</span> <span class="o">=</span> <span class="n">DimensionConstraint</span><span class="p">(</span>
+    <span class="n">min_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]),</span>  <span class="c1"># [x_min, y_min, z_min]</span>
+    <span class="n">max_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]),</span>    <span class="c1"># [x_max, y_max, z_max]</span>
+    <span class="n">joint_limits_scale</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span>  <span class="c1"># Use 95% of joint range</span>
+    <span class="n">ground_height</span><span class="o">=</span><span class="mf">0.0</span>
+<span class="p">)</span>
+
+<span class="c1"># Complex workspace with exclusion zones</span>
+<span class="n">complex_constraints</span> <span class="o">=</span> <span class="n">DimensionConstraint</span><span class="p">(</span>
+    <span class="n">min_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">]),</span>
+    <span class="n">max_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">,</span> <span class="mf">2.5</span><span class="p">]),</span>
+    <span class="n">joint_limits_scale</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span>
+    <span class="n">exclude_zones</span><span class="o">=</span><span class="p">[</span>
+        <span class="c1"># Obstacle 1: table</span>
+        <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.3</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.2</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">])),</span>
+        <span class="c1"># Obstacle 2: wall</span>
+        <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.8</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">,</span> <span class="mf">2.5</span><span class="p">]))</span>
+    <span class="p">],</span>
+    <span class="n">ground_height</span><span class="o">=-</span><span class="mf">0.1</span><span class="p">,</span>
+    <span class="n">enforce_collision_free</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">self_collision_check</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<section id="constraint-options">
+<h4>Constraint Options<a class="headerlink" href="#constraint-options" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>min_bounds/max_bounds</strong>: Cartesian workspace limits</p></li>
+<li><p><strong>joint_limits_scale</strong>: Scale factor for joint range usage</p></li>
+<li><p><strong>exclude_zones</strong>: List of forbidden regions</p></li>
+<li><p><strong>ground_height</strong>: Floor level for filtering</p></li>
+<li><p><strong>enforce_collision_free</strong>: Enable collision checking</p></li>
+<li><p><strong>self_collision_check</strong>: Check robot self-collisions</p></li>
+</ul>
+</section>
+</section>
+</section>
+<section id="usage-examples">
+<h2>Usage Examples<a class="headerlink" href="#usage-examples" title="Link to this heading">#</a></h2>
+<section id="basic-workspace-analysis-setup">
+<h3>Basic Workspace Analysis Setup<a class="headerlink" href="#basic-workspace-analysis-setup" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1"># Complete configuration for basic analysis</span>
+<span class="n">sampling_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">UNIFORM</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">15000</span><span class="p">,</span>
+    <span class="n">grid_resolution</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">1500</span>
+<span class="p">)</span>
+
+<span class="n">cache_config</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">compression</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">max_cache_size_mb</span><span class="o">=</span><span class="mi">2000</span>
+<span class="p">)</span>
+
+<span class="n">metric_config</span> <span class="o">=</span> <span class="n">MetricConfig</span><span class="p">(</span>
+    <span class="n">enabled_metrics</span><span class="o">=</span><span class="p">[</span><span class="n">MetricType</span><span class="o">.</span><span class="n">REACHABILITY</span><span class="p">,</span> <span class="n">MetricType</span><span class="o">.</span><span class="n">DENSITY</span><span class="p">],</span>
+    <span class="n">save_results</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="n">viz_config</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+    <span class="n">vis_type</span><span class="o">=</span><span class="n">VisualizationType</span><span class="o">.</span><span class="n">POINT_CLOUD</span><span class="p">,</span>
+    <span class="n">point_size</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span>
+    <span class="n">color_by_distance</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="n">constraints</span> <span class="o">=</span> <span class="n">DimensionConstraint</span><span class="p">(</span>
+    <span class="n">min_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="o">-</span><span class="mf">1.2</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]),</span>
+    <span class="n">max_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.2</span><span class="p">,</span> <span class="mf">1.2</span><span class="p">,</span> <span class="mf">1.8</span><span class="p">]),</span>
+    <span class="n">joint_limits_scale</span><span class="o">=</span><span class="mf">0.9</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="high-performance-configuration">
+<h3>High-Performance Configuration<a class="headerlink" href="#high-performance-configuration" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configuration optimized for speed and large datasets</span>
+<span class="n">fast_sampling</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">HALTON</span><span class="p">,</span>  <span class="c1"># Better than random</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">100000</span><span class="p">,</span>                <span class="c1"># Large dataset</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>                  <span class="c1"># Large batches</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">42</span>
+<span class="p">)</span>
+
+<span class="n">fast_cache</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">compression</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>                 <span class="c1"># Faster access</span>
+    <span class="n">cache_format</span><span class="o">=</span><span class="s2">&quot;npz&quot;</span><span class="p">,</span>               <span class="c1"># Efficient format</span>
+    <span class="n">max_cache_size_mb</span><span class="o">=</span><span class="mi">10000</span>           <span class="c1"># Large cache</span>
+<span class="p">)</span>
+
+<span class="n">minimal_metrics</span> <span class="o">=</span> <span class="n">MetricConfig</span><span class="p">(</span>
+    <span class="n">enabled_metrics</span><span class="o">=</span><span class="p">[</span><span class="n">MetricType</span><span class="o">.</span><span class="n">REACHABILITY</span><span class="p">],</span>  <span class="c1"># Only essential</span>
+    <span class="n">reachability</span><span class="o">=</span><span class="n">ReachabilityConfig</span><span class="p">(</span>
+        <span class="n">voxel_size</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span>              <span class="c1"># Lower resolution</span>
+        <span class="n">compute_coverage</span><span class="o">=</span><span class="kc">False</span>         <span class="c1"># Skip expensive computation</span>
+    <span class="p">),</span>
+    <span class="n">save_results</span><span class="o">=</span><span class="kc">False</span>                <span class="c1"># Don&#39;t save to disk</span>
+<span class="p">)</span>
+
+<span class="n">efficient_viz</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+    <span class="n">vis_type</span><span class="o">=</span><span class="n">VisualizationType</span><span class="o">.</span><span class="n">VOXEL</span><span class="p">,</span> <span class="c1"># Faster than spheres</span>
+    <span class="n">voxel_size</span><span class="o">=</span><span class="mf">0.03</span><span class="p">,</span>                  <span class="c1"># Aggressive downsampling</span>
+    <span class="n">is_voxel_down</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">show_unreachable_points</span><span class="o">=</span><span class="kc">False</span>     <span class="c1"># Reduce complexity</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="research-configuration">
+<h3>Research Configuration<a class="headerlink" href="#research-configuration" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configuration for detailed research analysis</span>
+<span class="n">research_sampling</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">SOBOL</span><span class="p">,</span>  <span class="c1"># Low-discrepancy sequence</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">50000</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">2500</span>
+<span class="p">)</span>
+
+<span class="n">persistent_cache</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">cache_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./research_cache&quot;</span><span class="p">),</span>
+    <span class="n">use_hash</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">compression</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">cache_format</span><span class="o">=</span><span class="s2">&quot;h5&quot;</span>                 <span class="c1"># Good for large datasets</span>
+<span class="p">)</span>
+
+<span class="n">comprehensive_metrics</span> <span class="o">=</span> <span class="n">MetricConfig</span><span class="p">(</span>
+    <span class="n">enabled_metrics</span><span class="o">=</span><span class="p">[</span><span class="n">MetricType</span><span class="o">.</span><span class="n">ALL</span><span class="p">],</span>
+    <span class="n">reachability</span><span class="o">=</span><span class="n">ReachabilityConfig</span><span class="p">(</span>
+        <span class="n">voxel_size</span><span class="o">=</span><span class="mf">0.005</span><span class="p">,</span>             <span class="c1"># High resolution</span>
+        <span class="n">compute_coverage</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">),</span>
+    <span class="n">manipulability</span><span class="o">=</span><span class="n">ManipulabilityConfig</span><span class="p">(</span>
+        <span class="n">jacobian_threshold</span><span class="o">=</span><span class="mf">0.001</span><span class="p">,</span>
+        <span class="n">compute_isotropy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">compute_heatmap</span><span class="o">=</span><span class="kc">True</span>          <span class="c1"># Generate heatmaps</span>
+    <span class="p">),</span>
+    <span class="n">density</span><span class="o">=</span><span class="n">DensityConfig</span><span class="p">(</span>
+        <span class="n">radius</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span>                  <span class="c1"># Fine-grained density</span>
+        <span class="n">k_neighbors</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+        <span class="n">compute_distribution</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">),</span>
+    <span class="n">save_results</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="o">=</span><span class="s2">&quot;json&quot;</span>
+<span class="p">)</span>
+
+<span class="n">publication_viz</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+    <span class="n">vis_type</span><span class="o">=</span><span class="n">VisualizationType</span><span class="o">.</span><span class="n">SPHERE</span><span class="p">,</span>
+    <span class="n">sphere_radius</span><span class="o">=</span><span class="mf">0.006</span><span class="p">,</span>
+    <span class="n">sphere_resolution</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>             <span class="c1"># High quality spheres</span>
+    <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span>
+    <span class="n">color_by_distance</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">show_unreachable_points</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="n">detailed_constraints</span> <span class="o">=</span> <span class="n">DimensionConstraint</span><span class="p">(</span>
+    <span class="n">min_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">]),</span>
+    <span class="n">max_bounds</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]),</span>
+    <span class="n">joint_limits_scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>           <span class="c1"># Full joint range</span>
+    <span class="n">exclude_zones</span><span class="o">=</span><span class="p">[],</span>                 <span class="c1"># No exclusions for research</span>
+    <span class="n">enforce_collision_free</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">self_collision_check</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="configuration-composition">
+<h3>Configuration Composition<a class="headerlink" href="#configuration-composition" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create configurations programmatically</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_analysis_config</span><span class="p">(</span>
+    <span class="n">resolution</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;medium&quot;</span><span class="p">,</span>
+    <span class="n">enable_cache</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">visualization_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;point_cloud&quot;</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create configuration set based on analysis requirements.&quot;&quot;&quot;</span>
+    
+    <span class="c1"># Resolution-dependent settings</span>
+    <span class="n">resolution_params</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;low&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;samples&quot;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span> <span class="s2">&quot;voxel&quot;</span><span class="p">:</span> <span class="mf">0.05</span><span class="p">,</span> <span class="s2">&quot;batch&quot;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">},</span>
+        <span class="s2">&quot;medium&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;samples&quot;</span><span class="p">:</span> <span class="mi">20000</span><span class="p">,</span> <span class="s2">&quot;voxel&quot;</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">,</span> <span class="s2">&quot;batch&quot;</span><span class="p">:</span> <span class="mi">2000</span><span class="p">},</span>
+        <span class="s2">&quot;high&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;samples&quot;</span><span class="p">:</span> <span class="mi">80000</span><span class="p">,</span> <span class="s2">&quot;voxel&quot;</span><span class="p">:</span> <span class="mf">0.01</span><span class="p">,</span> <span class="s2">&quot;batch&quot;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">}</span>
+    <span class="p">}</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="n">resolution_params</span><span class="p">[</span><span class="n">resolution</span><span class="p">]</span>
+    
+    <span class="n">sampling_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+        <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">HALTON</span><span class="p">,</span>
+        <span class="n">num_samples</span><span class="o">=</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;samples&quot;</span><span class="p">],</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;batch&quot;</span><span class="p">]</span>
+    <span class="p">)</span>
+    
+    <span class="n">cache_config</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="n">enable_cache</span><span class="p">)</span>
+    
+    <span class="n">viz_config</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+        <span class="n">vis_type</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">VisualizationType</span><span class="p">,</span> <span class="n">visualization_type</span><span class="o">.</span><span class="n">upper</span><span class="p">()),</span>
+        <span class="n">voxel_size</span><span class="o">=</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;voxel&quot;</span><span class="p">]</span>
+    <span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">sampling_config</span><span class="p">,</span> <span class="n">cache_config</span><span class="p">,</span> <span class="n">viz_config</span>
+
+<span class="c1"># Usage</span>
+<span class="n">low_res_configs</span> <span class="o">=</span> <span class="n">create_analysis_config</span><span class="p">(</span><span class="s2">&quot;low&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;voxel&quot;</span><span class="p">)</span>
+<span class="n">high_res_configs</span> <span class="o">=</span> <span class="n">create_analysis_config</span><span class="p">(</span><span class="s2">&quot;high&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;sphere&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="best-practices">
+<h2>Best Practices<a class="headerlink" href="#best-practices" title="Link to this heading">#</a></h2>
+<section id="configuration-management">
+<h3>Configuration Management<a class="headerlink" href="#configuration-management" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Use Type Hints</strong>: Leverage the type safety provided by dataclasses</p></li>
+<li><p><strong>Validate Parameters</strong>: Check parameter ranges before analysis</p></li>
+<li><p><strong>Document Choices</strong>: Comment configuration choices for reproducibility</p></li>
+<li><p><strong>Version Configs</strong>: Save configuration alongside results</p></li>
+<li><p><strong>Test Different Settings</strong>: Experiment with sampling strategies</p></li>
+</ol>
+</section>
+<section id="performance-optimization">
+<h3>Performance Optimization<a class="headerlink" href="#performance-optimization" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Performance tips based on use case</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">optimize_for_speed</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+        <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">RANDOM</span><span class="p">,</span>  <span class="c1"># Fastest generation</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>                  <span class="c1"># Large batches</span>
+        <span class="n">num_samples</span><span class="o">=</span><span class="mi">20000</span>                  <span class="c1"># Moderate resolution</span>
+    <span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">optimize_for_accuracy</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+        <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">SOBOL</span><span class="p">,</span>   <span class="c1"># Better coverage</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>                   <span class="c1"># Moderate batches</span>
+        <span class="n">num_samples</span><span class="o">=</span><span class="mi">100000</span>                 <span class="c1"># High resolution</span>
+    <span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">optimize_for_memory</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span>                    <span class="c1"># Small batches</span>
+        <span class="n">num_samples</span><span class="o">=</span><span class="mi">15000</span>                  <span class="c1"># Moderate total</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="configuration-validation">
+<h3>Configuration Validation<a class="headerlink" href="#configuration-validation" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">validate_config</span><span class="p">(</span><span class="n">config</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate configuration parameters.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">num_samples</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;num_samples must be positive&quot;</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">batch_size</span> <span class="o">&gt;</span> <span class="n">config</span><span class="o">.</span><span class="n">num_samples</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;batch_size cannot exceed num_samples&quot;</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s1">&#39;voxel_size&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">config</span><span class="o">.</span><span class="n">voxel_size</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;voxel_size must be positive&quot;</span><span class="p">)</span>
+
+<span class="c1"># Usage</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">validate_config</span><span class="p">(</span><span class="n">my_config</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Configuration error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="api-reference">
+<h2>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading">#</a></h2>
+<section id="samplingconfig">
+<h3>SamplingConfig<a class="headerlink" href="#samplingconfig" title="Link to this heading">#</a></h3>
+<p>Configuration for joint space sampling strategies.</p>
+<section id="parameters">
+<h4>Parameters<a class="headerlink" href="#parameters" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>strategy</strong>: <code class="docutils literal notranslate"><span class="pre">SamplingStrategy</span></code> - Sampling method to use</p></li>
+<li><p><strong>num_samples</strong>: <code class="docutils literal notranslate"><span class="pre">int</span></code> - Total number of samples to generate (default: 1000)</p></li>
+<li><p><strong>grid_resolution</strong>: <code class="docutils literal notranslate"><span class="pre">int</span></code> - Grid resolution for uniform sampling (default: 10)</p></li>
+<li><p><strong>batch_size</strong>: <code class="docutils literal notranslate"><span class="pre">int</span></code> - Batch size for processing (default: 1000)</p></li>
+<li><p><strong>seed</strong>: <code class="docutils literal notranslate"><span class="pre">int</span></code> - Random seed for reproducibility (default: 42)</p></li>
+<li><p><strong>importance_weight_func</strong>: <code class="docutils literal notranslate"><span class="pre">Optional[Callable]</span></code> - Weight function for importance sampling</p></li>
+<li><p><strong>gaussian_mean</strong>: <code class="docutils literal notranslate"><span class="pre">Optional[float]</span></code> - Mean for Gaussian sampling</p></li>
+<li><p><strong>gaussian_std</strong>: <code class="docutils literal notranslate"><span class="pre">Optional[float]</span></code> - Standard deviation for Gaussian sampling</p></li>
+</ul>
+</section>
+</section>
+<section id="cacheconfig">
+<h3>CacheConfig<a class="headerlink" href="#cacheconfig" title="Link to this heading">#</a></h3>
+<p>Configuration for result caching and storage.</p>
+<section id="cacheconfig-parameters">
+<h4>CacheConfig Parameters<a class="headerlink" href="#cacheconfig-parameters" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>enabled</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Enable caching (default: True)</p></li>
+<li><p><strong>cache_dir</strong>: <code class="docutils literal notranslate"><span class="pre">Optional[Path]</span></code> - Cache directory path</p></li>
+<li><p><strong>use_hash</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Use hash-based cache keys (default: True)</p></li>
+<li><p><strong>compression</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Compress cache files (default: True)</p></li>
+<li><p><strong>max_cache_size_mb</strong>: <code class="docutils literal notranslate"><span class="pre">int</span></code> - Maximum cache size in MB (default: 1000)</p></li>
+<li><p><strong>cache_format</strong>: <code class="docutils literal notranslate"><span class="pre">str</span></code> - Cache file format: ‘npz’, ‘pkl’, ‘h5’ (default: ‘npz’)</p></li>
+</ul>
+</section>
+</section>
+<section id="metricconfig">
+<h3>MetricConfig<a class="headerlink" href="#metricconfig" title="Link to this heading">#</a></h3>
+<p>Configuration for workspace analysis metrics.</p>
+<section id="metricconfig-parameters">
+<h4>MetricConfig Parameters<a class="headerlink" href="#metricconfig-parameters" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>enabled_metrics</strong>: <code class="docutils literal notranslate"><span class="pre">List[MetricType]</span></code> - List of metrics to compute</p></li>
+<li><p><strong>reachability</strong>: <code class="docutils literal notranslate"><span class="pre">ReachabilityConfig</span></code> - Reachability analysis settings</p></li>
+<li><p><strong>manipulability</strong>: <code class="docutils literal notranslate"><span class="pre">ManipulabilityConfig</span></code> - Manipulability analysis settings</p></li>
+<li><p><strong>density</strong>: <code class="docutils literal notranslate"><span class="pre">DensityConfig</span></code> - Density analysis settings</p></li>
+<li><p><strong>save_results</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Save results to file (default: True)</p></li>
+<li><p><strong>output_format</strong>: <code class="docutils literal notranslate"><span class="pre">str</span></code> - Output format: ‘json’, ‘yaml’, ‘pkl’ (default: ‘json’)</p></li>
+</ul>
+</section>
+</section>
+<section id="visualizationconfig">
+<h3>VisualizationConfig<a class="headerlink" href="#visualizationconfig" title="Link to this heading">#</a></h3>
+<p>Configuration for visualization appearance and behavior.</p>
+<section id="visualizationconfig-parameters">
+<h4>VisualizationConfig Parameters<a class="headerlink" href="#visualizationconfig-parameters" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>enabled</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Enable visualization (default: True)</p></li>
+<li><p><strong>vis_type</strong>: <code class="docutils literal notranslate"><span class="pre">VisualizationType</span></code> - Visualization type (default: POINT_CLOUD)</p></li>
+<li><p><strong>voxel_size</strong>: <code class="docutils literal notranslate"><span class="pre">float</span></code> - Voxel downsampling size (default: 0.05)</p></li>
+<li><p><strong>point_size</strong>: <code class="docutils literal notranslate"><span class="pre">float</span></code> - Point size in visualization (default: 4.0)</p></li>
+<li><p><strong>alpha</strong>: <code class="docutils literal notranslate"><span class="pre">float</span></code> - Transparency level 0.0-1.0 (default: 0.5)</p></li>
+<li><p><strong>color_by_distance</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Color by distance from base (default: True)</p></li>
+<li><p><strong>sphere_radius</strong>: <code class="docutils literal notranslate"><span class="pre">float</span></code> - Sphere radius for sphere visualization (default: 0.005)</p></li>
+<li><p><strong>show_unreachable_points</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Show unreachable points (default: False)</p></li>
+</ul>
+</section>
+</section>
+<section id="dimensionconstraint">
+<h3>DimensionConstraint<a class="headerlink" href="#dimensionconstraint" title="Link to this heading">#</a></h3>
+<p>Configuration for workspace bounds and constraints.</p>
+<section id="dimensionconstraint-parameters">
+<h4>DimensionConstraint Parameters<a class="headerlink" href="#dimensionconstraint-parameters" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>min_bounds</strong>: <code class="docutils literal notranslate"><span class="pre">Optional[np.ndarray]</span></code> - Minimum workspace bounds [x, y, z]</p></li>
+<li><p><strong>max_bounds</strong>: <code class="docutils literal notranslate"><span class="pre">Optional[np.ndarray]</span></code> - Maximum workspace bounds [x, y, z]</p></li>
+<li><p><strong>joint_limits_scale</strong>: <code class="docutils literal notranslate"><span class="pre">float</span></code> - Joint range scale factor (default: 1.0)</p></li>
+<li><p><strong>exclude_zones</strong>: <code class="docutils literal notranslate"><span class="pre">List[Tuple[np.ndarray,</span> <span class="pre">np.ndarray]]</span></code> - Exclusion zones</p></li>
+<li><p><strong>ground_height</strong>: <code class="docutils literal notranslate"><span class="pre">float</span></code> - Ground plane height (default: 0.0)</p></li>
+<li><p><strong>enforce_collision_free</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Enable collision checking (default: False)</p></li>
+<li><p><strong>self_collision_check</strong>: <code class="docutils literal notranslate"><span class="pre">bool</span></code> - Check self-collisions (default: False)</p></li>
+</ul>
+</section>
+</section>
+</section>
+<section id="configuration-examples">
+<h2>Configuration Examples<a class="headerlink" href="#configuration-examples" title="Link to this heading">#</a></h2>
+<section id="minimal-configuration">
+<h3>Minimal Configuration<a class="headerlink" href="#minimal-configuration" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Simplest possible configuration</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.workspace_analyzer.configs</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+
+<span class="n">config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">()</span>  <span class="c1"># Uses defaults</span>
+<span class="c1"># Result: uniform sampling, 1000 samples, grid resolution 10</span>
+</pre></div>
+</div>
+</section>
+<section id="production-configuration">
+<h3>Production Configuration<a class="headerlink" href="#production-configuration" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Production-ready configuration</span>
+<span class="n">production_sampling</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">HALTON</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">25000</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">2500</span><span class="p">,</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">42</span>
+<span class="p">)</span>
+
+<span class="n">production_cache</span> <span class="o">=</span> <span class="n">CacheConfig</span><span class="p">(</span>
+    <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">cache_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;/app/cache&quot;</span><span class="p">),</span>
+    <span class="n">compression</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">max_cache_size_mb</span><span class="o">=</span><span class="mi">5000</span>
+<span class="p">)</span>
+
+<span class="n">production_metrics</span> <span class="o">=</span> <span class="n">MetricConfig</span><span class="p">(</span>
+    <span class="n">enabled_metrics</span><span class="o">=</span><span class="p">[</span><span class="n">MetricType</span><span class="o">.</span><span class="n">REACHABILITY</span><span class="p">,</span> <span class="n">MetricType</span><span class="o">.</span><span class="n">MANIPULABILITY</span><span class="p">],</span>
+    <span class="n">save_results</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="o">=</span><span class="s2">&quot;json&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="debug-configuration">
+<h3>Debug Configuration<a class="headerlink" href="#debug-configuration" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configuration for debugging and development</span>
+<span class="n">debug_config</span> <span class="o">=</span> <span class="n">SamplingConfig</span><span class="p">(</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="n">SamplingStrategy</span><span class="o">.</span><span class="n">UNIFORM</span><span class="p">,</span>
+    <span class="n">num_samples</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span>        <span class="c1"># Small for fast testing</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>         <span class="c1"># Small batches</span>
+    <span class="n">grid_resolution</span><span class="o">=</span><span class="mi">8</span>       <span class="c1"># Low resolution</span>
+<span class="p">)</span>
+
+<span class="n">debug_viz</span> <span class="o">=</span> <span class="n">VisualizationConfig</span><span class="p">(</span>
+    <span class="n">vis_type</span><span class="o">=</span><span class="n">VisualizationType</span><span class="o">.</span><span class="n">POINT_CLOUD</span><span class="p">,</span>
+    <span class="n">point_size</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>         <span class="c1"># Large points for visibility</span>
+    <span class="n">show_unreachable_points</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># Show all data</span>
+    <span class="n">alpha</span><span class="o">=</span><span class="mf">0.9</span>               <span class="c1"># High opacity</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="workspace_analyzer.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Workspace Analyzer</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="samplers.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Workspace Analyzer Samplers</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#table-of-contents">Table of Contents</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features">Key Features</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-types">Configuration Types</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sampling-configuration">1. Sampling Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#available-sampling-strategies">Available Sampling Strategies</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-sampling-examples">Advanced Sampling Examples</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cache-configuration">2. Cache Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#cache-configuration-options">Cache Configuration Options</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metric-configuration">3. Metric Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#metric-types">Metric Types</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualization-configuration">4. Visualization Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#visualization-options">Visualization Options</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimension-constraints">5. Dimension Constraints</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#constraint-options">Constraint Options</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#usage-examples">Usage Examples</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#basic-workspace-analysis-setup">Basic Workspace Analysis Setup</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#high-performance-configuration">High-Performance Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#research-configuration">Research Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-composition">Configuration Composition</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#best-practices">Best Practices</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-management">Configuration Management</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#performance-optimization">Performance Optimization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-validation">Configuration Validation</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-reference">API Reference</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#samplingconfig">SamplingConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#parameters">Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cacheconfig">CacheConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#cacheconfig-parameters">CacheConfig Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metricconfig">MetricConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#metricconfig-parameters">MetricConfig Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualizationconfig">VisualizationConfig</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#visualizationconfig-parameters">VisualizationConfig Parameters</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensionconstraint">DimensionConstraint</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensionconstraint-parameters">DimensionConstraint Parameters</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-examples">Configuration Examples</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#minimal-configuration">Minimal Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#production-configuration">Production Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#debug-configuration">Debug Configuration</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

@@ -1,0 +1,1321 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.toolkits.graspkit.pg_grasp.antipodal_generator &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/toolkits/graspkit/pg_grasp/antipodal_generator';</script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.toolkits.graspkit.pg_grasp.antipodal_generator</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">open3d</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">o3d</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">trimesh</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">F</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">viser</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">viser.transforms</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">tf</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">cast</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">AntipodalSampler</span><span class="p">,</span>
+    <span class="n">AntipodalSamplerCfg</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.graspkit.pg_grasp</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">GripperCollisionChecker</span><span class="p">,</span>
+    <span class="n">GripperCollisionCfg</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">GRASP_ANNOTATOR_CACHE_DIR</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">&quot;.cache&quot;</span> <span class="o">/</span> <span class="s2">&quot;embodichain&quot;</span> <span class="o">/</span> <span class="s2">&quot;grasp_annotator_cache&quot;</span>
+<span class="p">)</span>
+<span class="n">GRASP_ANNOTATOR_CACHE_DIR</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;GraspGenerator&quot;</span><span class="p">,</span> <span class="s2">&quot;GraspGeneratorCfg&quot;</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="GraspGeneratorCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.graspkit.pg_grasp.GraspGeneratorCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GraspGeneratorCfg</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for :class:`GraspGenerator`.</span>
+
+<span class="sd">    Controls the interactive grasp region annotation workflow, including the</span>
+<span class="sd">    browser-based visualizer settings, antipodal sampling parameters, and</span>
+<span class="sd">    grasp-pose filtering thresholds.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">viser_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">15531</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Port used by the Viser browser-based visualizer for interactive grasp</span>
+<span class="sd">    region annotation.&quot;&quot;&quot;</span>
+
+    <span class="n">use_largest_connected_component</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;When ``True``, only the largest connected component of the selected mesh</span>
+<span class="sd">    region is retained. Useful for meshes that contain disconnected fragments</span>
+<span class="sd">    or when selecting a local feature such as a handle.&quot;&quot;&quot;</span>
+
+    <span class="n">antipodal_sampler_cfg</span><span class="p">:</span> <span class="n">AntipodalSamplerCfg</span> <span class="o">=</span> <span class="n">AntipodalSamplerCfg</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Nested configuration for the antipodal point sampler. Controls the</span>
+<span class="sd">    number of sampled surface points, ray perturbation angle, and gripper jaw</span>
+<span class="sd">    distance limits. See :class:`AntipodalSamplerCfg` for details.&quot;&quot;&quot;</span>
+
+    <span class="n">max_deviation_angle</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">6</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Maximum allowed angle (in radians) between the specified approach</span>
+<span class="sd">    direction and the axis connecting an antipodal point pair. Pairs that</span>
+<span class="sd">    deviate more than this threshold from perpendicular to the approach are</span>
+<span class="sd">    discarded during grasp pose computation.&quot;&quot;&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="GraspGenerator">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.graspkit.pg_grasp.GraspGenerator">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">GraspGenerator</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Antipodal grasp-pose generator for parallel-jaw grippers.</span>
+
+<span class="sd">    Given an object mesh, ``GraspGenerator`` produces feasible grasp poses</span>
+<span class="sd">    through a three-stage pipeline:</span>
+
+<span class="sd">    1. **Antipodal sampling** — Surface points are uniformly sampled and</span>
+<span class="sd">       rays are cast along (and near) the inward normal to find antipodal</span>
+<span class="sd">       point pairs on opposite sides of the mesh (:meth:`generate`).</span>
+<span class="sd">       Alternatively, an interactive Viser-based annotator lets a human</span>
+<span class="sd">       select the graspable region (:meth:`annotate`).</span>
+<span class="sd">    2. **Pose construction** — For each antipodal pair, a 6-DoF grasp</span>
+<span class="sd">       frame is built so that the gripper opening aligns with the pair axis</span>
+<span class="sd">       and the approach direction is consistent with a user-specified</span>
+<span class="sd">       vector (:meth:`get_grasp_poses`).</span>
+<span class="sd">    3. **Filtering &amp; ranking** — Grasp candidates that would cause the</span>
+<span class="sd">       gripper to collide with the object are discarded.  Surviving poses</span>
+<span class="sd">       are scored by a weighted cost that penalises angular deviation from</span>
+<span class="sd">       the approach direction, narrow opening length, and distance to the</span>
+<span class="sd">       mesh centroid.</span>
+
+<span class="sd">    Typical usage::</span>
+
+<span class="sd">        generator = GraspGenerator(vertices, triangles, cfg=cfg)</span>
+
+<span class="sd">        # Programmatic: sample on the whole mesh or a sub-region</span>
+<span class="sd">        generator.generate()                       # whole mesh</span>
+<span class="sd">        generator.generate(face_indices=some_idx)  # specific faces</span>
+
+<span class="sd">        # Interactive: pick region in a browser UI</span>
+<span class="sd">        generator.annotate()</span>
+
+<span class="sd">        # Then compute the best grasp pose</span>
+<span class="sd">        pose, open_length = generator.get_grasp_poses(object_pose, approach_dir)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="GraspGenerator.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">vertices</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">triangles</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">GraspGeneratorCfg</span> <span class="o">=</span> <span class="n">GraspGeneratorCfg</span><span class="p">(),</span>
+        <span class="n">gripper_collision_cfg</span><span class="p">:</span> <span class="n">GripperCollisionCfg</span> <span class="o">=</span> <span class="n">GripperCollisionCfg</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the GraspGenerator with the given mesh vertices, triangles, and configuration.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            vertices (torch.Tensor): A tensor of shape (V, 3) representing the vertex positions of the mesh.</span>
+<span class="sd">            triangles (torch.Tensor): A tensor of shape (F, 3) representing the triangle indices of the mesh.</span>
+<span class="sd">            cfg (GraspGeneratorCfg, optional): Configuration for the grasp annotator. Defaults to GraspGeneratorCfg().</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">vertices</span><span class="o">.</span><span class="n">device</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">vertices</span> <span class="o">=</span> <span class="n">vertices</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">triangles</span> <span class="o">=</span> <span class="n">triangles</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mesh</span> <span class="o">=</span> <span class="n">trimesh</span><span class="o">.</span><span class="n">Trimesh</span><span class="p">(</span>
+            <span class="n">vertices</span><span class="o">=</span><span class="n">vertices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span>
+            <span class="n">faces</span><span class="o">=</span><span class="n">triangles</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span>
+            <span class="n">process</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">force</span><span class="o">=</span><span class="s2">&quot;mesh&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_collision_checker</span> <span class="o">=</span> <span class="n">GripperCollisionChecker</span><span class="p">(</span>
+            <span class="n">object_mesh_verts</span><span class="o">=</span><span class="n">vertices</span><span class="p">,</span>
+            <span class="n">object_mesh_faces</span><span class="o">=</span><span class="n">triangles</span><span class="p">,</span>
+            <span class="n">cfg</span><span class="o">=</span><span class="n">gripper_collision_cfg</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_antipodal_sampler</span> <span class="o">=</span> <span class="n">AntipodalSampler</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="o">.</span><span class="n">antipodal_sampler_cfg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Load cached antipodal pairs for the whole mesh if available.</span>
+        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cache_dir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">vertices</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">triangles</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">cache_path</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found cached antipodal pairs at </span><span class="si">{</span><span class="n">cache_path</span><span class="si">}</span><span class="s2">. Loading.&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">cache_path</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GraspGenerator.generate">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.generate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">vertex_indices</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">face_indices</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Generate antipodal point pairs for grasping on the given mesh region.</span>
+
+<span class="sd">        Exactly one of ``vertex_indices`` or ``face_indices`` must be provided</span>
+<span class="sd">        to define the grasp region.  When both are ``None``, the whole mesh is</span>
+<span class="sd">        used.</span>
+
+<span class="sd">        Results are cached to disk.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            vertex_indices: 1-D ``torch.Tensor`` of vertex indices defining the</span>
+<span class="sd">                grasp region.</span>
+<span class="sd">            face_indices: 1-D ``torch.Tensor`` of face indices defining the</span>
+<span class="sd">                grasp region.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If both ``vertex_indices`` and ``face_indices`` are</span>
+<span class="sd">                provided at the same time.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: A tensor of shape ``(N, 2, 3)`` representing N</span>
+<span class="sd">                antipodal point pairs.  Each pair consists of a hit point and</span>
+<span class="sd">                its corresponding surface point.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">vertex_indices</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">face_indices</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Only one of vertex_indices or face_indices should be provided, not both.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">vertex_indices</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">face_indices</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">sub_vertices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">vertices</span>
+            <span class="n">sub_faces</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">triangles</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">face_indices</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">face_idx_np</span> <span class="o">=</span> <span class="n">face_indices</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">vertex_idx_np</span> <span class="o">=</span> <span class="n">vertex_indices</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+                <span class="n">vertex_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="o">.</span><span class="n">vertices</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+                <span class="n">vertex_mask</span><span class="p">[</span><span class="n">vertex_idx_np</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">face_all</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="o">.</span><span class="n">faces</span><span class="p">)</span>
+                <span class="n">face_idx_np</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">vertex_mask</span><span class="p">[</span><span class="n">face_all</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span>
+            <span class="p">(</span>
+                <span class="n">_</span><span class="p">,</span>
+                <span class="n">_</span><span class="p">,</span>
+                <span class="n">sub_vertices_np</span><span class="p">,</span>
+                <span class="n">sub_faces_np</span><span class="p">,</span>
+            <span class="p">)</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_extract_selection_from_faces</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="p">,</span> <span class="n">face_idx_np</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">use_largest_connected_component</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">sub_vertices_np</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">sub_vertices</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+                <span class="n">sub_vertices_np</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+            <span class="n">sub_faces</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+                <span class="n">sub_faces_np</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+
+        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cache_dir</span><span class="p">(</span><span class="n">sub_vertices</span><span class="p">,</span> <span class="n">sub_faces</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">cache_path</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found cached antipodal pairs at </span><span class="si">{</span><span class="n">cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">cache_path</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_antipodal_sampler</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="n">sub_vertices</span><span class="p">,</span> <span class="n">sub_faces</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_save_cache</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span></div>
+
+
+<div class="viewcode-block" id="GraspGenerator.annotate">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.annotate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">annotate</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Annotate antipodal grasp region on the mesh and return sampled antipodal point pairs.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: A tensor of shape (N, 2, 3) representing N antipodal point pairs.</span>
+<span class="sd">                Each pair consists of a hit point and its corresponding surface point.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;[Viser] *****Annotate grasp region in http://localhost:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">viser_port</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+
+        <span class="n">server</span> <span class="o">=</span> <span class="n">viser</span><span class="o">.</span><span class="n">ViserServer</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">viser_port</span><span class="p">)</span>
+        <span class="n">server</span><span class="o">.</span><span class="n">gui</span><span class="o">.</span><span class="n">configure_theme</span><span class="p">(</span><span class="n">brand_color</span><span class="o">=</span><span class="p">(</span><span class="mi">130</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">150</span><span class="p">))</span>
+        <span class="n">server</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">set_up_direction</span><span class="p">(</span><span class="s2">&quot;+z&quot;</span><span class="p">)</span>
+
+        <span class="n">mesh_handle</span> <span class="o">=</span> <span class="n">server</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">add_mesh_trimesh</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;/mesh&quot;</span><span class="p">,</span> <span class="n">mesh</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="p">)</span>
+        <span class="n">selected_overlay</span><span class="p">:</span> <span class="n">viser</span><span class="o">.</span><span class="n">GlbHandle</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">sel_vertex_indices</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">sel_face_indices</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">sel_vertices</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">sel_faces</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">hit_point_pairs</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">return_flag</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="nd">@server</span><span class="o">.</span><span class="n">on_client_connect</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">client</span><span class="p">:</span> <span class="n">viser</span><span class="o">.</span><span class="n">ClientHandle</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">nonlocal</span> <span class="n">mesh_handle</span>
+            <span class="k">nonlocal</span> <span class="n">selected_overlay</span>
+            <span class="k">nonlocal</span> <span class="n">sel_vertex_indices</span>
+            <span class="k">nonlocal</span> <span class="n">sel_face_indices</span>
+            <span class="k">nonlocal</span> <span class="n">sel_vertices</span>
+            <span class="k">nonlocal</span> <span class="n">sel_faces</span>
+
+            <span class="c1"># client.camera.position = np.array([0.0, 0.0, -0.5])</span>
+            <span class="c1"># client.camera.wxyz = np.array([1.0, 0.0, 0.0, 0.0])</span>
+
+            <span class="n">select_button</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">gui</span><span class="o">.</span><span class="n">add_button</span><span class="p">(</span>
+                <span class="s2">&quot;Rect Select Region&quot;</span><span class="p">,</span> <span class="n">icon</span><span class="o">=</span><span class="n">viser</span><span class="o">.</span><span class="n">Icon</span><span class="o">.</span><span class="n">PAINT</span>
+            <span class="p">)</span>
+            <span class="n">confirm_button</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">gui</span><span class="o">.</span><span class="n">add_button</span><span class="p">(</span><span class="s2">&quot;Confirm Selection&quot;</span><span class="p">)</span>
+
+            <span class="nd">@select_button</span><span class="o">.</span><span class="n">on_click</span>
+            <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">_evt</span><span class="p">:</span> <span class="n">viser</span><span class="o">.</span><span class="n">GuiEvent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">select_button</span><span class="o">.</span><span class="n">disabled</span> <span class="o">=</span> <span class="kc">True</span>
+
+                <span class="nd">@client</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">on_pointer_event</span><span class="p">(</span><span class="n">event_type</span><span class="o">=</span><span class="s2">&quot;rect-select&quot;</span><span class="p">)</span>
+                <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">viser</span><span class="o">.</span><span class="n">ScenePointerEvent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">nonlocal</span> <span class="n">mesh_handle</span>
+                    <span class="k">nonlocal</span> <span class="n">selected_overlay</span>
+                    <span class="k">nonlocal</span> <span class="n">sel_vertex_indices</span>
+                    <span class="k">nonlocal</span> <span class="n">sel_face_indices</span>
+                    <span class="k">nonlocal</span> <span class="n">sel_vertices</span>
+                    <span class="k">nonlocal</span> <span class="n">sel_faces</span>
+                    <span class="k">nonlocal</span> <span class="n">hit_point_pairs</span>
+                    <span class="n">client</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">remove_pointer_callback</span><span class="p">()</span>
+
+                    <span class="n">proj</span><span class="p">,</span> <span class="n">depth</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_project_vertices_to_screen</span><span class="p">(</span>
+                        <span class="n">cast</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="o">.</span><span class="n">vertices</span><span class="p">),</span>
+                        <span class="n">mesh_handle</span><span class="p">,</span>
+                        <span class="n">event</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">camera</span><span class="p">,</span>
+                    <span class="p">)</span>
+
+                    <span class="n">lower</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">screen_pos</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">screen_pos</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+                    <span class="p">)</span>
+                    <span class="n">upper</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">screen_pos</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">screen_pos</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+                    <span class="p">)</span>
+                    <span class="n">vertex_mask</span> <span class="o">=</span> <span class="p">((</span><span class="n">proj</span> <span class="o">&gt;=</span> <span class="n">lower</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">proj</span> <span class="o">&lt;=</span> <span class="n">upper</span><span class="p">))</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span>
+                        <span class="n">depth</span> <span class="o">&gt;</span> <span class="mf">1e-6</span>
+                    <span class="p">)</span>
+
+                    <span class="p">(</span>
+                        <span class="n">sel_vertex_indices</span><span class="p">,</span>
+                        <span class="n">sel_face_indices</span><span class="p">,</span>
+                        <span class="n">sel_vertices</span><span class="p">,</span>
+                        <span class="n">sel_faces</span><span class="p">,</span>
+                    <span class="p">)</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_extract_selection_from_vertex_mask</span><span class="p">(</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="p">,</span> <span class="n">vertex_mask</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">use_largest_connected_component</span>
+                    <span class="p">)</span>
+                    <span class="k">if</span> <span class="n">sel_vertices</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;[Selection] No vertices selected.&quot;</span><span class="p">)</span>
+                        <span class="k">return</span>
+
+                    <span class="n">color_mesh</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                    <span class="n">vertex_colors</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">tile</span><span class="p">(</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">0.85</span><span class="p">,</span> <span class="mf">0.85</span><span class="p">,</span> <span class="mf">0.85</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]]),</span>
+                        <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mesh</span><span class="o">.</span><span class="n">vertices</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">),</span>
+                    <span class="p">)</span>
+                    <span class="n">vertex_colors</span><span class="p">[</span><span class="n">sel_vertex_indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                        <span class="p">[</span><span class="mf">0.56</span><span class="p">,</span> <span class="mf">0.17</span><span class="p">,</span> <span class="mf">0.92</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]</span>
+                    <span class="p">)</span>
+                    <span class="n">color_mesh</span><span class="o">.</span><span class="n">visual</span><span class="o">.</span><span class="n">vertex_colors</span> <span class="o">=</span> <span class="n">vertex_colors</span>  <span class="c1"># type: ignore</span>
+                    <span class="n">mesh_handle</span> <span class="o">=</span> <span class="n">server</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">add_mesh_trimesh</span><span class="p">(</span>
+                        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;/mesh&quot;</span><span class="p">,</span> <span class="n">mesh</span><span class="o">=</span><span class="n">color_mesh</span>
+                    <span class="p">)</span>
+
+                    <span class="k">if</span> <span class="n">selected_overlay</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">selected_overlay</span><span class="o">.</span><span class="n">remove</span><span class="p">()</span>
+                    <span class="n">selected_mesh</span> <span class="o">=</span> <span class="n">trimesh</span><span class="o">.</span><span class="n">Trimesh</span><span class="p">(</span>
+                        <span class="n">vertices</span><span class="o">=</span><span class="n">sel_vertices</span><span class="p">,</span>
+                        <span class="n">faces</span><span class="o">=</span><span class="n">sel_faces</span><span class="p">,</span>
+                        <span class="n">process</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                    <span class="p">)</span>
+                    <span class="n">selected_mesh</span><span class="o">.</span><span class="n">visual</span><span class="o">.</span><span class="n">face_colors</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.65</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+                    <span class="n">selected_overlay</span> <span class="o">=</span> <span class="n">server</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">add_mesh_trimesh</span><span class="p">(</span>
+                        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;/selected&quot;</span><span class="p">,</span> <span class="n">mesh</span><span class="o">=</span><span class="n">selected_mesh</span>
+                    <span class="p">)</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;[Selection] Selected </span><span class="si">{</span><span class="n">sel_vertex_indices</span><span class="o">.</span><span class="n">size</span><span class="si">}</span><span class="s2"> vertices and </span><span class="si">{</span><span class="n">sel_face_indices</span><span class="o">.</span><span class="n">size</span><span class="si">}</span><span class="s2"> faces.&quot;</span>
+                    <span class="p">)</span>
+
+                    <span class="n">hit_point_pairs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_antipodal_sampler</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span>
+                        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">sel_vertices</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+                        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">sel_faces</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+                    <span class="p">)</span>
+
+                    <span class="c1"># for visualization only</span>
+                    <span class="n">extended_hit_point_pairs</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_extend_hit_point_pairs</span><span class="p">(</span>
+                        <span class="n">hit_point_pairs</span>
+                    <span class="p">)</span>
+                    <span class="n">server</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">add_line_segments</span><span class="p">(</span>
+                        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;/antipodal_pairs&quot;</span><span class="p">,</span>
+                        <span class="n">points</span><span class="o">=</span><span class="n">extended_hit_point_pairs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span>
+                        <span class="n">colors</span><span class="o">=</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">200</span><span class="p">),</span>
+                        <span class="n">line_width</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span>
+                    <span class="p">)</span>
+
+                <span class="nd">@client</span><span class="o">.</span><span class="n">scene</span><span class="o">.</span><span class="n">on_pointer_callback_removed</span>
+                <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">select_button</span><span class="o">.</span><span class="n">disabled</span> <span class="o">=</span> <span class="kc">False</span>
+
+            <span class="nd">@confirm_button</span><span class="o">.</span><span class="n">on_click</span>
+            <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">_evt</span><span class="p">:</span> <span class="n">viser</span><span class="o">.</span><span class="n">GuiEvent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">nonlocal</span> <span class="n">return_flag</span>
+                <span class="k">if</span> <span class="n">sel_vertices</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;[Selection] No vertex selected.&quot;</span><span class="p">)</span>
+                    <span class="k">return</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;[Selection] </span><span class="si">{</span><span class="n">sel_vertices</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">vertices selected. Generating antipodal point pairs.&quot;</span>
+                    <span class="p">)</span>
+                    <span class="n">return_flag</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">return_flag</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">hit_point_pairs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span> <span class="o">=</span> <span class="n">hit_point_pairs</span>
+                    <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cache_dir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">vertices</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">triangles</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_save_cache</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">hit_point_pairs</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_cache_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vertices</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">triangles</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="n">vert_bytes</span> <span class="o">=</span> <span class="n">vertices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">tobytes</span><span class="p">()</span>
+        <span class="n">face_bytes</span> <span class="o">=</span> <span class="n">triangles</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">tobytes</span><span class="p">()</span>
+        <span class="n">md5_hash</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">md5</span><span class="p">(</span><span class="n">vert_bytes</span> <span class="o">+</span> <span class="n">face_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+        <span class="n">cache_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="n">GRASP_ANNOTATOR_CACHE_DIR</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;antipodal_cache_</span><span class="si">{</span><span class="n">md5_hash</span><span class="si">}</span><span class="s2">.npy&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">cache_path</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_save_cache</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cache_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">hit_point_pairs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">hit_point_pairs</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extend_hit_point_pairs</span><span class="p">(</span><span class="n">hit_point_pairs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="n">origin_points</span> <span class="o">=</span> <span class="n">hit_point_pairs</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="n">hit_points</span> <span class="o">=</span> <span class="n">hit_point_pairs</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="n">mid_points</span> <span class="o">=</span> <span class="p">(</span><span class="n">origin_points</span> <span class="o">+</span> <span class="n">hit_points</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="n">point_diff</span> <span class="o">=</span> <span class="n">hit_points</span> <span class="o">-</span> <span class="n">origin_points</span>
+        <span class="n">extended_origin</span> <span class="o">=</span> <span class="n">mid_points</span> <span class="o">-</span> <span class="mf">0.8</span> <span class="o">*</span> <span class="n">point_diff</span>
+        <span class="n">extended_hit</span> <span class="o">=</span> <span class="n">mid_points</span> <span class="o">+</span> <span class="mf">0.8</span> <span class="o">*</span> <span class="n">point_diff</span>
+        <span class="n">extended_point_pairs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">extended_origin</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">:],</span> <span class="n">extended_hit</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">:]],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">extended_point_pairs</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_project_vertices_to_screen</span><span class="p">(</span>
+        <span class="n">vertices_mesh</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">mesh_handle</span><span class="p">:</span> <span class="n">viser</span><span class="o">.</span><span class="n">GlbHandle</span><span class="p">,</span>
+        <span class="n">camera</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+        <span class="n">T_world_mesh</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">SE3</span><span class="o">.</span><span class="n">from_rotation_and_translation</span><span class="p">(</span>
+            <span class="n">tf</span><span class="o">.</span><span class="n">SO3</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">mesh_handle</span><span class="o">.</span><span class="n">wxyz</span><span class="p">)),</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">mesh_handle</span><span class="o">.</span><span class="n">position</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="n">vertices_world_h</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">T_world_mesh</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">()</span>
+            <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">vertices_mesh</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="n">vertices_mesh</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">))])</span><span class="o">.</span><span class="n">T</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">vertices_world</span> <span class="o">=</span> <span class="n">vertices_world_h</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+
+        <span class="n">T_camera_world</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">SE3</span><span class="o">.</span><span class="n">from_rotation_and_translation</span><span class="p">(</span>
+            <span class="n">tf</span><span class="o">.</span><span class="n">SO3</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">camera</span><span class="o">.</span><span class="n">wxyz</span><span class="p">)),</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">camera</span><span class="o">.</span><span class="n">position</span><span class="p">),</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">inverse</span><span class="p">()</span>
+        <span class="n">vertices_camera_h</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">T_camera_world</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">()</span>
+            <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">vertices_world</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="n">vertices_world</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">))])</span><span class="o">.</span><span class="n">T</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">vertices_camera</span> <span class="o">=</span> <span class="n">vertices_camera_h</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+
+        <span class="n">fov</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">camera</span><span class="o">.</span><span class="n">fov</span><span class="p">)</span>
+        <span class="n">aspect</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">camera</span><span class="o">.</span><span class="n">aspect</span><span class="p">)</span>
+        <span class="n">projected</span> <span class="o">=</span> <span class="n">vertices_camera</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">2</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">vertices_camera</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">:</span><span class="mi">3</span><span class="p">],</span> <span class="mf">1e-8</span><span class="p">)</span>
+        <span class="n">projected</span> <span class="o">/=</span> <span class="n">np</span><span class="o">.</span><span class="n">tan</span><span class="p">(</span><span class="n">fov</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">)</span>
+        <span class="n">projected</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">/=</span> <span class="n">aspect</span>
+        <span class="n">projected</span> <span class="o">=</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">projected</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.0</span>
+        <span class="k">return</span> <span class="n">projected</span><span class="p">,</span> <span class="n">vertices_camera</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extract_selection_from_vertex_mask</span><span class="p">(</span>
+        <span class="n">mesh</span><span class="p">:</span> <span class="n">trimesh</span><span class="o">.</span><span class="n">Trimesh</span><span class="p">,</span>
+        <span class="n">vertex_mask</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">largest_component</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Extract a sub-mesh from *mesh* using a per-vertex boolean mask.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            mesh: The source mesh.</span>
+<span class="sd">            vertex_mask: Boolean array of shape ``(V,)`` indicating which</span>
+<span class="sd">                vertices are selected.</span>
+<span class="sd">            largest_component: If ``True``, keep only the largest connected</span>
+<span class="sd">                component among the selected faces.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A tuple ``(vertex_indices, face_indices, sub_vertices, sub_faces)``</span>
+<span class="sd">            where ``sub_vertices`` and ``sub_faces`` define the extracted</span>
+<span class="sd">            sub-mesh with remapped indices.  Returns ``(None, None, None, None)``</span>
+<span class="sd">            if no faces are selected.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">faces</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">mesh</span><span class="o">.</span><span class="n">faces</span><span class="p">)</span>
+        <span class="n">face_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">vertex_mask</span><span class="p">[</span><span class="n">faces</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">face_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">face_mask</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">face_indices</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">largest_component</span><span class="p">:</span>
+            <span class="n">face_indices</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_largest_connected_face_component</span><span class="p">(</span>
+                <span class="n">mesh</span><span class="p">,</span> <span class="n">face_indices</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">face_indices</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_build_sub_mesh</span><span class="p">(</span><span class="n">mesh</span><span class="p">,</span> <span class="n">face_indices</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extract_selection_from_faces</span><span class="p">(</span>
+        <span class="n">mesh</span><span class="p">:</span> <span class="n">trimesh</span><span class="o">.</span><span class="n">Trimesh</span><span class="p">,</span>
+        <span class="n">face_indices</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">largest_component</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Extract a sub-mesh from *mesh* using face indices.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            mesh: The source mesh.</span>
+<span class="sd">            face_indices: Array of face indices to include.</span>
+<span class="sd">            largest_component: If ``True``, keep only the largest connected</span>
+<span class="sd">                component among the selected faces.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Same as :meth:`_extract_selection_from_vertex_mask`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">face_indices</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">largest_component</span><span class="p">:</span>
+            <span class="n">face_indices</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_largest_connected_face_component</span><span class="p">(</span>
+                <span class="n">mesh</span><span class="p">,</span> <span class="n">face_indices</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">face_indices</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_build_sub_mesh</span><span class="p">(</span><span class="n">mesh</span><span class="p">,</span> <span class="n">face_indices</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_build_sub_mesh</span><span class="p">(</span>
+        <span class="n">mesh</span><span class="p">:</span> <span class="n">trimesh</span><span class="o">.</span><span class="n">Trimesh</span><span class="p">,</span>
+        <span class="n">face_indices</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Build a sub-mesh with remapped vertex indices from selected faces.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            ``(vertex_indices, face_indices, sub_vertices, sub_faces)``</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">faces</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">mesh</span><span class="o">.</span><span class="n">faces</span><span class="p">)</span>
+        <span class="n">selected_face_vertices</span> <span class="o">=</span> <span class="n">faces</span><span class="p">[</span><span class="n">face_indices</span><span class="p">]</span>
+        <span class="n">vertex_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">selected_face_vertices</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">old_to_new</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="n">mesh</span><span class="o">.</span><span class="n">vertices</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="n">old_to_new</span><span class="p">[</span><span class="n">vertex_indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">vertex_indices</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+
+        <span class="n">sub_vertices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">mesh</span><span class="o">.</span><span class="n">vertices</span><span class="p">)[</span><span class="n">vertex_indices</span><span class="p">]</span>
+        <span class="n">sub_faces</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">old_to_new</span><span class="p">)[</span><span class="n">selected_face_vertices</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">vertex_indices</span><span class="p">,</span> <span class="n">face_indices</span><span class="p">,</span> <span class="n">sub_vertices</span><span class="p">,</span> <span class="n">sub_faces</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_largest_connected_face_component</span><span class="p">(</span>
+        <span class="n">mesh</span><span class="p">:</span> <span class="n">trimesh</span><span class="o">.</span><span class="n">Trimesh</span><span class="p">,</span>
+        <span class="n">face_ids</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the face indices of the largest connected component.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">face_ids</span><span class="o">.</span><span class="n">size</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">face_ids</span>
+
+        <span class="n">face_id_set</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">face_ids</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+        <span class="n">parent</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">face_id</span><span class="p">):</span> <span class="nb">int</span><span class="p">(</span><span class="n">face_id</span><span class="p">)</span> <span class="k">for</span> <span class="n">face_id</span> <span class="ow">in</span> <span class="n">face_ids</span><span class="p">}</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">find</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+            <span class="n">root</span> <span class="o">=</span> <span class="n">x</span>
+            <span class="k">while</span> <span class="n">parent</span><span class="p">[</span><span class="n">root</span><span class="p">]</span> <span class="o">!=</span> <span class="n">root</span><span class="p">:</span>
+                <span class="n">root</span> <span class="o">=</span> <span class="n">parent</span><span class="p">[</span><span class="n">root</span><span class="p">]</span>
+            <span class="k">while</span> <span class="n">parent</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">!=</span> <span class="n">x</span><span class="p">:</span>
+                <span class="n">x_parent</span> <span class="o">=</span> <span class="n">parent</span><span class="p">[</span><span class="n">x</span><span class="p">]</span>
+                <span class="n">parent</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">root</span>
+                <span class="n">x</span> <span class="o">=</span> <span class="n">x_parent</span>
+            <span class="k">return</span> <span class="n">root</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">union</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ra</span><span class="p">,</span> <span class="n">rb</span> <span class="o">=</span> <span class="n">find</span><span class="p">(</span><span class="n">a</span><span class="p">),</span> <span class="n">find</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ra</span> <span class="o">!=</span> <span class="n">rb</span><span class="p">:</span>
+                <span class="n">parent</span><span class="p">[</span><span class="n">rb</span><span class="p">]</span> <span class="o">=</span> <span class="n">ra</span>
+
+        <span class="n">face_adjacency</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">mesh</span><span class="o">.</span><span class="n">face_adjacency</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">face_a</span><span class="p">,</span> <span class="n">face_b</span> <span class="ow">in</span> <span class="n">face_adjacency</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">face_a</span><span class="p">)</span> <span class="ow">in</span> <span class="n">face_id_set</span> <span class="ow">and</span> <span class="nb">int</span><span class="p">(</span><span class="n">face_b</span><span class="p">)</span> <span class="ow">in</span> <span class="n">face_id_set</span><span class="p">:</span>
+                <span class="n">union</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">face_a</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">face_b</span><span class="p">))</span>
+
+        <span class="n">groups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">face_id</span> <span class="ow">in</span> <span class="n">face_ids</span><span class="p">:</span>
+            <span class="n">root</span> <span class="o">=</span> <span class="n">find</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">face_id</span><span class="p">))</span>
+            <span class="n">groups</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">face_id</span><span class="p">))</span>
+
+        <span class="n">largest_group</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">groups</span><span class="o">.</span><span class="n">values</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="nb">len</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">largest_group</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_transform</span><span class="p">(</span><span class="n">points</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">transform</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">transform</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">transform</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">points</span> <span class="o">@</span> <span class="n">r</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="n">t</span>
+
+<div class="viewcode-block" id="GraspGenerator.get_grasp_poses">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.get_grasp_poses">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_grasp_poses</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">object_pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">approach_direction</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">visualize_collision</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="n">visualize_pose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get grasp pose given approach direction.</span>
+
+<span class="sd">        Uses the antipodal point pairs stored in ``self._hit_point_pairs``</span>
+<span class="sd">        (populated by :meth:`generate` or :meth:`annotate`).</span>
+
+<span class="sd">        TODO:</span>
+<span class="sd">            1. Support Top-k grasp poses selection.</span>
+<span class="sd">            2. Support more selection criteria.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            object_pose: ``(4, 4)`` homogeneous transformation matrix</span>
+<span class="sd">                representing the pose of the object in the world frame.</span>
+<span class="sd">            approach_direction: ``(3,)`` unit vector representing the desired</span>
+<span class="sd">                approach direction of the gripper in the world frame.</span>
+<span class="sd">            visualize_collision: If ``True``, enable visual collision checking.</span>
+<span class="sd">            visualize_pose: If ``True``, visualize the best grasp pose using Open3D</span>
+<span class="sd">                after computation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            is_success (bool): Whether a valid grasp pose is found.</span>
+<span class="sd">            best_grasp_pose (torch.Tensor): If a valid grasp pose is found, a tensor of shape (4, 4) representing the homogeneous transformation matrix of the best grasp pose in the world frame. Otherwise, an identity matrix.</span>
+<span class="sd">            best_open_length (float): If a valid grasp pose is found, a scalar representing the optimal gripper opening length. Otherwise, a zero tensor.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            RuntimeError: If :meth:`generate` or :meth:`annotate` has not</span>
+<span class="sd">                been called yet.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="s2">&quot;No antipodal point pairs available. &quot;</span>
+                <span class="s2">&quot;Call generate() or annotate() first.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="mf">0.0</span>
+        <span class="n">origin_points</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="n">hit_points</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hit_point_pairs</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="n">origin_points_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_transform</span><span class="p">(</span><span class="n">origin_points</span><span class="p">,</span> <span class="n">object_pose</span><span class="p">)</span>
+        <span class="n">hit_points_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_transform</span><span class="p">(</span><span class="n">hit_points</span><span class="p">,</span> <span class="n">object_pose</span><span class="p">)</span>
+        <span class="n">centers</span> <span class="o">=</span> <span class="p">(</span><span class="n">origin_points_</span> <span class="o">+</span> <span class="n">hit_points_</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+        <span class="n">mesh_vert_transformed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_transform</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">vertices</span><span class="p">,</span> <span class="n">object_pose</span><span class="p">)</span>
+        <span class="n">mesh_center</span> <span class="o">=</span> <span class="n">mesh_vert_transformed</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># filter perpendicular antipodal point</span>
+        <span class="n">grasp_x</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">hit_points_</span> <span class="o">-</span> <span class="n">origin_points_</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">cos_angle</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">((</span><span class="n">grasp_x</span> <span class="o">*</span> <span class="n">approach_direction</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">),</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+        <span class="n">positive_angle</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">acos</span><span class="p">(</span><span class="n">cos_angle</span><span class="p">))</span>
+        <span class="n">valid_mask</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">positive_angle</span> <span class="o">-</span> <span class="n">torch</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">max_deviation_angle</span>
+        <span class="k">if</span> <span class="n">valid_mask</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;No valid antipodal pairs after angle filtering.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="mf">0.0</span>
+
+        <span class="n">valid_grasp_x</span> <span class="o">=</span> <span class="n">grasp_x</span><span class="p">[</span><span class="n">valid_mask</span><span class="p">]</span>
+        <span class="n">valid_centers</span> <span class="o">=</span> <span class="n">centers</span><span class="p">[</span><span class="n">valid_mask</span><span class="p">]</span>
+
+        <span class="c1"># compute grasp poses using antipodal point pairs and approach direction</span>
+        <span class="n">valid_grasp_poses</span> <span class="o">=</span> <span class="n">GraspGenerator</span><span class="o">.</span><span class="n">_grasp_pose_from_approach_direction</span><span class="p">(</span>
+            <span class="n">valid_grasp_x</span><span class="p">,</span> <span class="n">approach_direction</span><span class="p">,</span> <span class="n">valid_centers</span>
+        <span class="p">)</span>
+        <span class="n">valid_open_lengths</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span>
+            <span class="n">origin_points_</span><span class="p">[</span><span class="n">valid_mask</span><span class="p">]</span> <span class="o">-</span> <span class="n">hit_points_</span><span class="p">[</span><span class="n">valid_mask</span><span class="p">],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="c1"># select non-collide grasp poses</span>
+        <span class="n">is_colliding</span><span class="p">,</span> <span class="n">max_penetration</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collision_checker</span><span class="o">.</span><span class="n">query</span><span class="p">(</span>
+            <span class="n">object_pose</span><span class="p">,</span>
+            <span class="n">valid_grasp_poses</span><span class="p">,</span>
+            <span class="n">valid_open_lengths</span><span class="p">,</span>
+            <span class="n">is_visual</span><span class="o">=</span><span class="n">visualize_collision</span><span class="p">,</span>
+            <span class="n">collision_threshold</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">is_colliding</span><span class="o">.</span><span class="n">logical_not</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;No valid antipodal pairs after angle filtering.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="mf">0.0</span>
+        <span class="c1"># get best grasp pose</span>
+        <span class="n">valid_grasp_poses</span> <span class="o">=</span> <span class="n">valid_grasp_poses</span><span class="p">[</span><span class="o">~</span><span class="n">is_colliding</span><span class="p">]</span>
+        <span class="n">valid_open_lengths</span> <span class="o">=</span> <span class="n">valid_open_lengths</span><span class="p">[</span><span class="o">~</span><span class="n">is_colliding</span><span class="p">]</span>
+        <span class="n">valid_centers</span> <span class="o">=</span> <span class="n">valid_centers</span><span class="p">[</span><span class="o">~</span><span class="n">is_colliding</span><span class="p">]</span>
+        <span class="n">valid_grasp_x</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">valid_grasp_poses</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">cos_angle</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">valid_grasp_x</span> <span class="o">*</span> <span class="n">approach_direction</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">),</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span>
+        <span class="p">)</span>
+        <span class="n">positive_angle</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">acos</span><span class="p">(</span><span class="n">cos_angle</span><span class="p">))</span>
+        <span class="n">angle_cost</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">positive_angle</span> <span class="o">-</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+        <span class="n">center_distance</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">valid_centers</span> <span class="o">-</span> <span class="n">mesh_center</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">center_cost</span> <span class="o">=</span> <span class="n">center_distance</span> <span class="o">/</span> <span class="n">center_distance</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+        <span class="n">length_cost</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">valid_open_lengths</span> <span class="o">/</span> <span class="n">valid_open_lengths</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+        <span class="n">total_cost</span> <span class="o">=</span> <span class="mf">0.3</span> <span class="o">*</span> <span class="n">angle_cost</span> <span class="o">+</span> <span class="mf">0.3</span> <span class="o">*</span> <span class="n">length_cost</span> <span class="o">+</span> <span class="mf">0.4</span> <span class="o">*</span> <span class="n">center_cost</span>
+        <span class="n">best_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">total_cost</span><span class="p">)</span>
+        <span class="n">best_grasp_pose</span> <span class="o">=</span> <span class="n">valid_grasp_poses</span><span class="p">[</span><span class="n">best_idx</span><span class="p">]</span>
+        <span class="n">best_open_length</span> <span class="o">=</span> <span class="n">valid_open_lengths</span><span class="p">[</span><span class="n">best_idx</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">visualize_pose</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">visualize_grasp_pose</span><span class="p">(</span>
+                <span class="n">obj_pose</span><span class="o">=</span><span class="n">object_pose</span><span class="p">,</span>
+                <span class="n">grasp_pose</span><span class="o">=</span><span class="n">best_grasp_pose</span><span class="p">,</span>
+                <span class="n">open_length</span><span class="o">=</span><span class="n">best_open_length</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">best_grasp_pose</span><span class="p">,</span> <span class="n">best_open_length</span></div>
+
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_grasp_pose_from_approach_direction</span><span class="p">(</span>
+        <span class="n">grasp_x</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">approach_direction</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">center</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>
+    <span class="p">):</span>
+        <span class="n">approach_direction_repeat</span> <span class="o">=</span> <span class="n">approach_direction</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span>
+            <span class="n">grasp_x</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="n">grasp_y</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">approach_direction_repeat</span><span class="p">,</span> <span class="n">grasp_x</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">grasp_y</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">grasp_y</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">grasp_z</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">grasp_x</span><span class="p">,</span> <span class="n">grasp_y</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">grasp_z</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">grasp_z</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">grasp_poses</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">grasp_x</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">grasp_x</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">grasp_poses</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">grasp_x</span>
+        <span class="n">grasp_poses</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">grasp_y</span>
+        <span class="n">grasp_poses</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">grasp_z</span>
+        <span class="n">grasp_poses</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">center</span>
+        <span class="k">return</span> <span class="n">grasp_poses</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">visualize_grasp_pose</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">obj_pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">grasp_pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">open_length</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="n">mesh</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="p">(</span>
+            <span class="n">vertices</span><span class="o">=</span><span class="n">o3d</span><span class="o">.</span><span class="n">utility</span><span class="o">.</span><span class="n">Vector3dVector</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">vertices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()),</span>
+            <span class="n">triangles</span><span class="o">=</span><span class="n">o3d</span><span class="o">.</span><span class="n">utility</span><span class="o">.</span><span class="n">Vector3iVector</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">triangles</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()),</span>
+        <span class="p">)</span>
+        <span class="n">mesh</span><span class="o">.</span><span class="n">compute_vertex_normals</span><span class="p">()</span>
+        <span class="n">mesh</span><span class="o">.</span><span class="n">paint_uniform_color</span><span class="p">([</span><span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.6</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">])</span>
+        <span class="n">mesh</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">obj_pose</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">())</span>
+        <span class="n">vertices_</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">mesh</span><span class="o">.</span><span class="n">vertices</span><span class="p">),</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">vertices</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">vertices</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">mesh_scale</span> <span class="o">=</span> <span class="p">(</span><span class="n">vertices_</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">vertices_</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="n">groud_plane</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="o">.</span><span class="n">create_cylinder</span><span class="p">(</span>
+            <span class="n">radius</span><span class="o">=</span><span class="n">mesh_scale</span><span class="p">,</span> <span class="n">height</span><span class="o">=</span><span class="mf">0.01</span> <span class="o">*</span> <span class="n">mesh_scale</span>
+        <span class="p">)</span>
+        <span class="n">groud_plane</span><span class="o">.</span><span class="n">compute_vertex_normals</span><span class="p">()</span>
+        <span class="n">center</span> <span class="o">=</span> <span class="n">vertices_</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">z_sim</span> <span class="o">=</span> <span class="n">vertices_</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="n">groud_plane</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">center</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span> <span class="n">center</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span> <span class="n">z_sim</span> <span class="o">-</span> <span class="mf">0.005</span> <span class="o">*</span> <span class="n">mesh_scale</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="n">draw_thickness</span> <span class="o">=</span> <span class="mf">0.02</span> <span class="o">*</span> <span class="n">mesh_scale</span>
+        <span class="n">draw_length</span> <span class="o">=</span> <span class="mf">0.3</span> <span class="o">*</span> <span class="n">mesh_scale</span>
+        <span class="n">grasp_finger1</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="o">.</span><span class="n">create_box</span><span class="p">(</span>
+            <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_length</span>
+        <span class="p">)</span>
+        <span class="n">grasp_finger1</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span>
+            <span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">grasp_finger2</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="o">.</span><span class="n">create_box</span><span class="p">(</span>
+            <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_length</span>
+        <span class="p">)</span>
+        <span class="n">grasp_finger2</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span>
+            <span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">grasp_finger1</span><span class="o">.</span><span class="n">translate</span><span class="p">((</span><span class="o">-</span><span class="n">open_length</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.25</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">))</span>
+        <span class="n">grasp_finger2</span><span class="o">.</span><span class="n">translate</span><span class="p">((</span><span class="n">open_length</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.25</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">))</span>
+        <span class="n">grasp_root1</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="o">.</span><span class="n">create_box</span><span class="p">(</span>
+            <span class="n">open_length</span><span class="p">,</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_thickness</span>
+        <span class="p">)</span>
+        <span class="n">grasp_root1</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span>
+            <span class="p">(</span><span class="o">-</span><span class="n">open_length</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">grasp_root1</span><span class="o">.</span><span class="n">translate</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.75</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">))</span>
+        <span class="n">grasp_root2</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="o">.</span><span class="n">create_box</span><span class="p">(</span>
+            <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="n">draw_length</span>
+        <span class="p">)</span>
+        <span class="n">grasp_root2</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span>
+            <span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_thickness</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">grasp_root2</span><span class="o">.</span><span class="n">translate</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.25</span> <span class="o">*</span> <span class="n">draw_length</span><span class="p">))</span>
+
+        <span class="n">grasp_visual</span> <span class="o">=</span> <span class="n">grasp_finger1</span> <span class="o">+</span> <span class="n">grasp_finger2</span> <span class="o">+</span> <span class="n">grasp_root1</span> <span class="o">+</span> <span class="n">grasp_root2</span>
+        <span class="n">grasp_visual</span><span class="o">.</span><span class="n">paint_uniform_color</span><span class="p">([</span><span class="mf">0.8</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">])</span>
+        <span class="n">grasp_visual</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">grasp_pose</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">())</span>
+        <span class="n">o3d</span><span class="o">.</span><span class="n">visualization</span><span class="o">.</span><span class="n">draw_geometries</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">grasp_visual</span><span class="p">,</span> <span class="n">mesh</span><span class="p">,</span> <span class="n">groud_plane</span><span class="p">],</span>
+            <span class="n">window_name</span><span class="o">=</span><span class="s2">&quot;Grasp Pose Visualization&quot;</span><span class="p">,</span>
+            <span class="n">mesh_show_back_face</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

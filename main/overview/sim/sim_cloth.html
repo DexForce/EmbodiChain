@@ -1,0 +1,957 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Cloth Object &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'overview/sim/sim_cloth';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Soft Object" href="sim_soft_object.html" />
+    <link rel="prev" title="Rigid Object Group" href="sim_rigid_object_group.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Simulation Framework</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 current active has-children"><a class="reference internal" href="sim_assets.html">Simulation Assets</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3 current active"><a class="current reference internal" href="#">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/overview/sim/sim_cloth.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Cloth Object</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cloth-body-attributes">CLoth Body Attributes</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setup-initialization">Setup &amp; Initialization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cloth-object-class">Cloth Object Class</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#vertex-data-observation">Vertex Data (Observation)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#pose-management">Pose Management</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="cloth-object">
+<h1>Cloth Object<a class="headerlink" href="#cloth-object" title="Link to this heading">#</a></h1>
+<p>The <code class="xref py py-class docutils literal notranslate"><span class="pre">Cloth</span></code> class represents deformable surface entities in EmbodiChain. Unlike rigid bodies, cloth objects are defined by vertices and meshes rather than a single rigid pose.</p>
+<section id="configuration">
+<h2>Configuration<a class="headerlink" href="#configuration" title="Link to this heading">#</a></h2>
+<p>Configured via <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.ClothObjectCfg" title="embodichain.lab.sim.cfg.ClothObjectCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">ClothObjectCfg</span></code></a>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">physical_attr</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ClothPhysicalAttributesCfg</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">...</span></code></p></td>
+<td class="text-left"><p>Physical attributes.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">shape</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">MeshCfg</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">MeshCfg()</span></code></p></td>
+<td class="text-left"><p>Mesh configuration.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="cloth-body-attributes">
+<h3>CLoth Body Attributes<a class="headerlink" href="#cloth-body-attributes" title="Link to this heading">#</a></h3>
+<p>Cloth bodies require both voxelization and physical attributes.</p>
+<p><strong>Physical Attributes (<a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.ClothPhysicalAttributesCfg" title="embodichain.lab.sim.cfg.ClothPhysicalAttributesCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">ClothPhysicalAttributesCfg</span></code></a>)</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">youngs</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">1e10</span></code></p></td>
+<td class="text-left"><p>Young’s modulus (higher = stiffer).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">poissons</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.3</span></code></p></td>
+<td class="text-left"><p>Poisson’s ratio.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dynamic_friction</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.5</span></code></p></td>
+<td class="text-left"><p>Dynamic friction coefficient.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">elasticity_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.0</span></code></p></td>
+<td class="text-left"><p>Elasticity damping factor.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">thickness</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.01</span></code></p></td>
+<td class="text-left"><p>Cloth thickness (m).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bending_stiffness</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.001</span></code></p></td>
+<td class="text-left"><p>Bending stiffness.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bending_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.0</span></code></p></td>
+<td class="text-left"><p>Bending damping.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_kinematic</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>If True, (partially) kinematic behavior is enabled.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_ccd</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">True</span></code></p></td>
+<td class="text-left"><p>Enable continuous collision detection (CCD).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_self_collision</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable self-collision handling.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">has_gravity</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">True</span></code></p></td>
+<td class="text-left"><p>Whether the cloth is affected by gravity.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">self_collision_stress_tolerance</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.9</span></code></p></td>
+<td class="text-left"><p>Stress tolerance threshold for self-collision constraints.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">collision_mesh_simplification</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">True</span></code></p></td>
+<td class="text-left"><p>Whether to simplify the collision mesh for self-collision.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">vertex_velocity_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.005</span></code></p></td>
+<td class="text-left"><p>Per-vertex velocity damping.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">mass</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">-1.0</span></code></p></td>
+<td class="text-left"><p>Total mass of the cloth. If negative, density is used to compute mass.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">density</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">1.0</span></code></p></td>
+<td class="text-left"><p>Material density in kg/m^3.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">max_depenetration_velocity</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">1e6</span></code></p></td>
+<td class="text-left"><p>Maximum velocity used to resolve penetrations.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">max_velocity</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">100.0</span></code></p></td>
+<td class="text-left"><p>Clamp for linear (or vertex) velocity.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">self_collision_filter_distance</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.1</span></code></p></td>
+<td class="text-left"><p>Distance threshold for filtering self-collision vertex pairs.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">linear_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.05</span></code></p></td>
+<td class="text-left"><p>Global linear damping applied to the cloth.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">sleep_threshold</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.05</span></code></p></td>
+<td class="text-left"><p>Velocity/energy threshold below which the cloth can go to sleep.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">settling_threshold</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.1</span></code></p></td>
+<td class="text-left"><p>Threshold used to decide convergence/settling state.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">settling_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">10.0</span></code></p></td>
+<td class="text-left"><p>Additional damping applied during settling phase.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">min_position_iters</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">4</span></code></p></td>
+<td class="text-left"><p>Minimum solver iterations for position correction.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">min_velocity_iters</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">1</span></code></p></td>
+<td class="text-left"><p>Minimum solver iterations for velocity updates.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>For Cloth Object tutorial, please refer to the <a class="reference external" href="https://dexforce.github.io/EmbodiChain/tutorial/create_cloth.html">Cloth Body Simulation</a>.</p>
+</section>
+<section id="setup-initialization">
+<h3>Setup &amp; Initialization<a class="headerlink" href="#setup-initialization" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">SimulationManagerCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClothObject</span><span class="p">,</span> <span class="n">ClothObjectCfg</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">create_2d_grid_mesh</span><span class="p">(</span><span class="n">width</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">height</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">nx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">ny</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a flat rectangle in the XY plane centered at `origin`.</span>
+
+<span class="sd">    The rectangle is subdivided into an `nx` by `ny` grid (cells) and</span>
+<span class="sd">    triangulated. `nx=1, ny=1` yields the simple two-triangle rectangle.</span>
+
+<span class="sd">    Returns an vertices and triangles.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">w</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">width</span><span class="p">)</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">height</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">nx</span> <span class="o">&lt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">ny</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;nx and ny must be &gt;= 1&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Vectorized vertex positions using PyTorch</span>
+    <span class="n">x_lin</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="n">w</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">,</span> <span class="n">w</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+    <span class="n">y_lin</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="n">h</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">,</span> <span class="n">h</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="n">ny</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+    <span class="n">yy</span><span class="p">,</span> <span class="n">xx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">y_lin</span><span class="p">,</span> <span class="n">x_lin</span><span class="p">)</span>  <span class="c1"># shapes: (ny+1, nx+1)</span>
+    <span class="n">xx_flat</span> <span class="o">=</span> <span class="n">xx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">yy_flat</span> <span class="o">=</span> <span class="n">yy</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">zz_flat</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full_like</span><span class="p">(</span><span class="n">xx_flat</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+    <span class="n">verts</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">xx_flat</span><span class="p">,</span> <span class="n">yy_flat</span><span class="p">,</span> <span class="n">zz_flat</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (Nverts, 3)</span>
+
+    <span class="c1"># Vectorized triangle indices</span>
+    <span class="n">idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">((</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">ny</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">ny</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">v0</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">v1</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">v2</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">v3</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[</span><span class="mi">1</span><span class="p">:,</span> <span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">tri1</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">v0</span><span class="p">,</span> <span class="n">v1</span><span class="p">,</span> <span class="n">v3</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">tri2</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">v0</span><span class="p">,</span> <span class="n">v3</span><span class="p">,</span> <span class="n">v2</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">faces</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">tri1</span><span class="p">,</span> <span class="n">tri2</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">verts</span><span class="p">,</span> <span class="n">faces</span>
+
+<span class="c1"># 1. Initialize Simulation</span>
+<span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+<span class="n">sim_cfg</span> <span class="o">=</span> <span class="n">SimulationManagerCfg</span><span class="p">(</span><span class="n">sim_device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">sim</span> <span class="o">=</span> <span class="n">SimulationManager</span><span class="p">(</span><span class="n">sim_config</span><span class="o">=</span><span class="n">sim_cfg</span><span class="p">)</span>
+
+<span class="n">cloth_verts</span><span class="p">,</span> <span class="n">cloth_faces</span> <span class="o">=</span> <span class="n">create_2d_grid_mesh</span><span class="p">(</span><span class="n">width</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">height</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">nx</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">ny</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">cloth_mesh</span> <span class="o">=</span> <span class="n">o3d</span><span class="o">.</span><span class="n">geometry</span><span class="o">.</span><span class="n">TriangleMesh</span><span class="p">(</span>
+    <span class="n">vertices</span><span class="o">=</span><span class="n">o3d</span><span class="o">.</span><span class="n">utility</span><span class="o">.</span><span class="n">Vector3dVector</span><span class="p">(</span><span class="n">cloth_verts</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()),</span>
+    <span class="n">triangles</span><span class="o">=</span><span class="n">o3d</span><span class="o">.</span><span class="n">utility</span><span class="o">.</span><span class="n">Vector3iVector</span><span class="p">(</span><span class="n">cloth_faces</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()),</span>
+<span class="p">)</span>
+<span class="n">cloth_save_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tempfile</span><span class="o">.</span><span class="n">gettempdir</span><span class="p">(),</span> <span class="s2">&quot;cloth_mesh.ply&quot;</span><span class="p">)</span>
+<span class="n">o3d</span><span class="o">.</span><span class="n">io</span><span class="o">.</span><span class="n">write_triangle_mesh</span><span class="p">(</span><span class="n">cloth_save_path</span><span class="p">,</span> <span class="n">cloth_mesh</span><span class="p">)</span>
+<span class="c1"># 2. Configure Cloth Object</span>
+<span class="n">cfg</span><span class="o">=</span><span class="n">ClothObjectCfg</span><span class="p">(</span>
+    <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;cloth_demo&quot;</span><span class="p">,</span>
+    <span class="n">shape</span><span class="o">=</span><span class="n">MeshCfg</span><span class="p">(</span><span class="n">fpath</span><span class="o">=</span><span class="n">cloth_save_path</span><span class="p">),</span>
+    <span class="n">init_pos</span><span class="o">=</span><span class="p">[</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">],</span>
+    <span class="n">init_rot</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+    <span class="n">physical_attr</span><span class="o">=</span><span class="n">ClothPhysicalAttributesCfg</span><span class="p">(</span>
+        <span class="n">mass</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+        <span class="n">youngs</span><span class="o">=</span><span class="mf">1e10</span><span class="p">,</span>
+        <span class="n">poissons</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span>
+        <span class="n">thickness</span><span class="o">=</span><span class="mf">0.04</span><span class="p">,</span>
+        <span class="n">bending_stiffness</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+        <span class="n">bending_damping</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>
+        <span class="n">dynamic_friction</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span>
+        <span class="n">min_position_iters</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+
+<span class="c1"># 3. Spawn Cloth Object</span>
+<span class="c1"># Note: Assuming the method in SimulationManager is &#39;add_cloth_object&#39;</span>
+<span class="n">cloth_object</span><span class="p">:</span> <span class="n">ClothObject</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_cloth_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+<span class="c1"># 4. Initialize Physics</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">reset_objects_state</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="cloth-object-class">
+<h3>Cloth Object Class<a class="headerlink" href="#cloth-object-class" title="Link to this heading">#</a></h3>
+<section id="vertex-data-observation">
+<h4>Vertex Data (Observation)<a class="headerlink" href="#vertex-data-observation" title="Link to this heading">#</a></h4>
+<p>For cloth objects, the state is represented by the positions and velocities of its vertices, rather than a single root pose.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method</p></th>
+<th class="head text-left"><p>Return Shape</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_current_vertex_position()</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(n_envs,</span> <span class="pre">n_vert,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Current positions of mesh vertices.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_current_vertex_velocity()</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(n_envs,</span> <span class="pre">n_vert,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Current positions of  mesh vertices.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_rest_vertex_position()</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(n_envs,</span> <span class="pre">n_vert,</span> <span class="pre">3</span></code></p></td>
+<td class="text-left"><p>Rest (initial) positions of collision vertices.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<div><p>Note: N is the number of environments/instances, V_col is the number of collision vertices, and V_sim is the number of simulation vertices.</p>
+</div></blockquote>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example: Accessing vertex data</span>
+<span class="n">vert_position</span> <span class="o">=</span> <span class="n">cloth_object</span><span class="o">.</span><span class="n">get_current_vertex_position</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;vertices positions: </span><span class="si">{</span><span class="n">vert_position</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">vert_velocity</span> <span class="o">=</span> <span class="n">cloth_object</span><span class="o">.</span><span class="n">get_current_vertex_velocity</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Vertex Velocities: </span><span class="si">{</span><span class="n">vert_velocity</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="pose-management">
+<h4>Pose Management<a class="headerlink" href="#pose-management" title="Link to this heading">#</a></h4>
+<p>You can set the global pose of a cloth object (which transforms all its vertices), but getting a single “pose” from a deformed surface object is not supported.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_local_pose(pose)</span></code></p></td>
+<td class="text-left"><p>Sets the pose of the object by transforming all vertices.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_local_pose()</span></code></p></td>
+<td class="text-left"><p><strong>Not Supported</strong>. Raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> because a deformed object does not have a single rigid pose.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Reset or Move the Cloth Object</span>
+<span class="n">target_pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span> <span class="c1"># (x, y, z, qw, qx, qy, qz)</span>
+<span class="n">cloth_object</span><span class="o">.</span><span class="n">set_local_pose</span><span class="p">(</span><span class="n">target_pose</span><span class="p">)</span>
+
+<span class="c1"># Important: Step simulation to apply changes</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="sim_rigid_object_group.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Rigid Object Group</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="sim_soft_object.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Soft Object</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cloth-body-attributes">CLoth Body Attributes</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setup-initialization">Setup &amp; Initialization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cloth-object-class">Cloth Object Class</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#vertex-data-observation">Vertex Data (Observation)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#pose-management">Pose Management</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

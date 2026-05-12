@@ -1,0 +1,1201 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Simulating a Camera Sensor &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'tutorial/sensor';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Motion Generator" href="motion_gen.html" />
+    <link rel="prev" title="Create a solver" href="solver.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Tutorials</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver.html">Create a solver</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/tutorial/sensor.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Simulating a Camera Sensor</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#source-code">Source Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sensor-creation-and-attachment">1. <strong>Sensor Creation and Attachment</strong></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualizing-sensor-output">2. <strong>Visualizing Sensor Output</strong></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#simulation-loop">3. <strong>Simulation Loop</strong></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#running-the-example">Running the Example</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features-demonstrated">Key Features Demonstrated</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="simulating-a-camera-sensor">
+<span id="tutorial-simulate-sensor"></span><h1>Simulating a Camera Sensor<a class="headerlink" href="#simulating-a-camera-sensor" title="Link to this heading">#</a></h1>
+<p>This tutorial demonstrates how to create and simulate a camera sensor attached to a robot using SimulationManager. You will learn how to configure a camera, attach it to the robot’s end-effector, and visualize the sensor’s output during simulation.</p>
+<section id="source-code">
+<h2>Source Code<a class="headerlink" href="#source-code" title="Link to this heading">#</a></h2>
+<p>The code for this tutorial is in <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim/create_sensor.py</span></code>.</p>
+<details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
+<summary class="sd-summary-title sd-card-header">
+<span class="sd-summary-icon"><svg version="1.1" width="1.0em" height="1.0em" class="sd-octicon sd-octicon-code" viewBox="0 0 16 16" aria-hidden="true"><path d="m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"></path></svg></span><span class="sd-summary-text">Show code for create_sensor.py</span><span class="sd-summary-state-marker sd-summary-chevron-right"><svg version="1.1" width="1.5em" height="1.5em" class="sd-octicon sd-octicon-chevron-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.72 18.78a.75.75 0 0 1 0-1.06L14.44 12 8.72 6.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0Z"></path></svg></span></summary><div class="sd-summary-content sd-card-body docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="linenos">  1</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos">  2</span><span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="linenos">  3</span><span class="c1">#</span>
+<span class="linenos">  4</span><span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="linenos">  5</span><span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="linenos">  6</span><span class="c1"># You may obtain a copy of the License at</span>
+<span class="linenos">  7</span><span class="c1">#</span>
+<span class="linenos">  8</span><span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="linenos">  9</span><span class="c1">#</span>
+<span class="linenos"> 10</span><span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="linenos"> 11</span><span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="linenos"> 12</span><span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="linenos"> 13</span><span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="linenos"> 14</span><span class="c1"># limitations under the License.</span>
+<span class="linenos"> 15</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos"> 16</span>
+<span class="linenos"> 17</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 18</span><span class="sd">This script demonstrates how to create and simulate a camera sensor attached to a robot using SimulationManager.</span>
+<span class="linenos"> 19</span><span class="sd">It shows how to configure a camera sensor, attach it to the robot&#39;s end-effector, and visualize the sensor&#39;s output during simulation.</span>
+<span class="linenos"> 20</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 21</span>
+<span class="linenos"> 22</span><span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="linenos"> 23</span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="linenos"> 24</span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="linenos"> 25</span><span class="kn">import</span><span class="w"> </span><span class="nn">cv2</span>
+<span class="linenos"> 26</span>
+<span class="linenos"> 27</span><span class="n">torch</span><span class="o">.</span><span class="n">set_printoptions</span><span class="p">(</span><span class="n">precision</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">sci_mode</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="linenos"> 28</span>
+<span class="linenos"> 29</span><span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span> <span class="k">as</span> <span class="n">R</span>
+<span class="linenos"> 30</span>
+<span class="linenos"> 31</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">SimulationManagerCfg</span>
+<span class="linenos"> 32</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.utils.gym_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">add_env_launcher_args_to_parser</span>
+<span class="linenos"> 33</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.sensors</span><span class="w"> </span><span class="kn">import</span> <span class="n">Camera</span><span class="p">,</span> <span class="n">CameraCfg</span>
+<span class="linenos"> 34</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">Robot</span>
+<span class="linenos"> 35</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 36</span>    <span class="n">RenderCfg</span><span class="p">,</span>
+<span class="linenos"> 37</span>    <span class="n">JointDrivePropertiesCfg</span><span class="p">,</span>
+<span class="linenos"> 38</span>    <span class="n">RobotCfg</span><span class="p">,</span>
+<span class="linenos"> 39</span>    <span class="n">URDFCfg</span><span class="p">,</span>
+<span class="linenos"> 40</span>    <span class="n">RigidObjectCfg</span><span class="p">,</span>
+<span class="linenos"> 41</span><span class="p">)</span>
+<span class="linenos"> 42</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.shapes</span><span class="w"> </span><span class="kn">import</span> <span class="n">CubeCfg</span>
+<span class="linenos"> 43</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_path</span>
+<span class="linenos"> 44</span>
+<span class="linenos"> 45</span>
+<span class="linenos"> 46</span><span class="k">def</span><span class="w"> </span><span class="nf">mask_to_color_map</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">user_ids</span><span class="p">,</span> <span class="n">fix_seed</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="linenos"> 47</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 48</span><span class="sd">    Convert instance mask into color map.</span>
+<span class="linenos"> 49</span><span class="sd">    :param mask: Instance mask map.</span>
+<span class="linenos"> 50</span><span class="sd">    :param user_ids: List of unique user IDs in the mask.</span>
+<span class="linenos"> 51</span><span class="sd">    :return: Color map.</span>
+<span class="linenos"> 52</span><span class="sd">    &quot;&quot;&quot;</span>
+<span class="linenos"> 53</span>    <span class="c1"># Create a blank RGB image</span>
+<span class="linenos"> 54</span>    <span class="n">color_map</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">mask</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">mask</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+<span class="linenos"> 55</span>
+<span class="linenos"> 56</span>    <span class="c1"># Generate deterministic colors based on user_id values</span>
+<span class="linenos"> 57</span>    <span class="n">colors</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="linenos"> 58</span>    <span class="k">for</span> <span class="n">user_id</span> <span class="ow">in</span> <span class="n">user_ids</span><span class="p">:</span>
+<span class="linenos"> 59</span>        <span class="c1"># Use the user_id as seed to generate deterministic color</span>
+<span class="linenos"> 60</span>        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>
+<span class="linenos"> 61</span>        <span class="n">color</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">256</span><span class="p">),</span> <span class="n">size</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<span class="linenos"> 62</span>        <span class="n">colors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">color</span><span class="p">)</span>
+<span class="linenos"> 63</span>
+<span class="linenos"> 64</span>    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">color</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">colors</span><span class="p">):</span>
+<span class="linenos"> 65</span>        <span class="c1"># Assign color to the instances of each class</span>
+<span class="linenos"> 66</span>        <span class="n">color_map</span><span class="p">[</span><span class="n">mask</span> <span class="o">==</span> <span class="n">user_ids</span><span class="p">[</span><span class="n">idx</span><span class="p">]]</span> <span class="o">=</span> <span class="n">color</span>
+<span class="linenos"> 67</span>
+<span class="linenos"> 68</span>    <span class="k">return</span> <span class="n">color_map</span>
+<span class="linenos"> 69</span>
+<span class="linenos"> 70</span>
+<span class="linenos"> 71</span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+<span class="linenos"> 72</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Main function to demonstrate robot sensor simulation.&quot;&quot;&quot;</span>
+<span class="linenos"> 73</span>
+<span class="linenos"> 74</span>    <span class="c1"># Parse command line arguments</span>
+<span class="linenos"> 75</span>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+<span class="linenos"> 76</span>        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create and simulate a robot in SimulationManager&quot;</span>
+<span class="linenos"> 77</span>    <span class="p">)</span>
+<span class="linenos"> 78</span>    <span class="n">add_env_launcher_args_to_parser</span><span class="p">(</span><span class="n">parser</span><span class="p">)</span>
+<span class="linenos"> 79</span>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+<span class="linenos"> 80</span>        <span class="s2">&quot;--attach_sensor&quot;</span><span class="p">,</span>
+<span class="linenos"> 81</span>        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+<span class="linenos"> 82</span>        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Attach sensor to robot end-effector&quot;</span><span class="p">,</span>
+<span class="linenos"> 83</span>    <span class="p">)</span>
+<span class="linenos"> 84</span>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+<span class="linenos"> 85</span>
+<span class="linenos"> 86</span>    <span class="c1"># Initialize simulation</span>
+<span class="linenos"> 87</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Creating simulation...&quot;</span><span class="p">)</span>
+<span class="linenos"> 88</span>    <span class="n">config</span> <span class="o">=</span> <span class="n">SimulationManagerCfg</span><span class="p">(</span>
+<span class="linenos"> 89</span>        <span class="n">headless</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos"> 90</span>        <span class="n">sim_device</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+<span class="linenos"> 91</span>        <span class="n">arena_space</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>
+<span class="linenos"> 92</span>        <span class="n">render_cfg</span><span class="o">=</span><span class="n">RenderCfg</span><span class="p">(</span><span class="n">renderer</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">renderer</span><span class="p">),</span>
+<span class="linenos"> 93</span>        <span class="n">physics_dt</span><span class="o">=</span><span class="mf">1.0</span> <span class="o">/</span> <span class="mf">100.0</span><span class="p">,</span>
+<span class="linenos"> 94</span>        <span class="n">num_envs</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span>
+<span class="linenos"> 95</span>    <span class="p">)</span>
+<span class="linenos"> 96</span>    <span class="n">sim</span> <span class="o">=</span> <span class="n">SimulationManager</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<span class="linenos"> 97</span>
+<span class="linenos"> 98</span>    <span class="c1"># Create robot configuration</span>
+<span class="linenos"> 99</span>    <span class="n">robot</span> <span class="o">=</span> <span class="n">create_robot</span><span class="p">(</span><span class="n">sim</span><span class="p">)</span>
+<span class="linenos">100</span>
+<span class="linenos">101</span>    <span class="n">sensor</span> <span class="o">=</span> <span class="n">create_sensor</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+<span class="linenos">102</span>
+<span class="linenos">103</span>    <span class="c1"># Add a cube to the scene</span>
+<span class="linenos">104</span>    <span class="n">cube_cfg</span> <span class="o">=</span> <span class="n">RigidObjectCfg</span><span class="p">(</span>
+<span class="linenos">105</span>        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;cube&quot;</span><span class="p">,</span>
+<span class="linenos">106</span>        <span class="n">shape</span><span class="o">=</span><span class="n">CubeCfg</span><span class="p">(</span><span class="n">size</span><span class="o">=</span><span class="p">[</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.05</span><span class="p">]),</span>  <span class="c1"># Use CubeCfg for a cube</span>
+<span class="linenos">107</span>        <span class="n">init_pos</span><span class="o">=</span><span class="p">[</span><span class="mf">1.2</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">],</span>
+<span class="linenos">108</span>        <span class="n">init_rot</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+<span class="linenos">109</span>    <span class="p">)</span>
+<span class="linenos">110</span>    <span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cube_cfg</span><span class="p">)</span>
+<span class="linenos">111</span>
+<span class="linenos">112</span>    <span class="c1"># Initialize GPU physics if using CUDA</span>
+<span class="linenos">113</span>    <span class="k">if</span> <span class="n">sim</span><span class="o">.</span><span class="n">is_use_gpu_physics</span><span class="p">:</span>
+<span class="linenos">114</span>        <span class="n">sim</span><span class="o">.</span><span class="n">init_gpu_physics</span><span class="p">()</span>
+<span class="linenos">115</span>
+<span class="linenos">116</span>    <span class="c1"># Open visualization window if not headless</span>
+<span class="linenos">117</span>    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">headless</span><span class="p">:</span>
+<span class="linenos">118</span>        <span class="n">sim</span><span class="o">.</span><span class="n">open_window</span><span class="p">()</span>
+<span class="linenos">119</span>
+<span class="linenos">120</span>    <span class="c1"># Run simulation loop</span>
+<span class="linenos">121</span>    <span class="n">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">robot</span><span class="p">,</span> <span class="n">sensor</span><span class="p">)</span>
+<span class="linenos">122</span>
+<span class="linenos">123</span>
+<span class="linenos">124</span><span class="k">def</span><span class="w"> </span><span class="nf">create_sensor</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="linenos">125</span>    <span class="c1"># intrinsics params</span>
+<span class="linenos">126</span>    <span class="n">intrinsics</span> <span class="o">=</span> <span class="p">(</span><span class="mi">600</span><span class="p">,</span> <span class="mi">600</span><span class="p">,</span> <span class="mf">320.0</span><span class="p">,</span> <span class="mf">240.0</span><span class="p">)</span>
+<span class="linenos">127</span>    <span class="n">width</span> <span class="o">=</span> <span class="mi">640</span>
+<span class="linenos">128</span>    <span class="n">height</span> <span class="o">=</span> <span class="mi">480</span>
+<span class="linenos">129</span>
+<span class="linenos">130</span>    <span class="c1"># extrinsics params</span>
+<span class="linenos">131</span>    <span class="n">pos</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.09</span><span class="p">,</span> <span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.04</span><span class="p">]</span>
+<span class="linenos">132</span>    <span class="n">quat</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="p">[</span><span class="o">-</span><span class="mi">35</span><span class="p">,</span> <span class="mi">135</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+<span class="linenos">133</span>
+<span class="linenos">134</span>    <span class="c1"># If attach_sensor is True, attach to robot end-effector; otherwise, place it in the scene</span>
+<span class="linenos">135</span>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">attach_sensor</span><span class="p">:</span>
+<span class="linenos">136</span>        <span class="n">parent</span> <span class="o">=</span> <span class="s2">&quot;ee_link&quot;</span>
+<span class="linenos">137</span>    <span class="k">else</span><span class="p">:</span>
+<span class="linenos">138</span>        <span class="n">parent</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="linenos">139</span>        <span class="n">pos</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.2</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">]</span>
+<span class="linenos">140</span>        <span class="n">quat</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+<span class="linenos">141</span>        <span class="n">quat</span> <span class="o">=</span> <span class="p">[</span><span class="n">quat</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">quat</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">quat</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">quat</span><span class="p">[</span><span class="mi">2</span><span class="p">]]</span>  <span class="c1"># Convert to (w, x, y, z)</span>
+<span class="linenos">142</span>
+<span class="linenos">143</span>    <span class="c1"># create camera sensor and attach to robot end-effector</span>
+<span class="linenos">144</span>    <span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_sensor</span><span class="p">(</span>
+<span class="linenos">145</span>        <span class="n">sensor_cfg</span><span class="o">=</span><span class="n">CameraCfg</span><span class="p">(</span>
+<span class="linenos">146</span>            <span class="n">width</span><span class="o">=</span><span class="n">width</span><span class="p">,</span>
+<span class="linenos">147</span>            <span class="n">height</span><span class="o">=</span><span class="n">height</span><span class="p">,</span>
+<span class="linenos">148</span>            <span class="n">intrinsics</span><span class="o">=</span><span class="n">intrinsics</span><span class="p">,</span>
+<span class="linenos">149</span>            <span class="n">extrinsics</span><span class="o">=</span><span class="n">CameraCfg</span><span class="o">.</span><span class="n">ExtrinsicsCfg</span><span class="p">(</span>
+<span class="linenos">150</span>                <span class="n">parent</span><span class="o">=</span><span class="n">parent</span><span class="p">,</span>
+<span class="linenos">151</span>                <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+<span class="linenos">152</span>                <span class="n">quat</span><span class="o">=</span><span class="n">quat</span><span class="p">,</span>
+<span class="linenos">153</span>            <span class="p">),</span>
+<span class="linenos">154</span>            <span class="n">near</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+<span class="linenos">155</span>            <span class="n">far</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span>
+<span class="linenos">156</span>            <span class="n">enable_color</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">157</span>            <span class="n">enable_depth</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">158</span>            <span class="n">enable_mask</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">159</span>            <span class="n">enable_normal</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">160</span>        <span class="p">)</span>
+<span class="linenos">161</span>    <span class="p">)</span>
+<span class="linenos">162</span>    <span class="k">return</span> <span class="n">camera</span>
+<span class="linenos">163</span>
+<span class="linenos">164</span>
+<span class="linenos">165</span><span class="k">def</span><span class="w"> </span><span class="nf">create_robot</span><span class="p">(</span><span class="n">sim</span><span class="p">):</span>
+<span class="linenos">166</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create and configure a robot in the simulation.&quot;&quot;&quot;</span>
+<span class="linenos">167</span>
+<span class="linenos">168</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Loading robot...&quot;</span><span class="p">)</span>
+<span class="linenos">169</span>
+<span class="linenos">170</span>    <span class="c1"># Get SR5 URDF path</span>
+<span class="linenos">171</span>    <span class="n">sr5_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;Rokae/SR5/SR5.urdf&quot;</span><span class="p">)</span>
+<span class="linenos">172</span>
+<span class="linenos">173</span>    <span class="c1"># Get hand URDF path</span>
+<span class="linenos">174</span>    <span class="n">hand_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span>
+<span class="linenos">175</span>        <span class="s2">&quot;BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf&quot;</span>
+<span class="linenos">176</span>    <span class="p">)</span>
+<span class="linenos">177</span>
+<span class="linenos">178</span>    <span class="c1"># Define control parts for the robot</span>
+<span class="linenos">179</span>    <span class="c1"># Joint names in control_parts can be regex patterns</span>
+<span class="linenos">180</span>    <span class="n">CONTROL_PARTS</span> <span class="o">=</span> <span class="p">{</span>
+<span class="linenos">181</span>        <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="p">[</span>
+<span class="linenos">182</span>            <span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">,</span>  <span class="c1"># Matches JOINT1, JOINT2, ..., JOINT6</span>
+<span class="linenos">183</span>        <span class="p">],</span>
+<span class="linenos">184</span>        <span class="s2">&quot;hand&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;LEFT_.*&quot;</span><span class="p">],</span>  <span class="c1"># Matches all joints starting with L_</span>
+<span class="linenos">185</span>    <span class="p">}</span>
+<span class="linenos">186</span>
+<span class="linenos">187</span>    <span class="c1"># Define transformation for hand attachment</span>
+<span class="linenos">188</span>    <span class="n">hand_attach_xpos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+<span class="linenos">189</span>    <span class="n">hand_attach_xpos</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">([</span><span class="mi">90</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">()</span>
+<span class="linenos">190</span>    <span class="n">hand_attach_xpos</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.02</span>
+<span class="linenos">191</span>
+<span class="linenos">192</span>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">RobotCfg</span><span class="p">(</span>
+<span class="linenos">193</span>        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;sr5_with_brainco&quot;</span><span class="p">,</span>
+<span class="linenos">194</span>        <span class="n">urdf_cfg</span><span class="o">=</span><span class="n">URDFCfg</span><span class="p">(</span>
+<span class="linenos">195</span>            <span class="n">components</span><span class="o">=</span><span class="p">[</span>
+<span class="linenos">196</span>                <span class="p">{</span>
+<span class="linenos">197</span>                    <span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+<span class="linenos">198</span>                    <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">sr5_urdf_path</span><span class="p">,</span>
+<span class="linenos">199</span>                <span class="p">},</span>
+<span class="linenos">200</span>                <span class="p">{</span>
+<span class="linenos">201</span>                    <span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+<span class="linenos">202</span>                    <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">hand_urdf_path</span><span class="p">,</span>
+<span class="linenos">203</span>                    <span class="s2">&quot;transform&quot;</span><span class="p">:</span> <span class="n">hand_attach_xpos</span><span class="p">,</span>
+<span class="linenos">204</span>                <span class="p">},</span>
+<span class="linenos">205</span>            <span class="p">]</span>
+<span class="linenos">206</span>        <span class="p">),</span>
+<span class="linenos">207</span>        <span class="n">control_parts</span><span class="o">=</span><span class="n">CONTROL_PARTS</span><span class="p">,</span>
+<span class="linenos">208</span>        <span class="n">drive_pros</span><span class="o">=</span><span class="n">JointDrivePropertiesCfg</span><span class="p">(</span>
+<span class="linenos">209</span>            <span class="n">stiffness</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e4</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">},</span>
+<span class="linenos">210</span>            <span class="n">damping</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e2</span><span class="p">},</span>
+<span class="linenos">211</span>        <span class="p">),</span>
+<span class="linenos">212</span>    <span class="p">)</span>
+<span class="linenos">213</span>
+<span class="linenos">214</span>    <span class="c1"># Add robot to simulation</span>
+<span class="linenos">215</span>    <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_robot</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+<span class="linenos">216</span>
+<span class="linenos">217</span>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Robot created successfully with </span><span class="si">{</span><span class="n">robot</span><span class="o">.</span><span class="n">dof</span><span class="si">}</span><span class="s2"> joints&quot;</span><span class="p">)</span>
+<span class="linenos">218</span>
+<span class="linenos">219</span>    <span class="k">return</span> <span class="n">robot</span>
+<span class="linenos">220</span>
+<span class="linenos">221</span>
+<span class="linenos">222</span><span class="k">def</span><span class="w"> </span><span class="nf">get_sensor_image</span><span class="p">(</span><span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span><span class="p">,</span> <span class="n">headless</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">step_count</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="linenos">223</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos">224</span><span class="sd">    Get color, depth, mask, and normals views from the camera,</span>
+<span class="linenos">225</span><span class="sd">    and visualize them in a 2x2 grid (or save if headless).</span>
+<span class="linenos">226</span><span class="sd">    &quot;&quot;&quot;</span>
+<span class="linenos">227</span>    <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="linenos">228</span>
+<span class="linenos">229</span>    <span class="n">camera</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+<span class="linenos">230</span>    <span class="n">data</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">get_data</span><span class="p">()</span>
+<span class="linenos">231</span>    <span class="c1"># Get four views</span>
+<span class="linenos">232</span>    <span class="n">rgba</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>  <span class="c1"># (H, W, 3)</span>
+<span class="linenos">233</span>    <span class="n">depth</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;depth&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>  <span class="c1"># (H, W)</span>
+<span class="linenos">234</span>    <span class="n">mask</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;mask&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>  <span class="c1"># (H, W)</span>
+<span class="linenos">235</span>    <span class="n">normals</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;normal&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># (H, W, 3)</span>
+<span class="linenos">236</span>
+<span class="linenos">237</span>    <span class="c1"># Normalize for visualization</span>
+<span class="linenos">238</span>    <span class="n">depth_vis</span> <span class="o">=</span> <span class="p">(</span><span class="n">depth</span> <span class="o">-</span> <span class="n">depth</span><span class="o">.</span><span class="n">min</span><span class="p">())</span> <span class="o">/</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ptp</span><span class="p">(</span><span class="n">depth</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span>
+<span class="linenos">239</span>    <span class="n">depth_vis</span> <span class="o">=</span> <span class="p">(</span><span class="n">depth_vis</span> <span class="o">*</span> <span class="mi">255</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;uint8&quot;</span><span class="p">)</span>
+<span class="linenos">240</span>    <span class="n">mask_vis</span> <span class="o">=</span> <span class="n">mask_to_color_map</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">user_ids</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">mask</span><span class="p">))</span>
+<span class="linenos">241</span>    <span class="n">normals_vis</span> <span class="o">=</span> <span class="p">((</span><span class="n">normals</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">*</span> <span class="mi">255</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;uint8&quot;</span><span class="p">)</span>
+<span class="linenos">242</span>
+<span class="linenos">243</span>    <span class="c1"># Prepare titles and images for display</span>
+<span class="linenos">244</span>    <span class="n">titles</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Color&quot;</span><span class="p">,</span> <span class="s2">&quot;Depth&quot;</span><span class="p">,</span> <span class="s2">&quot;Mask&quot;</span><span class="p">,</span> <span class="s2">&quot;Normals&quot;</span><span class="p">]</span>
+<span class="linenos">245</span>    <span class="n">images</span> <span class="o">=</span> <span class="p">[</span>
+<span class="linenos">246</span>        <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">rgba</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">),</span>
+<span class="linenos">247</span>        <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">depth_vis</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_GRAY2BGR</span><span class="p">),</span>
+<span class="linenos">248</span>        <span class="n">mask_vis</span><span class="p">,</span>
+<span class="linenos">249</span>        <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">normals_vis</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">),</span>
+<span class="linenos">250</span>    <span class="p">]</span>
+<span class="linenos">251</span>
+<span class="linenos">252</span>    <span class="k">if</span> <span class="ow">not</span> <span class="n">headless</span><span class="p">:</span>
+<span class="linenos">253</span>        <span class="c1"># Concatenate images for 2x2 grid display using OpenCV</span>
+<span class="linenos">254</span>        <span class="n">top</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">images</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">images</span><span class="p">[</span><span class="mi">1</span><span class="p">]])</span>
+<span class="linenos">255</span>        <span class="n">bottom</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">images</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">images</span><span class="p">[</span><span class="mi">3</span><span class="p">]])</span>
+<span class="linenos">256</span>        <span class="n">grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">([</span><span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">])</span>
+<span class="linenos">257</span>        <span class="n">cv2</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="s2">&quot;Sensor Views (Color / Depth / Mask / Normals)&quot;</span><span class="p">,</span> <span class="n">grid</span><span class="p">)</span>
+<span class="linenos">258</span>        <span class="n">cv2</span><span class="o">.</span><span class="n">waitKey</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="linenos">259</span>    <span class="k">else</span><span class="p">:</span>
+<span class="linenos">260</span>        <span class="c1"># Save the 2x2 grid as an image using matplotlib</span>
+<span class="linenos">261</span>        <span class="n">fig</span><span class="p">,</span> <span class="n">axs</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
+<span class="linenos">262</span>        <span class="k">for</span> <span class="n">ax</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="n">title</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">axs</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span> <span class="n">images</span><span class="p">,</span> <span class="n">titles</span><span class="p">):</span>
+<span class="linenos">263</span>            <span class="n">ax</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_BGR2RGB</span><span class="p">))</span>
+<span class="linenos">264</span>            <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="n">title</span><span class="p">)</span>
+<span class="linenos">265</span>            <span class="n">ax</span><span class="o">.</span><span class="n">axis</span><span class="p">(</span><span class="s2">&quot;off&quot;</span><span class="p">)</span>
+<span class="linenos">266</span>        <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="linenos">267</span>        <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sensor_views_</span><span class="si">{</span><span class="n">step_count</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+<span class="linenos">268</span>        <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fig</span><span class="p">)</span>
+<span class="linenos">269</span>
+<span class="linenos">270</span>
+<span class="linenos">271</span><span class="k">def</span><span class="w"> </span><span class="nf">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span><span class="p">,</span> <span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span><span class="p">):</span>
+<span class="linenos">272</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Run the simulation loop with robot and camera sensor control.&quot;&quot;&quot;</span>
+<span class="linenos">273</span>
+<span class="linenos">274</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting simulation...&quot;</span><span class="p">)</span>
+<span class="linenos">275</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Robot will move through different poses&quot;</span><span class="p">)</span>
+<span class="linenos">276</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Press Ctrl+C to stop&quot;</span><span class="p">)</span>
+<span class="linenos">277</span>
+<span class="linenos">278</span>    <span class="n">step_count</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="linenos">279</span>
+<span class="linenos">280</span>    <span class="n">arm_joint_ids</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+<span class="linenos">281</span>    <span class="c1"># Define some target joint positions for demonstration</span>
+<span class="linenos">282</span>
+<span class="linenos">283</span>    <span class="n">arm_position1</span> <span class="o">=</span> <span class="p">(</span>
+<span class="linenos">284</span>        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">285</span>            <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+<span class="linenos">286</span>        <span class="p">)</span>
+<span class="linenos">287</span>        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="linenos">288</span>        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="linenos">289</span>    <span class="p">)</span>
+<span class="linenos">290</span>
+<span class="linenos">291</span>    <span class="n">arm_position2</span> <span class="o">=</span> <span class="p">(</span>
+<span class="linenos">292</span>        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">293</span>            <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.3</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+<span class="linenos">294</span>        <span class="p">)</span>
+<span class="linenos">295</span>        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="linenos">296</span>        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="linenos">297</span>    <span class="p">)</span>
+<span class="linenos">298</span>
+<span class="linenos">299</span>    <span class="k">try</span><span class="p">:</span>
+<span class="linenos">300</span>        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<span class="linenos">301</span>            <span class="c1"># Update physics</span>
+<span class="linenos">302</span>            <span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="linenos">303</span>
+<span class="linenos">304</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">1001</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+<span class="linenos">305</span>                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">arm_position1</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+<span class="linenos">306</span>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Moving to arm position 1&quot;</span><span class="p">)</span>
+<span class="linenos">307</span>
+<span class="linenos">308</span>                <span class="c1"># Refresh and get image from sensor</span>
+<span class="linenos">309</span>                <span class="n">get_sensor_image</span><span class="p">(</span><span class="n">camera</span><span class="p">)</span>
+<span class="linenos">310</span>
+<span class="linenos">311</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">2003</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+<span class="linenos">312</span>                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">arm_position2</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+<span class="linenos">313</span>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Moving to arm position 2&quot;</span><span class="p">)</span>
+<span class="linenos">314</span>
+<span class="linenos">315</span>                <span class="c1"># Refresh and get image from sensor</span>
+<span class="linenos">316</span>                <span class="n">get_sensor_image</span><span class="p">(</span><span class="n">camera</span><span class="p">)</span>
+<span class="linenos">317</span>
+<span class="linenos">318</span>            <span class="n">step_count</span> <span class="o">+=</span> <span class="mi">1</span>
+<span class="linenos">319</span>
+<span class="linenos">320</span>    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+<span class="linenos">321</span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Stopping simulation...&quot;</span><span class="p">)</span>
+<span class="linenos">322</span>    <span class="k">finally</span><span class="p">:</span>
+<span class="linenos">323</span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cleaning up...&quot;</span><span class="p">)</span>
+<span class="linenos">324</span>        <span class="n">sim</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span>
+<span class="linenos">325</span>
+<span class="linenos">326</span>
+<span class="linenos">327</span><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+<span class="linenos">328</span>    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</details></section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>This tutorial builds on the basic robot simulation example. If you are not familiar with robot simulation in SimulationManager, please read the <a class="reference internal" href="robot.html"><span class="doc">Simulating a Robot</span></a> tutorial first.</p>
+<section id="sensor-creation-and-attachment">
+<h3>1. <strong>Sensor Creation and Attachment</strong><a class="headerlink" href="#sensor-creation-and-attachment" title="Link to this heading">#</a></h3>
+<p>The camera sensor is created using <code class="xref py py-class docutils literal notranslate"><span class="pre">CameraCfg</span></code> and can be attached to the robot’s end-effector or placed freely in the scene. The attachment is controlled by the <code class="docutils literal notranslate"><span class="pre">--attach_sensor</span></code> argument.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">create_sensor</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+    <span class="c1"># intrinsics params</span>
+    <span class="n">intrinsics</span> <span class="o">=</span> <span class="p">(</span><span class="mi">600</span><span class="p">,</span> <span class="mi">600</span><span class="p">,</span> <span class="mf">320.0</span><span class="p">,</span> <span class="mf">240.0</span><span class="p">)</span>
+    <span class="n">width</span> <span class="o">=</span> <span class="mi">640</span>
+    <span class="n">height</span> <span class="o">=</span> <span class="mi">480</span>
+
+    <span class="c1"># extrinsics params</span>
+    <span class="n">pos</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.09</span><span class="p">,</span> <span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.04</span><span class="p">]</span>
+    <span class="n">quat</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="p">[</span><span class="o">-</span><span class="mi">35</span><span class="p">,</span> <span class="mi">135</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+
+    <span class="c1"># If attach_sensor is True, attach to robot end-effector; otherwise, place it in the scene</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">attach_sensor</span><span class="p">:</span>
+        <span class="n">parent</span> <span class="o">=</span> <span class="s2">&quot;ee_link&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">parent</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.2</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">]</span>
+        <span class="n">quat</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="n">quat</span> <span class="o">=</span> <span class="p">[</span><span class="n">quat</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">quat</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">quat</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">quat</span><span class="p">[</span><span class="mi">2</span><span class="p">]]</span>  <span class="c1"># Convert to (w, x, y, z)</span>
+
+    <span class="c1"># create camera sensor and attach to robot end-effector</span>
+    <span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_sensor</span><span class="p">(</span>
+        <span class="n">sensor_cfg</span><span class="o">=</span><span class="n">CameraCfg</span><span class="p">(</span>
+            <span class="n">width</span><span class="o">=</span><span class="n">width</span><span class="p">,</span>
+            <span class="n">height</span><span class="o">=</span><span class="n">height</span><span class="p">,</span>
+            <span class="n">intrinsics</span><span class="o">=</span><span class="n">intrinsics</span><span class="p">,</span>
+            <span class="n">extrinsics</span><span class="o">=</span><span class="n">CameraCfg</span><span class="o">.</span><span class="n">ExtrinsicsCfg</span><span class="p">(</span>
+                <span class="n">parent</span><span class="o">=</span><span class="n">parent</span><span class="p">,</span>
+                <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+                <span class="n">quat</span><span class="o">=</span><span class="n">quat</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="n">near</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+            <span class="n">far</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span>
+            <span class="n">enable_color</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">enable_depth</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">enable_mask</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">enable_normal</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">camera</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>The camera’s intrinsics (focal lengths and principal point) and resolution are set.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">extrinsics</span></code> specify the camera’s pose relative to its parent (e.g., the robot’s <code class="docutils literal notranslate"><span class="pre">ee_link</span></code> or the world).</p></li>
+<li><p>The camera is added to the simulation with <code class="xref py py-meth docutils literal notranslate"><span class="pre">sim.add_sensor()</span></code>.</p></li>
+</ul>
+</section>
+<section id="visualizing-sensor-output">
+<h3>2. <strong>Visualizing Sensor Output</strong><a class="headerlink" href="#visualizing-sensor-output" title="Link to this heading">#</a></h3>
+<p>The function <code class="docutils literal notranslate"><span class="pre">get_sensor_image</span></code> retrieves and visualizes the camera’s color, depth, mask, and normal images. In GUI mode, images are shown in a 2x2 grid using OpenCV. In headless mode, images are saved to disk.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">get_sensor_image</span><span class="p">(</span><span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span><span class="p">,</span> <span class="n">headless</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">step_count</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get color, depth, mask, and normals views from the camera,</span>
+<span class="sd">    and visualize them in a 2x2 grid (or save if headless).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+    <span class="n">camera</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">get_data</span><span class="p">()</span>
+    <span class="c1"># Get four views</span>
+    <span class="n">rgba</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>  <span class="c1"># (H, W, 3)</span>
+    <span class="n">depth</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;depth&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>  <span class="c1"># (H, W)</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;mask&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>  <span class="c1"># (H, W)</span>
+    <span class="n">normals</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;normal&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># (H, W, 3)</span>
+
+    <span class="c1"># Normalize for visualization</span>
+    <span class="n">depth_vis</span> <span class="o">=</span> <span class="p">(</span><span class="n">depth</span> <span class="o">-</span> <span class="n">depth</span><span class="o">.</span><span class="n">min</span><span class="p">())</span> <span class="o">/</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ptp</span><span class="p">(</span><span class="n">depth</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span>
+    <span class="n">depth_vis</span> <span class="o">=</span> <span class="p">(</span><span class="n">depth_vis</span> <span class="o">*</span> <span class="mi">255</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;uint8&quot;</span><span class="p">)</span>
+    <span class="n">mask_vis</span> <span class="o">=</span> <span class="n">mask_to_color_map</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">user_ids</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">mask</span><span class="p">))</span>
+    <span class="n">normals_vis</span> <span class="o">=</span> <span class="p">((</span><span class="n">normals</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">*</span> <span class="mi">255</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;uint8&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Prepare titles and images for display</span>
+    <span class="n">titles</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Color&quot;</span><span class="p">,</span> <span class="s2">&quot;Depth&quot;</span><span class="p">,</span> <span class="s2">&quot;Mask&quot;</span><span class="p">,</span> <span class="s2">&quot;Normals&quot;</span><span class="p">]</span>
+    <span class="n">images</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">rgba</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">),</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">depth_vis</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_GRAY2BGR</span><span class="p">),</span>
+        <span class="n">mask_vis</span><span class="p">,</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">normals_vis</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">),</span>
+    <span class="p">]</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">headless</span><span class="p">:</span>
+        <span class="c1"># Concatenate images for 2x2 grid display using OpenCV</span>
+        <span class="n">top</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">images</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">images</span><span class="p">[</span><span class="mi">1</span><span class="p">]])</span>
+        <span class="n">bottom</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">images</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">images</span><span class="p">[</span><span class="mi">3</span><span class="p">]])</span>
+        <span class="n">grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">([</span><span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">])</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="s2">&quot;Sensor Views (Color / Depth / Mask / Normals)&quot;</span><span class="p">,</span> <span class="n">grid</span><span class="p">)</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">waitKey</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Save the 2x2 grid as an image using matplotlib</span>
+        <span class="n">fig</span><span class="p">,</span> <span class="n">axs</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">ax</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="n">title</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">axs</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span> <span class="n">images</span><span class="p">,</span> <span class="n">titles</span><span class="p">):</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_BGR2RGB</span><span class="p">))</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="n">title</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">axis</span><span class="p">(</span><span class="s2">&quot;off&quot;</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sensor_views_</span><span class="si">{</span><span class="n">step_count</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fig</span><span class="p">)</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>The camera is updated to capture the latest data.</p></li>
+<li><p>Four types of images are visualized: color, depth, mask, and normals.</p></li>
+<li><p>Images are displayed in a window or saved as PNG files depending on the mode.</p></li>
+</ul>
+</section>
+<section id="simulation-loop">
+<h3>3. <strong>Simulation Loop</strong><a class="headerlink" href="#simulation-loop" title="Link to this heading">#</a></h3>
+<p>The simulation loop moves the robot through different arm poses and periodically updates and visualizes the sensor output.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span><span class="p">,</span> <span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run the simulation loop with robot and camera sensor control.&quot;&quot;&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting simulation...&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Robot will move through different poses&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Press Ctrl+C to stop&quot;</span><span class="p">)</span>
+
+    <span class="n">step_count</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="n">arm_joint_ids</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+    <span class="c1"># Define some target joint positions for demonstration</span>
+
+    <span class="n">arm_position1</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+            <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="n">arm_position2</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+            <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.3</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># Update physics</span>
+            <span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">1001</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">arm_position1</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Moving to arm position 1&quot;</span><span class="p">)</span>
+
+                <span class="c1"># Refresh and get image from sensor</span>
+                <span class="n">get_sensor_image</span><span class="p">(</span><span class="n">camera</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">2003</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">arm_position2</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Moving to arm position 2&quot;</span><span class="p">)</span>
+
+                <span class="c1"># Refresh and get image from sensor</span>
+                <span class="n">get_sensor_image</span><span class="p">(</span><span class="n">camera</span><span class="p">)</span>
+
+            <span class="n">step_count</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Stopping simulation...&quot;</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cleaning up...&quot;</span><span class="p">)</span>
+        <span class="n">sim</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>The robot alternates between two arm positions.</p></li>
+<li><p>After each movement, the sensor image is refreshed and visualized.</p></li>
+</ul>
+</section>
+</section>
+<section id="running-the-example">
+<h2>Running the Example<a class="headerlink" href="#running-the-example" title="Link to this heading">#</a></h2>
+<p>To run the sensor simulation script:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>/home/dex/projects/yuanhaonan/embodichain
+python<span class="w"> </span>scripts/tutorials/sim/create_sensor.py
+</pre></div>
+</div>
+<p>You can customize the simulation with the following command-line options:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Use GPU physics</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_sensor.py<span class="w"> </span>--device<span class="w"> </span>cuda
+
+<span class="c1"># Simulate multiple environments</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_sensor.py<span class="w"> </span>--num_envs<span class="w"> </span><span class="m">4</span>
+
+<span class="c1"># Run in headless mode (no GUI, images saved to disk)</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_sensor.py<span class="w"> </span>--headless
+
+<span class="c1"># Enable ray tracing rendering</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_sensor.py<span class="w"> </span>--renderer
+
+<span class="c1"># Attach the camera to the robot end-effector</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_sensor.py<span class="w"> </span>--attach_sensor
+</pre></div>
+</div>
+</section>
+<section id="key-features-demonstrated">
+<h2>Key Features Demonstrated<a class="headerlink" href="#key-features-demonstrated" title="Link to this heading">#</a></h2>
+<p>This tutorial demonstrates:</p>
+<ol class="arabic simple">
+<li><p><strong>Camera sensor creation</strong> using <code class="xref py py-class docutils literal notranslate"><span class="pre">CameraCfg</span></code></p></li>
+<li><p><strong>Sensor attachment</strong> to a robot link or placement in the scene</p></li>
+<li><p><strong>Camera configuration</strong> (intrinsics, extrinsics, clipping planes)</p></li>
+<li><p><strong>Real-time visualization</strong> of color, depth, mask, and normal images</p></li>
+<li><p><strong>Robot-sensor integration</strong> in a simulation loop</p></li>
+</ol>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
+<p>After completing this tutorial, you can explore:</p>
+<ul class="simple">
+<li><p>Using other sensor types (e.g., stereo cameras, force sensors)</p></li>
+<li><p>Recording sensor data for offline analysis</p></li>
+<li><p>Integrating sensor feedback into robot control or learning algorithms</p></li>
+</ul>
+<p>This tutorial provides a foundation for integrating perception into robotic simulation scenarios with SimulationManager.
+This tutorial provides the foundation for integrating perception into robotic simulation scenarios with SimulationManager.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="solver.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Create a solver</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="motion_gen.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Motion Generator</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#source-code">Source Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sensor-creation-and-attachment">1. <strong>Sensor Creation and Attachment</strong></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualizing-sensor-output">2. <strong>Visualizing Sensor Output</strong></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#simulation-loop">3. <strong>Simulation Loop</strong></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#running-the-example">Running the Example</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features-demonstrated">Key Features Demonstrated</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

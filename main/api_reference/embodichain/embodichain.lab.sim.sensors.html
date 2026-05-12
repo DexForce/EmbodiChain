@@ -1,0 +1,2072 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>embodichain.lab.sim.sensors &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference/embodichain/embodichain.lab.sim.sensors';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/api_reference/embodichain/embodichain.lab.sim.sensors.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>embodichain.lab.sim.sensors</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#sensor">Sensor</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor"><code class="docutils literal notranslate"><span class="pre">BaseSensor</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.__init__"><code class="docutils literal notranslate"><span class="pre">BaseSensor.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.destroy"><code class="docutils literal notranslate"><span class="pre">BaseSensor.destroy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.get_arena_pose"><code class="docutils literal notranslate"><span class="pre">BaseSensor.get_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.get_data"><code class="docutils literal notranslate"><span class="pre">BaseSensor.get_data()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.reset"><code class="docutils literal notranslate"><span class="pre">BaseSensor.reset()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.update"><code class="docutils literal notranslate"><span class="pre">BaseSensor.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg"><code class="docutils literal notranslate"><span class="pre">SensorCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.parent"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.pos"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.quat"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg.quat</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">SensorCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.get_data_types"><code class="docutils literal notranslate"><span class="pre">SensorCfg.get_data_types()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">SensorCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">SensorCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">SensorCfg.init_rot</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#camera">Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera"><code class="docutils literal notranslate"><span class="pre">Camera</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.__init__"><code class="docutils literal notranslate"><span class="pre">Camera.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.destroy"><code class="docutils literal notranslate"><span class="pre">Camera.destroy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_arena_pose"><code class="docutils literal notranslate"><span class="pre">Camera.get_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_data"><code class="docutils literal notranslate"><span class="pre">Camera.get_data()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_intrinsics"><code class="docutils literal notranslate"><span class="pre">Camera.get_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_local_pose"><code class="docutils literal notranslate"><span class="pre">Camera.get_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.group_id"><code class="docutils literal notranslate"><span class="pre">Camera.group_id</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.is_attached"><code class="docutils literal notranslate"><span class="pre">Camera.is_attached</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.look_at"><code class="docutils literal notranslate"><span class="pre">Camera.look_at()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.reset"><code class="docutils literal notranslate"><span class="pre">Camera.reset()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.set_intrinsics"><code class="docutils literal notranslate"><span class="pre">Camera.set_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.set_local_pose"><code class="docutils literal notranslate"><span class="pre">Camera.set_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.update"><code class="docutils literal notranslate"><span class="pre">Camera.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg"><code class="docutils literal notranslate"><span class="pre">CameraCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.parent"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.pos"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.quat"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.quat</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.up"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.up</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.parent"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.pos"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.quat"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg.quat</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">CameraCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.get_data_types"><code class="docutils literal notranslate"><span class="pre">CameraCfg.get_data_types()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.get_view_attrib"><code class="docutils literal notranslate"><span class="pre">CameraCfg.get_view_attrib()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">CameraCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">CameraCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">CameraCfg.init_rot</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stereo-camera">Stereo Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera"><code class="docutils literal notranslate"><span class="pre">StereoCamera</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.__init__"><code class="docutils literal notranslate"><span class="pre">StereoCamera.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.destroy"><code class="docutils literal notranslate"><span class="pre">StereoCamera.destroy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_arena_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_data"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_data()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_intrinsics"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_left_right_arena_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_left_right_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_local_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.group_id"><code class="docutils literal notranslate"><span class="pre">StereoCamera.group_id</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.is_attached"><code class="docutils literal notranslate"><span class="pre">StereoCamera.is_attached</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.look_at"><code class="docutils literal notranslate"><span class="pre">StereoCamera.look_at()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.reset"><code class="docutils literal notranslate"><span class="pre">StereoCamera.reset()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.set_intrinsics"><code class="docutils literal notranslate"><span class="pre">StereoCamera.set_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.set_local_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.set_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.update"><code class="docutils literal notranslate"><span class="pre">StereoCamera.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.parent"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.pos"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.quat"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.quat</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.up"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.up</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.parent"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.pos"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.quat"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg.quat</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_data_types"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.get_data_types()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_view_attrib"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.get_view_attrib()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.init_rot</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.left_to_right"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.left_to_right</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.right_to_left"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.right_to_left</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-embodichain.lab.sim.sensors">
+<span id="embodichain-lab-sim-sensors"></span><h1>embodichain.lab.sim.sensors<a class="headerlink" href="#module-embodichain.lab.sim.sensors" title="Link to this heading">#</a></h1>
+<p class="rubric">Classes</p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.SensorCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SensorCfg</span></code></a></p></td>
+<td><p>Configuration class for sensors.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor" title="embodichain.lab.sim.sensors.BaseSensor"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BaseSensor</span></code></a></p></td>
+<td><p>Base class for sensor abstraction in the simulation engine.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg" title="embodichain.lab.sim.sensors.CameraCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CameraCfg</span></code></a></p></td>
+<td><p>Configuration class for Camera.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera" title="embodichain.lab.sim.sensors.Camera"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Camera</span></code></a></p></td>
+<td><p>Base class for sensor abstraction in the simulation engine.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg" title="embodichain.lab.sim.sensors.StereoCameraCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">StereoCameraCfg</span></code></a></p></td>
+<td><p>Configuration class for StereoCamera.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera" title="embodichain.lab.sim.sensors.StereoCamera"><code class="xref py py-obj docutils literal notranslate"><span class="pre">StereoCamera</span></code></a></p></td>
+<td><p>Base class for sensor abstraction in the simulation engine.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="sensor">
+<h2>Sensor<a class="headerlink" href="#sensor" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.sensors.</span></span><span class="sig-name descname"><span class="pre">BaseSensor</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#BaseSensor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="embodichain.lab.sim.html#embodichain.lab.sim.common.BatchEntity" title="embodichain.lab.sim.common.BatchEntity"><code class="xref py py-class docutils literal notranslate"><span class="pre">BatchEntity</span></code></a></p>
+<p>Base class for sensor abstraction in the simulation engine.</p>
+<p>Sensors should inherit from this class and implement the <cite>update</cite> and <cite>get_data</cite> methods.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor.__init__" title="embodichain.lab.sim.sensors.BaseSensor.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(config[, device])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor.destroy" title="embodichain.lab.sim.sensors.BaseSensor.destroy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">destroy</span></code></a>()</p></td>
+<td><p>Destroy all entities managed by this batch entity.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor.get_arena_pose" title="embodichain.lab.sim.sensors.BaseSensor.get_arena_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_arena_pose</span></code></a>([to_matrix])</p></td>
+<td><p>Get the pose of the sensor in the arena frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor.get_data" title="embodichain.lab.sim.sensors.BaseSensor.get_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data</span></code></a>()</p></td>
+<td><p>Retrieve data from the sensor.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor.reset" title="embodichain.lab.sim.sensors.BaseSensor.reset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">reset</span></code></a>([env_ids])</p></td>
+<td><p>Reset the entity to its initial state.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor.update" title="embodichain.lab.sim.sensors.BaseSensor.update"><code class="xref py py-obj docutils literal notranslate"><span class="pre">update</span></code></a>(**kwargs)</p></td>
+<td><p>Update the sensor state based on the current simulation state.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">device(type='cpu')</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#BaseSensor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor.destroy">
+<span class="sig-name descname"><span class="pre">destroy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor.destroy" title="Link to this definition">#</a></dt>
+<dd><p>Destroy all entities managed by this batch entity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor.get_arena_pose">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_arena_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">to_matrix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#BaseSensor.get_arena_pose"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor.get_arena_pose" title="Link to this definition">#</a></dt>
+<dd><p>Get the pose of the sensor in the arena frame.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>to_matrix</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></span>) – If True, return the pose as a 4x4 transformation matrix.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A tensor representing the pose of the sensor in the arena frame.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor.get_data">
+<span class="sig-name descname"><span class="pre">get_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#BaseSensor.get_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor.get_data" title="Link to this definition">#</a></dt>
+<dd><p>Retrieve data from the sensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>copy</strong> – If True, return a copy of the data buffer. Defaults to True.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The data collected by the sensor.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#BaseSensor.reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor.reset" title="Link to this definition">#</a></dt>
+<dd><p>Reset the entity to its initial state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to reset. If None, reset all environments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.BaseSensor.update">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">update</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#BaseSensor.update"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.BaseSensor.update" title="Link to this definition">#</a></dt>
+<dd><p>Update the sensor state based on the current simulation state.</p>
+<p>This method is called periodically to ensure the sensor data is up-to-date.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>**kwargs</strong> – Additional keyword arguments for sensor update.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.sensors.</span></span><span class="sig-name descname"><span class="pre">SensorCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#SensorCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg" title="Link to this definition">#</a></dt>
+<dd><p>Configuration class for sensors.</p>
+<p>This class can be extended to include specific sensor configurations.</p>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg" title="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OffsetCfg</span></code></a></p></td>
+<td><p>Configuration of the sensor offset relative to the parent frame.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.from_dict" title="embodichain.lab.sim.sensors.SensorCfg.from_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">from_dict</span></code></a>(init_dict)</p></td>
+<td><p>Initialize the configuration from a dictionary.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.get_data_types" title="embodichain.lab.sim.sensors.SensorCfg.get_data_types"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data_types</span></code></a>()</p></td>
+<td><p>Get the data types supported by this sensor configuration.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.init_local_pose" title="embodichain.lab.sim.sensors.SensorCfg.init_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_local_pose</span></code></a></p></td>
+<td><p>4x4 transformation matrix of the root in local frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.init_pos" title="embodichain.lab.sim.sensors.SensorCfg.init_pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_pos</span></code></a></p></td>
+<td><p>Position of the root in simulation world frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.init_rot" title="embodichain.lab.sim.sensors.SensorCfg.init_rot"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_rot</span></code></a></p></td>
+<td><p>Euler angles (in degree) of the root in simulation world frame.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">OffsetCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#SensorCfg.OffsetCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg" title="Link to this definition">#</a></dt>
+<dd><p>Configuration of the sensor offset relative to the parent frame.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.parent" title="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.parent"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parent</span></code></a></p></td>
+<td><p>Name of the parent frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.pos" title="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">pos</span></code></a></p></td>
+<td><p>Position of the sensor in the parent frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.quat" title="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.quat"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quat</span></code></a></p></td>
+<td><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.parent">
+<span class="sig-name descname"><span class="pre">parent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.parent" title="Link to this definition">#</a></dt>
+<dd><p>Name of the parent frame. If not specified, the sensor will be placed in the arena frame.</p>
+<p>This is usually the case when the sensor is not attached to any specific object, eg, link of a robot arm.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.pos">
+<span class="sig-name descname"><span class="pre">pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.quat">
+<span class="sig-name descname"><span class="pre">quat</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.quat" title="Link to this definition">#</a></dt>
+<dd><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.from_dict">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">init_dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#SensorCfg.from_dict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.from_dict" title="Link to this definition">#</a></dt>
+<dd><p>Initialize the configuration from a dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.base_sensor.SensorCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SensorCfg</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.get_data_types">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_data_types</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/base_sensor.html#SensorCfg.get_data_types"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.get_data_types" title="Link to this definition">#</a></dt>
+<dd><p>Get the data types supported by this sensor configuration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A list of data types that this sensor configuration supports.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.init_local_pose">
+<span class="sig-name descname"><span class="pre">init_local_pose</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">np.ndarray</span> <span class="pre">|</span> <span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.init_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.init_pos">
+<span class="sig-name descname"><span class="pre">init_pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.init_pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.SensorCfg.init_rot">
+<span class="sig-name descname"><span class="pre">init_rot</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.SensorCfg.init_rot" title="Link to this definition">#</a></dt>
+<dd><p>Euler angles (in degree) of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="camera">
+<h2>Camera<a class="headerlink" href="#camera" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.sensors.</span></span><span class="sig-name descname"><span class="pre">Camera</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.sensors.BaseSensor" title="embodichain.lab.sim.sensors.base_sensor.BaseSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseSensor</span></code></a></p>
+<p>Base class for sensor abstraction in the simulation engine.</p>
+<p>Sensors should inherit from this class and implement the <cite>update</cite> and <cite>get_data</cite> methods.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.__init__" title="embodichain.lab.sim.sensors.Camera.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(config[, device])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.destroy" title="embodichain.lab.sim.sensors.Camera.destroy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">destroy</span></code></a>()</p></td>
+<td><p>Destroy all entities managed by this batch entity.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.get_arena_pose" title="embodichain.lab.sim.sensors.Camera.get_arena_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_arena_pose</span></code></a>([to_matrix])</p></td>
+<td><p>Get the pose of the sensor in the arena frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.get_data" title="embodichain.lab.sim.sensors.Camera.get_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data</span></code></a>()</p></td>
+<td><p>Retrieve data from the sensor.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.get_intrinsics" title="embodichain.lab.sim.sensors.Camera.get_intrinsics"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_intrinsics</span></code></a>()</p></td>
+<td><p>Get the camera intrinsics for both left and right cameras.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.get_local_pose" title="embodichain.lab.sim.sensors.Camera.get_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_local_pose</span></code></a>([to_matrix])</p></td>
+<td><p>Get the local pose of the camera.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.look_at" title="embodichain.lab.sim.sensors.Camera.look_at"><code class="xref py py-obj docutils literal notranslate"><span class="pre">look_at</span></code></a>(eye, target[, up, env_ids])</p></td>
+<td><p>Set the camera to look at a target point.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.reset" title="embodichain.lab.sim.sensors.Camera.reset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">reset</span></code></a>([env_ids])</p></td>
+<td><p>Reset the entity to its initial state.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.set_intrinsics" title="embodichain.lab.sim.sensors.Camera.set_intrinsics"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_intrinsics</span></code></a>(intrinsics[, env_ids])</p></td>
+<td><p>Set the camera intrinsics for both left and right cameras.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.set_local_pose" title="embodichain.lab.sim.sensors.Camera.set_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_local_pose</span></code></a>(pose[, env_ids])</p></td>
+<td><p>Set the local pose of the camera.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.update" title="embodichain.lab.sim.sensors.Camera.update"><code class="xref py py-obj docutils literal notranslate"><span class="pre">update</span></code></a>(**kwargs)</p></td>
+<td><p>Update the sensor data.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.group_id" title="embodichain.lab.sim.sensors.Camera.group_id"><code class="xref py py-obj docutils literal notranslate"><span class="pre">group_id</span></code></a></p></td>
+<td><p>Get the camera group ID in the dexsim world.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.Camera.is_attached" title="embodichain.lab.sim.sensors.Camera.is_attached"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_attached</span></code></a></p></td>
+<td><p>Check if the camera is attached to a parent entity.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">device(type='cpu')</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.destroy">
+<span class="sig-name descname"><span class="pre">destroy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.destroy" title="Link to this definition">#</a></dt>
+<dd><p>Destroy all entities managed by this batch entity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.get_arena_pose">
+<span class="sig-name descname"><span class="pre">get_arena_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">to_matrix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.get_arena_pose"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.get_arena_pose" title="Link to this definition">#</a></dt>
+<dd><p>Get the pose of the sensor in the arena frame.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>to_matrix</strong> (<em>bool</em>) – If True, return the pose as a 4x4 transformation matrix.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A tensor representing the pose of the sensor in the arena frame.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.get_data">
+<span class="sig-name descname"><span class="pre">get_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.get_data" title="Link to this definition">#</a></dt>
+<dd><p>Retrieve data from the sensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>copy</strong> – If True, return a copy of the data buffer. Defaults to True.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The data collected by the sensor.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.get_intrinsics">
+<span class="sig-name descname"><span class="pre">get_intrinsics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.get_intrinsics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.get_intrinsics" title="Link to this definition">#</a></dt>
+<dd><p>Get the camera intrinsics for both left and right cameras.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The intrinsics for the left camera with shape (N, 3, 3).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.get_local_pose">
+<span class="sig-name descname"><span class="pre">get_local_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">to_matrix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.get_local_pose"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.get_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>Get the local pose of the camera.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>to_matrix</strong> (<em>bool</em>) – If True, return the pose as a 4x4 matrix. If False, return as a quaternion.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The local pose of the camera.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.group_id">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">group_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.group_id" title="Link to this definition">#</a></dt>
+<dd><p>Get the camera group ID in the dexsim world.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The camera group ID.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.is_attached">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">is_attached</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.is_attached" title="Link to this definition">#</a></dt>
+<dd><p>Check if the camera is attached to a parent entity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True if the camera is attached to a parent entity, False otherwise.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.look_at">
+<span class="sig-name descname"><span class="pre">look_at</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">eye</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">up</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.look_at"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.look_at" title="Link to this definition">#</a></dt>
+<dd><p>Set the camera to look at a target point.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>eye</strong> (<em>torch.Tensor</em>) – The position of the camera (eye) with shape (N, 3).</p></li>
+<li><p><strong>target</strong> (<em>torch.Tensor</em>) – The point the camera should look at (target) with shape (N, 3).</p></li>
+<li><p><strong>up</strong> (<em>torch.Tensor</em><em> | </em><em>None</em>) – The up direction vector. If None, defaults to [0, 0, 1].</p></li>
+<li><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to set the look at for. If None, set for all environments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.reset" title="Link to this definition">#</a></dt>
+<dd><p>Reset the entity to its initial state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to reset. If None, reset all environments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.set_intrinsics">
+<span class="sig-name descname"><span class="pre">set_intrinsics</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">intrinsics</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.set_intrinsics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.set_intrinsics" title="Link to this definition">#</a></dt>
+<dd><p>Set the camera intrinsics for both left and right cameras.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>intrinsics</strong> (<em>torch.Tensor</em>) – The intrinsics for the left camera with shape (4,) / (3, 3) or (N, 4) / (N, 3, 3).</p></li>
+<li><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment ids to set the intrinsics. If None, set for all environments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.set_local_pose">
+<span class="sig-name descname"><span class="pre">set_local_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pose</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.set_local_pose"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.set_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>Set the local pose of the camera.</p>
+<p>Note: The pose should be in the OpenGL coordinate system, which means the Y is up and Z is forward.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pose</strong> (<em>torch.Tensor</em>) – The local pose to set, should be a 4x4 transformation matrix.</p></li>
+<li><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to set the pose for. If None, set for all environments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.Camera.update">
+<span class="sig-name descname"><span class="pre">update</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#Camera.update"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.Camera.update" title="Link to this definition">#</a></dt>
+<dd><p>Update the sensor data.</p>
+<dl class="simple">
+<dt>The supported data types are:</dt><dd><ul class="simple">
+<li><p>color: RGB images with shape (B, H, W, 4) and dtype torch.uint8</p></li>
+<li><p>depth: Depth images with shape (B, H, W) and dtype torch.float32</p></li>
+<li><p>mask: Instance segmentation masks with shape (B, H, W) and dtype torch.int32</p></li>
+<li><p>normal: Normal images with shape (B, H, W, 3) and dtype torch.float32</p></li>
+<li><p>position: Position images with shape (B, H, W, 3) and dtype torch.float32</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>**kwargs</strong> – Additional keyword arguments for sensor update.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.sensors.</span></span><span class="sig-name descname"><span class="pre">CameraCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#CameraCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.base_sensor.SensorCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SensorCfg</span></code></a></p>
+<p>Configuration class for Camera.</p>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg" title="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ExtrinsicsCfg</span></code></a></p></td>
+<td><p>Configuration class for camera extrinsics.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg" title="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OffsetCfg</span></code></a></p></td>
+<td><p>Configuration of the sensor offset relative to the parent frame.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.from_dict" title="embodichain.lab.sim.sensors.CameraCfg.from_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">from_dict</span></code></a>(init_dict)</p></td>
+<td><p>Initialize the configuration from a dictionary.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.get_data_types" title="embodichain.lab.sim.sensors.CameraCfg.get_data_types"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data_types</span></code></a>()</p></td>
+<td><p>Get the data types supported by this sensor configuration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.get_view_attrib" title="embodichain.lab.sim.sensors.CameraCfg.get_view_attrib"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_view_attrib</span></code></a>()</p></td>
+<td><p>Get the view attributes for the camera.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.init_local_pose" title="embodichain.lab.sim.sensors.CameraCfg.init_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_local_pose</span></code></a></p></td>
+<td><p>4x4 transformation matrix of the root in local frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.init_pos" title="embodichain.lab.sim.sensors.CameraCfg.init_pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_pos</span></code></a></p></td>
+<td><p>Position of the root in simulation world frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.init_rot" title="embodichain.lab.sim.sensors.CameraCfg.init_rot"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_rot</span></code></a></p></td>
+<td><p>Euler angles (in degree) of the root in simulation world frame.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ExtrinsicsCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#CameraCfg.ExtrinsicsCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg" title="embodichain.lab.sim.sensors.base_sensor.SensorCfg.OffsetCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">OffsetCfg</span></code></a></p>
+<p>Configuration class for camera extrinsics.</p>
+<p>The extrinsics define the position and orientation of the camera in the 3D world.
+If eye, target, and up are provided, they will be used to compute the extrinsics.
+Otherwise, the position and orientation will be set to the defaults.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.parent" title="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.parent"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parent</span></code></a></p></td>
+<td><p>Name of the parent frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.pos" title="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">pos</span></code></a></p></td>
+<td><p>Position of the sensor in the parent frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.quat" title="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.quat"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quat</span></code></a></p></td>
+<td><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.up" title="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.up"><code class="xref py py-obj docutils literal notranslate"><span class="pre">up</span></code></a></p></td>
+<td><p>Alternative way to specify the camera extrinsics using eye, target, and up vectors.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.parent">
+<span class="sig-name descname"><span class="pre">parent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.parent" title="Link to this definition">#</a></dt>
+<dd><p>Name of the parent frame. If not specified, the sensor will be placed in the arena frame.</p>
+<p>This is usually the case when the sensor is not attached to any specific object, eg, link of a robot arm.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.pos">
+<span class="sig-name descname"><span class="pre">pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.quat">
+<span class="sig-name descname"><span class="pre">quat</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.quat" title="Link to this definition">#</a></dt>
+<dd><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.up">
+<span class="sig-name descname"><span class="pre">up</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.up" title="Link to this definition">#</a></dt>
+<dd><p>Alternative way to specify the camera extrinsics using eye, target, and up vectors.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">OffsetCfg</span></span><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration of the sensor offset relative to the parent frame.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.parent" title="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.parent"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parent</span></code></a></p></td>
+<td><p>Name of the parent frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.pos" title="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">pos</span></code></a></p></td>
+<td><p>Position of the sensor in the parent frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.quat" title="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.quat"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quat</span></code></a></p></td>
+<td><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.parent">
+<span class="sig-name descname"><span class="pre">parent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.parent" title="Link to this definition">#</a></dt>
+<dd><p>Name of the parent frame. If not specified, the sensor will be placed in the arena frame.</p>
+<p>This is usually the case when the sensor is not attached to any specific object, eg, link of a robot arm.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.pos">
+<span class="sig-name descname"><span class="pre">pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.quat">
+<span class="sig-name descname"><span class="pre">quat</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.quat" title="Link to this definition">#</a></dt>
+<dd><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.from_dict">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">init_dict</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.from_dict" title="Link to this definition">#</a></dt>
+<dd><p>Initialize the configuration from a dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.base_sensor.SensorCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SensorCfg</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.get_data_types">
+<span class="sig-name descname"><span class="pre">get_data_types</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#CameraCfg.get_data_types"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.get_data_types" title="Link to this definition">#</a></dt>
+<dd><p>Get the data types supported by this sensor configuration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A list of data types that this sensor configuration supports.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.get_view_attrib">
+<span class="sig-name descname"><span class="pre">get_view_attrib</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/camera.html#CameraCfg.get_view_attrib"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.get_view_attrib" title="Link to this definition">#</a></dt>
+<dd><p>Get the view attributes for the camera.</p>
+<p>The camera view whcich is used to render the scene
+Default view attributes for the camera are: [COLOR, DEPTH, MASK]
+The supported view attributes are:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>COLOR: RGBA images</p></li>
+<li><p>DEPTH: Depth images</p></li>
+<li><p>MASK: Instance segmentation masks</p></li>
+<li><p>NORMAL: Normal images</p></li>
+<li><p>POSITION: Position images with 3D coordinates.</p></li>
+</ul>
+</div></blockquote>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">ViewFlags</span></code></span></p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The view attributes for the camera.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.init_local_pose">
+<span class="sig-name descname"><span class="pre">init_local_pose</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">np.ndarray</span> <span class="pre">|</span> <span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.init_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.init_pos">
+<span class="sig-name descname"><span class="pre">init_pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.init_pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.CameraCfg.init_rot">
+<span class="sig-name descname"><span class="pre">init_rot</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.CameraCfg.init_rot" title="Link to this definition">#</a></dt>
+<dd><p>Euler angles (in degree) of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="stereo-camera">
+<h2>Stereo Camera<a class="headerlink" href="#stereo-camera" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.sensors.</span></span><span class="sig-name descname"><span class="pre">StereoCamera</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCamera"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.sensors.Camera" title="embodichain.lab.sim.sensors.camera.Camera"><code class="xref py py-class docutils literal notranslate"><span class="pre">Camera</span></code></a></p>
+<p>Base class for sensor abstraction in the simulation engine.</p>
+<p>Sensors should inherit from this class and implement the <cite>update</cite> and <cite>get_data</cite> methods.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.__init__" title="embodichain.lab.sim.sensors.StereoCamera.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(config[, device])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.destroy" title="embodichain.lab.sim.sensors.StereoCamera.destroy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">destroy</span></code></a>()</p></td>
+<td><p>Destroy all entities managed by this batch entity.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.get_arena_pose" title="embodichain.lab.sim.sensors.StereoCamera.get_arena_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_arena_pose</span></code></a>([to_matrix])</p></td>
+<td><p>Get the pose of the sensor in the arena frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.get_data" title="embodichain.lab.sim.sensors.StereoCamera.get_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data</span></code></a>()</p></td>
+<td><p>Retrieve data from the sensor.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.get_intrinsics" title="embodichain.lab.sim.sensors.StereoCamera.get_intrinsics"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_intrinsics</span></code></a>()</p></td>
+<td><p>Get the camera intrinsics for both left and right cameras.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.get_left_right_arena_pose" title="embodichain.lab.sim.sensors.StereoCamera.get_left_right_arena_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_left_right_arena_pose</span></code></a>()</p></td>
+<td><p>Get the local pose of the left and right cameras.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.get_local_pose" title="embodichain.lab.sim.sensors.StereoCamera.get_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_local_pose</span></code></a>([to_matrix])</p></td>
+<td><p>Get the local pose of the camera.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.look_at" title="embodichain.lab.sim.sensors.StereoCamera.look_at"><code class="xref py py-obj docutils literal notranslate"><span class="pre">look_at</span></code></a>(eye, target[, up, env_ids])</p></td>
+<td><p>Set the camera to look at a target point.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.reset" title="embodichain.lab.sim.sensors.StereoCamera.reset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">reset</span></code></a>([env_ids])</p></td>
+<td><p>Reset the entity to its initial state.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.set_intrinsics" title="embodichain.lab.sim.sensors.StereoCamera.set_intrinsics"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_intrinsics</span></code></a>(intrinsics[, ...])</p></td>
+<td><p>Set the camera intrinsics for both left and right cameras.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.set_local_pose" title="embodichain.lab.sim.sensors.StereoCamera.set_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_local_pose</span></code></a>(pose[, env_ids])</p></td>
+<td><p>Set the local pose of the camera.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.update" title="embodichain.lab.sim.sensors.StereoCamera.update"><code class="xref py py-obj docutils literal notranslate"><span class="pre">update</span></code></a>(**kwargs)</p></td>
+<td><p>Update the sensor data.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.group_id" title="embodichain.lab.sim.sensors.StereoCamera.group_id"><code class="xref py py-obj docutils literal notranslate"><span class="pre">group_id</span></code></a></p></td>
+<td><p>Get the camera group ID in the dexsim world.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCamera.is_attached" title="embodichain.lab.sim.sensors.StereoCamera.is_attached"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_attached</span></code></a></p></td>
+<td><p>Check if the camera is attached to a parent entity.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">device(type='cpu')</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCamera.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.destroy">
+<span class="sig-name descname"><span class="pre">destroy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.destroy" title="Link to this definition">#</a></dt>
+<dd><p>Destroy all entities managed by this batch entity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.get_arena_pose">
+<span class="sig-name descname"><span class="pre">get_arena_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">to_matrix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.get_arena_pose" title="Link to this definition">#</a></dt>
+<dd><p>Get the pose of the sensor in the arena frame.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>to_matrix</strong> (<em>bool</em>) – If True, return the pose as a 4x4 transformation matrix.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A tensor representing the pose of the sensor in the arena frame.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.get_data">
+<span class="sig-name descname"><span class="pre">get_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.get_data" title="Link to this definition">#</a></dt>
+<dd><p>Retrieve data from the sensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>copy</strong> – If True, return a copy of the data buffer. Defaults to True.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The data collected by the sensor.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.get_intrinsics">
+<span class="sig-name descname"><span class="pre">get_intrinsics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCamera.get_intrinsics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.get_intrinsics" title="Link to this definition">#</a></dt>
+<dd><p>Get the camera intrinsics for both left and right cameras.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The intrinsics for the left and right cameras with shape (B, 3, 3).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Tuple[torch.Tensor, torch.Tensor]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.get_left_right_arena_pose">
+<span class="sig-name descname"><span class="pre">get_left_right_arena_pose</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCamera.get_left_right_arena_pose"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.get_left_right_arena_pose" title="Link to this definition">#</a></dt>
+<dd><p>Get the local pose of the left and right cameras.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The local pose of the left camera with shape (num_envs, 4, 4).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.get_local_pose">
+<span class="sig-name descname"><span class="pre">get_local_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">to_matrix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.get_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>Get the local pose of the camera.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>to_matrix</strong> (<em>bool</em>) – If True, return the pose as a 4x4 matrix. If False, return as a quaternion.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The local pose of the camera.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.group_id">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">group_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.group_id" title="Link to this definition">#</a></dt>
+<dd><p>Get the camera group ID in the dexsim world.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The camera group ID.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.is_attached">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">is_attached</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.is_attached" title="Link to this definition">#</a></dt>
+<dd><p>Check if the camera is attached to a parent entity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True if the camera is attached to a parent entity, False otherwise.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.look_at">
+<span class="sig-name descname"><span class="pre">look_at</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">eye</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">up</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.look_at" title="Link to this definition">#</a></dt>
+<dd><p>Set the camera to look at a target point.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>eye</strong> (<em>torch.Tensor</em>) – The position of the camera (eye) with shape (N, 3).</p></li>
+<li><p><strong>target</strong> (<em>torch.Tensor</em>) – The point the camera should look at (target) with shape (N, 3).</p></li>
+<li><p><strong>up</strong> (<em>torch.Tensor</em><em> | </em><em>None</em>) – The up direction vector. If None, defaults to [0, 0, 1].</p></li>
+<li><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to set the look at for. If None, set for all environments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.reset" title="Link to this definition">#</a></dt>
+<dd><p>Reset the entity to its initial state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to reset. If None, reset all environments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.set_intrinsics">
+<span class="sig-name descname"><span class="pre">set_intrinsics</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">intrinsics</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">right_intrinsics</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCamera.set_intrinsics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.set_intrinsics" title="Link to this definition">#</a></dt>
+<dd><p>Set the camera intrinsics for both left and right cameras.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>intrinsics</strong> (<em>torch.Tensor</em>) – The intrinsics for the left camera with shape (4,) / (3, 3) or (B, 4) / (B, 3, 3).</p></li>
+<li><p><strong>right_intrinsics</strong> (<em>torch.Tensor</em><em> | </em><em>None</em>) – The intrinsics for the right camera with shape (4,) / (3, 3) or (B, 4) / (B, 3, 3). If None, use the same intrinsics as the left camera.</p></li>
+<li><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment ids to set the intrinsics. If None, set for all environments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.set_local_pose">
+<span class="sig-name descname"><span class="pre">set_local_pose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pose</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env_ids</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.set_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>Set the local pose of the camera.</p>
+<p>Note: The pose should be in the OpenGL coordinate system, which means the Y is up and Z is forward.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pose</strong> (<em>torch.Tensor</em>) – The local pose to set, should be a 4x4 transformation matrix.</p></li>
+<li><p><strong>env_ids</strong> (<em>Sequence</em><em>[</em><em>int</em><em>] </em><em>| </em><em>None</em>) – The environment IDs to set the pose for. If None, set for all environments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCamera.update">
+<span class="sig-name descname"><span class="pre">update</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCamera.update"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCamera.update" title="Link to this definition">#</a></dt>
+<dd><p>Update the sensor data.</p>
+<dl class="simple">
+<dt>The supported data types are:</dt><dd><ul class="simple">
+<li><p>color: RGB images with shape (B, H, W, 4) and dtype torch.uint8</p></li>
+<li><p>depth: Depth images with shape (B, H, W, 1) and dtype torch.float32</p></li>
+<li><p>mask: Instance segmentation masks with shape (B, H, W, 1) and dtype torch.int32</p></li>
+<li><p>normal: Normal images with shape (B, H, W, 3) and dtype torch.float32</p></li>
+<li><p>position: Position images with shape (B, H, W, 3) and dtype torch.float32</p></li>
+<li><p>disparity: Disparity images with shape (B, H, W, 1) and dtype torch.float32</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>**kwargs</strong> – Additional keyword arguments for sensor update.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.sensors.</span></span><span class="sig-name descname"><span class="pre">StereoCameraCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCameraCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.sensors.CameraCfg" title="embodichain.lab.sim.sensors.camera.CameraCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">CameraCfg</span></code></a></p>
+<p>Configuration class for StereoCamera.</p>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg" title="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ExtrinsicsCfg</span></code></a></p></td>
+<td><p>Configuration class for camera extrinsics.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg" title="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OffsetCfg</span></code></a></p></td>
+<td><p>Configuration of the sensor offset relative to the parent frame.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.from_dict" title="embodichain.lab.sim.sensors.StereoCameraCfg.from_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">from_dict</span></code></a>(init_dict)</p></td>
+<td><p>Initialize the configuration from a dictionary.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_data_types" title="embodichain.lab.sim.sensors.StereoCameraCfg.get_data_types"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data_types</span></code></a>()</p></td>
+<td><p>Get the data types supported by this sensor configuration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_view_attrib" title="embodichain.lab.sim.sensors.StereoCameraCfg.get_view_attrib"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_view_attrib</span></code></a>()</p></td>
+<td><p>Get the view attributes for the camera.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_local_pose" title="embodichain.lab.sim.sensors.StereoCameraCfg.init_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_local_pose</span></code></a></p></td>
+<td><p>4x4 transformation matrix of the root in local frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_pos" title="embodichain.lab.sim.sensors.StereoCameraCfg.init_pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_pos</span></code></a></p></td>
+<td><p>Position of the root in simulation world frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_rot" title="embodichain.lab.sim.sensors.StereoCameraCfg.init_rot"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_rot</span></code></a></p></td>
+<td><p>Euler angles (in degree) of the root in simulation world frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.left_to_right" title="embodichain.lab.sim.sensors.StereoCameraCfg.left_to_right"><code class="xref py py-obj docutils literal notranslate"><span class="pre">left_to_right</span></code></a></p></td>
+<td><p>Get the transformation matrix from left camera to right camera.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.right_to_left" title="embodichain.lab.sim.sensors.StereoCameraCfg.right_to_left"><code class="xref py py-obj docutils literal notranslate"><span class="pre">right_to_left</span></code></a></p></td>
+<td><p>Get the transformation matrix from right camera to left camera.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ExtrinsicsCfg</span></span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg" title="embodichain.lab.sim.sensors.base_sensor.SensorCfg.OffsetCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">OffsetCfg</span></code></a></p>
+<p>Configuration class for camera extrinsics.</p>
+<p>The extrinsics define the position and orientation of the camera in the 3D world.
+If eye, target, and up are provided, they will be used to compute the extrinsics.
+Otherwise, the position and orientation will be set to the defaults.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.parent" title="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.parent"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parent</span></code></a></p></td>
+<td><p>Name of the parent frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.pos" title="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">pos</span></code></a></p></td>
+<td><p>Position of the sensor in the parent frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.quat" title="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.quat"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quat</span></code></a></p></td>
+<td><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.up" title="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.up"><code class="xref py py-obj docutils literal notranslate"><span class="pre">up</span></code></a></p></td>
+<td><p>Alternative way to specify the camera extrinsics using eye, target, and up vectors.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.parent">
+<span class="sig-name descname"><span class="pre">parent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.parent" title="Link to this definition">#</a></dt>
+<dd><p>Name of the parent frame. If not specified, the sensor will be placed in the arena frame.</p>
+<p>This is usually the case when the sensor is not attached to any specific object, eg, link of a robot arm.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.pos">
+<span class="sig-name descname"><span class="pre">pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.quat">
+<span class="sig-name descname"><span class="pre">quat</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.quat" title="Link to this definition">#</a></dt>
+<dd><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.up">
+<span class="sig-name descname"><span class="pre">up</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.up" title="Link to this definition">#</a></dt>
+<dd><p>Alternative way to specify the camera extrinsics using eye, target, and up vectors.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">OffsetCfg</span></span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration of the sensor offset relative to the parent frame.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.parent" title="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.parent"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parent</span></code></a></p></td>
+<td><p>Name of the parent frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.pos" title="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">pos</span></code></a></p></td>
+<td><p>Position of the sensor in the parent frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.quat" title="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.quat"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quat</span></code></a></p></td>
+<td><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.parent">
+<span class="sig-name descname"><span class="pre">parent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.parent" title="Link to this definition">#</a></dt>
+<dd><p>Name of the parent frame. If not specified, the sensor will be placed in the arena frame.</p>
+<p>This is usually the case when the sensor is not attached to any specific object, eg, link of a robot arm.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.pos">
+<span class="sig-name descname"><span class="pre">pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.quat">
+<span class="sig-name descname"><span class="pre">quat</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.quat" title="Link to this definition">#</a></dt>
+<dd><p>Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.from_dict">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">init_dict</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.from_dict" title="Link to this definition">#</a></dt>
+<dd><p>Initialize the configuration from a dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.base_sensor.SensorCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SensorCfg</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.get_data_types">
+<span class="sig-name descname"><span class="pre">get_data_types</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/sensors/stereo.html#StereoCameraCfg.get_data_types"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_data_types" title="Link to this definition">#</a></dt>
+<dd><p>Get the data types supported by this sensor configuration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A list of data types that this sensor configuration supports.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.get_view_attrib">
+<span class="sig-name descname"><span class="pre">get_view_attrib</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_view_attrib" title="Link to this definition">#</a></dt>
+<dd><p>Get the view attributes for the camera.</p>
+<p>The camera view whcich is used to render the scene
+Default view attributes for the camera are: [COLOR, DEPTH, MASK]
+The supported view attributes are:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>COLOR: RGBA images</p></li>
+<li><p>DEPTH: Depth images</p></li>
+<li><p>MASK: Instance segmentation masks</p></li>
+<li><p>NORMAL: Normal images</p></li>
+<li><p>POSITION: Position images with 3D coordinates.</p></li>
+</ul>
+</div></blockquote>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">ViewFlags</span></code></span></p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The view attributes for the camera.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.init_local_pose">
+<span class="sig-name descname"><span class="pre">init_local_pose</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">np.ndarray</span> <span class="pre">|</span> <span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.init_pos">
+<span class="sig-name descname"><span class="pre">init_pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.init_rot">
+<span class="sig-name descname"><span class="pre">init_rot</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_rot" title="Link to this definition">#</a></dt>
+<dd><p>Euler angles (in degree) of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.left_to_right">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">left_to_right</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.left_to_right" title="Link to this definition">#</a></dt>
+<dd><p>Get the transformation matrix from left camera to right camera.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="embodichain.lab.sim.sensors.StereoCameraCfg.right_to_left">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">right_to_left</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#embodichain.lab.sim.sensors.StereoCameraCfg.right_to_left" title="Link to this definition">#</a></dt>
+<dd><p>Get the transformation matrix from right camera to left camera.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#sensor">Sensor</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor"><code class="docutils literal notranslate"><span class="pre">BaseSensor</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.__init__"><code class="docutils literal notranslate"><span class="pre">BaseSensor.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.destroy"><code class="docutils literal notranslate"><span class="pre">BaseSensor.destroy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.get_arena_pose"><code class="docutils literal notranslate"><span class="pre">BaseSensor.get_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.get_data"><code class="docutils literal notranslate"><span class="pre">BaseSensor.get_data()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.reset"><code class="docutils literal notranslate"><span class="pre">BaseSensor.reset()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.BaseSensor.update"><code class="docutils literal notranslate"><span class="pre">BaseSensor.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg"><code class="docutils literal notranslate"><span class="pre">SensorCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.parent"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.pos"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.OffsetCfg.quat"><code class="docutils literal notranslate"><span class="pre">SensorCfg.OffsetCfg.quat</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">SensorCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.get_data_types"><code class="docutils literal notranslate"><span class="pre">SensorCfg.get_data_types()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">SensorCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">SensorCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.SensorCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">SensorCfg.init_rot</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#camera">Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera"><code class="docutils literal notranslate"><span class="pre">Camera</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.__init__"><code class="docutils literal notranslate"><span class="pre">Camera.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.destroy"><code class="docutils literal notranslate"><span class="pre">Camera.destroy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_arena_pose"><code class="docutils literal notranslate"><span class="pre">Camera.get_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_data"><code class="docutils literal notranslate"><span class="pre">Camera.get_data()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_intrinsics"><code class="docutils literal notranslate"><span class="pre">Camera.get_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.get_local_pose"><code class="docutils literal notranslate"><span class="pre">Camera.get_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.group_id"><code class="docutils literal notranslate"><span class="pre">Camera.group_id</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.is_attached"><code class="docutils literal notranslate"><span class="pre">Camera.is_attached</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.look_at"><code class="docutils literal notranslate"><span class="pre">Camera.look_at()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.reset"><code class="docutils literal notranslate"><span class="pre">Camera.reset()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.set_intrinsics"><code class="docutils literal notranslate"><span class="pre">Camera.set_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.set_local_pose"><code class="docutils literal notranslate"><span class="pre">Camera.set_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.Camera.update"><code class="docutils literal notranslate"><span class="pre">Camera.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg"><code class="docutils literal notranslate"><span class="pre">CameraCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.parent"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.pos"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.quat"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.quat</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.ExtrinsicsCfg.up"><code class="docutils literal notranslate"><span class="pre">CameraCfg.ExtrinsicsCfg.up</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.parent"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.pos"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.OffsetCfg.quat"><code class="docutils literal notranslate"><span class="pre">CameraCfg.OffsetCfg.quat</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">CameraCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.get_data_types"><code class="docutils literal notranslate"><span class="pre">CameraCfg.get_data_types()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.get_view_attrib"><code class="docutils literal notranslate"><span class="pre">CameraCfg.get_view_attrib()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">CameraCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">CameraCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.CameraCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">CameraCfg.init_rot</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stereo-camera">Stereo Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera"><code class="docutils literal notranslate"><span class="pre">StereoCamera</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.__init__"><code class="docutils literal notranslate"><span class="pre">StereoCamera.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.destroy"><code class="docutils literal notranslate"><span class="pre">StereoCamera.destroy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_arena_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_data"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_data()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_intrinsics"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_left_right_arena_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_left_right_arena_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.get_local_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.get_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.group_id"><code class="docutils literal notranslate"><span class="pre">StereoCamera.group_id</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.is_attached"><code class="docutils literal notranslate"><span class="pre">StereoCamera.is_attached</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.look_at"><code class="docutils literal notranslate"><span class="pre">StereoCamera.look_at()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.reset"><code class="docutils literal notranslate"><span class="pre">StereoCamera.reset()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.set_intrinsics"><code class="docutils literal notranslate"><span class="pre">StereoCamera.set_intrinsics()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.set_local_pose"><code class="docutils literal notranslate"><span class="pre">StereoCamera.set_local_pose()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCamera.update"><code class="docutils literal notranslate"><span class="pre">StereoCamera.update()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.parent"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.pos"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.quat"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.quat</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.ExtrinsicsCfg.up"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.ExtrinsicsCfg.up</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.parent"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg.parent</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.pos"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg.pos</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.OffsetCfg.quat"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.OffsetCfg.quat</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_data_types"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.get_data_types()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.get_view_attrib"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.get_view_attrib()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.init_rot</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.left_to_right"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.left_to_right</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.sensors.StereoCameraCfg.right_to_left"><code class="docutils literal notranslate"><span class="pre">StereoCameraCfg.right_to_left</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

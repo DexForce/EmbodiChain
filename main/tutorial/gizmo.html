@@ -1,0 +1,994 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Interactive Robot Control with Gizmo &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'tutorial/gizmo';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Creating a Basic Environment" href="basic_env.html" />
+    <link rel="prev" title="Atomic Actions" href="atomic_actions.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Tutorials</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/tutorial/gizmo.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Interactive Robot Control with Gizmo</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code">The Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code-explained">The Code Explained</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-is-a-gizmo">What is a Gizmo?</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-up-robot-configuration">Setting up Robot Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#creating-and-attaching-a-gizmo">Creating and Attaching a Gizmo</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-gizmo-robot-interaction-works">How Gizmo-Robot Interaction Works</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#the-simulation-loop">The Simulation Loop</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gizmo-lifecycle-management">Gizmo Lifecycle Management</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#available-gizmo-methods">Available Gizmo Methods</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#running-the-tutorial">Running the Tutorial</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tips-and-best-practices">Tips and Best Practices</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="interactive-robot-control-with-gizmo">
+<span id="tutorial-gizmo-robot"></span><h1>Interactive Robot Control with Gizmo<a class="headerlink" href="#interactive-robot-control-with-gizmo" title="Link to this heading">#</a></h1>
+<p>This tutorial demonstrates how to use the Gizmo class for interactive robot manipulation in SimulationManager. You’ll learn how to create a gizmo attached to a robot’s end-effector and use it for real-time inverse kinematics (IK) control, allowing intuitive manipulation of robot poses through visual interaction.</p>
+<section id="the-code">
+<h2>The Code<a class="headerlink" href="#the-code" title="Link to this heading">#</a></h2>
+<p>The tutorial corresponds to the <code class="docutils literal notranslate"><span class="pre">gizmo_robot.py</span></code> script in the <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim</span></code> directory.</p>
+<details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
+<summary class="sd-summary-title sd-card-header">
+<span class="sd-summary-icon"><svg version="1.1" width="1.0em" height="1.0em" class="sd-octicon sd-octicon-code" viewBox="0 0 16 16" aria-hidden="true"><path d="m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"></path></svg></span><span class="sd-summary-text">Code for gizmo_robot.py</span><span class="sd-summary-state-marker sd-summary-chevron-right"><svg version="1.1" width="1.5em" height="1.5em" class="sd-octicon sd-octicon-chevron-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.72 18.78a.75.75 0 0 1 0-1.06L14.44 12 8.72 6.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0Z"></path></svg></span></summary><div class="sd-summary-content sd-card-body docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="linenos">  1</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos">  2</span><span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="linenos">  3</span><span class="c1">#</span>
+<span class="linenos">  4</span><span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="linenos">  5</span><span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="linenos">  6</span><span class="c1"># You may obtain a copy of the License at</span>
+<span class="linenos">  7</span><span class="c1">#</span>
+<span class="linenos">  8</span><span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="linenos">  9</span><span class="c1">#</span>
+<span class="linenos"> 10</span><span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="linenos"> 11</span><span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="linenos"> 12</span><span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="linenos"> 13</span><span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="linenos"> 14</span><span class="c1"># limitations under the License.</span>
+<span class="linenos"> 15</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos"> 16</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 17</span><span class="sd">Gizmo-Robot Example: Test Gizmo class on a robot (UR10)</span>
+<span class="linenos"> 18</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 19</span>
+<span class="linenos"> 20</span><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="linenos"> 21</span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="linenos"> 22</span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="linenos"> 23</span><span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="linenos"> 24</span>
+<span class="linenos"> 25</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">SimulationManagerCfg</span>
+<span class="linenos"> 26</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.utils.gym_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">add_env_launcher_args_to_parser</span>
+<span class="linenos"> 27</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 28</span>    <span class="n">RenderCfg</span><span class="p">,</span>
+<span class="linenos"> 29</span>    <span class="n">RobotCfg</span><span class="p">,</span>
+<span class="linenos"> 30</span>    <span class="n">URDFCfg</span><span class="p">,</span>
+<span class="linenos"> 31</span>    <span class="n">JointDrivePropertiesCfg</span><span class="p">,</span>
+<span class="linenos"> 32</span><span class="p">)</span>
+<span class="linenos"> 33</span>
+<span class="linenos"> 34</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.solvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">PinkSolverCfg</span>
+<span class="linenos"> 35</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_path</span>
+<span class="linenos"> 36</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<span class="linenos"> 37</span>
+<span class="linenos"> 38</span>
+<span class="linenos"> 39</span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+<span class="linenos"> 40</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Main function to create and run the simulation scene.&quot;&quot;&quot;</span>
+<span class="linenos"> 41</span>
+<span class="linenos"> 42</span>    <span class="c1"># Parse command line arguments</span>
+<span class="linenos"> 43</span>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+<span class="linenos"> 44</span>        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create a simulation scene with SimulationManager&quot;</span>
+<span class="linenos"> 45</span>    <span class="p">)</span>
+<span class="linenos"> 46</span>    <span class="n">add_env_launcher_args_to_parser</span><span class="p">(</span><span class="n">parser</span><span class="p">)</span>
+<span class="linenos"> 47</span>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+<span class="linenos"> 48</span>
+<span class="linenos"> 49</span>    <span class="c1"># Configure the simulation</span>
+<span class="linenos"> 50</span>    <span class="n">sim_cfg</span> <span class="o">=</span> <span class="n">SimulationManagerCfg</span><span class="p">(</span>
+<span class="linenos"> 51</span>        <span class="n">width</span><span class="o">=</span><span class="mi">1920</span><span class="p">,</span>
+<span class="linenos"> 52</span>        <span class="n">height</span><span class="o">=</span><span class="mi">1080</span><span class="p">,</span>
+<span class="linenos"> 53</span>        <span class="n">physics_dt</span><span class="o">=</span><span class="mf">1.0</span> <span class="o">/</span> <span class="mf">100.0</span><span class="p">,</span>
+<span class="linenos"> 54</span>        <span class="n">sim_device</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+<span class="linenos"> 55</span>        <span class="n">render_cfg</span><span class="o">=</span><span class="n">RenderCfg</span><span class="p">(</span><span class="n">renderer</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">renderer</span><span class="p">),</span>
+<span class="linenos"> 56</span>    <span class="p">)</span>
+<span class="linenos"> 57</span>
+<span class="linenos"> 58</span>    <span class="n">sim</span> <span class="o">=</span> <span class="n">SimulationManager</span><span class="p">(</span><span class="n">sim_cfg</span><span class="p">)</span>
+<span class="linenos"> 59</span>    <span class="n">sim</span><span class="o">.</span><span class="n">set_manual_update</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+<span class="linenos"> 60</span>
+<span class="linenos"> 61</span>    <span class="c1"># Get UR10 URDF path</span>
+<span class="linenos"> 62</span>    <span class="n">urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;UniversalRobots/UR10/UR10.urdf&quot;</span><span class="p">)</span>
+<span class="linenos"> 63</span>
+<span class="linenos"> 64</span>    <span class="c1"># Create UR10 robot</span>
+<span class="linenos"> 65</span>    <span class="n">robot_cfg</span> <span class="o">=</span> <span class="n">RobotCfg</span><span class="p">(</span>
+<span class="linenos"> 66</span>        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span>
+<span class="linenos"> 67</span>        <span class="n">urdf_cfg</span><span class="o">=</span><span class="n">URDFCfg</span><span class="p">(</span>
+<span class="linenos"> 68</span>            <span class="n">components</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;arm&quot;</span><span class="p">,</span> <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">urdf_path</span><span class="p">}]</span>
+<span class="linenos"> 69</span>        <span class="p">),</span>
+<span class="linenos"> 70</span>        <span class="n">control_parts</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Joint[1-6]&quot;</span><span class="p">]},</span>
+<span class="linenos"> 71</span>        <span class="n">solver_cfg</span><span class="o">=</span><span class="p">{</span>
+<span class="linenos"> 72</span>            <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="n">PinkSolverCfg</span><span class="p">(</span>
+<span class="linenos"> 73</span>                <span class="n">urdf_path</span><span class="o">=</span><span class="n">urdf_path</span><span class="p">,</span>
+<span class="linenos"> 74</span>                <span class="n">end_link_name</span><span class="o">=</span><span class="s2">&quot;ee_link&quot;</span><span class="p">,</span>
+<span class="linenos"> 75</span>                <span class="n">root_link_name</span><span class="o">=</span><span class="s2">&quot;base_link&quot;</span><span class="p">,</span>
+<span class="linenos"> 76</span>                <span class="n">pos_eps</span><span class="o">=</span><span class="mf">1e-2</span><span class="p">,</span>
+<span class="linenos"> 77</span>                <span class="n">rot_eps</span><span class="o">=</span><span class="mf">5e-2</span><span class="p">,</span>
+<span class="linenos"> 78</span>                <span class="n">max_iterations</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+<span class="linenos"> 79</span>                <span class="n">dt</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>
+<span class="linenos"> 80</span>            <span class="p">)</span>
+<span class="linenos"> 81</span>        <span class="p">},</span>
+<span class="linenos"> 82</span>        <span class="n">drive_pros</span><span class="o">=</span><span class="n">JointDrivePropertiesCfg</span><span class="p">(</span>
+<span class="linenos"> 83</span>            <span class="n">stiffness</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Joint[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e4</span><span class="p">},</span>
+<span class="linenos"> 84</span>            <span class="n">damping</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Joint[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">},</span>
+<span class="linenos"> 85</span>        <span class="p">),</span>
+<span class="linenos"> 86</span>    <span class="p">)</span>
+<span class="linenos"> 87</span>    <span class="n">robot</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_robot</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">robot_cfg</span><span class="p">)</span>
+<span class="linenos"> 88</span>
+<span class="linenos"> 89</span>    <span class="c1"># Set initial joint positions</span>
+<span class="linenos"> 90</span>    <span class="n">initial_qpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos"> 91</span>        <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]],</span>
+<span class="linenos"> 92</span>        <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+<span class="linenos"> 93</span>        <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cpu&quot;</span><span class="p">,</span>
+<span class="linenos"> 94</span>    <span class="p">)</span>
+<span class="linenos"> 95</span>    <span class="n">joint_ids</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+<span class="linenos"> 96</span>    <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">initial_qpos</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">joint_ids</span><span class="p">)</span>
+<span class="linenos"> 97</span>
+<span class="linenos"> 98</span>    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.2</span><span class="p">)</span>  <span class="c1"># Wait for a moment to ensure everything is set up</span>
+<span class="linenos"> 99</span>
+<span class="linenos">100</span>    <span class="c1"># Enable gizmo using the new API</span>
+<span class="linenos">101</span>    <span class="n">sim</span><span class="o">.</span><span class="n">enable_gizmo</span><span class="p">(</span><span class="n">uid</span><span class="o">=</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+<span class="linenos">102</span>    <span class="k">if</span> <span class="ow">not</span> <span class="n">sim</span><span class="o">.</span><span class="n">has_gizmo</span><span class="p">(</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">):</span>
+<span class="linenos">103</span>        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;Failed to enable gizmo!&quot;</span><span class="p">)</span>
+<span class="linenos">104</span>        <span class="k">return</span>
+<span class="linenos">105</span>
+<span class="linenos">106</span>    <span class="n">sim</span><span class="o">.</span><span class="n">open_window</span><span class="p">()</span>
+<span class="linenos">107</span>
+<span class="linenos">108</span>    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;Gizmo-Robot example started!&quot;</span><span class="p">)</span>
+<span class="linenos">109</span>    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;Use the gizmo to drag the robot end-effector (EE)&quot;</span><span class="p">)</span>
+<span class="linenos">110</span>    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;Press Ctrl+C to stop the simulation&quot;</span><span class="p">)</span>
+<span class="linenos">111</span>
+<span class="linenos">112</span>    <span class="n">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">)</span>
+<span class="linenos">113</span>
+<span class="linenos">114</span>
+<span class="linenos">115</span><span class="k">def</span><span class="w"> </span><span class="nf">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">):</span>
+<span class="linenos">116</span>    <span class="n">step_count</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="linenos">117</span>    <span class="k">try</span><span class="p">:</span>
+<span class="linenos">118</span>        <span class="n">last_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="linenos">119</span>        <span class="n">last_step</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="linenos">120</span>        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<span class="linenos">121</span>            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.033</span><span class="p">)</span>  <span class="c1"># 30Hz</span>
+<span class="linenos">122</span>            <span class="c1"># Update all gizmos managed by sim</span>
+<span class="linenos">123</span>            <span class="n">sim</span><span class="o">.</span><span class="n">update_gizmos</span><span class="p">()</span>
+<span class="linenos">124</span>            <span class="n">step_count</span> <span class="o">+=</span> <span class="mi">1</span>
+<span class="linenos">125</span>
+<span class="linenos">126</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">100</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+<span class="linenos">127</span>                <span class="n">current_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="linenos">128</span>                <span class="n">elapsed</span> <span class="o">=</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">last_time</span>
+<span class="linenos">129</span>                <span class="n">fps</span> <span class="o">=</span> <span class="p">(</span>
+<span class="linenos">130</span>                    <span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span> <span class="o">*</span> <span class="p">(</span><span class="n">step_count</span> <span class="o">-</span> <span class="n">last_step</span><span class="p">)</span> <span class="o">/</span> <span class="n">elapsed</span>
+<span class="linenos">131</span>                    <span class="k">if</span> <span class="n">elapsed</span> <span class="o">&gt;</span> <span class="mi">0</span>
+<span class="linenos">132</span>                    <span class="k">else</span> <span class="mi">0</span>
+<span class="linenos">133</span>                <span class="p">)</span>
+<span class="linenos">134</span>                <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Simulation step: </span><span class="si">{</span><span class="n">step_count</span><span class="si">}</span><span class="s2">, FPS: </span><span class="si">{</span><span class="n">fps</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="linenos">135</span>                <span class="n">last_time</span> <span class="o">=</span> <span class="n">current_time</span>
+<span class="linenos">136</span>                <span class="n">last_step</span> <span class="o">=</span> <span class="n">step_count</span>
+<span class="linenos">137</span>    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+<span class="linenos">138</span>        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Stopping simulation...&quot;</span><span class="p">)</span>
+<span class="linenos">139</span>    <span class="k">finally</span><span class="p">:</span>
+<span class="linenos">140</span>        <span class="n">sim</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span>
+<span class="linenos">141</span>        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;Simulation terminated successfully&quot;</span><span class="p">)</span>
+<span class="linenos">142</span>
+<span class="linenos">143</span>
+<span class="linenos">144</span><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+<span class="linenos">145</span>    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</details></section>
+<section id="the-code-explained">
+<h2>The Code Explained<a class="headerlink" href="#the-code-explained" title="Link to this heading">#</a></h2>
+<p>Similar to the previous tutorial on robot simulation, we use the <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager" title="embodichain.lab.sim.SimulationManager"><code class="xref py py-class docutils literal notranslate"><span class="pre">SimulationManager</span></code></a> class to set up the simulation environment. If you haven’t read that tutorial yet, please refer to <a class="reference internal" href="robot.html"><span class="doc">Simulating a Robot</span></a> first.</p>
+<p><strong>Important:</strong> Gizmo only supports single environment mode (<cite>num_envs=1</cite>). Using multiple environments will raise an exception.</p>
+<p>All gizmo creation, visibility, and destruction operations must be managed via the SimulationManager API:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Toggle visibility for a gizmo</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">toggle_gizmo_visibility</span><span class="p">(</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+
+<span class="c1"># Set visibility explicitly</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">set_gizmo_visibility</span><span class="p">(</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">visible</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Always use the SimulationManager API to control gizmo visibility and lifecycle. Do not operate on the Gizmo instance directly.</p>
+<section id="what-is-a-gizmo">
+<h3>What is a Gizmo?<a class="headerlink" href="#what-is-a-gizmo" title="Link to this heading">#</a></h3>
+<p>A Gizmo is an interactive visual tool that allows users to manipulate simulation objects in real-time through mouse interactions. In robotics applications, gizmos are particularly useful for:</p>
+<ul class="simple">
+<li><p><strong>Interactive Robot Control</strong>: Drag the robot’s end-effector to desired positions</p></li>
+<li><p><strong>Inverse Kinematics</strong>: Automatically solve joint angles to reach target poses</p></li>
+<li><p><strong>Real-time Manipulation</strong>: Provide immediate visual feedback during robot motion planning</p></li>
+<li><p><strong>Debugging and Visualization</strong>: Test robot reachability and workspace limits</p></li>
+</ul>
+<p>The <code class="xref py py-class docutils literal notranslate"><span class="pre">objects.Gizmo</span></code> class provides a unified interface for interactive control of different simulation elements including robots, rigid objects, and cameras.</p>
+</section>
+<section id="setting-up-robot-configuration">
+<h3>Setting up Robot Configuration<a class="headerlink" href="#setting-up-robot-configuration" title="Link to this heading">#</a></h3>
+<p>First, we configure a UR10 robot with an IK solver for end-effector control:</p>
+<p>Key components of the robot configuration:</p>
+<ul class="simple">
+<li><p><strong>URDF Configuration</strong>: Loads the robot’s kinematic and visual model</p></li>
+<li><p><strong>Control Parts</strong>: Defines which joints can be controlled (<code class="docutils literal notranslate"><span class="pre">&quot;Joint[1-6]&quot;</span></code> for UR10)</p></li>
+<li><p><strong>IK Solver</strong>: <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PinkSolverCfg" title="embodichain.lab.sim.solvers.PinkSolverCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">solvers.PinkSolverCfg</span></code></a> provides inverse kinematics capabilities</p></li>
+<li><p><strong>Drive Properties</strong>: Sets stiffness and damping for joint control</p></li>
+</ul>
+<p>The IK solver is crucial for gizmo functionality, as it enables the robot to automatically calculate joint angles needed to reach gizmo target positions.</p>
+</section>
+<section id="creating-and-attaching-a-gizmo">
+<h3>Creating and Attaching a Gizmo<a class="headerlink" href="#creating-and-attaching-a-gizmo" title="Link to this heading">#</a></h3>
+<p>After configuring the robot, enable the gizmo for interactive control using the SimulationManager API (supports robot, rigid object, camera; key is <cite>uid:control_part</cite>):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Enable gizmo for the robot&#39;s arm</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">enable_gizmo</span><span class="p">(</span><span class="n">uid</span><span class="o">=</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">sim</span><span class="o">.</span><span class="n">has_gizmo</span><span class="p">(</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">):</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;Failed to enable gizmo!&quot;</span><span class="p">)</span>
+    <span class="k">return</span>
+</pre></div>
+</div>
+<p>The Gizmo instance is managed internally by SimulationManager. If you need to access it:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">gizmo</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">get_gizmo</span><span class="p">(</span><span class="s2">&quot;ur10_gizmo_test&quot;</span><span class="p">,</span> <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The Gizmo system will automatically:</p>
+<ol class="arabic simple">
+<li><p><strong>Detect Target Type</strong>: Identify that the target is a robot (vs. rigid object or camera)</p></li>
+<li><p><strong>Find End-Effector</strong>: Locate the robot’s end-effector link (<code class="docutils literal notranslate"><span class="pre">ee_link</span></code> for UR10)</p></li>
+<li><p><strong>Create Proxy Object</strong>: Generate a small invisible cube at the end-effector position</p></li>
+<li><p><strong>Set Up IK Callback</strong>: Configure the gizmo to trigger IK solving when moved</p></li>
+</ol>
+</section>
+<section id="how-gizmo-robot-interaction-works">
+<h3>How Gizmo-Robot Interaction Works<a class="headerlink" href="#how-gizmo-robot-interaction-works" title="Link to this heading">#</a></h3>
+<p>The gizmo-robot interaction follows this efficient workflow:</p>
+<ol class="arabic simple">
+<li><p><strong>Gizmo Callback</strong>: When the user drags the gizmo, a callback function updates the proxy object’s transform</p></li>
+<li><p><strong>Deferred IK Solving</strong>: Instead of solving IK immediately in the callback (which causes UI lag), the target transform is stored</p></li>
+<li><p><strong>Update Loop</strong>: During each simulation step, <code class="docutils literal notranslate"><span class="pre">gizmo.update()</span></code> solves IK and applies joint commands</p></li>
+<li><p><strong>Robot Motion</strong>: The robot smoothly moves to follow the gizmo position</p></li>
+</ol>
+<p>This design separates UI responsiveness from computational IK solving, ensuring smooth interaction even with complex robots.</p>
+</section>
+<section id="the-simulation-loop">
+<h3>The Simulation Loop<a class="headerlink" href="#the-simulation-loop" title="Link to this heading">#</a></h3>
+<p>In the main loop, simply call <cite>sim.update_gizmos()</cite>. There is no need to manually update any Gizmo instance.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">):</span>
+    <span class="n">step_count</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">last_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">last_step</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.033</span><span class="p">)</span>  <span class="c1"># 30Hz</span>
+            <span class="n">sim</span><span class="o">.</span><span class="n">update_gizmos</span><span class="p">()</span>  <span class="c1"># Update all gizmos</span>
+            <span class="n">step_count</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="c1"># ...performance statistics, etc...</span>
+    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Stopping simulation...&quot;</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">sim</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span>  <span class="c1"># Release all resources</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="s2">&quot;Simulation terminated successfully&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Main loop highlights:</p>
+<ul class="simple">
+<li><p><strong>Gizmo update</strong>: Only <cite>sim.update_gizmos()</cite> is needed, no <cite>gizmo.update()</cite></p></li>
+<li><p><strong>Performance monitoring</strong>: Optional FPS statistics</p></li>
+<li><p><strong>Resource cleanup</strong>: Only <cite>sim.destroy()</cite> is needed, no manual Gizmo destruction</p></li>
+<li><p><strong>Graceful shutdown</strong>: Supports Ctrl+C interruption</p></li>
+</ul>
+</section>
+<section id="gizmo-lifecycle-management">
+<h3>Gizmo Lifecycle Management<a class="headerlink" href="#gizmo-lifecycle-management" title="Link to this heading">#</a></h3>
+<p>Gizmo lifecycle is managed by SimulationManager:</p>
+<ul class="simple">
+<li><p>Enable: <cite>sim.enable_gizmo(…)</cite></p></li>
+<li><p>Update: Main loop automatically calls <cite>sim.update_gizmos()</cite></p></li>
+<li><p>Destroy/disable: <cite>sim.disable_gizmo(…)</cite> or <cite>sim.destroy()</cite> (recommended)</p></li>
+</ul>
+<p>There is no need to manually create or destroy Gizmo instances. All resources are managed by SimulationManager.</p>
+</section>
+<section id="available-gizmo-methods">
+<h3>Available Gizmo Methods<a class="headerlink" href="#available-gizmo-methods" title="Link to this heading">#</a></h3>
+<p>If you need to access the underlying Gizmo instance (via <cite>sim.get_gizmo</cite>), you can use the following methods:</p>
+<p><strong>Transform Control:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">set_world_pose(pose)</span></code>: Set gizmo world position and orientation</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">get_world_pose()</span></code>: Get current gizmo world transform</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">set_local_pose(pose)</span></code>: Set gizmo local transform relative to parent</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">get_local_pose()</span></code>: Get gizmo local transform</p></li>
+</ul>
+<p><strong>Visual properties (strongly recommend using SimulationManager API):</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sim.toggle_gizmo_visibility(uid,</span> <span class="pre">control_part=None)</span></code>: Toggle gizmo visibility</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sim.set_gizmo_visibility(uid,</span> <span class="pre">visible,</span> <span class="pre">control_part=None)</span></code>: Set gizmo visibility</p></li>
+</ul>
+<p><strong>Hierarchy Management:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">get_parent()</span></code>: Get gizmo’s parent node in scene hierarchy</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">get_name()</span></code>: Get gizmo node name for debugging</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">detach()</span></code>: Disconnect gizmo from current target</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">attach(target)</span></code>: Attach gizmo to a new simulation object</p></li>
+</ul>
+</section>
+<section id="running-the-tutorial">
+<h3>Running the Tutorial<a class="headerlink" href="#running-the-tutorial" title="Link to this heading">#</a></h3>
+<p>To run the gizmo robot tutorial:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>scripts/tutorials/sim
+python<span class="w"> </span>gizmo_robot.py<span class="w"> </span>--device<span class="w"> </span>cpu
+</pre></div>
+</div>
+<p>Command-line options:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">cpu|cuda</span></code>: Choose simulation device</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--num_envs</span> <span class="pre">N</span></code>: Number of parallel environments</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--headless</span></code>: Run without GUI for automated testing</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--renderer</span></code>: Enable ray tracing for better visuals</p></li>
+</ul>
+<p>Once running:</p>
+<ol class="arabic simple">
+<li><p><strong>Mouse Interaction</strong>: Click and drag the gizmo (colorful axes) to move the robot</p></li>
+<li><p><strong>Real-time IK</strong>: Watch the robot joints automatically adjust to follow the gizmo</p></li>
+<li><p><strong>Workspace Limits</strong>: Observe how the robot behaves at workspace boundaries</p></li>
+<li><p><strong>Performance</strong>: Monitor FPS in the console output</p></li>
+</ol>
+</section>
+<section id="tips-and-best-practices">
+<h3>Tips and Best Practices<a class="headerlink" href="#tips-and-best-practices" title="Link to this heading">#</a></h3>
+<p><strong>Performance optimization:</strong></p>
+<ul class="simple">
+<li><p>Only call <code class="docutils literal notranslate"><span class="pre">sim.update_gizmos()</span></code> in the main loop, no need for <code class="docutils literal notranslate"><span class="pre">gizmo.update()</span></code></p></li>
+<li><p>Reduce IK solver iterations for better real-time performance if needed</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">set_manual_update(False)</span></code> for smoother interaction</p></li>
+</ul>
+<p><strong>Debugging tips:</strong></p>
+<ul class="simple">
+<li><p>Check console output for IK solver success/failure messages</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">get_world_pose()</span></code> to check gizmo position (if needed)</p></li>
+<li><p>Monitor FPS to identify performance bottlenecks</p></li>
+</ul>
+<p><strong>Robot compatibility:</strong></p>
+<ul class="simple">
+<li><p>Ensure your robot is configured with a correct IK solver</p></li>
+<li><p>Check the end-effector (EE) link name</p></li>
+<li><p>Test joint limits and workspace boundaries</p></li>
+</ul>
+<p><strong>Visualization customization:</strong></p>
+<ul class="simple">
+<li><p>Adjust gizmo appearance via Gizmo config (e.g., <code class="docutils literal notranslate"><span class="pre">set_line_width()</span></code>; requires access to the instance via <cite>sim.get_gizmo</cite>)</p></li>
+<li><p>Adjust gizmo scale according to robot size</p></li>
+<li><p>Enable collision for debugging if needed</p></li>
+</ul>
+</section>
+<section id="next-steps">
+<h3>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h3>
+<p>After mastering basic gizmo usage, you can explore:</p>
+<ul class="simple">
+<li><p><strong>Multi-robot Gizmos</strong>: Attach gizmos to multiple robots simultaneously</p></li>
+<li><p><strong>Custom Gizmo Callbacks</strong>: Implement application-specific interaction logic</p></li>
+<li><p><strong>Gizmo with Rigid Objects</strong>: Use gizmos for interactive object manipulation</p></li>
+<li><p><strong>Advanced IK Configuration</strong>: Fine-tune solver parameters for specific robots</p></li>
+</ul>
+<p>For more advanced robot control and simulation features, refer to the complete <a class="reference internal" href="robot.html"><span class="doc">Simulating a Robot</span></a> tutorial and the API documentation for <code class="xref py py-class docutils literal notranslate"><span class="pre">objects.Gizmo</span></code> and <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PinkSolverCfg" title="embodichain.lab.sim.solvers.PinkSolverCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">solvers.PinkSolverCfg</span></code></a>.</p>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="atomic_actions.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Atomic Actions</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="basic_env.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Creating a Basic Environment</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code">The Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code-explained">The Code Explained</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-is-a-gizmo">What is a Gizmo?</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-up-robot-configuration">Setting up Robot Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#creating-and-attaching-a-gizmo">Creating and Attaching a Gizmo</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-gizmo-robot-interaction-works">How Gizmo-Robot Interaction Works</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#the-simulation-loop">The Simulation Loop</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gizmo-lifecycle-management">Gizmo Lifecycle Management</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#available-gizmo-methods">Available Gizmo Methods</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#running-the-tutorial">Running the Tutorial</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tips-and-best-practices">Tips and Best Practices</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

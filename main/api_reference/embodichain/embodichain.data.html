@@ -1,0 +1,1371 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>embodichain.data &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference/embodichain/embodichain.data';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="embodichain.lab" href="embodichain.lab.html" />
+    <link rel="prev" title="embodichain.agents" href="embodichain.agents.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="../index.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/api_reference/embodichain/embodichain.data.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>embodichain.data</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-package-overview">Data Package Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.constants">Constants</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.dataset">Dataset Resolution</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset.__init__"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset.calculate_md5"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset.calculate_md5()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset.check_zip"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset.check_zip()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.get_data_class"><code class="docutils literal notranslate"><span class="pre">get_data_class()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.get_data_path"><code class="docutils literal notranslate"><span class="pre">get_data_path()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.download">Asset Download CLI</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.cmd_download"><code class="docutils literal notranslate"><span class="pre">cmd_download()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.cmd_list"><code class="docutils literal notranslate"><span class="pre">cmd_list()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.download_asset"><code class="docutils literal notranslate"><span class="pre">download_asset()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.find_asset_class"><code class="docutils literal notranslate"><span class="pre">find_asset_class()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.get_registry"><code class="docutils literal notranslate"><span class="pre">get_registry()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.enum">Enums</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ActionMode"><code class="docutils literal notranslate"><span class="pre">ActionMode</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ActionMode.ABSOLUTE"><code class="docutils literal notranslate"><span class="pre">ActionMode.ABSOLUTE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ActionMode.RELATIVE"><code class="docutils literal notranslate"><span class="pre">ActionMode.RELATIVE</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts"><code class="docutils literal notranslate"><span class="pre">ControlParts</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.HEAD"><code class="docutils literal notranslate"><span class="pre">ControlParts.HEAD</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.LEFT_ARM"><code class="docutils literal notranslate"><span class="pre">ControlParts.LEFT_ARM</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.LEFT_EEF"><code class="docutils literal notranslate"><span class="pre">ControlParts.LEFT_EEF</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.RIGHT_ARM"><code class="docutils literal notranslate"><span class="pre">ControlParts.RIGHT_ARM</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.RIGHT_EEF"><code class="docutils literal notranslate"><span class="pre">ControlParts.RIGHT_EEF</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.WAIST"><code class="docutils literal notranslate"><span class="pre">ControlParts.WAIST</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefExecute"><code class="docutils literal notranslate"><span class="pre">EefExecute</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefExecute.CLOSE"><code class="docutils literal notranslate"><span class="pre">EefExecute.CLOSE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefExecute.OPEN"><code class="docutils literal notranslate"><span class="pre">EefExecute.OPEN</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefType"><code class="docutils literal notranslate"><span class="pre">EefType</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefType.POSE"><code class="docutils literal notranslate"><span class="pre">EefType.POSE</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EndEffector"><code class="docutils literal notranslate"><span class="pre">EndEffector</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EndEffector.DEXTROUSHAND"><code class="docutils literal notranslate"><span class="pre">EndEffector.DEXTROUSHAND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EndEffector.GRIPPER"><code class="docutils literal notranslate"><span class="pre">EndEffector.GRIPPER</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.Hints"><code class="docutils literal notranslate"><span class="pre">Hints</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.Hints.ARM"><code class="docutils literal notranslate"><span class="pre">Hints.ARM</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.Hints.EEF"><code class="docutils literal notranslate"><span class="pre">Hints.EEF</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.JointType"><code class="docutils literal notranslate"><span class="pre">JointType</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.JointType.QPOS"><code class="docutils literal notranslate"><span class="pre">JointType.QPOS</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask"><code class="docutils literal notranslate"><span class="pre">SemanticMask</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.BACKGROUND"><code class="docutils literal notranslate"><span class="pre">SemanticMask.BACKGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.FOREGROUND"><code class="docutils literal notranslate"><span class="pre">SemanticMask.FOREGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.ROBOT_LEFT"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.ROBOT_RIGHT"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">SemanticMask.BACKGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id1"><code class="docutils literal notranslate"><span class="pre">SemanticMask.FOREGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id2"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id3"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.__new__"><code class="docutils literal notranslate"><span class="pre">SemanticMask.__new__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-embodichain.data">
+<span id="embodichain-data"></span><h1>embodichain.data<a class="headerlink" href="#module-embodichain.data" title="Link to this heading">#</a></h1>
+<section id="data-package-overview">
+<h2>Data Package Overview<a class="headerlink" href="#data-package-overview" title="Link to this heading">#</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">embodichain.data</span></code> package centralizes dataset resolution and asset download
+helpers used by simulation tasks and training pipelines.</p>
+<p class="rubric">Submodules</p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#module-embodichain.data.constants" title="embodichain.data.constants"><code class="xref py py-obj docutils literal notranslate"><span class="pre">constants</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#module-embodichain.data.dataset" title="embodichain.data.dataset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dataset</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#module-embodichain.data.download" title="embodichain.data.download"><code class="xref py py-obj docutils literal notranslate"><span class="pre">download</span></code></a></p></td>
+<td><p>CLI tool for pre-downloading EmbodiChain data assets.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#module-embodichain.data.enum" title="embodichain.data.enum"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="module-embodichain.data.constants">
+<span id="constants"></span><h2>Constants<a class="headerlink" href="#module-embodichain.data.constants" title="Link to this heading">#</a></h2>
+</section>
+<section id="module-embodichain.data.dataset">
+<span id="dataset-resolution"></span><h2>Dataset Resolution<a class="headerlink" href="#module-embodichain.data.dataset" title="Link to this heading">#</a></h2>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.dataset.EmbodiChainDataset" title="embodichain.data.dataset.EmbodiChainDataset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EmbodiChainDataset</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Functions:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.dataset.get_data_class" title="embodichain.data.dataset.get_data_class"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data_class</span></code></a>(dataset_name[, extra_modules])</p></td>
+<td><p>Retrieve the dataset class from the available modules.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.dataset.get_data_path" title="embodichain.data.dataset.get_data_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_data_path</span></code></a>(data_path_in_config)</p></td>
+<td><p>Get the absolute path of the data file.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.dataset.EmbodiChainDataset">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.dataset.</span></span><span class="sig-name descname"><span class="pre">EmbodiChainDataset</span></span><a class="reference internal" href="../../_modules/embodichain/data/dataset.html#EmbodiChainDataset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.dataset.EmbodiChainDataset" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">DownloadDataset</span></code></p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.dataset.EmbodiChainDataset.__init__" title="embodichain.data.dataset.EmbodiChainDataset.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(self, prefix, data_descriptor[, ...])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.dataset.EmbodiChainDataset.calculate_md5" title="embodichain.data.dataset.EmbodiChainDataset.calculate_md5"><code class="xref py py-obj docutils literal notranslate"><span class="pre">calculate_md5</span></code></a>(file_path[, chunk_size])</p></td>
+<td><p>Calculate the MD5 checksum of a file.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.dataset.EmbodiChainDataset.check_zip" title="embodichain.data.dataset.EmbodiChainDataset.check_zip"><code class="xref py py-obj docutils literal notranslate"><span class="pre">check_zip</span></code></a>(prefix, data_descriptor, path)</p></td>
+<td><p>Check the integrity of the zip file and its extracted contents.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.data.dataset.EmbodiChainDataset.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">open3d.cuda.pybind.data.DownloadDataset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_descriptor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">open3d.cuda.pybind.data.DataDescriptor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../../_modules/embodichain/data/dataset.html#EmbodiChainDataset.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.dataset.EmbodiChainDataset.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.data.dataset.EmbodiChainDataset.calculate_md5">
+<span class="sig-name descname"><span class="pre">calculate_md5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">8192</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/dataset.html#EmbodiChainDataset.calculate_md5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.dataset.EmbodiChainDataset.calculate_md5" title="Link to this definition">#</a></dt>
+<dd><p>Calculate the MD5 checksum of a file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.data.dataset.EmbodiChainDataset.check_zip">
+<span class="sig-name descname"><span class="pre">check_zip</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prefix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_descriptor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/dataset.html#EmbodiChainDataset.check_zip"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.dataset.EmbodiChainDataset.check_zip" title="Link to this definition">#</a></dt>
+<dd><p>Check the integrity of the zip file and its extracted contents.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.dataset.get_data_class">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.dataset.</span></span><span class="sig-name descname"><span class="pre">get_data_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dataset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">extra_modules</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/dataset.html#get_data_class"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.dataset.get_data_class" title="Link to this definition">#</a></dt>
+<dd><p>Retrieve the dataset class from the available modules.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>dataset_name</strong> (<em>str</em>) – The name of the dataset class.</p></li>
+<li><p><strong>extra_modules</strong> (<em>list</em><em>[</em><em>str</em><em>] </em><em>| </em><em>None</em>) – Optional list of additional module names to search for the dataset class.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The dataset class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>type</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>AttributeError</strong> – If the dataset class is not found in any module.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.dataset.get_data_path">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.dataset.</span></span><span class="sig-name descname"><span class="pre">get_data_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path_in_config</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/dataset.html#get_data_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.dataset.get_data_path" title="Link to this definition">#</a></dt>
+<dd><p>Get the absolute path of the data file.</p>
+<dl class="simple">
+<dt>Resolution order:</dt><dd><ol class="arabic simple">
+<li><p>If <code class="docutils literal notranslate"><span class="pre">data_path_in_config</span></code> is an absolute path, return it directly.</p></li>
+<li><p>If a matching file/directory exists under <code class="docutils literal notranslate"><span class="pre">EMBODICHAIN_DEFAULT_DATA_ROOT</span></code>
+(which can be overridden via the <code class="docutils literal notranslate"><span class="pre">EMBODICHAIN_DATA_ROOT</span></code> environment
+variable), return that path.</p></li>
+<li><p>Otherwise, resolve via the registered data-class download mechanism.</p></li>
+</ol>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data_path_in_config</strong> (<em>str</em>) – The dataset path in the format
+<code class="docutils literal notranslate"><span class="pre">&quot;dataset_name/subpath&quot;</span></code>.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The absolute path of the data file.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-embodichain.data.download">
+<span id="asset-download-cli"></span><h2>Asset Download CLI<a class="headerlink" href="#module-embodichain.data.download" title="Link to this heading">#</a></h2>
+<p>CLI tool for pre-downloading EmbodiChain data assets.</p>
+<p>Usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># List all available assets</span>
+<span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">embodichain</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">download</span> <span class="nb">list</span>
+
+<span class="c1"># List assets in a specific category</span>
+<span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">embodichain</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">download</span> <span class="nb">list</span> <span class="o">--</span><span class="n">category</span> <span class="n">robot</span>
+
+<span class="c1"># Download a specific asset by name</span>
+<span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">embodichain</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">download</span> <span class="n">download</span> <span class="o">--</span><span class="n">name</span> <span class="n">CobotMagicArm</span>
+
+<span class="c1"># Download all assets in a category</span>
+<span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">embodichain</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">download</span> <span class="n">download</span> <span class="o">--</span><span class="n">category</span> <span class="n">robot</span>
+
+<span class="c1"># Download everything</span>
+<span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">embodichain</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">download</span> <span class="n">download</span> <span class="o">--</span><span class="nb">all</span>
+</pre></div>
+</div>
+<p><strong>Functions:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.download.cmd_download" title="embodichain.data.download.cmd_download"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_download</span></code></a>(args)</p></td>
+<td><p>Download assets by name, category, or everything.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.download.cmd_list" title="embodichain.data.download.cmd_list"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_list</span></code></a>(args)</p></td>
+<td><p>List available assets.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.download.download_asset" title="embodichain.data.download.download_asset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">download_asset</span></code></a>(cls_name, cls)</p></td>
+<td><p>Instantiate an asset class to trigger download, then ensure extraction.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.download.find_asset_class" title="embodichain.data.download.find_asset_class"><code class="xref py py-obj docutils literal notranslate"><span class="pre">find_asset_class</span></code></a>(name, registry)</p></td>
+<td><p>Find an asset class by name (case-insensitive) across all categories.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.download.get_registry" title="embodichain.data.download.get_registry"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_registry</span></code></a>()</p></td>
+<td><p>Build <code class="docutils literal notranslate"><span class="pre">{category:</span> <span class="pre">[(class_name,</span> <span class="pre">class),</span> <span class="pre">...]}</span></code> for every category.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.download.main" title="embodichain.data.download.main"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.download.cmd_download">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.download.</span></span><span class="sig-name descname"><span class="pre">cmd_download</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/download.html#cmd_download"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.download.cmd_download" title="Link to this definition">#</a></dt>
+<dd><p>Download assets by name, category, or everything.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.download.cmd_list">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.download.</span></span><span class="sig-name descname"><span class="pre">cmd_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/download.html#cmd_list"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.download.cmd_list" title="Link to this definition">#</a></dt>
+<dd><p>List available assets.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.download.download_asset">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.download.</span></span><span class="sig-name descname"><span class="pre">download_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cls_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cls</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/download.html#download_asset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.download.download_asset" title="Link to this definition">#</a></dt>
+<dd><p>Instantiate an asset class to trigger download, then ensure extraction.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.download.find_asset_class">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.download.</span></span><span class="sig-name descname"><span class="pre">find_asset_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">registry</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/download.html#find_asset_class"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.download.find_asset_class" title="Link to this definition">#</a></dt>
+<dd><p>Find an asset class by name (case-insensitive) across all categories.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">type</span></code>] | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.download.get_registry">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.download.</span></span><span class="sig-name descname"><span class="pre">get_registry</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/download.html#get_registry"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.download.get_registry" title="Link to this definition">#</a></dt>
+<dd><p>Build <code class="docutils literal notranslate"><span class="pre">{category:</span> <span class="pre">[(class_name,</span> <span class="pre">class),</span> <span class="pre">...]}</span></code> for every category.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">type</span></code>]]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.data.download.main">
+<span class="sig-prename descclassname"><span class="pre">embodichain.data.download.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/data/download.html#main"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.download.main" title="Link to this definition">#</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-embodichain.data.enum">
+<span id="enums"></span><h2>Enums<a class="headerlink" href="#module-embodichain.data.enum" title="Link to this heading">#</a></h2>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.ActionMode" title="embodichain.data.enum.ActionMode"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ActionMode</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts" title="embodichain.data.enum.ControlParts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ControlParts</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.EefExecute" title="embodichain.data.enum.EefExecute"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EefExecute</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.EefType" title="embodichain.data.enum.EefType"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EefType</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.EndEffector" title="embodichain.data.enum.EndEffector"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EndEffector</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.Hints" title="embodichain.data.enum.Hints"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Hints</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.JointType" title="embodichain.data.enum.JointType"><code class="xref py py-obj docutils literal notranslate"><span class="pre">JointType</span></code></a></p></td>
+<td><p>An enumeration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.SemanticMask" title="embodichain.data.enum.SemanticMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SemanticMask</span></code></a></p></td>
+<td><p>SemanticMask is an enumeration representing different semantic regions in an image or scene.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.ActionMode">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">ActionMode</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#ActionMode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.ActionMode" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.ActionMode.ABSOLUTE" title="embodichain.data.enum.ActionMode.ABSOLUTE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ABSOLUTE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.ActionMode.RELATIVE" title="embodichain.data.enum.ActionMode.RELATIVE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RELATIVE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ActionMode.ABSOLUTE">
+<span class="sig-name descname"><span class="pre">ABSOLUTE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></em><a class="headerlink" href="#embodichain.data.enum.ActionMode.ABSOLUTE" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ActionMode.RELATIVE">
+<span class="sig-name descname"><span class="pre">RELATIVE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'delta_'</span></em><a class="headerlink" href="#embodichain.data.enum.ActionMode.RELATIVE" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">ControlParts</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#ControlParts"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.ControlParts" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts.HEAD" title="embodichain.data.enum.ControlParts.HEAD"><code class="xref py py-obj docutils literal notranslate"><span class="pre">HEAD</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts.LEFT_ARM" title="embodichain.data.enum.ControlParts.LEFT_ARM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LEFT_ARM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts.LEFT_EEF" title="embodichain.data.enum.ControlParts.LEFT_EEF"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LEFT_EEF</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts.RIGHT_ARM" title="embodichain.data.enum.ControlParts.RIGHT_ARM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RIGHT_ARM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts.RIGHT_EEF" title="embodichain.data.enum.ControlParts.RIGHT_EEF"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RIGHT_EEF</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.ControlParts.WAIST" title="embodichain.data.enum.ControlParts.WAIST"><code class="xref py py-obj docutils literal notranslate"><span class="pre">WAIST</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts.HEAD">
+<span class="sig-name descname"><span class="pre">HEAD</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'head'</span></em><a class="headerlink" href="#embodichain.data.enum.ControlParts.HEAD" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts.LEFT_ARM">
+<span class="sig-name descname"><span class="pre">LEFT_ARM</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'left_arm'</span></em><a class="headerlink" href="#embodichain.data.enum.ControlParts.LEFT_ARM" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts.LEFT_EEF">
+<span class="sig-name descname"><span class="pre">LEFT_EEF</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'left_eef'</span></em><a class="headerlink" href="#embodichain.data.enum.ControlParts.LEFT_EEF" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts.RIGHT_ARM">
+<span class="sig-name descname"><span class="pre">RIGHT_ARM</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'right_arm'</span></em><a class="headerlink" href="#embodichain.data.enum.ControlParts.RIGHT_ARM" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts.RIGHT_EEF">
+<span class="sig-name descname"><span class="pre">RIGHT_EEF</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'right_eef'</span></em><a class="headerlink" href="#embodichain.data.enum.ControlParts.RIGHT_EEF" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.ControlParts.WAIST">
+<span class="sig-name descname"><span class="pre">WAIST</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'waist'</span></em><a class="headerlink" href="#embodichain.data.enum.ControlParts.WAIST" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.EefExecute">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">EefExecute</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#EefExecute"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.EefExecute" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.EefExecute.CLOSE" title="embodichain.data.enum.EefExecute.CLOSE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CLOSE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.EefExecute.OPEN" title="embodichain.data.enum.EefExecute.OPEN"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OPEN</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.EefExecute.CLOSE">
+<span class="sig-name descname"><span class="pre">CLOSE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'execute_close'</span></em><a class="headerlink" href="#embodichain.data.enum.EefExecute.CLOSE" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.EefExecute.OPEN">
+<span class="sig-name descname"><span class="pre">OPEN</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'execute_open'</span></em><a class="headerlink" href="#embodichain.data.enum.EefExecute.OPEN" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.EefType">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">EefType</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#EefType"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.EefType" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.EefType.POSE" title="embodichain.data.enum.EefType.POSE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">POSE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.EefType.POSE">
+<span class="sig-name descname"><span class="pre">POSE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'eef_pose'</span></em><a class="headerlink" href="#embodichain.data.enum.EefType.POSE" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.EndEffector">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">EndEffector</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#EndEffector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.EndEffector" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.EndEffector.DEXTROUSHAND" title="embodichain.data.enum.EndEffector.DEXTROUSHAND"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEXTROUSHAND</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.EndEffector.GRIPPER" title="embodichain.data.enum.EndEffector.GRIPPER"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GRIPPER</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.EndEffector.DEXTROUSHAND">
+<span class="sig-name descname"><span class="pre">DEXTROUSHAND</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'hand'</span></em><a class="headerlink" href="#embodichain.data.enum.EndEffector.DEXTROUSHAND" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.EndEffector.GRIPPER">
+<span class="sig-name descname"><span class="pre">GRIPPER</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'gripper'</span></em><a class="headerlink" href="#embodichain.data.enum.EndEffector.GRIPPER" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.Hints">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">Hints</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#Hints"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.Hints" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.Hints.ARM" title="embodichain.data.enum.Hints.ARM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ARM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.data.enum.Hints.EEF" title="embodichain.data.enum.Hints.EEF"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EEF</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.Hints.ARM">
+<span class="sig-name descname"><span class="pre">ARM</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('left_arm',</span> <span class="pre">'right_arm')</span></em><a class="headerlink" href="#embodichain.data.enum.Hints.ARM" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.Hints.EEF">
+<span class="sig-name descname"><span class="pre">EEF</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('left_eef',</span> <span class="pre">'right_eef',</span> <span class="pre">'gripper',</span> <span class="pre">'hand')</span></em><a class="headerlink" href="#embodichain.data.enum.Hints.EEF" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.JointType">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">JointType</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#JointType"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.JointType" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.JointType.QPOS" title="embodichain.data.enum.JointType.QPOS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QPOS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.JointType.QPOS">
+<span class="sig-name descname"><span class="pre">QPOS</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'qpos'</span></em><a class="headerlink" href="#embodichain.data.enum.JointType.QPOS" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.data.enum.SemanticMask">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.data.enum.</span></span><span class="sig-name descname"><span class="pre">SemanticMask</span></span><a class="reference internal" href="../../_modules/embodichain/data/enum.html#SemanticMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.data.enum.SemanticMask" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">IntEnum</span></code></p>
+<p>SemanticMask is an enumeration representing different semantic regions in an image or scene.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.SemanticMask.BACKGROUND">
+<span class="sig-name descname"><span class="pre">BACKGROUND</span></span><a class="headerlink" href="#embodichain.data.enum.SemanticMask.BACKGROUND" title="Link to this definition">#</a></dt>
+<dd><p>Represents the background region (value: 0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.SemanticMask.FOREGROUND">
+<span class="sig-name descname"><span class="pre">FOREGROUND</span></span><a class="headerlink" href="#embodichain.data.enum.SemanticMask.FOREGROUND" title="Link to this definition">#</a></dt>
+<dd><p>Represents the foreground objects (value: 1).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.SemanticMask.ROBOT_LEFT">
+<span class="sig-name descname"><span class="pre">ROBOT_LEFT</span></span><a class="headerlink" href="#embodichain.data.enum.SemanticMask.ROBOT_LEFT" title="Link to this definition">#</a></dt>
+<dd><p>Represents the left robot region (value: 2).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.data.enum.SemanticMask.ROBOT_RIGHT">
+<span class="sig-name descname"><span class="pre">ROBOT_RIGHT</span></span><a class="headerlink" href="#embodichain.data.enum.SemanticMask.ROBOT_RIGHT" title="Link to this definition">#</a></dt>
+<dd><p>Represents the right robot region (value: 3).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id0" title="embodichain.data.enum.SemanticMask.BACKGROUND"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BACKGROUND</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id1" title="embodichain.data.enum.SemanticMask.FOREGROUND"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FOREGROUND</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id2" title="embodichain.data.enum.SemanticMask.ROBOT_LEFT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ROBOT_LEFT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id3" title="embodichain.data.enum.SemanticMask.ROBOT_RIGHT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ROBOT_RIGHT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.data.enum.SemanticMask.__new__" title="embodichain.data.enum.SemanticMask.__new__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__new__</span></code></a>(value)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id0">
+<span class="sig-name descname"><span class="pre">BACKGROUND</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#id0" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id1">
+<span class="sig-name descname"><span class="pre">FOREGROUND</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></em><a class="headerlink" href="#id1" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id2">
+<span class="sig-name descname"><span class="pre">ROBOT_LEFT</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#id2" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id3">
+<span class="sig-name descname"><span class="pre">ROBOT_RIGHT</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#id3" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.data.enum.SemanticMask.__new__">
+<span class="sig-name descname"><span class="pre">__new__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.data.enum.SemanticMask.__new__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="embodichain.agents.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">embodichain.agents</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="embodichain.lab.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">embodichain.lab</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-package-overview">Data Package Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.constants">Constants</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.dataset">Dataset Resolution</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset.__init__"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset.calculate_md5"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset.calculate_md5()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.EmbodiChainDataset.check_zip"><code class="docutils literal notranslate"><span class="pre">EmbodiChainDataset.check_zip()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.get_data_class"><code class="docutils literal notranslate"><span class="pre">get_data_class()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.dataset.get_data_path"><code class="docutils literal notranslate"><span class="pre">get_data_path()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.download">Asset Download CLI</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.cmd_download"><code class="docutils literal notranslate"><span class="pre">cmd_download()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.cmd_list"><code class="docutils literal notranslate"><span class="pre">cmd_list()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.download_asset"><code class="docutils literal notranslate"><span class="pre">download_asset()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.find_asset_class"><code class="docutils literal notranslate"><span class="pre">find_asset_class()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.get_registry"><code class="docutils literal notranslate"><span class="pre">get_registry()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.download.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.data.enum">Enums</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ActionMode"><code class="docutils literal notranslate"><span class="pre">ActionMode</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ActionMode.ABSOLUTE"><code class="docutils literal notranslate"><span class="pre">ActionMode.ABSOLUTE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ActionMode.RELATIVE"><code class="docutils literal notranslate"><span class="pre">ActionMode.RELATIVE</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts"><code class="docutils literal notranslate"><span class="pre">ControlParts</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.HEAD"><code class="docutils literal notranslate"><span class="pre">ControlParts.HEAD</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.LEFT_ARM"><code class="docutils literal notranslate"><span class="pre">ControlParts.LEFT_ARM</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.LEFT_EEF"><code class="docutils literal notranslate"><span class="pre">ControlParts.LEFT_EEF</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.RIGHT_ARM"><code class="docutils literal notranslate"><span class="pre">ControlParts.RIGHT_ARM</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.RIGHT_EEF"><code class="docutils literal notranslate"><span class="pre">ControlParts.RIGHT_EEF</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.ControlParts.WAIST"><code class="docutils literal notranslate"><span class="pre">ControlParts.WAIST</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefExecute"><code class="docutils literal notranslate"><span class="pre">EefExecute</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefExecute.CLOSE"><code class="docutils literal notranslate"><span class="pre">EefExecute.CLOSE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefExecute.OPEN"><code class="docutils literal notranslate"><span class="pre">EefExecute.OPEN</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefType"><code class="docutils literal notranslate"><span class="pre">EefType</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EefType.POSE"><code class="docutils literal notranslate"><span class="pre">EefType.POSE</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EndEffector"><code class="docutils literal notranslate"><span class="pre">EndEffector</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EndEffector.DEXTROUSHAND"><code class="docutils literal notranslate"><span class="pre">EndEffector.DEXTROUSHAND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.EndEffector.GRIPPER"><code class="docutils literal notranslate"><span class="pre">EndEffector.GRIPPER</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.Hints"><code class="docutils literal notranslate"><span class="pre">Hints</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.Hints.ARM"><code class="docutils literal notranslate"><span class="pre">Hints.ARM</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.Hints.EEF"><code class="docutils literal notranslate"><span class="pre">Hints.EEF</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.JointType"><code class="docutils literal notranslate"><span class="pre">JointType</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.JointType.QPOS"><code class="docutils literal notranslate"><span class="pre">JointType.QPOS</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask"><code class="docutils literal notranslate"><span class="pre">SemanticMask</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.BACKGROUND"><code class="docutils literal notranslate"><span class="pre">SemanticMask.BACKGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.FOREGROUND"><code class="docutils literal notranslate"><span class="pre">SemanticMask.FOREGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.ROBOT_LEFT"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.ROBOT_RIGHT"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">SemanticMask.BACKGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id1"><code class="docutils literal notranslate"><span class="pre">SemanticMask.FOREGROUND</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id2"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id3"><code class="docutils literal notranslate"><span class="pre">SemanticMask.ROBOT_RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.data.enum.SemanticMask.__new__"><code class="docutils literal notranslate"><span class="pre">SemanticMask.__new__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

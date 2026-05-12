@@ -1,0 +1,1142 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>embodichain.agents.rl.models &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference/embodichain/embodichain.agents.rl.models';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/api_reference/embodichain/embodichain.agents.rl.models.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>embodichain.agents.rl.models</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic"><code class="docutils literal notranslate"><span class="pre">ActorCritic</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.__init__"><code class="docutils literal notranslate"><span class="pre">ActorCritic.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.evaluate_actions"><code class="docutils literal notranslate"><span class="pre">ActorCritic.evaluate_actions()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.forward"><code class="docutils literal notranslate"><span class="pre">ActorCritic.forward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.get_value"><code class="docutils literal notranslate"><span class="pre">ActorCritic.get_value()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly"><code class="docutils literal notranslate"><span class="pre">ActorOnly</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.__init__"><code class="docutils literal notranslate"><span class="pre">ActorOnly.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.evaluate_actions"><code class="docutils literal notranslate"><span class="pre">ActorOnly.evaluate_actions()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.forward"><code class="docutils literal notranslate"><span class="pre">ActorOnly.forward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.get_value"><code class="docutils literal notranslate"><span class="pre">ActorOnly.get_value()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.MLP"><code class="docutils literal notranslate"><span class="pre">MLP</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.MLP.__init__"><code class="docutils literal notranslate"><span class="pre">MLP.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.MLP.init_orthogonal"><code class="docutils literal notranslate"><span class="pre">MLP.init_orthogonal()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy"><code class="docutils literal notranslate"><span class="pre">Policy</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.__init__"><code class="docutils literal notranslate"><span class="pre">Policy.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.device"><code class="docutils literal notranslate"><span class="pre">Policy.device</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.evaluate_actions"><code class="docutils literal notranslate"><span class="pre">Policy.evaluate_actions()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.forward"><code class="docutils literal notranslate"><span class="pre">Policy.forward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.get_action"><code class="docutils literal notranslate"><span class="pre">Policy.get_action()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.get_value"><code class="docutils literal notranslate"><span class="pre">Policy.get_value()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.training"><code class="docutils literal notranslate"><span class="pre">Policy.training</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.build_mlp_from_cfg"><code class="docutils literal notranslate"><span class="pre">build_mlp_from_cfg()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.build_policy"><code class="docutils literal notranslate"><span class="pre">build_policy()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.get_policy_class"><code class="docutils literal notranslate"><span class="pre">get_policy_class()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.get_registered_policy_names"><code class="docutils literal notranslate"><span class="pre">get_registered_policy_names()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.register_policy"><code class="docutils literal notranslate"><span class="pre">register_policy()</span></code></a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-embodichain.agents.rl.models">
+<span id="embodichain-agents-rl-models"></span><h1>embodichain.agents.rl.models<a class="headerlink" href="#module-embodichain.agents.rl.models" title="Link to this heading">#</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>Policy-network registration and model construction APIs for RL agents.</p>
+<blockquote>
+<div><p class="rubric">Functions</p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.build_mlp_from_cfg" title="embodichain.agents.rl.models.build_mlp_from_cfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_mlp_from_cfg</span></code></a>(module_cfg, in_dim, out_dim)</p></td>
+<td><p>Construct an MLP module from a minimal json-like config.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.build_policy" title="embodichain.agents.rl.models.build_policy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_policy</span></code></a>(policy_block, obs_space, ...[, ...])</p></td>
+<td><p>Build a policy from config using spaces for extensibility.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.get_policy_class" title="embodichain.agents.rl.models.get_policy_class"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_policy_class</span></code></a>(name)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.get_registered_policy_names" title="embodichain.agents.rl.models.get_registered_policy_names"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_registered_policy_names</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.register_policy" title="embodichain.agents.rl.models.register_policy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">register_policy</span></code></a>(name, policy_cls)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div></blockquote>
+<p id="module-0"><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorCritic" title="embodichain.agents.rl.models.ActorCritic"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ActorCritic</span></code></a></p></td>
+<td><p>Actor-Critic with learnable log_std for Gaussian policy.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorOnly" title="embodichain.agents.rl.models.ActorOnly"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ActorOnly</span></code></a></p></td>
+<td><p>Actor-only policy for algorithms that do not use a value function (e.g., GRPO).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.MLP" title="embodichain.agents.rl.models.MLP"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MLP</span></code></a></p></td>
+<td><p>General MLP supporting custom last activation, orthogonal init, and output reshape.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy" title="embodichain.agents.rl.models.Policy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Policy</span></code></a></p></td>
+<td><p>Abstract base class that all RL policies must implement.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Functions:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.build_mlp_from_cfg" title="embodichain.agents.rl.models.build_mlp_from_cfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_mlp_from_cfg</span></code></a>(module_cfg, in_dim, out_dim)</p></td>
+<td><p>Construct an MLP module from a minimal json-like config.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.build_policy" title="embodichain.agents.rl.models.build_policy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_policy</span></code></a>(policy_block, obs_space, ...[, ...])</p></td>
+<td><p>Build a policy from config using spaces for extensibility.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.get_policy_class" title="embodichain.agents.rl.models.get_policy_class"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_policy_class</span></code></a>(name)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.get_registered_policy_names" title="embodichain.agents.rl.models.get_registered_policy_names"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_registered_policy_names</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.register_policy" title="embodichain.agents.rl.models.register_policy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">register_policy</span></code></a>(name, policy_cls)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorCritic">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">ActorCritic</span></span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_critic.html#ActorCritic"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorCritic" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.agents.rl.models.Policy" title="embodichain.agents.rl.models.policy.Policy"><code class="xref py py-class docutils literal notranslate"><span class="pre">Policy</span></code></a></p>
+<p>Actor-Critic with learnable log_std for Gaussian policy.</p>
+<p>This is a placeholder implementation of the Policy interface that:
+- Encapsulates MLP networks (actor + critic) that need to be trained by RL algorithms
+- Handles internal computation: MLP output → mean + learnable log_std → Normal distribution
+- Provides a uniform interface for RL algorithms (PPO, SAC, etc.)</p>
+<p>This allows seamless swapping with other policy implementations (e.g., VLAPolicy)
+without modifying RL algorithm code.</p>
+<p>Implements TensorDict-native interfaces while preserving <cite>get_action()</cite>
+compatibility for evaluation and legacy call-sites.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorCritic.__init__" title="embodichain.agents.rl.models.ActorCritic.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(obs_dim, action_dim, device, actor, ...)</p></td>
+<td><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorCritic.evaluate_actions" title="embodichain.agents.rl.models.ActorCritic.evaluate_actions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">evaluate_actions</span></code></a>(tensordict)</p></td>
+<td><p>Evaluate actions and return current policy outputs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorCritic.forward" title="embodichain.agents.rl.models.ActorCritic.forward"><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></a>(tensordict[, deterministic])</p></td>
+<td><p>Write sampled actions and value estimates into the TensorDict.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorCritic.get_value" title="embodichain.agents.rl.models.ActorCritic.get_value"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_value</span></code></a>(tensordict)</p></td>
+<td><p>Write value estimate for the given observations into the TensorDict.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorCritic.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obs_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">action_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">critic</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_critic.html#ActorCritic.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorCritic.__init__" title="Link to this definition">#</a></dt>
+<dd><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorCritic.evaluate_actions">
+<span class="sig-name descname"><span class="pre">evaluate_actions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_critic.html#ActorCritic.evaluate_actions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorCritic.evaluate_actions" title="Link to this definition">#</a></dt>
+<dd><p>Evaluate actions and return current policy outputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – TensorDict containing <cite>obs</cite> and <cite>action</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A new TensorDict containing <cite>sample_log_prob</cite>, <cite>entropy</cite>, and <cite>value</cite>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorCritic.forward">
+<span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deterministic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_critic.html#ActorCritic.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorCritic.forward" title="Link to this definition">#</a></dt>
+<dd><p>Write sampled actions and value estimates into the TensorDict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorCritic.get_value">
+<span class="sig-name descname"><span class="pre">get_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_critic.html#ActorCritic.get_value"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorCritic.get_value" title="Link to this definition">#</a></dt>
+<dd><p>Write value estimate for the given observations into the TensorDict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – Input TensorDict containing <cite>obs</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TensorDict with <cite>value</cite> populated.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorOnly">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">ActorOnly</span></span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_only.html#ActorOnly"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorOnly" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.agents.rl.models.Policy" title="embodichain.agents.rl.models.policy.Policy"><code class="xref py py-class docutils literal notranslate"><span class="pre">Policy</span></code></a></p>
+<p>Actor-only policy for algorithms that do not use a value function (e.g., GRPO).</p>
+<p>Same interface as ActorCritic: get_action and evaluate_actions return (action, log_prob, value),
+but value is always zeros since no critic is used.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorOnly.__init__" title="embodichain.agents.rl.models.ActorOnly.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(obs_dim, action_dim, device, actor)</p></td>
+<td><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorOnly.evaluate_actions" title="embodichain.agents.rl.models.ActorOnly.evaluate_actions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">evaluate_actions</span></code></a>(tensordict)</p></td>
+<td><p>Evaluate actions and return current policy outputs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorOnly.forward" title="embodichain.agents.rl.models.ActorOnly.forward"><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></a>(tensordict[, deterministic])</p></td>
+<td><p>Write sampled actions and value estimates into the TensorDict.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.ActorOnly.get_value" title="embodichain.agents.rl.models.ActorOnly.get_value"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_value</span></code></a>(tensordict)</p></td>
+<td><p>Write value estimate for the given observations into the TensorDict.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorOnly.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obs_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">action_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_only.html#ActorOnly.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorOnly.__init__" title="Link to this definition">#</a></dt>
+<dd><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorOnly.evaluate_actions">
+<span class="sig-name descname"><span class="pre">evaluate_actions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_only.html#ActorOnly.evaluate_actions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorOnly.evaluate_actions" title="Link to this definition">#</a></dt>
+<dd><p>Evaluate actions and return current policy outputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – TensorDict containing <cite>obs</cite> and <cite>action</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A new TensorDict containing <cite>sample_log_prob</cite>, <cite>entropy</cite>, and <cite>value</cite>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorOnly.forward">
+<span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deterministic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_only.html#ActorOnly.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorOnly.forward" title="Link to this definition">#</a></dt>
+<dd><p>Write sampled actions and value estimates into the TensorDict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.ActorOnly.get_value">
+<span class="sig-name descname"><span class="pre">get_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/actor_only.html#ActorOnly.get_value"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.ActorOnly.get_value" title="Link to this definition">#</a></dt>
+<dd><p>Write value estimate for the given observations into the TensorDict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – Input TensorDict containing <cite>obs</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TensorDict with <cite>value</cite> populated.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.MLP">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">MLP</span></span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/mlp.html#MLP"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.MLP" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Sequential</span></code></p>
+<p>General MLP supporting custom last activation, orthogonal init, and output reshape.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>input_dim</strong> (<em>-</em>) – input dimension</p></li>
+<li><p><strong>output_dim</strong> (<em>-</em>) – output dimension (int or shape tuple/list)</p></li>
+<li><p><strong>hidden_dims</strong> (<em>-</em>) – hidden layer sizes, e.g. [256, 256]</p></li>
+<li><p><strong>activation</strong> (<em>-</em>) – hidden layer activation name (relu/elu/tanh/gelu/silu)</p></li>
+<li><p><strong>last_activation</strong> (<em>-</em>) – last-layer activation name or None for linear</p></li>
+<li><p><strong>use_layernorm</strong> (<em>-</em>) – whether to add LayerNorm after each hidden linear layer</p></li>
+<li><p><strong>dropout_p</strong> (<em>-</em>) – dropout probability for hidden layers (0 disables)</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.MLP.__init__" title="embodichain.agents.rl.models.MLP.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(input_dim, output_dim, hidden_dims)</p></td>
+<td><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.MLP.init_orthogonal" title="embodichain.agents.rl.models.MLP.init_orthogonal"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_orthogonal</span></code></a>([scales])</p></td>
+<td><p>Orthogonal-initialize linear layers and zero the bias.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.MLP.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hidden_dims</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">activation</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'elu'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">last_activation</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_layernorm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dropout_p</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/mlp.html#MLP.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.MLP.__init__" title="Link to this definition">#</a></dt>
+<dd><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.MLP.init_orthogonal">
+<span class="sig-name descname"><span class="pre">init_orthogonal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">scales</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/mlp.html#MLP.init_orthogonal"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.MLP.init_orthogonal" title="Link to this definition">#</a></dt>
+<dd><p>Orthogonal-initialize linear layers and zero the bias.</p>
+<p>scales: single gain value or a sequence with length equal to the
+number of linear layers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">Policy</span></span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/policy.html#Policy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.Policy" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Module</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<p>Abstract base class that all RL policies must implement.</p>
+<p>A Policy:
+- Encapsulates neural networks that are trained by RL algorithms
+- Handles internal computations (e.g., network output → distribution)
+- Provides a uniform interface for algorithms (PPO, SAC, etc.)</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.__init__" title="embodichain.agents.rl.models.Policy.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>()</p></td>
+<td><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.evaluate_actions" title="embodichain.agents.rl.models.Policy.evaluate_actions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">evaluate_actions</span></code></a>(tensordict)</p></td>
+<td><p>Evaluate actions and return current policy outputs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.forward" title="embodichain.agents.rl.models.Policy.forward"><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></a>(tensordict[, deterministic])</p></td>
+<td><p>Write sampled actions and value estimates into the TensorDict.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.get_action" title="embodichain.agents.rl.models.Policy.get_action"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_action</span></code></a>(tensordict[, deterministic])</p></td>
+<td><p>Sample actions into the provided TensorDict without gradients.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.get_value" title="embodichain.agents.rl.models.Policy.get_value"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_value</span></code></a>(tensordict)</p></td>
+<td><p>Write value estimate for the given observations into the TensorDict.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.device" title="embodichain.agents.rl.models.Policy.device"><code class="xref py py-obj docutils literal notranslate"><span class="pre">device</span></code></a></p></td>
+<td><p>Device where the policy parameters are located.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.rl.models.Policy.training" title="embodichain.agents.rl.models.Policy.training"><code class="xref py py-obj docutils literal notranslate"><span class="pre">training</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/policy.html#Policy.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.Policy.__init__" title="Link to this definition">#</a></dt>
+<dd><p>Initialize internal Module state, shared by both nn.Module and ScriptModule.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.device">
+<span class="sig-name descname"><span class="pre">device</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">torch.device</span></em><a class="headerlink" href="#embodichain.agents.rl.models.Policy.device" title="Link to this definition">#</a></dt>
+<dd><p>Device where the policy parameters are located.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.evaluate_actions">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">evaluate_actions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/policy.html#Policy.evaluate_actions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.Policy.evaluate_actions" title="Link to this definition">#</a></dt>
+<dd><p>Evaluate actions and return current policy outputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – TensorDict containing <cite>obs</cite> and <cite>action</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A new TensorDict containing <cite>sample_log_prob</cite>, <cite>entropy</cite>, and <cite>value</cite>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.forward">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deterministic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/policy.html#Policy.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.Policy.forward" title="Link to this definition">#</a></dt>
+<dd><p>Write sampled actions and value estimates into the TensorDict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.get_action">
+<span class="sig-name descname"><span class="pre">get_action</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deterministic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/policy.html#Policy.get_action"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.Policy.get_action" title="Link to this definition">#</a></dt>
+<dd><p>Sample actions into the provided TensorDict without gradients.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – Input TensorDict containing <cite>obs</cite>.</p></li>
+<li><p><strong>deterministic</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></span>) – If True, return the mean action; otherwise sample</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TensorDict with <cite>action</cite>, <cite>sample_log_prob</cite>, and <cite>value</cite> populated.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.get_value">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tensordict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models/policy.html#Policy.get_value"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.Policy.get_value" title="Link to this definition">#</a></dt>
+<dd><p>Write value estimate for the given observations into the TensorDict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensordict</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – Input TensorDict containing <cite>obs</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TensorDict with <cite>value</cite> populated.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.Policy.training">
+<span class="sig-name descname"><span class="pre">training</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.agents.rl.models.Policy.training" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.build_mlp_from_cfg">
+<span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">build_mlp_from_cfg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">module_cfg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">in_dim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_dim</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models.html#build_mlp_from_cfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.build_mlp_from_cfg" title="Link to this definition">#</a></dt>
+<dd><p>Construct an MLP module from a minimal json-like config.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.agents.rl.models.MLP" title="embodichain.agents.rl.models.mlp.MLP"><code class="xref py py-class docutils literal notranslate"><span class="pre">MLP</span></code></a></span></p>
+</dd>
+</dl>
+<dl>
+<dt>Expected schema:</dt><dd><dl class="simple">
+<dt>module_cfg = {</dt><dd><p>“type”: “mlp”,
+“hidden_sizes”: [256, 256],
+“activation”: “relu”,</p>
+</dd>
+</dl>
+<p>}</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.build_policy">
+<span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">build_policy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">policy_block</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">obs_space</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">action_space</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">critic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models.html#build_policy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.build_policy" title="Link to this definition">#</a></dt>
+<dd><p>Build a policy from config using spaces for extensibility.</p>
+<p>Built-in MLP policies still resolve flattened <cite>obs_dim</cite> / <cite>action_dim</cite>, while
+custom policies may accept richer <cite>obs_space</cite> / <cite>action_space</cite> inputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.agents.rl.models.Policy" title="embodichain.agents.rl.models.policy.Policy"><code class="xref py py-class docutils literal notranslate"><span class="pre">Policy</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.get_policy_class">
+<span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">get_policy_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models.html#get_policy_class"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.get_policy_class" title="Link to this definition">#</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Type</span></code>[<a class="reference internal" href="#embodichain.agents.rl.models.Policy" title="embodichain.agents.rl.models.policy.Policy"><code class="xref py py-class docutils literal notranslate"><span class="pre">Policy</span></code></a>]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.get_registered_policy_names">
+<span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">get_registered_policy_names</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models.html#get_registered_policy_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.get_registered_policy_names" title="Link to this definition">#</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="embodichain.agents.rl.models.register_policy">
+<span class="sig-prename descclassname"><span class="pre">embodichain.agents.rl.models.</span></span><span class="sig-name descname"><span class="pre">register_policy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_cls</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/rl/models.html#register_policy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.rl.models.register_policy" title="Link to this definition">#</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic"><code class="docutils literal notranslate"><span class="pre">ActorCritic</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.__init__"><code class="docutils literal notranslate"><span class="pre">ActorCritic.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.evaluate_actions"><code class="docutils literal notranslate"><span class="pre">ActorCritic.evaluate_actions()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.forward"><code class="docutils literal notranslate"><span class="pre">ActorCritic.forward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorCritic.get_value"><code class="docutils literal notranslate"><span class="pre">ActorCritic.get_value()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly"><code class="docutils literal notranslate"><span class="pre">ActorOnly</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.__init__"><code class="docutils literal notranslate"><span class="pre">ActorOnly.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.evaluate_actions"><code class="docutils literal notranslate"><span class="pre">ActorOnly.evaluate_actions()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.forward"><code class="docutils literal notranslate"><span class="pre">ActorOnly.forward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.ActorOnly.get_value"><code class="docutils literal notranslate"><span class="pre">ActorOnly.get_value()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.MLP"><code class="docutils literal notranslate"><span class="pre">MLP</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.MLP.__init__"><code class="docutils literal notranslate"><span class="pre">MLP.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.MLP.init_orthogonal"><code class="docutils literal notranslate"><span class="pre">MLP.init_orthogonal()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy"><code class="docutils literal notranslate"><span class="pre">Policy</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.__init__"><code class="docutils literal notranslate"><span class="pre">Policy.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.device"><code class="docutils literal notranslate"><span class="pre">Policy.device</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.evaluate_actions"><code class="docutils literal notranslate"><span class="pre">Policy.evaluate_actions()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.forward"><code class="docutils literal notranslate"><span class="pre">Policy.forward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.get_action"><code class="docutils literal notranslate"><span class="pre">Policy.get_action()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.get_value"><code class="docutils literal notranslate"><span class="pre">Policy.get_value()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.Policy.training"><code class="docutils literal notranslate"><span class="pre">Policy.training</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.build_mlp_from_cfg"><code class="docutils literal notranslate"><span class="pre">build_mlp_from_cfg()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.build_policy"><code class="docutils literal notranslate"><span class="pre">build_policy()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.get_policy_class"><code class="docutils literal notranslate"><span class="pre">get_policy_class()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.get_registered_policy_names"><code class="docutils literal notranslate"><span class="pre">get_registered_policy_names()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.rl.models.register_policy"><code class="docutils literal notranslate"><span class="pre">register_policy()</span></code></a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

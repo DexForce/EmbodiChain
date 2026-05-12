@@ -1,0 +1,1765 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.gym.envs.managers.observations &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/gym/envs/managers/observations';</script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.gym.envs.managers.observations</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">tensordict</span><span class="w"> </span><span class="kn">import</span> <span class="n">TensorDict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TYPE_CHECKING</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Sequence</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">RigidObject</span><span class="p">,</span> <span class="n">Articulation</span><span class="p">,</span> <span class="n">Robot</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.sensors</span><span class="w"> </span><span class="kn">import</span> <span class="n">Camera</span><span class="p">,</span> <span class="n">StereoCamera</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvObs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="n">SceneEntityCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers.events</span><span class="w"> </span><span class="kn">import</span> <span class="n">resolve_dict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Functor</span><span class="p">,</span> <span class="n">FunctorCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.math</span><span class="w"> </span><span class="kn">import</span> <span class="n">quat_from_matrix</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbodiedEnv</span>
+
+
+<div class="viewcode-block" id="get_object_pose">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_object_pose">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_object_pose</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the arena poses of the objects in the environment.</span>
+
+<span class="sd">    If the object with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the scene entity.</span>
+<span class="sd">        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the objects.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">asset_uids</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">to_matrix</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">7</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="n">to_matrix</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_rigid_object_pose">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_rigid_object_pose">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_rigid_object_pose</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the world poses of the rigid objects in the environment.</span>
+
+<span class="sd">    If the rigid object with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        This method will be deprecated in the future and replaced by `get_object_pose` as</span>
+<span class="sd">        the distinction between rigid objects and general objects is being removed. Please use `get_object_pose` instead when possible.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the scene entity.</span>
+<span class="sd">        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the rigid objects.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object_uid_list</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">to_matrix</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">7</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="n">to_matrix</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_object_body_scale">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_object_body_scale">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_object_body_scale</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the body scale of the objects in the environment.</span>
+
+<span class="sd">    If the object with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the scene entity.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 3) representing the body scale of the objects.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">asset_uids</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">RigidObject</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Object with UID &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; is not a RigidObject. Currently only support getting body scale for RigidObject, please check again.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_body_scale</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="get_object_uid">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_object_uid">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_object_uid</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the user IDs of the objects in the environment.</span>
+
+<span class="sd">    If the object with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        - If asset is RigidObject, the user IDs is shaped as (num_envs,)</span>
+<span class="sd">        - If asset is Articulation or Robot, the user IDs is shaped as (num_envs, num_links) and ordered by</span>
+<span class="sd">            link_names in the configuration.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the scene entity.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs,) representing the user IDs of the objects.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">asset_uids</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="p">(</span><span class="n">Articulation</span><span class="p">,</span> <span class="n">Robot</span><span class="p">,</span> <span class="n">RigidObject</span><span class="p">))</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Object with UID &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; is not an Articulation, Robot or RigidObject. Currently only support getting user IDs for Articulation, Robot and RigidObject, please check again.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_user_ids</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="get_rigid_object_velocity">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_rigid_object_velocity">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_rigid_object_velocity</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the world velocities of the rigid objects in the environment.</span>
+
+<span class="sd">    If the rigid object with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the scene entity.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 6) representing the linear and angular velocities of the rigid objects.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object_uid_list</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">obj</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">vel</span></div>
+
+
+
+<div class="viewcode-block" id="normalize_robot_joint_data">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.normalize_robot_joint_data">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">normalize_robot_joint_data</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">data</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">joint_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
+    <span class="n">limit</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;qpos_limits&quot;</span><span class="p">,</span> <span class="s2">&quot;qvel_limits&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;qpos_limits&quot;</span><span class="p">,</span>
+    <span class="nb">range</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Normalize the robot joint positions to the range of [0, 1] based on the joint limits.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        joint_ids: The indices of the joints to be normalized.</span>
+<span class="sd">        limit: The type of joint limits to be used for normalization. Options are:</span>
+<span class="sd">            - `qpos_limits`: Use the joint position limits for normalization.</span>
+<span class="sd">            - `qvel_limits`: Use the joint velocity limits for normalization.</span>
+<span class="sd">        range: The range to normalize the joint data to. Defaults to [0.0, 1.0].</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">robot</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">robot</span>
+
+    <span class="n">joint_ids_set</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">)[</span><span class="n">joint_ids</span><span class="p">]</span>
+    <span class="c1"># shape of target_limits: (num_envs, len(joint_ids), 2)</span>
+    <span class="n">target_limits</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">robot</span><span class="o">.</span><span class="n">body_data</span><span class="p">,</span> <span class="n">limit</span><span class="p">)[:,</span> <span class="n">joint_ids_set</span><span class="p">,</span> <span class="p">:]</span>
+    <span class="n">low</span> <span class="o">=</span> <span class="n">target_limits</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="n">high</span> <span class="o">=</span> <span class="n">target_limits</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">]</span>
+
+    <span class="c1"># normalize the joint data to the specified range</span>
+    <span class="n">data</span><span class="p">[:,</span> <span class="n">joint_ids</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="p">[:,</span> <span class="n">joint_ids</span><span class="p">]</span> <span class="o">-</span> <span class="n">low</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">high</span> <span class="o">-</span> <span class="n">low</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span>
+        <span class="nb">range</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="nb">range</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">)</span> <span class="o">+</span> <span class="nb">range</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">data</span></div>
+
+
+
+<div class="viewcode-block" id="get_sensor_pose_in_robot_frame">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_sensor_pose_in_robot_frame">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_sensor_pose_in_robot_frame</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">robot_uid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">is_right</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the pose of a sensor in the robot&#39;s base coordinate frame.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the sensor entity.</span>
+<span class="sd">        robot_uid: The uid of the robot. If None, uses the default robot from env.</span>
+<span class="sd">        is_right: Whether to return the right camera intrinsics for stereo cameras.</span>
+<span class="sd">            Defaults to False (left camera). Ignored for monocular cameras.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 4, 4) representing the sensor pose in robot coordinates as a transformation matrix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Get robot base pose in world frame</span>
+    <span class="n">robot</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_robot</span><span class="p">(</span><span class="n">robot_uid</span><span class="p">)</span> <span class="k">if</span> <span class="n">robot_uid</span> <span class="k">else</span> <span class="n">env</span><span class="o">.</span><span class="n">robot</span>
+    <span class="n">robot_pose</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">robot_pose_inv</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">robot_pose</span><span class="p">)</span>
+
+    <span class="c1"># Get sensor pose in world frame</span>
+    <span class="n">sensor</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Camera</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">]</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_sensor</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">sensor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Sensor with UID &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; not found in the simulation.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">):</span>
+        <span class="n">cam_left_pose</span><span class="p">,</span> <span class="n">cam_right_pose</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_left_right_arena_pose</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">is_right</span><span class="p">:</span>
+            <span class="n">cam_in_robot</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">robot_pose_inv</span><span class="p">,</span> <span class="n">cam_right_pose</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cam_in_robot</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">robot_pose_inv</span><span class="p">,</span> <span class="n">cam_left_pose</span><span class="p">)</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">cam_pose</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_arena_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="c1"># Compute sensor pose in robot coordinate frame: T_robot_cam = inv(T_world_robot) @ T_world_cam</span>
+        <span class="n">cam_in_robot</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">robot_pose_inv</span><span class="p">,</span> <span class="n">cam_pose</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cam_in_robot</span></div>
+
+
+
+<div class="viewcode-block" id="get_sensor_intrinsics">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_sensor_intrinsics">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_sensor_intrinsics</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">is_right</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the intrinsic matrix of a sensor (camera).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the sensor entity.</span>
+<span class="sd">        is_right: Whether to return the right camera intrinsics for stereo cameras.</span>
+<span class="sd">            Defaults to False (left camera). Ignored for monocular cameras.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 3, 3) representing the camera intrinsics.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">sensor</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_sensor</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">sensor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Sensor with UID &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; not found in the simulation.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">):</span>
+        <span class="n">left_intrinsics</span><span class="p">,</span> <span class="n">right_intrinsics</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_intrinsics</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">right_intrinsics</span> <span class="k">if</span> <span class="n">is_right</span> <span class="k">else</span> <span class="n">left_intrinsics</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="n">Camera</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_intrinsics</span><span class="p">()</span>  <span class="c1"># (num_envs, 3, 3)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sensor &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; is not Camera or StereoCamera.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="compute_semantic_mask">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.compute_semantic_mask">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_semantic_mask</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">foreground_uids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">is_right</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute the semantic mask for the specified scene entity.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        The semantic mask is defined as (B, H, W, len(SemanticMask)) where these channels represents:</span>
+<span class="sd">        - background channel: the instance id of the background is set to 1 (0 if not background)</span>
+<span class="sd">        - foreground channel: the instance id of the foreground objects is set to 1 (0 if not foreground)</span>
+<span class="sd">        - robot left-side channel: the instance id of the robot left-side is set to 1</span>
+<span class="sd">        - robot right-side channel: the instance id of the robot right-side is set to 1</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        entity_cfg: The configuration of the scene entity.</span>
+<span class="sd">        foreground_uids: The list of uids for the foreground objects.</span>
+<span class="sd">        is_right: Whether to use the right camera for stereo cameras. Default is False.</span>
+<span class="sd">            Only applicable if the sensor is a StereoCamera.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, height, width) representing the semantic mask.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data.enum</span><span class="w"> </span><span class="kn">import</span> <span class="n">SemanticMask</span>
+
+    <span class="n">sensor</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Camera</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">]</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_sensor</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">sensor</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">enable_mask</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Sensor &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; does not have mask enabled. Please enable the mask in the sensor configuration.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">)</span> <span class="ow">and</span> <span class="n">is_right</span><span class="p">:</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="n">obs</span><span class="p">[</span><span class="s2">&quot;sensor&quot;</span><span class="p">][</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">][</span><span class="s2">&quot;mask_right&quot;</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="n">obs</span><span class="p">[</span><span class="s2">&quot;sensor&quot;</span><span class="p">][</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">][</span><span class="s2">&quot;mask&quot;</span><span class="p">]</span>
+
+    <span class="n">left_link_indices</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">i</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">link_name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">link_names</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">link_name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;left_&quot;</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="n">left_robot_uids</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">user_ids</span><span class="p">[:,</span> <span class="n">left_link_indices</span><span class="p">]</span>
+
+    <span class="n">right_link_indices</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">i</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">link_name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">link_names</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">link_name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;right_&quot;</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="n">right_robot_uids</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">user_ids</span><span class="p">[:,</span> <span class="n">right_link_indices</span><span class="p">]</span>
+
+    <span class="n">mask_exp</span> <span class="o">=</span> <span class="n">mask</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">left_robot_uids_exp</span> <span class="o">=</span> <span class="n">left_robot_uids</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">right_robot_uids_exp</span> <span class="o">=</span> <span class="n">right_robot_uids</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">left_robot_mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">mask_exp</span> <span class="o">==</span> <span class="n">left_robot_uids_exp</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze_</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">right_robot_mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">mask_exp</span> <span class="o">==</span> <span class="n">right_robot_uids_exp</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze_</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">asset_uids</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">asset_uids</span>
+    <span class="n">foreground_assets</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">uid</span><span class="p">)</span> <span class="k">for</span> <span class="n">uid</span> <span class="ow">in</span> <span class="n">foreground_uids</span> <span class="k">if</span> <span class="n">uid</span> <span class="ow">in</span> <span class="n">asset_uids</span>
+    <span class="p">]</span>
+
+    <span class="c1"># cat assets uid (num_envs, n) into dim 1</span>
+    <span class="n">foreground_uids</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span>
+        <span class="p">[</span>
+            <span class="p">(</span>
+                <span class="n">asset</span><span class="o">.</span><span class="n">get_user_ids</span><span class="p">()</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">asset</span><span class="o">.</span><span class="n">get_user_ids</span><span class="p">()</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span>
+                <span class="k">else</span> <span class="n">asset</span><span class="o">.</span><span class="n">get_user_ids</span><span class="p">()</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="n">asset</span> <span class="ow">in</span> <span class="n">foreground_assets</span>
+        <span class="p">],</span>
+        <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">foreground_uids_exp</span> <span class="o">=</span> <span class="n">foreground_uids</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">foreground_mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">mask_exp</span> <span class="o">==</span> <span class="n">foreground_uids_exp</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze_</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">background_mask</span> <span class="o">=</span> <span class="o">~</span><span class="p">(</span><span class="n">left_robot_mask</span> <span class="o">|</span> <span class="n">right_robot_mask</span> <span class="o">|</span> <span class="n">foreground_mask</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze_</span><span class="p">(</span>
+        <span class="o">-</span><span class="mi">1</span>
+    <span class="p">)</span>
+
+    <span class="n">masks</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="n">masks_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">member</span><span class="o">.</span><span class="n">value</span> <span class="k">for</span> <span class="n">member</span> <span class="ow">in</span> <span class="n">SemanticMask</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">masks</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span>
+        <span class="n">masks_ids</span>
+    <span class="p">),</span> <span class="s2">&quot;Different length of mask slots and SemanticMask Enum </span><span class="si">{}</span><span class="s2">.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">masks_ids</span><span class="p">)</span>
+    <span class="n">mask_id_to_label</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">SemanticMask</span><span class="o">.</span><span class="n">BACKGROUND</span><span class="o">.</span><span class="n">value</span><span class="p">:</span> <span class="n">background_mask</span><span class="p">,</span>
+        <span class="n">SemanticMask</span><span class="o">.</span><span class="n">FOREGROUND</span><span class="o">.</span><span class="n">value</span><span class="p">:</span> <span class="n">foreground_mask</span><span class="p">,</span>
+        <span class="n">SemanticMask</span><span class="o">.</span><span class="n">ROBOT_LEFT</span><span class="o">.</span><span class="n">value</span><span class="p">:</span> <span class="n">left_robot_mask</span><span class="p">,</span>
+        <span class="n">SemanticMask</span><span class="o">.</span><span class="n">ROBOT_RIGHT</span><span class="o">.</span><span class="n">value</span><span class="p">:</span> <span class="n">right_robot_mask</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="n">mask_id</span> <span class="ow">in</span> <span class="n">masks_ids</span><span class="p">:</span>
+        <span class="n">masks</span><span class="p">[</span><span class="n">mask_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">mask_id_to_label</span><span class="p">[</span><span class="n">mask_id</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_robot_eef_pose">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_robot_eef_pose">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_robot_eef_pose</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="s2">&quot;EmbodiedEnv&quot;</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">part_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">position_only</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get robot end-effector pose using forward kinematics.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">        obs: The observation dictionary.</span>
+<span class="sd">        part_name: The name of the control part. If None, uses default part.</span>
+<span class="sd">        position_only: If True, returns only position (3D). If False, returns full pose (4x4 matrix).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tensor of shape (num_envs, 3) if position_only=True, or (num_envs, 4, 4) otherwise.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">robot</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">robot</span>
+
+    <span class="k">if</span> <span class="n">part_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">joint_ids</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">part_name</span><span class="p">)</span>
+        <span class="n">qpos</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos</span><span class="p">[:,</span> <span class="n">joint_ids</span><span class="p">]</span>
+        <span class="n">ee_pose</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">compute_fk</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">part_name</span><span class="p">,</span> <span class="n">qpos</span><span class="o">=</span><span class="n">qpos</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">qpos</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">()</span>
+        <span class="n">ee_pose</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">compute_fk</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">qpos</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">position_only</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">ee_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">ee_pose</span></div>
+
+
+
+<div class="viewcode-block" id="target_position">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.target_position">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">target_position</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="s2">&quot;EmbodiedEnv&quot;</span><span class="p">,</span>
+    <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+    <span class="n">target_pose_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;goal_pose&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get virtual target position from env state.</span>
+
+<span class="sd">    Reads target pose from env.{target_pose_key} (set by randomize_target_pose event).</span>
+<span class="sd">    Returns zeros if not yet initialized (e.g., during env initialization before reset).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env: The environment instance</span>
+<span class="sd">        obs: Observation dict (unused, for API compatibility)</span>
+<span class="sd">        target_pose_key: Key for target pose in env (default: &quot;goal_pose&quot;)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Target position tensor of shape (num_envs, 3).</span>
+<span class="sd">        Returns zeros if target_pose_key is not found (e.g., before first reset).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">target_pose_key</span><span class="p">):</span>
+        <span class="c1"># Return zeros during initialization (before reset event triggers)</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="n">target_poses</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">target_pose_key</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">target_poses</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>  <span class="c1"># (num_envs, 3)</span>
+        <span class="k">return</span> <span class="n">target_poses</span>
+    <span class="k">else</span><span class="p">:</span>  <span class="c1"># (num_envs, 4, 4)</span>
+        <span class="k">return</span> <span class="n">target_poses</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="compute_exteroception">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.compute_exteroception">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">compute_exteroception</span><span class="p">(</span><span class="n">Functor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute the exteroception for the observation space.</span>
+
+<span class="sd">    The exteroception is currently defined as a set of keypoints around a reference pose, which are prjected from 3D</span>
+<span class="sd">    space to 2D image plane.</span>
+<span class="sd">    The reference pose can derive from the following sources:</span>
+<span class="sd">        - Pose from robot control part (e.g., end-effector, usually tcp pose)</span>
+<span class="sd">        - Object affordance pose (e.g., handle pose of a mug or a pick pose of a cube)</span>
+
+<span class="sd">    Therefore, the exteroception are defined in the camera-like sensor, for example.</span>
+<span class="sd">    descriptor = {</span>
+<span class="sd">        &quot;cam_high&quot;: [</span>
+<span class="sd">            {</span>
+<span class="sd">                &quot;type&quot;: &quot;affordance&quot;,</span>
+<span class="sd">                &quot;obj_uid&quot;: &quot;obj1&quot;,</span>
+<span class="sd">                &quot;key&quot;: &quot;grasp_pose&quot;,</span>
+<span class="sd">                &quot;is_arena_coord&quot;: True</span>
+<span class="sd">            },</span>
+<span class="sd">            {</span>
+<span class="sd">                &quot;type&quot;: &quot;affordance&quot;,</span>
+<span class="sd">                &quot;obj_uid&quot;: &quot;obj1&quot;,</span>
+<span class="sd">                &quot;key&quot;: &quot;place_pose&quot;,</span>
+<span class="sd">            },</span>
+<span class="sd">            {</span>
+<span class="sd">                &quot;type&quot;: &quot;robot&quot;,</span>
+<span class="sd">                &quot;control_part&quot;: &quot;left_arm&quot;,</span>
+<span class="sd">            },</span>
+<span class="sd">            {</span>
+<span class="sd">                &quot;type&quot;: &quot;robot&quot;,</span>
+<span class="sd">                &quot;control_part&quot;: &quot;right_arm&quot;,</span>
+<span class="sd">            }</span>
+<span class="sd">        ],</span>
+<span class="sd">        ...</span>
+<span class="sd">    }</span>
+
+<span class="sd">    Explanation of the parameters:</span>
+<span class="sd">        - The key of the dictionary is the sensor uid.</span>
+<span class="sd">        - The value is another dictionary, where the key is the source type, and the value is a dictionary of parameters.</span>
+<span class="sd">        - For `affordance` source type, the parameters are:</span>
+<span class="sd">            - `obj_uid`: The uid of the object to get the affordance pose from.</span>
+<span class="sd">            - `key`: The key of the affordance pose in the affordance data.</span>
+<span class="sd">            - `is_arena_coord`: Whether the affordance pose is in the arena coordinate system. Default is False.</span>
+<span class="sd">        - For `robot` source type, the parameters are:</span>
+<span class="sd">            - `control_part`: The control part of the robot to get the pose from.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="compute_exteroception.__init__">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.compute_exteroception.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">FunctorCfg</span><span class="p">,</span>
+        <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">env</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">num_envs</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Exteroception functor only supported env with &#39;num_envs=1&#39; but got &#39;num_envs=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">num_envs</span><span class="si">}</span><span class="s2">&#39;. Please check again.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_valid_source</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;robot&quot;</span><span class="p">,</span> <span class="s2">&quot;affordance&quot;</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="compute_exteroception.shift_pose">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.compute_exteroception.shift_pose">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shift_pose</span><span class="p">(</span><span class="n">pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">axis</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">shift</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Shift the pose along the specified axis by the given amount.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            pose: The original pose tensor of shape (B, 4, 4).</span>
+<span class="sd">            axis: The axis along which to shift (0 for x, 1 for y, 2 for z).</span>
+<span class="sd">            shift: The amount to shift along the specified axis.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">shift_pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">pose</span><span class="p">)</span>
+        <span class="n">shift_pose</span><span class="p">[:,</span> <span class="n">axis</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">shift</span>
+        <span class="n">shift_pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">shift_pose</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">shift_pose</span></div>
+
+
+<div class="viewcode-block" id="compute_exteroception.expand_pose">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.compute_exteroception.expand_pose">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">expand_pose</span><span class="p">(</span>
+        <span class="n">pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">x_interval</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+        <span class="n">y_interval</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+        <span class="n">kpnts_number</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">ref_pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Expand pose with keypoints along x and y axes.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            pose: The original pose tensor of shape (B, 4, 4).</span>
+<span class="sd">            x_interval: The interval for expanding along x-axis.</span>
+<span class="sd">            y_interval: The interval for expanding along y-axis.</span>
+<span class="sd">            kpnts_number: Number of keypoints to generate for each axis.</span>
+<span class="sd">            ref_pose: Reference pose tensor of shape (B, 4, 4). If None, uses identity matrix.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Expanded poses tensor of shape (B, 1 + 2*kpnts_number, 4, 4).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">batch_size</span> <span class="o">=</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="n">pose</span><span class="o">.</span><span class="n">device</span>
+
+        <span class="c1"># Create default reference pose if not provided</span>
+        <span class="k">if</span> <span class="n">ref_pose</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ref_pose</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Start with the original pose transformed by ref_pose</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="p">[</span><span class="n">ref_pose</span> <span class="o">@</span> <span class="n">pose</span><span class="p">]</span>
+
+        <span class="c1"># Generate x-axis offsets and expand poses</span>
+        <span class="c1"># TODO: only support 1 env</span>
+        <span class="n">xoffset</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="n">x_interval</span><span class="p">,</span> <span class="n">x_interval</span><span class="p">,</span> <span class="n">kpnts_number</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">x_shift</span> <span class="ow">in</span> <span class="n">xoffset</span><span class="p">:</span>
+            <span class="n">shifted_pose</span> <span class="o">=</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">shift_pose</span><span class="p">(</span><span class="n">pose</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">x_shift</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+            <span class="n">x_expanded</span> <span class="o">=</span> <span class="n">ref_pose</span> <span class="o">@</span> <span class="n">shifted_pose</span>
+            <span class="n">ret</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">x_expanded</span><span class="p">)</span>
+
+        <span class="c1"># Generate y-axis offsets and expand poses</span>
+        <span class="c1"># TODO: only support 1 env</span>
+        <span class="n">yoffset</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="n">y_interval</span><span class="p">,</span> <span class="n">y_interval</span><span class="p">,</span> <span class="n">kpnts_number</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">y_shift</span> <span class="ow">in</span> <span class="n">yoffset</span><span class="p">:</span>
+            <span class="n">shifted_pose</span> <span class="o">=</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">shift_pose</span><span class="p">(</span><span class="n">pose</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">y_shift</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+            <span class="n">y_expanded</span> <span class="o">=</span> <span class="n">ref_pose</span> <span class="o">@</span> <span class="n">shifted_pose</span>
+            <span class="n">ret</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">y_expanded</span><span class="p">)</span>
+
+        <span class="c1"># Stack all poses along a new dimension</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">ret</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_project_3d_to_2d</span><span class="p">(</span>
+        <span class="n">cam_pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">intrinsics</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">target_poses</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">normalize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Project 3D poses to 2D image plane.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cam_pose: Camera pose of in arena frame of shape (B, 4, 4).</span>
+<span class="sd">            intrinsics: Camera intrinsic matrix of shape (B, 3, 3).</span>
+<span class="sd">            height: Image height.</span>
+<span class="sd">            width: Image width.</span>
+<span class="sd">            target_poses: 3D poses of shape (B, N, 4, 4).</span>
+<span class="sd">            normalize: Whether to normalize the projected points to [0, 1] range.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Projected 2D points of shape (B, N, 2).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">num_poses</span> <span class="o">=</span> <span class="n">target_poses</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+
+        <span class="c1"># Convert to opencv coordinate system</span>
+        <span class="n">cam_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">cam_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">cam_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">cam_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
+
+        <span class="c1"># Expand cam_pose_inv and intrinsics to match target_poses batch dimension</span>
+        <span class="n">cam_pose_inv</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">cam_pose</span><span class="p">)</span>  <span class="c1"># (B, 4, 4)</span>
+        <span class="n">cam_pose_inv_expanded</span> <span class="o">=</span> <span class="n">cam_pose_inv</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span>
+            <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">num_poses</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="p">)</span>  <span class="c1"># (B, N, 4, 4)</span>
+        <span class="n">cam_pose_inv_reshaped</span> <span class="o">=</span> <span class="n">cam_pose_inv_expanded</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1"># (B*N, 4, 4)</span>
+
+        <span class="n">intrinsics_expanded</span> <span class="o">=</span> <span class="n">intrinsics</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span>
+            <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">num_poses</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="p">)</span>  <span class="c1"># (B, N, 3, 3)</span>
+        <span class="n">intrinsics_reshaped</span> <span class="o">=</span> <span class="n">intrinsics_expanded</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>  <span class="c1"># (B*N, 3, 3)</span>
+
+        <span class="c1"># Reshape target_poses to (B*N, 4, 4)</span>
+        <span class="n">target_poses_reshaped</span> <span class="o">=</span> <span class="n">target_poses</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1"># (B*N, 4, 4)</span>
+
+        <span class="c1"># Transform 3D points to camera coordinates in parallel</span>
+        <span class="c1"># Extract translation part (position) from target poses: (B*N, 4, 1)</span>
+        <span class="n">target_positions</span> <span class="o">=</span> <span class="n">target_poses_reshaped</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">3</span><span class="p">:</span><span class="mi">4</span><span class="p">]</span>  <span class="c1"># (B*N, 4, 1)</span>
+
+        <span class="c1"># Transform to camera coordinates: (B*N, 4, 1)</span>
+        <span class="n">cam_positions</span> <span class="o">=</span> <span class="n">cam_pose_inv_reshaped</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">target_positions</span><span class="p">)</span>  <span class="c1"># (B*N, 4, 1)</span>
+        <span class="n">cam_positions_3d</span> <span class="o">=</span> <span class="n">cam_positions</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>  <span class="c1"># (B*N, 3)</span>
+
+        <span class="c1"># Project to 2D using intrinsics in parallel</span>
+        <span class="c1"># Add small epsilon to avoid division by zero</span>
+        <span class="n">eps</span> <span class="o">=</span> <span class="mf">1e-8</span>
+        <span class="n">z_safe</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">cam_positions_3d</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">],</span> <span class="nb">min</span><span class="o">=</span><span class="n">eps</span><span class="p">)</span>  <span class="c1"># (B*N,)</span>
+
+        <span class="c1"># Normalize by depth</span>
+        <span class="n">normalized_points</span> <span class="o">=</span> <span class="n">cam_positions_3d</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">2</span><span class="p">]</span> <span class="o">/</span> <span class="n">z_safe</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (B*N, 2)</span>
+
+        <span class="c1"># Convert to homogeneous coordinates and apply intrinsics</span>
+        <span class="n">normalized_homogeneous</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">normalized_points</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">normalized_points</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">1</span><span class="p">])],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span>
+        <span class="p">)</span>  <span class="c1"># (B*N, 3)</span>
+        <span class="n">pixel_coords</span> <span class="o">=</span> <span class="n">intrinsics_reshaped</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span>
+            <span class="n">normalized_homogeneous</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span>
+            <span class="o">-</span><span class="mi">1</span>
+        <span class="p">)</span>  <span class="c1"># (B*N, 3)</span>
+
+        <span class="c1"># Extract 2D coordinates</span>
+        <span class="n">points_2d_flat</span> <span class="o">=</span> <span class="n">pixel_coords</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">2</span><span class="p">]</span>  <span class="c1"># (B*N, 2)</span>
+
+        <span class="c1"># Reshape back to (B, N, 2)</span>
+        <span class="n">points_2d</span> <span class="o">=</span> <span class="n">points_2d_flat</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">num_poses</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="c1"># clip to range [0, width] and [0, height]</span>
+        <span class="n">points_2d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">points_2d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="n">width</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">points_2d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">points_2d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="n">height</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">normalize</span><span class="p">:</span>
+            <span class="c1"># Normalize to [0, 1] range</span>
+            <span class="n">points_2d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">/=</span> <span class="n">width</span>
+            <span class="n">points_2d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">/=</span> <span class="n">height</span>
+
+        <span class="k">return</span> <span class="n">points_2d</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_gripper_ratio</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">control_part</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">gripper_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">):</span>
+        <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">robot</span>
+        <span class="n">gripper_max_limit</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos_limits</span><span class="p">[</span>
+            <span class="p">:,</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">control_part</span><span class="p">)</span>
+        <span class="p">][:,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">gripper_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">gripper_qpos</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">()[:,</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">control_part</span><span class="p">)][:,</span> <span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">gripper_qpos</span> <span class="o">/</span> <span class="n">gripper_max_limit</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_robot_exteroception</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">control_part</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">x_interval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">y_interval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">kpnts_number</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">12</span><span class="p">,</span>
+        <span class="n">offset</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">follow_eef</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the robot exteroception poses.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            control_part: The part of the robot to use as reference. If None, uses the base.</span>
+<span class="sd">            x_interval: The interval for expanding along x-axis.</span>
+<span class="sd">            y_interval: The interval for expanding along y-axis.</span>
+<span class="sd">            kpnts_number: Number of keypoints to generate for each axis.</span>
+<span class="sd">            offset: Intrinsic offset that need to be substracted.</span>
+<span class="sd">            follow_eef: Whether to follow the gripper or not.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A tensor of shape (num_envs, 1 + 2*kpnts_number, 4, 4) representing the exteroception poses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">robot</span>
+        <span class="k">if</span> <span class="n">control_part</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">current_qpos</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">()[:,</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">control_part</span><span class="p">)]</span>
+            <span class="n">robot_pose</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">compute_fk</span><span class="p">(</span>
+                <span class="n">current_qpos</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">control_part</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">follow_eef</span><span class="p">:</span>
+                <span class="n">gripper_ratio</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_gripper_ratio</span><span class="p">(</span>
+                    <span class="n">control_part</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;_eef&quot;</span><span class="p">)</span>
+                <span class="p">)</span>  <span class="c1"># TODO: &quot;_eef&quot; hardcode</span>
+                <span class="c1"># TODO: only support 1 env</span>
+                <span class="n">y_interval</span> <span class="o">=</span> <span class="p">(</span><span class="n">y_interval</span> <span class="o">*</span> <span class="n">gripper_ratio</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;Not supported Robot without control part yet.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">offset</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">offset</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+                <span class="n">offset</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">offset</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">offset</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Only (N, 3) shaped xyz-intrinsic offset supported, got shape </span><span class="si">{</span><span class="n">offset</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">offset</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">offset</span> <span class="o">=</span> <span class="n">offset</span><span class="p">[</span><span class="kc">None</span><span class="p">]</span>
+            <span class="c1"># TODO: This operation may be slow when large scale Parallelization, but when small (num_envs=1) this operation is faster</span>
+            <span class="n">robot_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">robot_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">-</span> <span class="n">torch</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span>
+                <span class="s2">&quot;bij,bj-&gt;bi&quot;</span><span class="p">,</span> <span class="n">robot_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">],</span> <span class="n">offset</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">expand_pose</span><span class="p">(</span>
+            <span class="n">robot_pose</span><span class="p">,</span>
+            <span class="n">x_interval</span><span class="p">,</span>
+            <span class="n">y_interval</span><span class="p">,</span>
+            <span class="n">kpnts_number</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_object_exteroception</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">uid</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">affordance_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">x_interval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">y_interval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">kpnts_number</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">12</span><span class="p">,</span>
+        <span class="n">is_arena_coord</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="n">follow_eef</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the rigid object exteroception poses.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            uid: The UID of the object.</span>
+<span class="sd">            affordance_key: The key of the affordance to use for the object pose.</span>
+<span class="sd">            x_interval: The interval for expanding along x-axis.</span>
+<span class="sd">            y_interval: The interval for expanding along y-axis.</span>
+<span class="sd">            kpnts_number: Number of keypoints to generate for each axis.</span>
+<span class="sd">            is_arena_coord: Whether to use the arena coordinate system. Default is False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A tensor of shape (num_envs, 1 + 2*kpnts_number, 4, 4) representing the exteroception poses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">obj</span><span class="p">:</span> <span class="n">RigidObject</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object</span><span class="p">(</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">obj</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Rigid object with UID &#39;</span><span class="si">{</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; not found in the simulation.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="p">,</span> <span class="s2">&quot;affordance_datas&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;Affordance data is not available in the environment. We cannot compute object exteroception.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">affordance_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">affordance_datas</span><span class="p">:</span>
+            <span class="c1"># TODO: should this default behavior be warned?</span>
+            <span class="c1"># logger.log_warning(</span>
+            <span class="c1">#     f&quot;Affordance key &#39;{affordance_key}&#39; not found in the affordance data, using identity pose..&quot;</span>
+            <span class="c1"># )</span>
+            <span class="k">pass</span>
+
+        <span class="n">affordance_pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">affordance_datas</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="n">affordance_key</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="p">),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">affordance_pose</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="n">affordance_pose</span> <span class="o">=</span> <span class="n">affordance_pose</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">ref_pose</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">is_arena_coord</span> <span class="k">else</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">follow_eef</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">gripper_ratio</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_gripper_ratio</span><span class="p">(</span><span class="n">control_part</span><span class="o">=</span><span class="n">follow_eef</span><span class="p">)</span>
+            <span class="c1"># TODO: only support 1 env</span>
+            <span class="n">y_interval</span> <span class="o">=</span> <span class="p">(</span><span class="n">y_interval</span> <span class="o">*</span> <span class="n">gripper_ratio</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">expand_pose</span><span class="p">(</span>
+            <span class="n">affordance_pose</span><span class="p">,</span>
+            <span class="n">x_interval</span><span class="p">,</span>
+            <span class="n">y_interval</span><span class="p">,</span>
+            <span class="n">kpnts_number</span><span class="p">,</span>
+            <span class="n">ref_pose</span><span class="o">=</span><span class="n">ref_pose</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_check_source_valid</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">source</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_valid_source</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Invalid exteroception source &#39;</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">&#39;. Supported sources are </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_valid_source</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">descriptor</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span>
+        <span class="n">x_interval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">y_interval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">kpnts_number</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">12</span><span class="p">,</span>
+        <span class="n">groups</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">6</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute the exteroception poses based on the asset type.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            descriptor: The observation dictionary.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A dictionary containing the exteroception poses with key &#39;exteroception&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">exteroception</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">descriptor</span> <span class="o">=</span> <span class="n">resolve_dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="p">,</span> <span class="n">descriptor</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">sensor_uid</span><span class="p">,</span> <span class="n">sources</span> <span class="ow">in</span> <span class="n">descriptor</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">sensor</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Camera</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_sensor</span><span class="p">(</span><span class="n">sensor_uid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">sensor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Sensor with UID &#39;</span><span class="si">{</span><span class="n">sensor_uid</span><span class="si">}</span><span class="s2">&#39; not found in the simulation.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="p">(</span><span class="n">Camera</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">)):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Sensor with UID &#39;</span><span class="si">{</span><span class="n">sensor_uid</span><span class="si">}</span><span class="s2">&#39; is not a Camera or StereoCamera.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="n">height</span><span class="p">,</span> <span class="n">width</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">height</span><span class="p">,</span> <span class="n">sensor</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">width</span>
+
+            <span class="n">exteroception</span><span class="p">[</span><span class="n">sensor_uid</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">taget_pose_list</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+                <span class="n">source_type</span> <span class="o">=</span> <span class="n">source</span><span class="p">[</span><span class="s2">&quot;type&quot;</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_check_source_valid</span><span class="p">(</span><span class="n">source_type</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">source_type</span> <span class="o">==</span> <span class="s2">&quot;robot&quot;</span><span class="p">:</span>
+                    <span class="n">target_pose</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_robot_exteroception</span><span class="p">(</span>
+                        <span class="n">control_part</span><span class="o">=</span><span class="n">source</span><span class="p">[</span><span class="s2">&quot;control_part&quot;</span><span class="p">],</span>
+                        <span class="n">x_interval</span><span class="o">=</span><span class="n">x_interval</span><span class="p">,</span>
+                        <span class="n">y_interval</span><span class="o">=</span><span class="n">y_interval</span><span class="p">,</span>
+                        <span class="n">kpnts_number</span><span class="o">=</span><span class="n">kpnts_number</span><span class="p">,</span>
+                        <span class="n">offset</span><span class="o">=</span><span class="n">source</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;offset&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+                        <span class="n">follow_eef</span><span class="o">=</span><span class="n">source</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;follow_eef&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+                    <span class="p">)</span>
+                <span class="k">elif</span> <span class="n">source_type</span> <span class="o">==</span> <span class="s2">&quot;affordance&quot;</span><span class="p">:</span>
+                    <span class="n">target_pose</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_object_exteroception</span><span class="p">(</span>
+                        <span class="n">uid</span><span class="o">=</span><span class="n">source</span><span class="p">[</span><span class="s2">&quot;obj_uid&quot;</span><span class="p">],</span>
+                        <span class="n">affordance_key</span><span class="o">=</span><span class="n">source</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">],</span>
+                        <span class="n">x_interval</span><span class="o">=</span><span class="n">x_interval</span><span class="p">,</span>
+                        <span class="n">y_interval</span><span class="o">=</span><span class="n">y_interval</span><span class="p">,</span>
+                        <span class="n">kpnts_number</span><span class="o">=</span><span class="n">kpnts_number</span><span class="p">,</span>
+                        <span class="n">is_arena_coord</span><span class="o">=</span><span class="n">source</span><span class="p">[</span><span class="s2">&quot;is_arena_coord&quot;</span><span class="p">],</span>
+                        <span class="n">follow_eef</span><span class="o">=</span><span class="n">source</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;follow_eef&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+                    <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Unsupported exteroception source &#39;</span><span class="si">{</span><span class="n">source_type</span><span class="si">}</span><span class="s2">&#39;. Supported sources are &#39;robot&#39; and &#39;affordance.&quot;</span>
+                    <span class="p">)</span>
+                <span class="n">taget_pose_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">target_pose</span><span class="p">)</span>
+
+            <span class="n">target_poses</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">taget_pose_list</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">target_poses</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">kpnts_number</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">!=</span> <span class="n">groups</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Exteroception groups number mismatch. Expected </span><span class="si">{</span><span class="n">groups</span><span class="si">}</span><span class="s2">, but got </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">target_poses</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">kpnts_number</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">))</span><span class="si">}</span><span class="s2">.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="n">StereoCamera</span><span class="p">):</span>
+                <span class="n">intrinsics</span><span class="p">,</span> <span class="n">right_intrinsics</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_intrinsics</span><span class="p">()</span>
+                <span class="n">left_arena_pose</span><span class="p">,</span> <span class="n">right_arena_pose</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_left_right_arena_pose</span><span class="p">()</span>
+                <span class="n">projected_kpnts</span> <span class="o">=</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">_project_3d_to_2d</span><span class="p">(</span>
+                    <span class="n">left_arena_pose</span><span class="p">,</span>
+                    <span class="n">intrinsics</span><span class="p">,</span>
+                    <span class="n">height</span><span class="p">,</span>
+                    <span class="n">width</span><span class="p">,</span>
+                    <span class="n">target_poses</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">exteroception</span><span class="p">[</span><span class="n">sensor_uid</span><span class="p">][</span><span class="s2">&quot;l&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">projected_kpnts</span>
+
+                <span class="n">projected_kpnts</span> <span class="o">=</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">_project_3d_to_2d</span><span class="p">(</span>
+                    <span class="n">right_arena_pose</span><span class="p">,</span>
+                    <span class="n">right_intrinsics</span><span class="p">,</span>
+                    <span class="n">height</span><span class="p">,</span>
+                    <span class="n">width</span><span class="p">,</span>
+                    <span class="n">target_poses</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">exteroception</span><span class="p">[</span><span class="n">sensor_uid</span><span class="p">][</span><span class="s2">&quot;r&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">projected_kpnts</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">intrinsics</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_intrinsics</span><span class="p">()</span>
+                <span class="n">projected_kpnts</span> <span class="o">=</span> <span class="n">compute_exteroception</span><span class="o">.</span><span class="n">_project_3d_to_2d</span><span class="p">(</span>
+                    <span class="n">sensor</span><span class="o">.</span><span class="n">get_arena_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+                    <span class="n">intrinsics</span><span class="p">,</span>
+                    <span class="n">height</span><span class="p">,</span>
+                    <span class="n">width</span><span class="p">,</span>
+                    <span class="n">target_poses</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">exteroception</span><span class="p">[</span><span class="n">sensor_uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">projected_kpnts</span>
+
+        <span class="k">return</span> <span class="n">exteroception</span></div>
+
+
+
+<div class="viewcode-block" id="get_rigid_object_physics_attributes">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_rigid_object_physics_attributes">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">get_rigid_object_physics_attributes</span><span class="p">(</span><span class="n">Functor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the physics attributes of the rigid object in the environment with caching.</span>
+
+<span class="sd">    This functor retrieves and caches physics attributes (mass, friction, damping, inertia)</span>
+<span class="sd">    for rigid objects. The cache is cleared when the environment resets,</span>
+<span class="sd">    ensuring fresh values are fetched at the start of each episode.</span>
+
+<span class="sd">    If the rigid object with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned for each attribute.</span>
+
+<span class="sd">    The cached data is stored per entity UID. When called, if data is cached,</span>
+<span class="sd">    it returns a clone of the cached tensor to prevent accidental modifications.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        Physics attributes are typically constant during an episode, so caching improves</span>
+<span class="sd">        performance by avoiding repeated queries to the physics engine.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        cfg: The configuration object.</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="get_rigid_object_physics_attributes.__init__">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_rigid_object_physics_attributes.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">FunctorCfg</span><span class="p">,</span> <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the physics attributes functor.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg: The configuration object.</span>
+<span class="sd">            env: The environment instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">env</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span></div>
+
+
+<div class="viewcode-block" id="get_rigid_object_physics_attributes.reset">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_rigid_object_physics_attributes.reset">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Clear the cached physics attributes.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            env_ids: The environment ids. Defaults to None, which clears all cache.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the physics attributes of the rigid object.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            env: The environment instance.</span>
+<span class="sd">            obs: The observation dictionary.</span>
+<span class="sd">            entity_cfg: The configuration of the scene entity.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A TensorDict containing the physics attributes of the rigid object.</span>
+<span class="sd">            If the object does not exist, zero tensors are returned for each attribute.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">uid</span> <span class="o">=</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span>
+
+        <span class="c1"># Return cached data if available</span>
+        <span class="k">if</span> <span class="n">uid</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">:</span>
+            <span class="n">cached_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">uid</span><span class="p">]</span>
+            <span class="c1"># Return clones to prevent accidental modifications</span>
+            <span class="k">return</span> <span class="n">cached_dict</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+        <span class="c1"># Fetch physics attributes from the rigid object</span>
+        <span class="k">if</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object_uid_list</span><span class="p">():</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">TensorDict</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;mass&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;friction&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;damping&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;inertia&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                <span class="p">},</span>
+                <span class="n">batch_size</span><span class="o">=</span><span class="p">[</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">],</span>
+                <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">obj</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+            <span class="n">result</span> <span class="o">=</span> <span class="n">TensorDict</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;mass&quot;</span><span class="p">:</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_mass</span><span class="p">(),</span>
+                    <span class="s2">&quot;friction&quot;</span><span class="p">:</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_friction</span><span class="p">(),</span>
+                    <span class="s2">&quot;damping&quot;</span><span class="p">:</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_damping</span><span class="p">(),</span>
+                    <span class="s2">&quot;inertia&quot;</span><span class="p">:</span> <span class="n">obj</span><span class="o">.</span><span class="n">get_inertia</span><span class="p">(),</span>
+                <span class="p">},</span>
+                <span class="n">batch_size</span><span class="o">=</span><span class="p">[</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">],</span>
+                <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Cache the result (store clones to avoid modifying cached data)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">result</span></div>
+
+
+
+<div class="viewcode-block" id="get_articulation_joint_drive">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_articulation_joint_drive">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">get_articulation_joint_drive</span><span class="p">(</span><span class="n">Functor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the joint drive properties of the articulation in the environment with caching.</span>
+
+<span class="sd">    This functor retrieves and caches joint drive properties (stiffness, damping, max_effort, max_velocity, friction)</span>
+<span class="sd">    for articulations (including robots). The cache is cleared when the environment resets,</span>
+<span class="sd">    ensuring fresh values are fetched at the start of each episode.</span>
+
+<span class="sd">    If the articulation with the specified UID does not exist in the environment,</span>
+<span class="sd">    a zero tensor will be returned for each attribute.</span>
+
+<span class="sd">    The cached data is stored per entity UID. When called, if data is cached,</span>
+<span class="sd">    it returns a clone of the cached tensor to prevent accidental modifications.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        Joint drive properties are typically constant during an episode, so caching improves</span>
+<span class="sd">        performance by avoiding repeated queries.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        cfg: The configuration object.</span>
+<span class="sd">        env: The environment instance.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="get_articulation_joint_drive.__init__">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_articulation_joint_drive.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">FunctorCfg</span><span class="p">,</span> <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the joint drive functor.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg: The configuration object.</span>
+<span class="sd">            env: The environment instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">env</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span></div>
+
+
+<div class="viewcode-block" id="get_articulation_joint_drive.reset">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.observations.get_articulation_joint_drive.reset">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Clear the cached joint drive properties.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            env_ids: The environment ids. Defaults to None, which clears all cache.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint drive properties of the articulation.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            env: The environment instance.</span>
+<span class="sd">            obs: The observation dictionary.</span>
+<span class="sd">            entity_cfg: The configuration of the scene entity.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A TensorDict containing the joint drive properties of the articulation.</span>
+<span class="sd">            If the object does not exist, zero tensors are returned for each attribute.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">uid</span> <span class="o">=</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span>
+
+        <span class="c1"># Return cached data if available</span>
+        <span class="k">if</span> <span class="n">uid</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">:</span>
+            <span class="n">cached_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">uid</span><span class="p">]</span>
+            <span class="c1"># Return clones to prevent accidental modifications</span>
+            <span class="k">return</span> <span class="n">cached_dict</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+        <span class="c1"># Fetch joint drive properties from the articulation or robot</span>
+        <span class="k">if</span> <span class="n">uid</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_articulation_uid_list</span><span class="p">():</span>
+            <span class="n">art</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_articulation</span><span class="p">(</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">uid</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_robot_uid_list</span><span class="p">():</span>
+            <span class="n">art</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_robot</span><span class="p">(</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">art</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">art</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># We don&#39;t know the exact DOF of a non-existent articulation,</span>
+            <span class="c1"># but usually it&#39;s 0 if we don&#39;t have it. We will just use 1 as fallback or return empty</span>
+            <span class="c1"># Wait, Articulation&#39;s DOF might not be 1. But to support tensor shape consistency,</span>
+            <span class="c1"># perhaps 1 is better than failing. We can use a 0-size dimension or 1.</span>
+            <span class="c1"># get_rigid_object_physics_attributes uses shape (num_envs, 1) for mass, etc.</span>
+            <span class="c1"># Here we default to 1 joint if not found.</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">TensorDict</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;stiffness&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;damping&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;max_effort&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;max_velocity&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;friction&quot;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">),</span>
+                <span class="p">},</span>
+                <span class="n">batch_size</span><span class="o">=</span><span class="p">[</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">],</span>
+                <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">stiffness</span><span class="p">,</span> <span class="n">damping</span><span class="p">,</span> <span class="n">max_effort</span><span class="p">,</span> <span class="n">max_velocity</span><span class="p">,</span> <span class="n">friction</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">art</span><span class="o">.</span><span class="n">get_joint_drive</span><span class="p">()</span>
+            <span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">TensorDict</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;stiffness&quot;</span><span class="p">:</span> <span class="n">stiffness</span><span class="p">,</span>
+                    <span class="s2">&quot;damping&quot;</span><span class="p">:</span> <span class="n">damping</span><span class="p">,</span>
+                    <span class="s2">&quot;max_effort&quot;</span><span class="p">:</span> <span class="n">max_effort</span><span class="p">,</span>
+                    <span class="s2">&quot;max_velocity&quot;</span><span class="p">:</span> <span class="n">max_velocity</span><span class="p">,</span>
+                    <span class="s2">&quot;friction&quot;</span><span class="p">:</span> <span class="n">friction</span><span class="p">,</span>
+                <span class="p">},</span>
+                <span class="n">batch_size</span><span class="o">=</span><span class="p">[</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">],</span>
+                <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Cache the result (store clones to avoid modifying cached data)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="p">[</span><span class="n">uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">result</span></div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

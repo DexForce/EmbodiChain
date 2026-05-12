@@ -1,0 +1,1173 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.sim.solvers.opw_solver &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/sim/solvers/opw_solver';</script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.sim.solvers.opw_solver</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warp</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">wp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">polars</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pl</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">itertools</span><span class="w"> </span><span class="kn">import</span> <span class="n">product</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">TYPE_CHECKING</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span><span class="p">,</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.solvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">SolverCfg</span><span class="p">,</span> <span class="n">BaseSolver</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.warp.kinematics.opw_solver</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">OPWparam</span><span class="p">,</span>
+    <span class="n">opw_fk_kernel</span><span class="p">,</span>
+    <span class="n">opw_ik_kernel</span><span class="p">,</span>
+    <span class="n">opw_ik_select_kernel</span><span class="p">,</span>
+    <span class="n">wp_vec6f</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.device_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">standardize_device_string</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Self</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">normalize_to_pi</span><span class="p">(</span><span class="n">angle</span><span class="p">):</span>
+    <span class="n">angle</span> <span class="o">=</span> <span class="p">(</span><span class="n">angle</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span> <span class="o">%</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span>
+    <span class="k">return</span> <span class="n">angle</span>
+
+
+<div class="viewcode-block" id="OPWSolverCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolverCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">OPWSolverCfg</span><span class="p">(</span><span class="n">SolverCfg</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for OPW inverse kinematics controller.&quot;&quot;&quot;</span>
+
+    <span class="n">class_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;OPWSolver&quot;</span>
+
+    <span class="c1"># OPW-specific parameters</span>
+    <span class="n">a1</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">a2</span> <span class="o">=</span> <span class="o">-</span><span class="mf">21.984</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">c1</span> <span class="o">=</span> <span class="mf">123.0</span>
+    <span class="n">c2</span> <span class="o">=</span> <span class="mf">285.03</span>
+    <span class="n">c3</span> <span class="o">=</span> <span class="mf">250.75</span>
+    <span class="n">c4</span> <span class="o">=</span> <span class="mf">91.0</span>
+    <span class="n">offsets</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="mf">0.0</span><span class="p">,</span>
+        <span class="mf">82.21350356417211</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span><span class="p">,</span>
+        <span class="o">-</span><span class="mf">167.21710113148163</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span><span class="p">,</span>
+        <span class="mf">0.0</span><span class="p">,</span>
+        <span class="mf">0.0</span><span class="p">,</span>
+        <span class="mf">0.0</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">flip_axes</span> <span class="o">=</span> <span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="n">has_parallelogram</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="c1"># Parameters for the inverse-kinematics method.</span>
+    <span class="n">ik_params</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1"># safe margin for joint limits, in radians</span>
+    <span class="n">safe_margin</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>  <span class="c1"># 5.0 * np.pi / 180.0</span>
+
+<div class="viewcode-block" id="OPWSolverCfg.init_solver">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolverCfg.init_solver">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">init_solver</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">),</span> <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;OPWSolver&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the solver with the configuration.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            device (torch.device): The device to use for the solver. Defaults to CPU.</span>
+<span class="sd">            n_sample (int): The number of environments for which the solver is initialized.</span>
+<span class="sd">            **kwargs: Additional keyword arguments that may be used for solver initialization.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            OPWSolver: An initialized solver instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">solver</span> <span class="o">=</span> <span class="n">OPWSolver</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="c1"># Set the Tool Center Point (TCP) for the solver</span>
+        <span class="n">solver</span><span class="o">.</span><span class="n">set_tcp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_tcp_as_numpy</span><span class="p">())</span>
+
+        <span class="k">return</span> <span class="n">solver</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="OPWSolver">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">OPWSolver</span><span class="p">(</span><span class="n">BaseSolver</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;OPW inverse kinematics (IK) controller.</span>
+
+<span class="sd">    This controller implements OPW inverse kinematics using various methods for</span>
+<span class="sd">    computing the inverse of the Jacobian matrix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="OPWSolver.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">OPWSolverCfg</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;cpu&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Initializes the OPW kinematics solver.</span>
+
+<span class="sd">            This constructor sets up the kinematics solver using OPW methods,</span>
+<span class="sd">            allowing for efficient computation of robot kinematics based on</span>
+<span class="sd">            the specified URDF model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg: The configuration for the solver.</span>
+<span class="sd">            device (str, optional): The device to use for the solver (e.g., &quot;cpu&quot; or &quot;cuda&quot;). Defaults to &quot;cpu&quot;.</span>
+<span class="sd">            **kwargs: Additional keyword arguments passed to the base solver.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="c1"># Note: the warp-based solver is currently the only active backend and</span>
+        <span class="c1"># is initialized regardless of the selected device.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_init_warp_solver</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_tcp</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="OPWSolver.set_tcp">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver.set_tcp">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_tcp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xpos</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_tcp</span><span class="p">(</span><span class="n">xpos</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tcp_warp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">mat44f</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tcp_xpos</span><span class="p">)</span>
+        <span class="n">tcp_inv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+        <span class="n">tcp_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tcp_xpos</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">tcp_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">tcp_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">tcp_xpos</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tcp_inv_warp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">mat44f</span><span class="p">(</span><span class="n">tcp_inv</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_warp_solver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">OPWSolverCfg</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="n">OPWparam</span><span class="p">()</span>
+        <span class="c1"># convert unit from mm to m, increate precision</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">a1</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">a1</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">a2</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">a2</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">b</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">b</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">c1</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">c1</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">c2</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">c2</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">c3</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">c3</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">c4</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">c4</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">offsets</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="n">cfg</span><span class="o">.</span><span class="n">offsets</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sign_corrections</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="o">-</span><span class="mf">1.0</span> <span class="k">if</span> <span class="n">flip</span> <span class="k">else</span> <span class="mf">1.0</span> <span class="k">for</span> <span class="n">flip</span> <span class="ow">in</span> <span class="n">cfg</span><span class="o">.</span><span class="n">flip_axes</span><span class="p">],</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="OPWSolver.get_fk">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver.get_fk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_fk</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Computes the forward kinematics for the end-effector link.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor): Joint positions. Can be a single configuration (dof,) or a batch (batch_size, dof).</span>
+<span class="sd">            **kwargs: Additional keyword arguments for customization.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: The homogeneous transformation matrix of the end link with TCP applied.</span>
+<span class="sd">                        Shape is (4, 4) for single input, or (batch_size, 4, 4) for batch input.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">standardize_device_string</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">get_fk</span><span class="p">(</span><span class="n">qpos</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_fk_warp</span><span class="p">(</span><span class="n">qpos</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="OPWSolver.get_fk_warp">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver.get_fk_warp">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_fk_warp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Computes the forward kinematics for the end-effector link.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor): Joint positions. Can be a single configuration (dof,) or a batch (batch_size, dof).</span>
+<span class="sd">            **kwargs: Additional keyword arguments for customization.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: The homogeneous transformation matrix of the end link with TCP applied.</span>
+<span class="sd">                        Shape is (4, 4) for single input, or (batch_size, 4, 4) for batch input.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">qpos</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">6</span><span class="p">,):</span>
+            <span class="n">qpos_batch</span> <span class="o">=</span> <span class="n">qpos</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">qpos_batch</span> <span class="o">=</span> <span class="n">qpos</span>
+        <span class="n">n_sample</span> <span class="o">=</span> <span class="n">qpos_batch</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">qpos_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">from_torch</span><span class="p">(</span><span class="n">qpos_batch</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>  <span class="c1"># dtype=float, device=&quot;cuda&quot;)</span>
+        <span class="c1"># qpos_wp = wp.array(qpos_batch.detach().cpu().numpy().reshape(-1), dtype=float, device=self.device)</span>
+        <span class="n">xpos_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">n_sample</span> <span class="o">*</span> <span class="mi">16</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">wp</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span>
+            <span class="n">kernel</span><span class="o">=</span><span class="n">opw_fk_kernel</span><span class="p">,</span>
+            <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="n">n_sample</span><span class="p">),</span>
+            <span class="n">inputs</span><span class="o">=</span><span class="p">[</span>
+                <span class="n">qpos_wp</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_tcp_warp</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">offsets</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">sign_corrections</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">xpos_wp</span><span class="p">],</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="n">xpos</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">to_torch</span><span class="p">(</span><span class="n">xpos_wp</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xpos</span></div>
+
+
+<div class="viewcode-block" id="OPWSolver.get_ik">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver.get_ik">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_ik</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target_xpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">qpos_seed</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">return_all_solutions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute target joint positions using OPW inverse kinematics.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target_xpos (torch.Tensor): Current end-effector pose, shape (n_sample, 4, 4).</span>
+<span class="sd">            qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, num_joints). Defaults to None.</span>
+<span class="sd">            return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.</span>
+<span class="sd">            **kwargs: Additional keyword arguments for future extensions.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[torch.Tensor, torch.Tensor]:</span>
+<span class="sd">                - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, num_joints).</span>
+<span class="sd">                - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_ik_warp</span><span class="p">(</span><span class="n">target_xpos</span><span class="p">,</span> <span class="n">qpos_seed</span><span class="p">,</span> <span class="n">return_all_solutions</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="OPWSolver.get_ik_warp">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.OPWSolver.get_ik_warp">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_ik_warp</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target_xpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">qpos_seed</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">return_all_solutions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute target joint positions using OPW inverse kinematics.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target_xpos (torch.Tensor): Current end-effector pose, shape (n_sample, 4, 4).</span>
+<span class="sd">            qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, num_joints).</span>
+<span class="sd">            return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.</span>
+<span class="sd">            **kwargs: Additional keyword arguments for future extensions.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[torch.Tensor, torch.Tensor]:</span>
+<span class="sd">                - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, n_solution, num_joints).</span>
+<span class="sd">                - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">N_SOL</span> <span class="o">=</span> <span class="mi">8</span>
+        <span class="n">DOF</span> <span class="o">=</span> <span class="mi">6</span>
+        <span class="n">n_sample</span> <span class="o">=</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">kernel_device</span> <span class="o">=</span> <span class="n">standardize_device_string</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span>
+            <span class="n">target_xpos_batch</span> <span class="o">=</span> <span class="n">target_xpos</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">target_xpos_batch</span> <span class="o">=</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+        <span class="n">target_xpos_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">from_torch</span><span class="p">(</span><span class="n">target_xpos_batch</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">all_qpos_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">n_sample</span> <span class="o">*</span> <span class="n">N_SOL</span> <span class="o">*</span> <span class="n">DOF</span><span class="p">,</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="n">all_ik_valid_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">n_sample</span> <span class="o">*</span> <span class="n">N_SOL</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="c1"># TODO: whether require gradient</span>
+        <span class="n">offsets_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">offsets</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">))</span>
+        <span class="n">sign_corrections_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sign_corrections</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
+            <span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">lower_limits_</span> <span class="o">=</span> <span class="n">wp_vec6f</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">[</span><span class="mi">5</span><span class="p">],</span>
+        <span class="p">)</span>
+        <span class="n">upper_limits_</span> <span class="o">=</span> <span class="n">wp_vec6f</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">[</span><span class="mi">5</span><span class="p">],</span>
+        <span class="p">)</span>
+        <span class="n">wp</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span>
+            <span class="n">kernel</span><span class="o">=</span><span class="n">opw_ik_kernel</span><span class="p">,</span>
+            <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="n">n_sample</span><span class="p">),</span>
+            <span class="n">inputs</span><span class="o">=</span><span class="p">(</span>
+                <span class="n">target_xpos_wp</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_tcp_inv_warp</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                <span class="n">offsets_</span><span class="p">,</span>
+                <span class="n">sign_corrections_</span><span class="p">,</span>
+                <span class="n">lower_limits_</span><span class="p">,</span>
+                <span class="n">upper_limits_</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">safe_margin</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">all_qpos_wp</span><span class="p">,</span> <span class="n">all_ik_valid_wp</span><span class="p">],</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">),</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">return_all_solutions</span><span class="p">:</span>
+            <span class="n">all_qpos</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">to_torch</span><span class="p">(</span><span class="n">all_qpos_wp</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="n">N_SOL</span><span class="p">,</span> <span class="n">DOF</span><span class="p">)</span>
+            <span class="n">all_ik_valid</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">to_torch</span><span class="p">(</span><span class="n">all_ik_valid_wp</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="n">N_SOL</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">all_ik_valid</span><span class="p">,</span> <span class="n">all_qpos</span>
+        <span class="k">if</span> <span class="n">qpos_seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span>
+                <span class="n">n_sample</span><span class="p">,</span>
+                <span class="n">DOF</span><span class="p">,</span>
+            <span class="p">):</span>
+                <span class="n">qpos_seed_</span> <span class="o">=</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="n">DOF</span><span class="p">,):</span>
+                <span class="n">qpos_seed_</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">qpos_seed</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Invalid shape for qpos_seed: </span><span class="si">{</span><span class="n">qpos_seed</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">. Expected (</span><span class="si">{</span><span class="n">n_sample</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">DOF</span><span class="si">}</span><span class="s2">) or (</span><span class="si">{</span><span class="n">DOF</span><span class="si">}</span><span class="s2">,).&quot;</span>
+                <span class="p">)</span>
+            <span class="n">qpos_seed_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">from_torch</span><span class="p">(</span><span class="n">qpos_seed_</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="n">DOF</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">kernel_device</span>
+            <span class="p">)</span>
+            <span class="n">qpos_seed_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">from_torch</span><span class="p">(</span><span class="n">qpos_seed</span><span class="p">)</span>
+        <span class="n">all_qpos_wp</span> <span class="o">=</span> <span class="n">all_qpos_wp</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">n_sample</span><span class="p">,</span> <span class="n">N_SOL</span><span class="p">,</span> <span class="n">DOF</span><span class="p">))</span>
+        <span class="n">all_ik_valid_wp</span> <span class="o">=</span> <span class="n">all_ik_valid_wp</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">n_sample</span><span class="p">,</span> <span class="n">N_SOL</span><span class="p">))</span>
+        <span class="n">joint_weight</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;joint_weight&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="n">DOF</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">))</span>
+        <span class="n">joint_weight_wp</span> <span class="o">=</span> <span class="n">wp_vec6f</span><span class="p">(</span>
+            <span class="n">joint_weight</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="n">joint_weight</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="n">joint_weight</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+            <span class="n">joint_weight</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
+            <span class="n">joint_weight</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span>
+            <span class="n">joint_weight</span><span class="p">[</span><span class="mi">5</span><span class="p">],</span>
+        <span class="p">)</span>
+        <span class="n">best_ik_result_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">best_ik_valid_wp</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">n_sample</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">wp</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span>
+            <span class="n">kernel</span><span class="o">=</span><span class="n">opw_ik_select_kernel</span><span class="p">,</span>
+            <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="n">n_sample</span><span class="p">),</span>
+            <span class="n">inputs</span><span class="o">=</span><span class="p">[</span>
+                <span class="n">all_qpos_wp</span><span class="p">,</span>
+                <span class="n">all_ik_valid_wp</span><span class="p">,</span>
+                <span class="n">qpos_seed_wp</span><span class="p">,</span>
+                <span class="n">joint_weight_wp</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="n">outputs</span><span class="o">=</span><span class="p">[</span>
+                <span class="n">best_ik_result_wp</span><span class="p">,</span>
+                <span class="n">best_ik_valid_wp</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">standardize_device_string</span><span class="p">(</span><span class="n">kernel_device</span><span class="p">),</span>
+        <span class="p">)</span>
+
+        <span class="n">best_ik_result</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">wp</span><span class="o">.</span><span class="n">to_torch</span><span class="p">(</span><span class="n">best_ik_result_wp</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_sample</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">6</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">best_ik_valid</span> <span class="o">=</span> <span class="n">wp</span><span class="o">.</span><span class="n">to_torch</span><span class="p">(</span><span class="n">best_ik_valid_wp</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">best_ik_valid</span><span class="p">,</span> <span class="n">best_ik_result</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_calculate_dynamic_weights</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">current_joints</span><span class="p">,</span> <span class="n">joint_limits</span><span class="p">,</span> <span class="n">base_weights</span><span class="o">=</span><span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Calculate dynamic joint weights based on proximity to joint limits.</span>
+
+<span class="sd">        This function increases the weight of joints that are close to their limits, making the IK solver</span>
+<span class="sd">        penalize solutions that move joints near their boundaries. The closer a joint is to its limit,</span>
+<span class="sd">        the higher its weight will be, encouraging safer joint configurations.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            current_joints (np.ndarray): Current joint positions, shape (6,).</span>
+<span class="sd">            joint_limits (list or np.ndarray): List of (min, max) tuples for each joint, shape (6, 2).</span>
+<span class="sd">            base_weights (np.ndarray, optional): Base weights for each joint, shape (6,). Defaults to ones.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            np.ndarray: Dynamic weights for each joint, shape (6,).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">base_weights</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">base_weights</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">6</span><span class="p">)</span>
+
+        <span class="n">dynamic_weights</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">base_weights</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">6</span><span class="p">):</span>
+            <span class="n">cj</span> <span class="o">=</span> <span class="n">current_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cj</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">cj</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">cj</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">cj</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">cj</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">cj</span><span class="o">.</span><span class="n">flat</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">jl_min</span> <span class="o">=</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">jl_max</span> <span class="o">=</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">range_size</span> <span class="o">=</span> <span class="n">jl_max</span> <span class="o">-</span> <span class="n">jl_min</span>
+            <span class="n">distance_to_min</span> <span class="o">=</span> <span class="n">cj</span> <span class="o">-</span> <span class="n">jl_min</span>
+            <span class="n">distance_to_max</span> <span class="o">=</span> <span class="n">jl_max</span> <span class="o">-</span> <span class="n">cj</span>
+
+            <span class="n">min_ratio</span> <span class="o">=</span> <span class="n">distance_to_min</span> <span class="o">/</span> <span class="n">range_size</span>
+            <span class="n">max_ratio</span> <span class="o">=</span> <span class="n">distance_to_max</span> <span class="o">/</span> <span class="n">range_size</span>
+            <span class="n">danger_ratio</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">min_ratio</span><span class="p">),</span> <span class="nb">float</span><span class="p">(</span><span class="n">max_ratio</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">danger_ratio</span> <span class="o">&lt;</span> <span class="mf">0.2</span><span class="p">:</span>
+                <span class="n">dynamic_weights</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">5.0</span>
+            <span class="k">elif</span> <span class="n">danger_ratio</span> <span class="o">&lt;</span> <span class="mf">0.4</span><span class="p">:</span>
+                <span class="n">dynamic_weights</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">2.0</span>
+
+        <span class="k">return</span> <span class="n">dynamic_weights</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_select_optimal_solution</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">current_joints</span><span class="p">,</span>
+        <span class="n">all_solutions</span><span class="p">,</span>
+        <span class="n">joint_limits</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">prev_joints</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">return_all_valid</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Select the optimal IK solution based on joint limits and weighted differences.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            current_joints (np.ndarray): Current joint positions in radians, shape=(6,)</span>
+<span class="sd">            all_solutions (List[np.ndarray]): List of all possible IK solutions, each solution has shape=(6,)</span>
+<span class="sd">            joint_limits (List[Tuple], optional): Joint limits list [(min1,max1),...,(min6,max6)]. Defaults to None.</span>
+<span class="sd">            weights (np.ndarray, optional): Weight coefficients for each joint, shape=(6,). Defaults to None.</span>
+<span class="sd">            prev_joints (np.ndarray, optional): Previous joint positions in radians, shape=(6,). Defaults to None.</span>
+<span class="sd">            return_all_valid (bool, optional): If True, return all valid solutions instead of just the optimal one. Defaults to False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[bool, np.ndarray]: A tuple containing:</span>
+<span class="sd">                - Success flag (True if solution found)</span>
+<span class="sd">                - Joint angles of the optimal solution (single solution) or all valid solutions (if return_all_valid=True)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Input validation</span>
+        <span class="k">if</span> <span class="n">current_joints</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">all_solutions</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+
+        <span class="c1"># Convert inputs to numpy arrays</span>
+        <span class="n">current_joints</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">current_joints</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">all_solutions</span> <span class="o">=</span> <span class="p">[(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">sol</span><span class="p">))</span> <span class="k">for</span> <span class="n">sol</span> <span class="ow">in</span> <span class="n">all_solutions</span><span class="p">]</span>
+
+        <span class="c1"># Set default joint limits if none provided</span>
+        <span class="k">if</span> <span class="n">joint_limits</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">joint_limits</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">),</span>  <span class="c1"># joint 1</span>
+                <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">),</span>  <span class="c1"># joint 2</span>
+                <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">),</span>  <span class="c1"># joint 3</span>
+                <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">),</span>  <span class="c1"># joint 4</span>
+                <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">),</span>  <span class="c1"># joint 5</span>
+                <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">),</span>  <span class="c1"># joint 6</span>
+            <span class="p">]</span>
+
+        <span class="c1"># TODO: support funciton to setting safty margin</span>
+        <span class="c1"># SAFETY_MARGIN = np.radians(5.0)</span>
+        <span class="c1"># joint_limits = [</span>
+        <span class="c1">#     (-2.618 + SAFETY_MARGIN, 2.618 - SAFETY_MARGIN),  # 约(-145.5°+5°, 124.2°-5°)</span>
+        <span class="c1">#     (0.0 + SAFETY_MARGIN, 3.14 - SAFETY_MARGIN),  # 约(0°+5°, 180°-5°)</span>
+        <span class="c1">#     (-2.967 + SAFETY_MARGIN, 0.0 - SAFETY_MARGIN),  # 约(-170°+5°, 0°-5°)</span>
+        <span class="c1">#     (-1.745 + SAFETY_MARGIN, 1.745 - SAFETY_MARGIN),  # 约(-100°+5°, 100°-5°)</span>
+        <span class="c1">#     (-1.22 + SAFETY_MARGIN, 1.22 - SAFETY_MARGIN),  # 约(-70°+5°, 70°-5°)</span>
+        <span class="c1">#     (-2.0944 + SAFETY_MARGIN, 2.0944 - SAFETY_MARGIN),  # 约(-120°+5°, 120°-5°)</span>
+        <span class="c1"># ]</span>
+
+        <span class="c1"># Handle empty solution case</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_solutions</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;No available solutions found.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+
+        <span class="c1"># Set default weights if none provided</span>
+        <span class="k">if</span> <span class="n">weights</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">weights</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">6</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">weights</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+
+        <span class="c1"># Initialize previous joints if not provided</span>
+        <span class="k">if</span> <span class="n">prev_joints</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">prev_joints</span> <span class="o">=</span> <span class="n">current_joints</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">prev_joints</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">prev_joints</span><span class="p">)</span>
+
+        <span class="c1"># Ensure we only work with first 6 joints</span>
+        <span class="n">current_joints</span> <span class="o">=</span> <span class="n">current_joints</span><span class="p">[:</span><span class="mi">6</span><span class="p">]</span>
+        <span class="n">prev_joints</span> <span class="o">=</span> <span class="n">prev_joints</span><span class="p">[:</span><span class="mi">6</span><span class="p">]</span>
+
+        <span class="c1"># Calculate dynamic weights considering joint limits</span>
+        <span class="n">dynamic_weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_calculate_dynamic_weights</span><span class="p">(</span>
+            <span class="n">current_joints</span><span class="p">,</span> <span class="n">joint_limits</span><span class="p">,</span> <span class="n">weights</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Initialize variables for tracking best solution and all valid solutions with scores</span>
+        <span class="n">best_score</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">)</span>
+        <span class="n">best_qpos</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">all_valid_solutions</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># List of (solution, score) tuples for sorting</span>
+
+        <span class="c1"># Evaluate each IK solution</span>
+        <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">all_solutions</span><span class="p">:</span>
+            <span class="n">possible_arrays</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">valid_solution</span> <span class="o">=</span> <span class="kc">True</span>
+
+            <span class="c1"># Generate possible joint values considering 2π periodicity</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">6</span><span class="p">):</span>
+                <span class="n">current_possible_values</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="c1"># Determine previous movement direction</span>
+                <span class="n">prev_move</span> <span class="o">=</span> <span class="n">current_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+                <span class="c1"># Prefer offsets in the same direction as previous movement</span>
+                <span class="n">preferred_offsets</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span> <span class="k">if</span> <span class="n">prev_move</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="k">else</span> <span class="nb">range</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">offset</span> <span class="ow">in</span> <span class="n">preferred_offsets</span><span class="p">:</span>
+                    <span class="n">adjusted_value</span> <span class="o">=</span> <span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">offset</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">adjusted_value</span> <span class="o">&lt;=</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]:</span>
+                        <span class="n">current_possible_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">adjusted_value</span><span class="p">)</span>
+
+                <span class="c1"># If no values found in preferred direction, try all directions</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">current_possible_values</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">offset</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+                        <span class="n">adjusted_value</span> <span class="o">=</span> <span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">offset</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">adjusted_value</span> <span class="o">&lt;=</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]:</span>
+                            <span class="n">current_possible_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">adjusted_value</span><span class="p">)</span>
+
+                <span class="c1"># If still no valid values, mark solution as invalid</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">current_possible_values</span><span class="p">:</span>
+                    <span class="n">valid_solution</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">break</span>
+
+                <span class="n">possible_arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">current_possible_values</span><span class="p">)</span>
+
+            <span class="c1"># Skip invalid solutions</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">valid_solution</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># Helper function to safely normalize weights</span>
+            <span class="k">def</span><span class="w"> </span><span class="nf">safe_normalize</span><span class="p">(</span><span class="n">weights</span><span class="p">):</span>
+                <span class="n">max_weight</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">max_weight</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">weights</span> <span class="o">/</span> <span class="n">max_weight</span>
+                <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+
+            <span class="c1"># Evaluate all combinations of possible joint values</span>
+            <span class="k">for</span> <span class="n">combination</span> <span class="ow">in</span> <span class="n">product</span><span class="p">(</span><span class="o">*</span><span class="n">possible_arrays</span><span class="p">):</span>
+                <span class="n">solution</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">combination</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">solution</span><span class="o">.</span><span class="n">size</span> <span class="o">!=</span> <span class="mi">6</span><span class="p">:</span>
+                    <span class="k">continue</span>
+
+                <span class="n">solution</span> <span class="o">=</span> <span class="n">solution</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">current_joints</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+
+                <span class="c1"># Calculate optimization score for this solution</span>
+                <span class="c1"># 1. Position difference penalty (weighted squared difference)</span>
+                <span class="n">pos_diff</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">((</span><span class="n">solution</span> <span class="o">-</span> <span class="n">current_joints</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">dynamic_weights</span><span class="p">)</span>
+
+                <span class="c1"># 2. Joint limit proximity penalty</span>
+                <span class="n">limit_penalty</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">6</span><span class="p">):</span>
+                    <span class="n">margin</span> <span class="o">=</span> <span class="mf">0.05</span>  <span class="c1"># 5% safety margin</span>
+                    <span class="c1"># Calculate safe operating range</span>
+                    <span class="n">lower</span> <span class="o">=</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">margin</span> <span class="o">*</span> <span class="p">(</span>
+                        <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="p">)</span>
+                    <span class="n">upper</span> <span class="o">=</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">margin</span> <span class="o">*</span> <span class="p">(</span>
+                        <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">joint_limits</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="p">)</span>
+
+                    <span class="c1"># Apply penalty if near joint limits</span>
+                    <span class="k">if</span> <span class="n">solution</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">lower</span> <span class="ow">or</span> <span class="n">solution</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">upper</span><span class="p">:</span>
+                        <span class="n">normalized_weights</span> <span class="o">=</span> <span class="n">safe_normalize</span><span class="p">(</span><span class="n">dynamic_weights</span><span class="p">)</span>
+                        <span class="n">limit_penalty</span> <span class="o">+=</span> <span class="mf">5.0</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">normalized_weights</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+                <span class="c1"># 3. Direction change penalty (for avoiding sign flips)</span>
+                <span class="n">direction_penalty</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">6</span><span class="p">):</span>
+                    <span class="n">prev_move</span> <span class="o">=</span> <span class="n">current_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                    <span class="n">current_move</span> <span class="o">=</span> <span class="n">solution</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">current_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                    <span class="c1"># Penalize direction reversals</span>
+                    <span class="k">if</span> <span class="n">prev_move</span> <span class="o">*</span> <span class="n">current_move</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># Opposite signs</span>
+                        <span class="n">direction_penalty</span> <span class="o">+=</span> <span class="p">(</span>
+                            <span class="nb">abs</span><span class="p">(</span><span class="n">current_move</span><span class="p">)</span> <span class="o">*</span> <span class="n">dynamic_weights</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*</span> <span class="mf">2.0</span>
+                        <span class="p">)</span>
+
+                <span class="c1"># 4. Velocity continuity penalty (for smooth motion)</span>
+                <span class="n">velocity_penalty</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">6</span><span class="p">):</span>
+                    <span class="n">prev_vel</span> <span class="o">=</span> <span class="n">current_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                    <span class="n">current_vel</span> <span class="o">=</span> <span class="n">solution</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">current_joints</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                    <span class="n">accel</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">current_vel</span> <span class="o">-</span> <span class="n">prev_vel</span><span class="p">)</span>
+                    <span class="c1"># Penalize excessive acceleration (&gt;30°/s²)</span>
+                    <span class="k">if</span> <span class="n">accel</span> <span class="o">&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="mi">30</span><span class="p">):</span>
+                        <span class="n">velocity_penalty</span> <span class="o">+=</span> <span class="n">accel</span> <span class="o">*</span> <span class="n">dynamic_weights</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*</span> <span class="mf">5.0</span>
+
+                <span class="c1"># Combine all penalty terms</span>
+                <span class="n">total_score</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">pos_diff</span> <span class="o">+</span> <span class="n">limit_penalty</span> <span class="o">+</span> <span class="n">direction_penalty</span> <span class="o">+</span> <span class="n">velocity_penalty</span>
+                <span class="p">)</span>
+
+                <span class="c1"># Add to valid solutions list with score (for sorting when return_all_valid=True)</span>
+                <span class="n">all_valid_solutions</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">solution</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">total_score</span><span class="p">))</span>
+
+                <span class="c1"># Update best solution if current one is better (for single solution return)</span>
+                <span class="k">if</span> <span class="n">total_score</span> <span class="o">&lt;</span> <span class="n">best_score</span><span class="p">:</span>
+                    <span class="n">best_score</span> <span class="o">=</span> <span class="n">total_score</span>
+                    <span class="n">best_qpos</span> <span class="o">=</span> <span class="n">solution</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+        <span class="c1"># Return results based on what was requested</span>
+        <span class="k">if</span> <span class="n">return_all_valid</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_valid_solutions</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+
+            <span class="c1"># Sort solutions by score (ascending order - lower score is better)</span>
+            <span class="n">all_valid_solutions</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+            <span class="c1"># Extract only the solutions (remove scores)</span>
+            <span class="n">sorted_solutions</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">sol</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">sol</span> <span class="ow">in</span> <span class="n">all_valid_solutions</span><span class="p">])</span>
+            <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">sorted_solutions</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">best_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([])</span>
+            <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">best_qpos</span></div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

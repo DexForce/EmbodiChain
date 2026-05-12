@@ -1,0 +1,1009 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Simulating a Robot &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'tutorial/robot';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Create a solver" href="solver.html" />
+    <link rel="prev" title="Rigid object group tutorial" href="rigid_object_group.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Tutorials</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/tutorial/robot.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Simulating a Robot</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code">The Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code-explained">The Code Explained</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#loading-robot-urdf">Loading Robot URDF</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuring-control-parts">Configuring Control Parts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-drive-properties">Setting Drive Properties</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#robot-control">Robot Control</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#getting-robot-state">Getting Robot State</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code-execution">The Code Execution</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features-demonstrated">Key Features Demonstrated</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="simulating-a-robot">
+<span id="tutorial-simulate-robot"></span><h1>Simulating a Robot<a class="headerlink" href="#simulating-a-robot" title="Link to this heading">#</a></h1>
+<p>This tutorial shows you how to create and simulate a robot using SimulationManager. You’ll learn how to load a robot from URDF files, configure control systems, and run basic robot simulation with joint control.</p>
+<section id="the-code">
+<h2>The Code<a class="headerlink" href="#the-code" title="Link to this heading">#</a></h2>
+<p>The tutorial corresponds to the <code class="docutils literal notranslate"><span class="pre">create_robot.py</span></code> script in the <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim</span></code> directory.</p>
+<details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
+<summary class="sd-summary-title sd-card-header">
+<span class="sd-summary-icon"><svg version="1.1" width="1.0em" height="1.0em" class="sd-octicon sd-octicon-code" viewBox="0 0 16 16" aria-hidden="true"><path d="m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"></path></svg></span><span class="sd-summary-text">Code for create_robot.py</span><span class="sd-summary-state-marker sd-summary-chevron-right"><svg version="1.1" width="1.5em" height="1.5em" class="sd-octicon sd-octicon-chevron-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.72 18.78a.75.75 0 0 1 0-1.06L14.44 12 8.72 6.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0Z"></path></svg></span></summary><div class="sd-summary-content sd-card-body docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="linenos">  1</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos">  2</span><span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="linenos">  3</span><span class="c1">#</span>
+<span class="linenos">  4</span><span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="linenos">  5</span><span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="linenos">  6</span><span class="c1"># You may obtain a copy of the License at</span>
+<span class="linenos">  7</span><span class="c1">#</span>
+<span class="linenos">  8</span><span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="linenos">  9</span><span class="c1">#</span>
+<span class="linenos"> 10</span><span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="linenos"> 11</span><span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="linenos"> 12</span><span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="linenos"> 13</span><span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="linenos"> 14</span><span class="c1"># limitations under the License.</span>
+<span class="linenos"> 15</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos"> 16</span>
+<span class="linenos"> 17</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 18</span><span class="sd">This script demonstrates how to create and simulate a robot using SimulationManager.</span>
+<span class="linenos"> 19</span><span class="sd">It shows how to load a robot from URDF, set up control parts, and run basic simulation.</span>
+<span class="linenos"> 20</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 21</span>
+<span class="linenos"> 22</span><span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="linenos"> 23</span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="linenos"> 24</span><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="linenos"> 25</span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="linenos"> 26</span>
+<span class="linenos"> 27</span><span class="n">torch</span><span class="o">.</span><span class="n">set_printoptions</span><span class="p">(</span><span class="n">precision</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">sci_mode</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="linenos"> 28</span>
+<span class="linenos"> 29</span><span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span> <span class="k">as</span> <span class="n">R</span>
+<span class="linenos"> 30</span>
+<span class="linenos"> 31</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">SimulationManagerCfg</span>
+<span class="linenos"> 32</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">Robot</span>
+<span class="linenos"> 33</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 34</span>    <span class="n">RenderCfg</span><span class="p">,</span>
+<span class="linenos"> 35</span>    <span class="n">JointDrivePropertiesCfg</span><span class="p">,</span>
+<span class="linenos"> 36</span>    <span class="n">RobotCfg</span><span class="p">,</span>
+<span class="linenos"> 37</span>    <span class="n">URDFCfg</span><span class="p">,</span>
+<span class="linenos"> 38</span><span class="p">)</span>
+<span class="linenos"> 39</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_path</span>
+<span class="linenos"> 40</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.utils.gym_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">add_env_launcher_args_to_parser</span>
+<span class="linenos"> 41</span>
+<span class="linenos"> 42</span>
+<span class="linenos"> 43</span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+<span class="linenos"> 44</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Main function to demonstrate robot simulation.&quot;&quot;&quot;</span>
+<span class="linenos"> 45</span>
+<span class="linenos"> 46</span>    <span class="c1"># Parse command line arguments</span>
+<span class="linenos"> 47</span>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+<span class="linenos"> 48</span>        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create and simulate a robot in SimulationManager&quot;</span>
+<span class="linenos"> 49</span>    <span class="p">)</span>
+<span class="linenos"> 50</span>    <span class="n">add_env_launcher_args_to_parser</span><span class="p">(</span><span class="n">parser</span><span class="p">)</span>
+<span class="linenos"> 51</span>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+<span class="linenos"> 52</span>
+<span class="linenos"> 53</span>    <span class="c1"># Initialize simulation</span>
+<span class="linenos"> 54</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Creating simulation...&quot;</span><span class="p">)</span>
+<span class="linenos"> 55</span>    <span class="n">config</span> <span class="o">=</span> <span class="n">SimulationManagerCfg</span><span class="p">(</span>
+<span class="linenos"> 56</span>        <span class="n">headless</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos"> 57</span>        <span class="n">sim_device</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+<span class="linenos"> 58</span>        <span class="n">arena_space</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>
+<span class="linenos"> 59</span>        <span class="n">render_cfg</span><span class="o">=</span><span class="n">RenderCfg</span><span class="p">(</span><span class="n">renderer</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">renderer</span><span class="p">),</span>
+<span class="linenos"> 60</span>        <span class="n">physics_dt</span><span class="o">=</span><span class="mf">1.0</span> <span class="o">/</span> <span class="mf">100.0</span><span class="p">,</span>
+<span class="linenos"> 61</span>        <span class="n">num_envs</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span>
+<span class="linenos"> 62</span>    <span class="p">)</span>
+<span class="linenos"> 63</span>    <span class="n">sim</span> <span class="o">=</span> <span class="n">SimulationManager</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<span class="linenos"> 64</span>
+<span class="linenos"> 65</span>    <span class="c1"># Create robot configuration</span>
+<span class="linenos"> 66</span>    <span class="n">robot</span> <span class="o">=</span> <span class="n">create_robot</span><span class="p">(</span><span class="n">sim</span><span class="p">)</span>
+<span class="linenos"> 67</span>
+<span class="linenos"> 68</span>    <span class="c1"># Initialize GPU physics if using CUDA</span>
+<span class="linenos"> 69</span>    <span class="k">if</span> <span class="n">sim</span><span class="o">.</span><span class="n">is_use_gpu_physics</span><span class="p">:</span>
+<span class="linenos"> 70</span>        <span class="n">sim</span><span class="o">.</span><span class="n">init_gpu_physics</span><span class="p">()</span>
+<span class="linenos"> 71</span>
+<span class="linenos"> 72</span>    <span class="c1"># Open visualization window if not headless</span>
+<span class="linenos"> 73</span>    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">headless</span><span class="p">:</span>
+<span class="linenos"> 74</span>        <span class="n">sim</span><span class="o">.</span><span class="n">open_window</span><span class="p">()</span>
+<span class="linenos"> 75</span>
+<span class="linenos"> 76</span>    <span class="c1"># Run simulation loop</span>
+<span class="linenos"> 77</span>    <span class="n">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">robot</span><span class="p">)</span>
+<span class="linenos"> 78</span>
+<span class="linenos"> 79</span>
+<span class="linenos"> 80</span><span class="k">def</span><span class="w"> </span><span class="nf">create_robot</span><span class="p">(</span><span class="n">sim</span><span class="p">):</span>
+<span class="linenos"> 81</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create and configure a robot in the simulation.&quot;&quot;&quot;</span>
+<span class="linenos"> 82</span>
+<span class="linenos"> 83</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Loading robot...&quot;</span><span class="p">)</span>
+<span class="linenos"> 84</span>
+<span class="linenos"> 85</span>    <span class="c1"># Get SR5 arm URDF path</span>
+<span class="linenos"> 86</span>    <span class="n">sr5_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;Rokae/SR5/SR5.urdf&quot;</span><span class="p">)</span>
+<span class="linenos"> 87</span>
+<span class="linenos"> 88</span>    <span class="c1"># Get hand URDF path</span>
+<span class="linenos"> 89</span>    <span class="n">hand_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span>
+<span class="linenos"> 90</span>        <span class="s2">&quot;BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf&quot;</span>
+<span class="linenos"> 91</span>    <span class="p">)</span>
+<span class="linenos"> 92</span>
+<span class="linenos"> 93</span>    <span class="c1"># Define control parts for the robot</span>
+<span class="linenos"> 94</span>    <span class="c1"># Joint names in control_parts can be regex patterns</span>
+<span class="linenos"> 95</span>    <span class="n">CONTROL_PARTS</span> <span class="o">=</span> <span class="p">{</span>
+<span class="linenos"> 96</span>        <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="p">[</span>
+<span class="linenos"> 97</span>            <span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">,</span>  <span class="c1"># Matches JOINT1, JOINT2, ..., JOINT6</span>
+<span class="linenos"> 98</span>        <span class="p">],</span>
+<span class="linenos"> 99</span>        <span class="s2">&quot;hand&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;LEFT_.*&quot;</span><span class="p">],</span>  <span class="c1"># Matches all joints starting with L_</span>
+<span class="linenos">100</span>    <span class="p">}</span>
+<span class="linenos">101</span>
+<span class="linenos">102</span>    <span class="c1"># Define transformation for hand attachment</span>
+<span class="linenos">103</span>    <span class="n">hand_attach_xpos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+<span class="linenos">104</span>    <span class="n">hand_attach_xpos</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">([</span><span class="mi">90</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">()</span>
+<span class="linenos">105</span>    <span class="n">hand_attach_xpos</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.02</span>
+<span class="linenos">106</span>
+<span class="linenos">107</span>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">RobotCfg</span><span class="p">(</span>
+<span class="linenos">108</span>        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;sr5_with_brainco&quot;</span><span class="p">,</span>
+<span class="linenos">109</span>        <span class="n">urdf_cfg</span><span class="o">=</span><span class="n">URDFCfg</span><span class="p">(</span>
+<span class="linenos">110</span>            <span class="n">components</span><span class="o">=</span><span class="p">[</span>
+<span class="linenos">111</span>                <span class="p">{</span>
+<span class="linenos">112</span>                    <span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+<span class="linenos">113</span>                    <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">sr5_urdf_path</span><span class="p">,</span>
+<span class="linenos">114</span>                <span class="p">},</span>
+<span class="linenos">115</span>                <span class="p">{</span>
+<span class="linenos">116</span>                    <span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+<span class="linenos">117</span>                    <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">hand_urdf_path</span><span class="p">,</span>
+<span class="linenos">118</span>                    <span class="s2">&quot;transform&quot;</span><span class="p">:</span> <span class="n">hand_attach_xpos</span><span class="p">,</span>
+<span class="linenos">119</span>                <span class="p">},</span>
+<span class="linenos">120</span>            <span class="p">]</span>
+<span class="linenos">121</span>        <span class="p">),</span>
+<span class="linenos">122</span>        <span class="n">control_parts</span><span class="o">=</span><span class="n">CONTROL_PARTS</span><span class="p">,</span>
+<span class="linenos">123</span>        <span class="n">drive_pros</span><span class="o">=</span><span class="n">JointDrivePropertiesCfg</span><span class="p">(</span>
+<span class="linenos">124</span>            <span class="n">stiffness</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e4</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">},</span>
+<span class="linenos">125</span>            <span class="n">damping</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e2</span><span class="p">},</span>
+<span class="linenos">126</span>        <span class="p">),</span>
+<span class="linenos">127</span>    <span class="p">)</span>
+<span class="linenos">128</span>
+<span class="linenos">129</span>    <span class="c1"># Add robot to simulation</span>
+<span class="linenos">130</span>    <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_robot</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+<span class="linenos">131</span>
+<span class="linenos">132</span>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Robot created successfully with </span><span class="si">{</span><span class="n">robot</span><span class="o">.</span><span class="n">dof</span><span class="si">}</span><span class="s2"> joints&quot;</span><span class="p">)</span>
+<span class="linenos">133</span>
+<span class="linenos">134</span>    <span class="k">return</span> <span class="n">robot</span>
+<span class="linenos">135</span>
+<span class="linenos">136</span>
+<span class="linenos">137</span><span class="k">def</span><span class="w"> </span><span class="nf">run_simulation</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span><span class="p">):</span>
+<span class="linenos">138</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Run the simulation loop with robot control.&quot;&quot;&quot;</span>
+<span class="linenos">139</span>
+<span class="linenos">140</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting simulation...&quot;</span><span class="p">)</span>
+<span class="linenos">141</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Robot will move through different poses&quot;</span><span class="p">)</span>
+<span class="linenos">142</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Press Ctrl+C to stop&quot;</span><span class="p">)</span>
+<span class="linenos">143</span>
+<span class="linenos">144</span>    <span class="n">step_count</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="linenos">145</span>
+<span class="linenos">146</span>    <span class="n">arm_joint_ids</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+<span class="linenos">147</span>    <span class="c1"># Define some target joint positions for demonstration</span>
+<span class="linenos">148</span>    <span class="n">arm_position1</span> <span class="o">=</span> <span class="p">(</span>
+<span class="linenos">149</span>        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">150</span>            <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+<span class="linenos">151</span>        <span class="p">)</span>
+<span class="linenos">152</span>        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="linenos">153</span>        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="linenos">154</span>    <span class="p">)</span>
+<span class="linenos">155</span>
+<span class="linenos">156</span>    <span class="n">arm_position2</span> <span class="o">=</span> <span class="p">(</span>
+<span class="linenos">157</span>        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">158</span>            <span class="p">[</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+<span class="linenos">159</span>        <span class="p">)</span>
+<span class="linenos">160</span>        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="linenos">161</span>        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="linenos">162</span>    <span class="p">)</span>
+<span class="linenos">163</span>
+<span class="linenos">164</span>    <span class="c1"># Get joint IDs for the hand.</span>
+<span class="linenos">165</span>    <span class="n">hand_joint_ids</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="s2">&quot;hand&quot;</span><span class="p">)</span>
+<span class="linenos">166</span>    <span class="c1"># Define hand open and close positions based on joint limits.</span>
+<span class="linenos">167</span>    <span class="n">hand_position_open</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos_limits</span><span class="p">[:,</span> <span class="n">hand_joint_ids</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
+<span class="linenos">168</span>    <span class="n">hand_position_close</span> <span class="o">=</span> <span class="n">robot</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos_limits</span><span class="p">[:,</span> <span class="n">hand_joint_ids</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
+<span class="linenos">169</span>
+<span class="linenos">170</span>    <span class="k">try</span><span class="p">:</span>
+<span class="linenos">171</span>        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<span class="linenos">172</span>            <span class="c1"># Update physics</span>
+<span class="linenos">173</span>            <span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="linenos">174</span>
+<span class="linenos">175</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">4000</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+<span class="linenos">176</span>                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">arm_position1</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+<span class="linenos">177</span>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Moving to arm position 1&quot;</span><span class="p">)</span>
+<span class="linenos">178</span>
+<span class="linenos">179</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">4000</span> <span class="o">==</span> <span class="mi">1000</span><span class="p">:</span>
+<span class="linenos">180</span>                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">arm_position2</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+<span class="linenos">181</span>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Moving to arm position 2&quot;</span><span class="p">)</span>
+<span class="linenos">182</span>
+<span class="linenos">183</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">4000</span> <span class="o">==</span> <span class="mi">2000</span><span class="p">:</span>
+<span class="linenos">184</span>                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">hand_position_close</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">hand_joint_ids</span><span class="p">)</span>
+<span class="linenos">185</span>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Closing hand&quot;</span><span class="p">)</span>
+<span class="linenos">186</span>
+<span class="linenos">187</span>            <span class="k">if</span> <span class="n">step_count</span> <span class="o">%</span> <span class="mi">4000</span> <span class="o">==</span> <span class="mi">3000</span><span class="p">:</span>
+<span class="linenos">188</span>                <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">hand_position_open</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">hand_joint_ids</span><span class="p">)</span>
+<span class="linenos">189</span>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Opening hand&quot;</span><span class="p">)</span>
+<span class="linenos">190</span>
+<span class="linenos">191</span>            <span class="n">step_count</span> <span class="o">+=</span> <span class="mi">1</span>
+<span class="linenos">192</span>
+<span class="linenos">193</span>    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+<span class="linenos">194</span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Stopping simulation...&quot;</span><span class="p">)</span>
+<span class="linenos">195</span>    <span class="k">finally</span><span class="p">:</span>
+<span class="linenos">196</span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cleaning up...&quot;</span><span class="p">)</span>
+<span class="linenos">197</span>        <span class="n">sim</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span>
+<span class="linenos">198</span>
+<span class="linenos">199</span>
+<span class="linenos">200</span><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+<span class="linenos">201</span>    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</details></section>
+<section id="the-code-explained">
+<h2>The Code Explained<a class="headerlink" href="#the-code-explained" title="Link to this heading">#</a></h2>
+<p>Similar to the previous tutorial on creating a simulation scene, we use the <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager" title="embodichain.lab.sim.SimulationManager"><code class="xref py py-class docutils literal notranslate"><span class="pre">SimulationManager</span></code></a> class to set up the simulation environment. If you haven’t read that tutorial yet, please refer to <a class="reference internal" href="create_scene.html"><span class="doc">Creating a simulation scene</span></a> first.</p>
+<section id="loading-robot-urdf">
+<h3>Loading Robot URDF<a class="headerlink" href="#loading-robot-urdf" title="Link to this heading">#</a></h3>
+<p>SimulationManager supports loading robots from URDF (Unified Robot Description Format) files. You can load either a single URDF file or compose multiple URDF components into a complete robot system.</p>
+<p>For a simple two-component robot (arm + hand):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>    <span class="n">sr5_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;Rokae/SR5/SR5.urdf&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Get hand URDF path</span>
+    <span class="n">hand_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span>
+        <span class="s2">&quot;BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf&quot;</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Define control parts for the robot</span>
+    <span class="c1"># Joint names in control_parts can be regex patterns</span>
+    <span class="n">CONTROL_PARTS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">,</span>  <span class="c1"># Matches JOINT1, JOINT2, ..., JOINT6</span>
+        <span class="p">],</span>
+        <span class="s2">&quot;hand&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;LEFT_.*&quot;</span><span class="p">],</span>  <span class="c1"># Matches all joints starting with L_</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Define transformation for hand attachment</span>
+    <span class="n">hand_attach_xpos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+    <span class="n">hand_attach_xpos</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">([</span><span class="mi">90</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">()</span>
+    <span class="n">hand_attach_xpos</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.02</span>
+
+    <span class="n">cfg</span> <span class="o">=</span> <span class="n">RobotCfg</span><span class="p">(</span>
+        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;sr5_with_brainco&quot;</span><span class="p">,</span>
+        <span class="n">urdf_cfg</span><span class="o">=</span><span class="n">URDFCfg</span><span class="p">(</span>
+            <span class="n">components</span><span class="o">=</span><span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">sr5_urdf_path</span><span class="p">,</span>
+                <span class="p">},</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">hand_urdf_path</span><span class="p">,</span>
+                    <span class="s2">&quot;transform&quot;</span><span class="p">:</span> <span class="n">hand_attach_xpos</span><span class="p">,</span>
+                <span class="p">},</span>
+            <span class="p">]</span>
+        <span class="p">),</span>
+        <span class="n">control_parts</span><span class="o">=</span><span class="n">CONTROL_PARTS</span><span class="p">,</span>
+        <span class="n">drive_pros</span><span class="o">=</span><span class="n">JointDrivePropertiesCfg</span><span class="p">(</span>
+            <span class="n">stiffness</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e4</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">},</span>
+            <span class="n">damping</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e2</span><span class="p">},</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Add robot to simulation</span>
+    <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_robot</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.URDFCfg" title="embodichain.lab.sim.cfg.URDFCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">cfg.URDFCfg</span></code></a> allows you to compose multiple URDF files with specific transformations, enabling complex robot assemblies.</p>
+</section>
+<section id="configuring-control-parts">
+<h3>Configuring Control Parts<a class="headerlink" href="#configuring-control-parts" title="Link to this heading">#</a></h3>
+<p>Control parts define how the robot’s joints are grouped for control purposes. This is useful for organizing complex robots with multiple subsystems.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>    <span class="c1"># Define control parts for the robot</span>
+    <span class="c1"># Joint names in control_parts can be regex patterns</span>
+    <span class="n">CONTROL_PARTS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">,</span>  <span class="c1"># Matches JOINT1, JOINT2, ..., JOINT6</span>
+        <span class="p">],</span>
+        <span class="s2">&quot;hand&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;LEFT_.*&quot;</span><span class="p">],</span>  <span class="c1"># Matches all joints starting with L_</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+<p>Joint names in control parts can use regex patterns for flexible matching. For example:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;JOINT[1-6]&quot;</span></code> matches JOINT1, JOINT2, …, JOINT6</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;L_.*&quot;</span></code> matches all joints starting with <cite>“L_”</cite></p></li>
+</ul>
+</section>
+<section id="setting-drive-properties">
+<h3>Setting Drive Properties<a class="headerlink" href="#setting-drive-properties" title="Link to this heading">#</a></h3>
+<p>Drive properties control how the robot’s joints behave during simulation, including stiffness, damping, and force limits.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>        <span class="n">drive_pros</span><span class="o">=</span><span class="n">JointDrivePropertiesCfg</span><span class="p">(</span>
+            <span class="n">stiffness</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e4</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">},</span>
+            <span class="n">damping</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[1-6]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">,</span> <span class="s2">&quot;LEFT_.*&quot;</span><span class="p">:</span> <span class="mf">1e2</span><span class="p">},</span>
+        <span class="p">),</span>
+</pre></div>
+</div>
+<p>You can set different stiffness values for different joint groups using regex patterns. More details on drive properties can be found in <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.JointDrivePropertiesCfg" title="embodichain.lab.sim.cfg.JointDrivePropertiesCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">cfg.JointDrivePropertiesCfg</span></code></a>.</p>
+<p>For more robot configuration options, refer to <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.RobotCfg" title="embodichain.lab.sim.cfg.RobotCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">cfg.RobotCfg</span></code></a>.</p>
+</section>
+<section id="robot-control">
+<h3>Robot Control<a class="headerlink" href="#robot-control" title="Link to this heading">#</a></h3>
+<p>For the basic control of robot joints, you can set position targets using <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.set_qpos" title="embodichain.lab.sim.objects.Robot.set_qpos"><code class="xref py py-meth docutils literal notranslate"><span class="pre">objects.Robot.set_qpos()</span></code></a>. The control action should be created as a torch.Tensor with shape (num_envs, num_joints), where <cite>num_joints</cite> is the total number of joints in the robot or the number of joints in a specific control part.</p>
+<ul>
+<li><p>If you can control all joints, use:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">target_positions</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p>If you want to control a subset of joints, specify the joint IDs:</p>
+<blockquote>
+<div><div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">target_positions</span><span class="p">,</span> <span class="n">joint_ids</span><span class="o">=</span><span class="n">subset_joint_ids</span><span class="p">)</span>
+</pre></div>
+</div>
+</div></blockquote>
+</li>
+</ul>
+</section>
+<section id="getting-robot-state">
+<h3>Getting Robot State<a class="headerlink" href="#getting-robot-state" title="Link to this heading">#</a></h3>
+<p>You can query the robot’s current joint positions and velocities via <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qpos" title="embodichain.lab.sim.objects.Robot.get_qpos"><code class="xref py py-meth docutils literal notranslate"><span class="pre">objects.Robot.get_qpos()</span></code></a> and <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qvel" title="embodichain.lab.sim.objects.Robot.get_qvel"><code class="xref py py-meth docutils literal notranslate"><span class="pre">objects.Robot.get_qvel()</span></code></a>. For more robot API details, see <a class="reference internal" href="../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot" title="embodichain.lab.sim.objects.Robot"><code class="xref py py-class docutils literal notranslate"><span class="pre">objects.Robot</span></code></a>.</p>
+</section>
+</section>
+<section id="the-code-execution">
+<h2>The Code Execution<a class="headerlink" href="#the-code-execution" title="Link to this heading">#</a></h2>
+<p>To run the robot simulation script:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>/root/sources/embodichain
+python<span class="w"> </span>scripts/tutorials/sim/create_robot.py
+</pre></div>
+</div>
+<p>You can customize the simulation with various command-line options:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run with GPU physics</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_robot.py<span class="w"> </span>--device<span class="w"> </span>cuda
+
+<span class="c1"># Run multiple environments</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_robot.py<span class="w"> </span>--num_envs<span class="w"> </span><span class="m">4</span>
+
+<span class="c1"># Run in headless mode</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_robot.py<span class="w"> </span>--headless
+
+<span class="c1"># Enable ray tracing rendering</span>
+python<span class="w"> </span>scripts/tutorials/sim/create_robot.py<span class="w"> </span>--renderer
+</pre></div>
+</div>
+<p>The simulation will show the robot moving through different poses, demonstrating basic joint control capabilities.</p>
+</section>
+<section id="key-features-demonstrated">
+<h2>Key Features Demonstrated<a class="headerlink" href="#key-features-demonstrated" title="Link to this heading">#</a></h2>
+<p>This tutorial demonstrates several key features of robot simulation in SimulationManager:</p>
+<ol class="arabic simple">
+<li><p><strong>URDF Loading</strong>: Both single-file and multi-component robot loading</p></li>
+<li><p><strong>Control Parts</strong>: Organizing joints into logical control groups</p></li>
+<li><p><strong>Drive Properties</strong>: Configuring joint stiffness and control behavior</p></li>
+<li><p><strong>Joint Control</strong>: Setting position targets and reading joint states</p></li>
+<li><p><strong>Multi-Environment</strong>: Running multiple robot instances in parallel</p></li>
+</ol>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
+<p>After mastering basic robot simulation, you can explore:</p>
+<ul class="simple">
+<li><p>End-effector control and inverse kinematics</p></li>
+<li><p>Sensor integration (cameras, force sensors)</p></li>
+<li><p>Robot-object interaction scenarios</p></li>
+</ul>
+<p>This tutorial provides the foundation for creating sophisticated robotic simulation scenarios with SimulationManager.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="rigid_object_group.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Rigid object group tutorial</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="solver.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Create a solver</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code">The Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code-explained">The Code Explained</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#loading-robot-urdf">Loading Robot URDF</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuring-control-parts">Configuring Control Parts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-drive-properties">Setting Drive Properties</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#robot-control">Robot Control</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#getting-robot-state">Getting Robot State</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code-execution">The Code Execution</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features-demonstrated">Key Features Demonstrated</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

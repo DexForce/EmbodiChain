@@ -1,0 +1,1094 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>embodichain.lab.sim.robots &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference/embodichain/embodichain.lab.sim.robots';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/api_reference/embodichain/embodichain.lab.sim.robots.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>embodichain.lab.sim.robots</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.class_type"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.class_type</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.end_link_name"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.end_link_name</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.from_dict()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.ik_nearest_weight"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.ik_nearest_weight</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.joint_names"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.joint_names</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.root_link_name"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.root_link_name</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.tcp"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.tcp</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.urdf_path"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.urdf_path</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.user_qpos_limits"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.user_qpos_limits</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.attrs"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.attrs</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.body_scale"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.body_scale</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_chain"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.build_pk_chain</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_serial_chain"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.build_pk_serial_chain()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.compute_uv"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.compute_uv</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.control_parts"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.control_parts</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.disable_self_collision"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.disable_self_collision</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.drive_pros"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.drive_pros</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.fix_base"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.fix_base</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.fpath"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.fpath</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_qpos"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_qpos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_rot</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_position_iters"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.min_position_iters</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_velocity_iters"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.min_velocity_iters</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.sleep_threshold"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.sleep_threshold</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.solver_cfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.solver_cfg</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.urdf_cfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.urdf_cfg</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.use_usd_properties"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.use_usd_properties</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-embodichain.lab.sim.robots">
+<span id="embodichain-lab-sim-robots"></span><h1>embodichain.lab.sim.robots<a class="headerlink" href="#module-embodichain.lab.sim.robots" title="Link to this heading">#</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>This module exposes robot-specific configuration presets for simulation scenes.</p>
+<p class="rubric">Classes</p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg" title="embodichain.lab.sim.robots.CobotMagicCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CobotMagicCfg</span></code></a></p></td>
+<td><p>CobotMagicCfg(uid: 'Union[str, None]' = &lt;factory&gt;, init_pos: 'tuple[float, float, float]' = &lt;factory&gt;, init_rot: 'tuple[float, float, float]' = &lt;factory&gt;, init_local_pose: 'np.ndarray | None' = &lt;factory&gt;, fpath: 'str' = &lt;factory&gt;, drive_pros: 'JointDrivePropertiesCfg' = &lt;factory&gt;, body_scale: 'Union[tuple, list]' = &lt;factory&gt;, attrs: 'RigidBodyAttributesCfg' = &lt;factory&gt;, fix_base: 'bool' = &lt;factory&gt;, disable_self_collision: 'bool' = &lt;factory&gt;, init_qpos: 'Union[torch.Tensor, np.ndarray, Sequence[float]]' = &lt;factory&gt;, sleep_threshold: 'float' = &lt;factory&gt;, min_position_iters: 'int' = &lt;factory&gt;, min_velocity_iters: 'int' = &lt;factory&gt;, build_pk_chain: 'bool' = &lt;factory&gt;, compute_uv: 'bool' = &lt;factory&gt;, use_usd_properties: 'bool' = &lt;factory&gt;, control_parts: 'Dict[str, List[str]] | None' = &lt;factory&gt;, urdf_cfg: 'URDFCfg' = &lt;factory&gt;, solver_cfg: &quot;Dict[str, 'SolverCfg'] | None&quot; = &lt;factory&gt;, _build_default_cfgs: function = &lt;factory&gt;)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.robots.</span></span><span class="sig-name descname"><span class="pre">CobotMagicCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/robots/cobotmagic.html#CobotMagicCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="embodichain.lab.sim.html#embodichain.lab.sim.cfg.RobotCfg" title="embodichain.lab.sim.cfg.RobotCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">RobotCfg</span></code></a></p>
+<p>CobotMagicCfg(uid: ‘Union[str, None]’ = &lt;factory&gt;, init_pos: ‘tuple[float, float, float]’ = &lt;factory&gt;, init_rot: ‘tuple[float, float, float]’ = &lt;factory&gt;, init_local_pose: ‘np.ndarray | None’ = &lt;factory&gt;, fpath: ‘str’ = &lt;factory&gt;, drive_pros: ‘JointDrivePropertiesCfg’ = &lt;factory&gt;, body_scale: ‘Union[tuple, list]’ = &lt;factory&gt;, attrs: ‘RigidBodyAttributesCfg’ = &lt;factory&gt;, fix_base: ‘bool’ = &lt;factory&gt;, disable_self_collision: ‘bool’ = &lt;factory&gt;, init_qpos: ‘Union[torch.Tensor, np.ndarray, Sequence[float]]’ = &lt;factory&gt;, sleep_threshold: ‘float’ = &lt;factory&gt;, min_position_iters: ‘int’ = &lt;factory&gt;, min_velocity_iters: ‘int’ = &lt;factory&gt;, build_pk_chain: ‘bool’ = &lt;factory&gt;, compute_uv: ‘bool’ = &lt;factory&gt;, use_usd_properties: ‘bool’ = &lt;factory&gt;, control_parts: ‘Dict[str, List[str]] | None’ = &lt;factory&gt;, urdf_cfg: ‘URDFCfg’ = &lt;factory&gt;, solver_cfg: “Dict[str, ‘SolverCfg’] | None” = &lt;factory&gt;, _build_default_cfgs: function = &lt;factory&gt;)</p>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SolverCfg</span></code></a></p></td>
+<td><p>Configuration for the kinematic solver used in the robot simulation.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.attrs" title="embodichain.lab.sim.robots.CobotMagicCfg.attrs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">attrs</span></code></a></p></td>
+<td><p>Physical attributes for all links.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.body_scale" title="embodichain.lab.sim.robots.CobotMagicCfg.body_scale"><code class="xref py py-obj docutils literal notranslate"><span class="pre">body_scale</span></code></a></p></td>
+<td><p>Scale of the articulation in the simulation world frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_chain" title="embodichain.lab.sim.robots.CobotMagicCfg.build_pk_chain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_pk_chain</span></code></a></p></td>
+<td><p>Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.compute_uv" title="embodichain.lab.sim.robots.CobotMagicCfg.compute_uv"><code class="xref py py-obj docutils literal notranslate"><span class="pre">compute_uv</span></code></a></p></td>
+<td><p>Whether to compute the UV mapping for the articulation link.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.control_parts" title="embodichain.lab.sim.robots.CobotMagicCfg.control_parts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">control_parts</span></code></a></p></td>
+<td><p>Control parts is the mapping from part name to joint names.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.disable_self_collision" title="embodichain.lab.sim.robots.CobotMagicCfg.disable_self_collision"><code class="xref py py-obj docutils literal notranslate"><span class="pre">disable_self_collision</span></code></a></p></td>
+<td><p>Whether to enable or disable self-collisions.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.drive_pros" title="embodichain.lab.sim.robots.CobotMagicCfg.drive_pros"><code class="xref py py-obj docutils literal notranslate"><span class="pre">drive_pros</span></code></a></p></td>
+<td><p>Properties to define the drive mechanism of a joint.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.fix_base" title="embodichain.lab.sim.robots.CobotMagicCfg.fix_base"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fix_base</span></code></a></p></td>
+<td><p>Whether to fix the base of the articulation.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.fpath" title="embodichain.lab.sim.robots.CobotMagicCfg.fpath"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fpath</span></code></a></p></td>
+<td><p>Path to the articulation asset file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_local_pose" title="embodichain.lab.sim.robots.CobotMagicCfg.init_local_pose"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_local_pose</span></code></a></p></td>
+<td><p>4x4 transformation matrix of the root in local frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_pos" title="embodichain.lab.sim.robots.CobotMagicCfg.init_pos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_pos</span></code></a></p></td>
+<td><p>Position of the root in simulation world frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_qpos" title="embodichain.lab.sim.robots.CobotMagicCfg.init_qpos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_qpos</span></code></a></p></td>
+<td><p>Initial joint positions of the articulation.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_rot" title="embodichain.lab.sim.robots.CobotMagicCfg.init_rot"><code class="xref py py-obj docutils literal notranslate"><span class="pre">init_rot</span></code></a></p></td>
+<td><p>Euler angles (in degree) of the root in simulation world frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_position_iters" title="embodichain.lab.sim.robots.CobotMagicCfg.min_position_iters"><code class="xref py py-obj docutils literal notranslate"><span class="pre">min_position_iters</span></code></a></p></td>
+<td><p>[1,255].</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_velocity_iters" title="embodichain.lab.sim.robots.CobotMagicCfg.min_velocity_iters"><code class="xref py py-obj docutils literal notranslate"><span class="pre">min_velocity_iters</span></code></a></p></td>
+<td><p>[0,255].</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.sleep_threshold" title="embodichain.lab.sim.robots.CobotMagicCfg.sleep_threshold"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sleep_threshold</span></code></a></p></td>
+<td><p>[0, max_float32]</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.solver_cfg" title="embodichain.lab.sim.robots.CobotMagicCfg.solver_cfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">solver_cfg</span></code></a></p></td>
+<td><p>Solver is used to compute forward and inverse kinematics for the robot.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.urdf_cfg" title="embodichain.lab.sim.robots.CobotMagicCfg.urdf_cfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">urdf_cfg</span></code></a></p></td>
+<td><p>URDF assembly configuration which allows for assembling a robot from multiple URDF components.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.use_usd_properties" title="embodichain.lab.sim.robots.CobotMagicCfg.use_usd_properties"><code class="xref py py-obj docutils literal notranslate"><span class="pre">use_usd_properties</span></code></a></p></td>
+<td><p>Whether to use physical properties from USD file instead of config.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_serial_chain" title="embodichain.lab.sim.robots.CobotMagicCfg.build_pk_serial_chain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_pk_serial_chain</span></code></a>([device])</p></td>
+<td><p>Build the serial chain from the URDF file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.from_dict" title="embodichain.lab.sim.robots.CobotMagicCfg.from_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">from_dict</span></code></a>(init_dict)</p></td>
+<td><p>Initialize the configuration from a dictionary.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">SolverCfg</span></span><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for the kinematic solver used in the robot simulation.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.class_type" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.class_type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">class_type</span></code></a></p></td>
+<td><p>The class type of the solver to be used.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.end_link_name" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.end_link_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">end_link_name</span></code></a></p></td>
+<td><p>The name of the end-effector link for the solver.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.ik_nearest_weight" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.ik_nearest_weight"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ik_nearest_weight</span></code></a></p></td>
+<td><p>Weights for the inverse kinematics nearest calculation.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.joint_names" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.joint_names"><code class="xref py py-obj docutils literal notranslate"><span class="pre">joint_names</span></code></a></p></td>
+<td><p>List of joint names for the solver.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.root_link_name" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.root_link_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">root_link_name</span></code></a></p></td>
+<td><p>The name of the root/base link for the solver.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.tcp" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.tcp"><code class="xref py py-obj docutils literal notranslate"><span class="pre">tcp</span></code></a></p></td>
+<td><p>The tool center point (TCP) position as a 4x4 homogeneous matrix.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.urdf_path" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.urdf_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">urdf_path</span></code></a></p></td>
+<td><p>The file path to the URDF model of the robot.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.user_qpos_limits" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.user_qpos_limits"><code class="xref py py-obj docutils literal notranslate"><span class="pre">user_qpos_limits</span></code></a></p></td>
+<td><p>User defined Joint position limits [2, DOF] for the solver.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.from_dict" title="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.from_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">from_dict</span></code></a>(init_dict)</p></td>
+<td><p>Initialize the configuration from a dictionary.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.class_type">
+<span class="sig-name descname"><span class="pre">class_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.class_type" title="Link to this definition">#</a></dt>
+<dd><p>The class type of the solver to be used.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.end_link_name">
+<span class="sig-name descname"><span class="pre">end_link_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.end_link_name" title="Link to this definition">#</a></dt>
+<dd><p>The name of the end-effector link for the solver.</p>
+<p>This defines the target link for forward/inverse kinematics calculations.
+Must match a link name in the URDF file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.from_dict">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">init_dict</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.from_dict" title="Link to this definition">#</a></dt>
+<dd><p>Initialize the configuration from a dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.SolverCfg" title="embodichain.lab.sim.solvers.base_solver.SolverCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SolverCfg</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.ik_nearest_weight">
+<span class="sig-name descname"><span class="pre">ik_nearest_weight</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]]</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.ik_nearest_weight" title="Link to this definition">#</a></dt>
+<dd><p>Weights for the inverse kinematics nearest calculation.</p>
+<p>The weights influence how the solver prioritizes closeness to the seed position
+when multiple solutions are available.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.joint_names">
+<span class="sig-name descname"><span class="pre">joint_names</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">]</span> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.joint_names" title="Link to this definition">#</a></dt>
+<dd><p>List of joint names for the solver.</p>
+<p>If None, all joints in the URDF will be used.
+If specified, only these named joints will be included in the kinematic chain.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.root_link_name">
+<span class="sig-name descname"><span class="pre">root_link_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.root_link_name" title="Link to this definition">#</a></dt>
+<dd><p>The name of the root/base link for the solver.</p>
+<p>This defines the starting point of the kinematic chain.
+Must match a link name in the URDF file.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.tcp">
+<span class="sig-name descname"><span class="pre">tcp</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">ndarray</span></code></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.tcp" title="Link to this definition">#</a></dt>
+<dd><p>The tool center point (TCP) position as a 4x4 homogeneous matrix.</p>
+<p>This represents the position and orientation of the tool in the robot’s end-effector frame.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.urdf_path">
+<span class="sig-name descname"><span class="pre">urdf_path</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.urdf_path" title="Link to this definition">#</a></dt>
+<dd><p>The file path to the URDF model of the robot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.user_qpos_limits">
+<span class="sig-name descname"><span class="pre">user_qpos_limits</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]]</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.user_qpos_limits" title="Link to this definition">#</a></dt>
+<dd><p>User defined Joint position limits [2, DOF] for the solver.
+If not provided (None), this value will replace by joint limits defined in urdf when solver init from robot.
+If provided, the solver will use the intersection of user defined limits and urdf limits as the final joint limits.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.attrs">
+<span class="sig-name descname"><span class="pre">attrs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">RigidBodyAttributesCfg</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.attrs" title="Link to this definition">#</a></dt>
+<dd><p>Physical attributes for all links. We use default mass from the USD/URDF file if available.
+The mass and density in attrs will only be used if specified.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.body_scale">
+<span class="sig-name descname"><span class="pre">body_scale</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Union[tuple,</span> <span class="pre">list]</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.body_scale" title="Link to this definition">#</a></dt>
+<dd><p>Scale of the articulation in the simulation world frame.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.build_pk_chain">
+<span class="sig-name descname"><span class="pre">build_pk_chain</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_chain" title="Link to this definition">#</a></dt>
+<dd><p>Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.build_pk_serial_chain">
+<span class="sig-name descname"><span class="pre">build_pk_serial_chain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">device(type='cpu')</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/robots/cobotmagic.html#CobotMagicCfg.build_pk_serial_chain"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_serial_chain" title="Link to this definition">#</a></dt>
+<dd><p>Build the serial chain from the URDF file.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This method is usually used in imitation dataset saving (compute eef pose from qpos using FK)
+and model training (provide a differentiable FK layer or loss computation).</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>device</strong> (<em>torch.device</em>) – The device to which the chain will be moved. Defaults to CPU.</p></li>
+<li><p><strong>**kwargs</strong> – Additional arguments for building the serial chain.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The serial chain of the robot for specified control part.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dict[str, pk.SerialChain]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.compute_uv">
+<span class="sig-name descname"><span class="pre">compute_uv</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.compute_uv" title="Link to this definition">#</a></dt>
+<dd><p>Whether to compute the UV mapping for the articulation link.</p>
+<p>Currently, the uv mapping is computed for each link with projection uv mapping method.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.control_parts">
+<span class="sig-name descname"><span class="pre">control_parts</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Dict[str,</span> <span class="pre">List[str]]</span> <span class="pre">|</span> <span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.control_parts" title="Link to this definition">#</a></dt>
+<dd><p>Control parts is the mapping from part name to joint names.</p>
+<p>For example, {‘left_arm’: [‘joint1’, ‘joint2’], ‘right_arm’: [‘joint3’, ‘joint4’]}
+If no control part is specified, the robot will use all joints as a single control part.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>if <cite>control_parts</cite> is specified, <cite>solver_cfg</cite> must be a dict with part names as</dt><dd><p>keys corresponding to the control parts name.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>The joint names in the control parts support regular expressions, e.g., ‘joint[1-6]’.</dt><dd><p>After initialization of robot, the names will be expanded to a list of full joint names.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><cite>Robot</cite> is a derived class of <cite>Articulation</cite>, with control parts support. So the <cite>drive_pros</cite></dt><dd><p>in <cite>ArticulationCfg</cite> can use control part as key to specify the corresponding joint drive properties,
+which will be overridden if these joint names are already specified.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.disable_self_collision">
+<span class="sig-name descname"><span class="pre">disable_self_collision</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.disable_self_collision" title="Link to this definition">#</a></dt>
+<dd><p>Whether to enable or disable self-collisions.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.drive_pros">
+<span class="sig-name descname"><span class="pre">drive_pros</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">JointDrivePropertiesCfg</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.drive_pros" title="Link to this definition">#</a></dt>
+<dd><p>Properties to define the drive mechanism of a joint.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.fix_base">
+<span class="sig-name descname"><span class="pre">fix_base</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.fix_base" title="Link to this definition">#</a></dt>
+<dd><p>Whether to fix the base of the articulation.</p>
+<p>Set to True for articulations that should not move, such as a fixed base robot arm or a door.
+Set to False for articulations that should move freely, such as a mobile robot or a humanoid robot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.fpath">
+<span class="sig-name descname"><span class="pre">fpath</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.fpath" title="Link to this definition">#</a></dt>
+<dd><p>Path to the articulation asset file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.from_dict">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">init_dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/robots/cobotmagic.html#CobotMagicCfg.from_dict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.from_dict" title="Link to this definition">#</a></dt>
+<dd><p>Initialize the configuration from a dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.robots.CobotMagicCfg" title="embodichain.lab.sim.robots.cobotmagic.CobotMagicCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">CobotMagicCfg</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.init_local_pose">
+<span class="sig-name descname"><span class="pre">init_local_pose</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">np.ndarray</span> <span class="pre">|</span> <span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_local_pose" title="Link to this definition">#</a></dt>
+<dd><p>4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.init_pos">
+<span class="sig-name descname"><span class="pre">init_pos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_pos" title="Link to this definition">#</a></dt>
+<dd><p>Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.init_qpos">
+<span class="sig-name descname"><span class="pre">init_qpos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Union[torch.Tensor,</span> <span class="pre">np.ndarray,</span> <span class="pre">Sequence[float]]</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_qpos" title="Link to this definition">#</a></dt>
+<dd><p>Initial joint positions of the articulation.</p>
+<p>If None, the joint positions will be set to zero.
+If provided, it should be a array of shape (num_joints,).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.init_rot">
+<span class="sig-name descname"><span class="pre">init_rot</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple[float,</span> <span class="pre">float,</span> <span class="pre">float]</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_rot" title="Link to this definition">#</a></dt>
+<dd><p>Euler angles (in degree) of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.min_position_iters">
+<span class="sig-name descname"><span class="pre">min_position_iters</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_position_iters" title="Link to this definition">#</a></dt>
+<dd><p>[1,255].</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Number of position iterations the solver should perform for this articulation. Range</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.min_velocity_iters">
+<span class="sig-name descname"><span class="pre">min_velocity_iters</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_velocity_iters" title="Link to this definition">#</a></dt>
+<dd><p>[0,255].</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Number of velocity iterations the solver should perform for this articulation. Range</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.sleep_threshold">
+<span class="sig-name descname"><span class="pre">sleep_threshold</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.sleep_threshold" title="Link to this definition">#</a></dt>
+<dd><p>[0, max_float32]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Energy below which the articulation may go to sleep. Range</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.solver_cfg">
+<span class="sig-name descname"><span class="pre">solver_cfg</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Dict[str,</span> <span class="pre">'SolverCfg']</span> <span class="pre">|</span> <span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.solver_cfg" title="Link to this definition">#</a></dt>
+<dd><p>Solver is used to compute forward and inverse kinematics for the robot.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.urdf_cfg">
+<span class="sig-name descname"><span class="pre">urdf_cfg</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">URDFCfg</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.urdf_cfg" title="Link to this definition">#</a></dt>
+<dd><p>URDF assembly configuration which allows for assembling a robot from multiple URDF components.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.robots.CobotMagicCfg.use_usd_properties">
+<span class="sig-name descname"><span class="pre">use_usd_properties</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#embodichain.lab.sim.robots.CobotMagicCfg.use_usd_properties" title="Link to this definition">#</a></dt>
+<dd><p>Whether to use physical properties from USD file instead of config.</p>
+<p>When True: Keep all physical properties (drive, physics attrs, etc.) from USD file.
+When False (default): Override USD properties with config values (URDF behavior).
+Only effective for USD files, ignored for URDF files.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.class_type"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.class_type</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.end_link_name"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.end_link_name</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.from_dict()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.ik_nearest_weight"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.ik_nearest_weight</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.joint_names"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.joint_names</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.root_link_name"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.root_link_name</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.tcp"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.tcp</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.urdf_path"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.urdf_path</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.SolverCfg.user_qpos_limits"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.SolverCfg.user_qpos_limits</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.attrs"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.attrs</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.body_scale"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.body_scale</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_chain"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.build_pk_chain</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.build_pk_serial_chain"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.build_pk_serial_chain()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.compute_uv"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.compute_uv</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.control_parts"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.control_parts</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.disable_self_collision"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.disable_self_collision</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.drive_pros"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.drive_pros</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.fix_base"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.fix_base</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.fpath"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.fpath</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.from_dict"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.from_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_local_pose"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_local_pose</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_pos"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_pos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_qpos"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_qpos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.init_rot"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.init_rot</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_position_iters"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.min_position_iters</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.min_velocity_iters"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.min_velocity_iters</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.sleep_threshold"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.sleep_threshold</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.solver_cfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.solver_cfg</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.urdf_cfg"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.urdf_cfg</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.robots.CobotMagicCfg.use_usd_properties"><code class="docutils literal notranslate"><span class="pre">CobotMagicCfg.use_usd_properties</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

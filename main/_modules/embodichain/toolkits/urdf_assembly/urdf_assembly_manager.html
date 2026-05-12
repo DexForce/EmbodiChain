@@ -1,0 +1,1639 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.toolkits.urdf_assembly.urdf_assembly_manager &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/toolkits/urdf_assembly/urdf_assembly_manager';</script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.toolkits.urdf_assembly.urdf_assembly_manager</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">copy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">wraps</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">xml.etree.ElementTree</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ET</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span> <span class="k">as</span> <span class="n">R</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.logging_utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">setup_urdf_logging</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.signature</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">URDFAssemblySignatureManager</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.component</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">URDFComponent</span><span class="p">,</span>
+    <span class="n">ComponentRegistry</span><span class="p">,</span>
+    <span class="n">URDFComponentManager</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.sensor</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">SensorAttachment</span><span class="p">,</span>
+    <span class="n">SensorRegistry</span><span class="p">,</span>
+    <span class="n">URDFSensorManager</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.connection</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">URDFConnectionManager</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.mesh</span><span class="w"> </span><span class="kn">import</span> <span class="n">URDFMeshManager</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.file_writer</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">URDFFileWriter</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.urdf_assembly.utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ensure_directory_exists</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;URDFAssemblyManager&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">performance_monitor</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Performance monitoring decorator for tracking function execution time&quot;&quot;&quot;</span>
+
+    <span class="nd">@wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">wrapper</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="n">duration</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> completed in </span><span class="si">{</span><span class="n">duration</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">result</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">duration</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> failed after </span><span class="si">{</span><span class="n">duration</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">s: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">raise</span>
+
+    <span class="k">return</span> <span class="n">wrapper</span>
+
+
+<div class="viewcode-block" id="URDFAssemblyManager">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">URDFAssemblyManager</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A class to manage the assembly of URDF files and their components.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Supported wheel types for chassis components</span>
+    <span class="n">SUPPORTED_WHEEL_TYPES</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;omni&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;differential&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;tracked&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+    <span class="c1"># Supported robot component types</span>
+    <span class="n">SUPPORTED_COMPONENTS</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;chassis&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;legs&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;torso&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;head&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;left_arm&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;right_arm&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;left_hand&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;right_hand&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+    <span class="c1"># Supported sensor types for attachment</span>
+    <span class="n">SUPPORTED_SENSORS</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;camera&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;lidar&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;imu&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;gps&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;force&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+    <span class="c1"># Supported mesh file formats</span>
+    <span class="n">SUPPORTED_MESH_TYPES</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;stl&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;obj&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;ply&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;dae&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;glb&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+<div class="viewcode-block" id="URDFAssemblyManager.__init__">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">component_registry</span><span class="p">:</span> <span class="n">ComponentRegistry</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">sensor_registry</span><span class="p">:</span> <span class="n">SensorRegistry</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">mesh_manager</span><span class="p">:</span> <span class="n">URDFMeshManager</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">component_manager</span><span class="p">:</span> <span class="s2">&quot;URDFComponentManager&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">sensor_manager</span><span class="p">:</span> <span class="s2">&quot;URDFSensorManager&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span> <span class="o">=</span> <span class="n">setup_urdf_logging</span><span class="p">()</span>
+
+        <span class="c1"># Global name normalization strategy for this assembly. By default,</span>
+        <span class="c1"># this preserves the legacy behavior: link names are lowercase and</span>
+        <span class="c1"># joint names are uppercase. The same mapping is passed down to</span>
+        <span class="c1"># managers that deal with naming so that the policy stays consistent.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;joint&quot;</span><span class="p">:</span> <span class="s2">&quot;upper&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;link&quot;</span><span class="p">:</span> <span class="s2">&quot;lower&quot;</span><span class="p">,</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Use registries for components and sensors</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span> <span class="o">=</span> <span class="n">component_registry</span> <span class="ow">or</span> <span class="n">ComponentRegistry</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sensor_registry</span> <span class="o">=</span> <span class="n">sensor_registry</span> <span class="ow">or</span> <span class="n">SensorRegistry</span><span class="p">()</span>
+
+        <span class="c1"># Initialize mesh manager</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mesh_manager</span> <span class="o">=</span> <span class="n">mesh_manager</span> <span class="ow">or</span> <span class="n">URDFMeshManager</span><span class="p">(</span><span class="n">output_dir</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Initialize managers for components and sensors</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">component_manager</span> <span class="o">=</span> <span class="n">component_manager</span> <span class="ow">or</span> <span class="n">URDFComponentManager</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mesh_manager</span><span class="p">,</span> <span class="n">name_case</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sensor_manager</span> <span class="o">=</span> <span class="n">sensor_manager</span> <span class="ow">or</span> <span class="n">URDFSensorManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mesh_manager</span><span class="p">)</span>
+
+        <span class="c1"># Processing order for components with their name prefixes</span>
+        <span class="c1"># Tuple format: (component_name, prefix)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_component_order_and_prefix</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;legs&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;head&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;left_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;left_&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;right_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;right_&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;left_hand&quot;</span><span class="p">,</span> <span class="s2">&quot;left_&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;right_hand&quot;</span><span class="p">,</span> <span class="s2">&quot;right_&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;hand&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+        <span class="p">]</span>
+
+        <span class="c1"># Attachment position indices for component connections.</span>
+        <span class="c1"># This dictionary defines which link of each component should be used as the connection point</span>
+        <span class="c1"># when attaching to other components:</span>
+        <span class="c1">#   0   : use the first link in the component&#39;s URDF (typically for child connections)</span>
+        <span class="c1">#   -1  : use the last link in the component&#39;s URDF (typically for parent connections)</span>
+        <span class="c1"># For example, &#39;chassis&#39;: 0 means the first link of the chassis is used for child attachments;</span>
+        <span class="c1"># &#39;torso&#39;: -1 means the last link of the torso is used for child attachments, etc.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attach_positions</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;chassis&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># Use first link of chassis for child connections</span>
+            <span class="s2">&quot;legs&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># Use last link of legs for child connections</span>
+            <span class="s2">&quot;torso&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># Use last link of torso for child connections</span>
+            <span class="s2">&quot;head&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># Use first link of head for connections</span>
+            <span class="s2">&quot;left_arm&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># Use last link of left_arm for hand attachment</span>
+            <span class="s2">&quot;right_arm&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># Use last link of right_arm for hand attachment</span>
+            <span class="s2">&quot;left_hand&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># Use first link of left_hand for connections</span>
+            <span class="s2">&quot;right_hand&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># Use first link of right_hand for connections</span>
+            <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># Use last link of arm for hand attachment</span>
+            <span class="s2">&quot;hand&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># Use first link of hand for connections</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Connection rules defining parent-child relationships between components</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">connection_rules</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;legs&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;legs&quot;</span><span class="p">,</span> <span class="s2">&quot;torso&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;torso&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;left_arm&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;right_arm&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;arm&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;head&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;left_arm&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;right_arm&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;arm&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;left_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;left_hand&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;right_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;right_hand&quot;</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span> <span class="s2">&quot;hand&quot;</span><span class="p">),</span>
+        <span class="p">]</span>
+
+        <span class="c1"># Configure logging</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">basicConfig</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+
+        <span class="c1"># Name of the base link for the robot</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">base_link_name</span> <span class="o">=</span> <span class="s2">&quot;base_link&quot;</span>
+
+        <span class="c1"># Initialize the URDF file writer for output formatting</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span> <span class="o">=</span> <span class="n">URDFFileWriter</span><span class="p">()</span>
+
+        <span class="c1"># Initialize signature manager instead of cache manager</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">signature_manager</span> <span class="o">=</span> <span class="n">URDFAssemblySignatureManager</span><span class="p">()</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">name_case</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the current name case policy for joints and links.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            dict[str, str]: A dictionary mapping &#39;joint&#39; and &#39;link&#39; to their respective case modes.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span>
+
+    <span class="nd">@name_case</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">name_case</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_name_case</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set a new name case policy for joints and links.</span>
+
+<span class="sd">        This method updates the name case policy and propagates it to the component and sensor managers.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            new_name_case (dict[str, str]): A dictionary mapping &#39;joint&#39; and &#39;link&#39; to their desired case modes (e.g., &#39;upper&#39;, &#39;lower&#39;, &#39;none&#39;).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">new_name_case</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;name_case must be a dictionary mapping &#39;joint&#39; and &#39;link&#39; to case modes.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;joint&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">new_name_case</span> <span class="ow">or</span> <span class="s2">&quot;link&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">new_name_case</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;name_case must contain keys &#39;joint&#39; and &#39;link&#39;.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span> <span class="o">=</span> <span class="n">new_name_case</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_case</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Normalize a name according to the assembly-wide case policy.</span>
+
+<span class="sd">        This helper mirrors the behavior of the managers&#39; own case helpers so</span>
+<span class="sd">        that any name sets computed here (e.g. for sensors) stay consistent</span>
+<span class="sd">        with how names are written into the URDF.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            kind (str): One of ``&quot;joint&quot;`` or ``&quot;link&quot;``.</span>
+<span class="sd">            name (str | None): The original name.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            str | None: The normalized name, or the original value if the</span>
+<span class="sd">            kind is unknown or its mode is ``&quot;none&quot;``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">mode</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;lower&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;upper&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">name</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">component_order_and_prefix</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the internal component order with their name prefixes.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            This exposes the internal list of ``(component_name, prefix)`` pairs</span>
+<span class="sd">            used when assembling URDFs. In most user code it is recommended to</span>
+<span class="sd">            use :attr:`component_prefix` instead, which focuses on configuring</span>
+<span class="sd">            prefixes rather than ordering.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list[tuple[str, str | None]]: A list of tuples specifying component</span>
+<span class="sd">            names and their prefixes.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_component_order_and_prefix</span>
+
+    <span class="nd">@component_order_and_prefix</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">component_order_and_prefix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_order</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the internal component prefix configuration.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            new_order: Value assigned directly to the internal</span>
+<span class="sd">                ``_component_order_and_prefix`` attribute, typically a list of</span>
+<span class="sd">                ``(component_name, prefix)`` tuples.</span>
+<span class="sd">        Note:</span>
+<span class="sd">            This setter performs no validation or patch-style merging; it</span>
+<span class="sd">            stores ``new_order`` as provided.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_component_order_and_prefix</span> <span class="o">=</span> <span class="n">new_order</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">component_prefix</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Configure name prefixes per component type.</span>
+
+<span class="sd">        This is a user-facing alias over :attr:`component_order_and_prefix`.</span>
+
+<span class="sd">        Semantics:</span>
+<span class="sd">            This setter is **patch-only**: it updates prefixes for components that</span>
+<span class="sd">            already exist in the current internal order and does **not** allow</span>
+<span class="sd">            introducing new component names.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list[tuple[str, str | None]]: The internal list of</span>
+<span class="sd">            ``(component_name, prefix)`` pairs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_order_and_prefix</span>
+
+    <span class="nd">@component_prefix</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">component_prefix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_prefixes</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">new_prefixes</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">all</span><span class="p">(</span>
+            <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">new_prefixes</span>
+        <span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;component_prefix must be a list of (component_name, prefix) tuples.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Treat new_prefixes as a patch on top of the existing/default order:</span>
+        <span class="c1">#  - For components already present in self._component_order_and_prefix, update their prefix.</span>
+        <span class="c1">#  - Preserve components that are not mentioned, keeping their relative order.</span>
+        <span class="c1">#</span>
+        <span class="c1"># Note: New/unknown component names are rejected to keep the assembly order</span>
+        <span class="c1"># controlled internally.</span>
+
+        <span class="c1"># Allowed components are exactly those already present in the default order.</span>
+        <span class="n">existing_components</span> <span class="o">=</span> <span class="p">{</span><span class="n">comp</span> <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_component_order_and_prefix</span><span class="p">}</span>
+
+        <span class="c1"># Build override map from the incoming list, but only for existing components.</span>
+        <span class="n">override_map</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">prefix</span> <span class="ow">in</span> <span class="n">new_prefixes</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">comp</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;component name in component_prefix must be a string.&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">comp</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;component_prefix cannot introduce new component &#39;</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">&#39;. &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;Allowed components: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">existing_components</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="n">override_map</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span> <span class="o">=</span> <span class="n">prefix</span>
+
+        <span class="n">merged_order</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># First, walk the existing order and apply overrides where available.</span>
+        <span class="c1"># The relative order of components is kept internal and usually does</span>
+        <span class="c1"># not need to be changed by users.</span>
+        <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">prefix</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_component_order_and_prefix</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">comp</span> <span class="ow">in</span> <span class="n">override_map</span><span class="p">:</span>
+                <span class="n">merged_order</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">comp</span><span class="p">,</span> <span class="n">override_map</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">comp</span><span class="p">)))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">merged_order</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">comp</span><span class="p">,</span> <span class="n">prefix</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_component_order_and_prefix</span> <span class="o">=</span> <span class="n">merged_order</span>
+
+<div class="viewcode-block" id="URDFAssemblyManager.add_component">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager.add_component">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_component</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">component_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">urdf_path</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">],</span>
+        <span class="n">transform</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">params</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Add a URDF component to the component registry.</span>
+
+<span class="sd">        This method creates a URDFComponent object and registers it in the component registry.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            component_type (str): The type/name of the component (e.g., &#39;chassis&#39;, &#39;head&#39;).</span>
+<span class="sd">            urdf_path (str or Path): Path to the URDF file for this component.</span>
+<span class="sd">            transform (np.ndarray, optional): 4x4 transformation matrix for positioning the component.</span>
+<span class="sd">            **params: Additional component-specific parameters (e.g., wheel_type for chassis).</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            bool: True if component added successfully, False otherwise.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">component_type</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;component_type must be a string&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">urdf_path</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">)):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;urdf_path must be a string or Path&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">component_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">SUPPORTED_COMPONENTS</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Unsupported component_type: </span><span class="si">{</span><span class="n">component_type</span><span class="si">}</span><span class="s2">. &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;Supported types: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">SUPPORTED_COMPONENTS</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+
+            <span class="n">component</span> <span class="o">=</span> <span class="n">URDFComponent</span><span class="p">(</span>
+                <span class="n">urdf_path</span><span class="o">=</span><span class="n">urdf_path</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span> <span class="n">transform</span><span class="o">=</span><span class="n">transform</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">component_type</span><span class="p">,</span> <span class="n">component</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Added component: [</span><span class="si">{</span><span class="n">component_type</span><span class="si">}</span><span class="s2">], URDF: (</span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to add component [</span><span class="si">{</span><span class="n">component_type</span><span class="si">}</span><span class="s2">]: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span></div>
+
+
+<div class="viewcode-block" id="URDFAssemblyManager.attach_sensor">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager.attach_sensor">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">attach_sensor</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sensor_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">sensor_source</span><span class="p">,</span>
+        <span class="n">parent_component</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">parent_link</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">transform</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Attach a sensor to a specific component and link, and register it in the sensor registry.</span>
+
+<span class="sd">        This method creates a SensorAttachment object and registers it in the sensor registry.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            sensor_name (str): Unique name for the sensor (e.g., &#39;camera&#39;).</span>
+<span class="sd">            sensor_source (str or ET.Element): Path to the sensor&#39;s URDF file or an XML element.</span>
+<span class="sd">            parent_component (str): Name of the component to which the sensor is attached.</span>
+<span class="sd">            parent_link (str): Name of the link within the parent component for attachment.</span>
+<span class="sd">            **kwargs: Additional keyword arguments (e.g., transform, sensor_type).</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            bool: True if sensor attached successfully, False otherwise.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">sensor</span> <span class="o">=</span> <span class="n">SensorAttachment</span><span class="p">(</span>
+                <span class="n">sensor_urdf</span><span class="o">=</span><span class="n">sensor_source</span><span class="p">,</span>
+                <span class="n">parent_component</span><span class="o">=</span><span class="n">parent_component</span><span class="p">,</span>
+                <span class="n">parent_link</span><span class="o">=</span><span class="n">parent_link</span><span class="p">,</span>
+                <span class="n">transform</span><span class="o">=</span><span class="n">transform</span><span class="p">,</span>
+                <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sensor_registry</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">sensor_name</span><span class="p">,</span> <span class="n">sensor</span><span class="p">)</span>
+            <span class="n">urdf_info</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n\t</span><span class="s2">URDF: (</span><span class="si">{</span><span class="n">sensor</span><span class="o">.</span><span class="n">sensor_urdf</span><span class="si">}</span><span class="s2">)&quot;</span>
+                <span class="k">if</span> <span class="n">sensor</span><span class="o">.</span><span class="n">sensor_urdf</span>
+                <span class="k">else</span> <span class="s2">&quot;, URDF: [N/A]&quot;</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Attached sensor: [</span><span class="si">{</span><span class="n">sensor_name</span><span class="si">}</span><span class="s2">] &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;to [</span><span class="si">{</span><span class="n">parent_component</span><span class="si">}</span><span class="s2">] at link [</span><span class="si">{</span><span class="n">parent_link</span><span class="si">}</span><span class="s2">]</span><span class="si">{</span><span class="n">urdf_info</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to attach sensor [</span><span class="si">{</span><span class="n">sensor_name</span><span class="si">}</span><span class="s2">]: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span></div>
+
+
+<div class="viewcode-block" id="URDFAssemblyManager.get_component">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager.get_component">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_component</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">component_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Retrieve a component from the registry by its type/name.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            component_type (str): The type/name of the component to retrieve.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            URDFComponent or None: The registered component object, or None if not found.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">component_type</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="URDFAssemblyManager.get_attached_sensors">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager.get_attached_sensors">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_attached_sensors</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get all attached sensors from the sensor registry.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            dict: A dictionary mapping sensor names to SensorAttachment objects.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">sensor_registry</span><span class="o">.</span><span class="n">all</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_urdf</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">urdf_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Load a URDF file and return its root element.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            urdf_path (str): Path to the URDF file.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            ET.Element: The root element of the parsed URDF XML.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">tree</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">urdf_path</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">tree</span><span class="o">.</span><span class="n">getroot</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to load URDF </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_transformation</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">urdf</span><span class="p">:</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">,</span> <span class="n">transform</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">link_name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Applies a transformation matrix to the &#39;xyz&#39; attributes of the origins of the specified link and its first joint in the URDF.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            urdf (ET.Element): The root element of the URDF to transform.</span>
+<span class="sd">            transform (np.ndarray): A 4x4 transformation matrix to apply.</span>
+<span class="sd">            link_name (str): The name of the link to apply the transformation to.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Now handle the first joint connected to this link</span>
+        <span class="k">for</span> <span class="n">joint</span> <span class="ow">in</span> <span class="n">urdf</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;joint&quot;</span><span class="p">):</span>
+            <span class="n">origin</span> <span class="o">=</span> <span class="n">joint</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;origin&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">origin</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Check if the joint connects to the specified link</span>
+                <span class="n">child_link</span> <span class="o">=</span> <span class="n">joint</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;child&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">child_link</span> <span class="o">==</span> <span class="n">link_name</span><span class="p">:</span>
+                    <span class="n">xyz</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="nb">float</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="k">for</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">origin</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">()])</span>
+                    <span class="n">transformed_xyz</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">transform</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">],</span> <span class="n">xyz</span><span class="p">)</span> <span class="o">+</span> <span class="n">transform</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+                    <span class="n">origin</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">transformed_xyz</span><span class="p">)))</span>
+
+                    <span class="c1"># Apply transformation to rpy</span>
+                    <span class="k">if</span> <span class="s2">&quot;rpy&quot;</span> <span class="ow">in</span> <span class="n">origin</span><span class="o">.</span><span class="n">attrib</span><span class="p">:</span>
+                        <span class="n">rpy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                            <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="k">for</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">origin</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rpy&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">()]</span>
+                        <span class="p">)</span>
+                        <span class="n">rotation</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="n">rpy</span><span class="p">)</span>
+                        <span class="n">transformed_rotation</span> <span class="o">=</span> <span class="p">(</span>
+                            <span class="n">R</span><span class="o">.</span><span class="n">from_matrix</span><span class="p">(</span><span class="n">transform</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">])</span> <span class="o">*</span> <span class="n">rotation</span>
+                        <span class="p">)</span>
+                        <span class="n">transformed_rpy</span> <span class="o">=</span> <span class="n">transformed_rotation</span><span class="o">.</span><span class="n">as_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">)</span>
+                        <span class="n">origin</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="s2">&quot;rpy&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">transformed_rpy</span><span class="p">)))</span>
+                    <span class="k">elif</span> <span class="s2">&quot;quat&quot;</span> <span class="ow">in</span> <span class="n">origin</span><span class="o">.</span><span class="n">attrib</span><span class="p">:</span>
+                        <span class="n">quat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                            <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="k">for</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">origin</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;quat&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">()]</span>
+                        <span class="p">)</span>
+                        <span class="n">rotation</span> <span class="o">=</span> <span class="n">R</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">,</span> <span class="n">quat</span><span class="p">)</span>
+                        <span class="n">transformed_rotation</span> <span class="o">=</span> <span class="p">(</span>
+                            <span class="n">R</span><span class="o">.</span><span class="n">from_matrix</span><span class="p">(</span><span class="n">transform</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">])</span> <span class="o">*</span> <span class="n">rotation</span>
+                        <span class="p">)</span>
+                        <span class="n">transformed_rpy</span> <span class="o">=</span> <span class="n">transformed_rotation</span><span class="o">.</span><span class="n">as_euler</span><span class="p">(</span><span class="s2">&quot;xyz&quot;</span><span class="p">)</span>
+                        <span class="n">origin</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="s2">&quot;rpy&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">transformed_rpy</span><span class="p">)))</span>
+
+                    <span class="k">break</span>  <span class="c1"># Stop after processing the first joint</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_create_base_link</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Creates a base link and returns it.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            ET.Element: The base link element.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">base_link</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">base_link_name</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">base_link</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_validate_urdf_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">urdf_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Validate URDF file integrity and format compliance</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            urdf_path (str): Path to the URDF file to validate</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            bool: True if file is valid, False otherwise</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># Check if file exists</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">urdf_path</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;URDF file not found: </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="c1"># Check file size to ensure it&#39;s not empty</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">urdf_path</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;URDF file is empty: </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="c1"># Attempt to parse XML structure</span>
+            <span class="n">root</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">urdf_path</span><span class="p">)</span><span class="o">.</span><span class="n">getroot</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">root</span><span class="o">.</span><span class="n">tag</span> <span class="o">!=</span> <span class="s2">&quot;robot&quot;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid URDF root element: </span><span class="si">{</span><span class="n">root</span><span class="o">.</span><span class="n">tag</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="c1"># Check for presence of basic link elements</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">root</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No links found in URDF: </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="c1"># Check robot name attribute</span>
+            <span class="n">robot_name</span> <span class="o">=</span> <span class="n">root</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">robot_name</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;URDF robot has no name attribute: </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;URDF file validation passed: </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+        <span class="k">except</span> <span class="n">ET</span><span class="o">.</span><span class="n">ParseError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;XML parse error in </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Validation error for </span><span class="si">{</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_generate_connection_rules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Dynamically generate connection rules based on available components.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list: A list of (parent, child) tuples specifying connection relationships.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">connection_rules</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Filter components that exist in urdf_dict</span>
+        <span class="n">existing_components</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">comp</span>
+            <span class="k">for</span> <span class="n">comp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">SUPPORTED_COMPONENTS</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">comp</span><span class="p">)</span>
+        <span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Existing components: </span><span class="si">{</span><span class="n">existing_components</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Define explicit connection rules - only meaningful relationships</span>
+        <span class="c1"># Rule 1: chassis connects to torso (if both exist)</span>
+        <span class="k">if</span> <span class="s2">&quot;chassis&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;legs&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;legs&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="s2">&quot;torso&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;legs&quot;</span><span class="p">,</span> <span class="s2">&quot;torso&quot;</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="s2">&quot;chassis&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;torso&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="c1"># If there are no legs, chassis connects directly to torso</span>
+            <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;torso&quot;</span><span class="p">))</span>
+
+        <span class="c1"># Rule 2: torso connects to head (if both exist)</span>
+        <span class="k">if</span> <span class="s2">&quot;torso&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;head&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;head&quot;</span><span class="p">))</span>
+
+        <span class="c1"># Rule 3: torso connects to arms (if they exist)</span>
+        <span class="k">if</span> <span class="s2">&quot;torso&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s2">&quot;left_arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;left_arm&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="s2">&quot;right_arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;right_arm&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="s2">&quot;arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;torso&quot;</span><span class="p">,</span> <span class="s2">&quot;arm&quot;</span><span class="p">))</span>
+
+        <span class="c1"># Rule 4: arms connect to hands (if both exist)</span>
+        <span class="k">if</span> <span class="s2">&quot;left_arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;left_hand&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;left_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;left_hand&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="s2">&quot;right_arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;right_hand&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;right_arm&quot;</span><span class="p">,</span> <span class="s2">&quot;right_hand&quot;</span><span class="p">))</span>
+
+        <span class="c1"># Rule 5: single arm connects to hand</span>
+        <span class="k">if</span> <span class="s2">&quot;arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;hand&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span> <span class="s2">&quot;hand&quot;</span><span class="p">))</span>
+
+        <span class="c1"># Rule 6: If no torso, chassis can directly connect to head and arms</span>
+        <span class="k">if</span> <span class="s2">&quot;chassis&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span> <span class="ow">and</span> <span class="s2">&quot;torso&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s2">&quot;head&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;head&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="s2">&quot;left_arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;left_arm&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="s2">&quot;right_arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;right_arm&quot;</span><span class="p">))</span>
+            <span class="c1"># Connect single arm directly to chassis (no torso scenario)</span>
+            <span class="k">if</span> <span class="s2">&quot;arm&quot;</span> <span class="ow">in</span> <span class="n">existing_components</span><span class="p">:</span>
+                <span class="n">connection_rules</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;chassis&quot;</span><span class="p">,</span> <span class="s2">&quot;arm&quot;</span><span class="p">))</span>
+
+        <span class="n">connection_rules</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">connection_rules</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Generated connection rules: </span><span class="si">{</span><span class="n">connection_rules</span><span class="si">}</span><span class="s2">, total </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">connection_rules</span><span class="p">)</span><span class="si">}</span><span class="s2"> rules&quot;</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">connection_rules</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_find_end_link</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">component</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">base_points</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">joints</span><span class="p">:</span> <span class="nb">list</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Find the end link of a component by traversing the joint chain downward.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            component (str): Component name to find the end link for.</span>
+<span class="sd">            base_points (dict): Mapping from component names to their base link names.</span>
+<span class="sd">            joints (list): List of joint elements to traverse.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[str, None]: Name of the end link, or None if component not found.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">current_link</span> <span class="o">=</span> <span class="n">base_points</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">component</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">current_link</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">visited_links</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>  <span class="c1"># Prevent infinite loops in joint chains</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">visited_links</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">current_link</span><span class="p">)</span>
+            <span class="n">found</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">for</span> <span class="n">joint</span> <span class="ow">in</span> <span class="n">joints</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">joint</span><span class="p">,</span> <span class="s2">&quot;find&quot;</span><span class="p">):</span>  <span class="c1"># Ensure it&#39;s an XML element, not a comment</span>
+                    <span class="n">parent</span> <span class="o">=</span> <span class="n">joint</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;parent&quot;</span><span class="p">)</span>
+                    <span class="n">child</span> <span class="o">=</span> <span class="n">joint</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;child&quot;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">parent</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">parent</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">current_link</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">child</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                            <span class="n">next_link</span> <span class="o">=</span> <span class="n">child</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">)</span>
+                            <span class="k">if</span> <span class="n">next_link</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">visited_links</span><span class="p">:</span>  <span class="c1"># Avoid revisiting links</span>
+                                <span class="n">current_link</span> <span class="o">=</span> <span class="n">next_link</span>
+                                <span class="n">found</span> <span class="o">=</span> <span class="kc">True</span>
+                                <span class="k">break</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">found</span><span class="p">:</span>
+                <span class="k">break</span>  <span class="c1"># No further links found in the chain</span>
+        <span class="k">return</span> <span class="n">current_link</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_log_names_once</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">elems</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">],</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">max_items</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">300</span><span class="p">,</span>
+        <span class="n">max_chars</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8000</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Log element names in a single line (truncated).&quot;&quot;&quot;</span>
+        <span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">elems</span><span class="p">:</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">n</span><span class="p">:</span>
+                <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+
+        <span class="n">total</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">)</span>
+        <span class="n">shown_names</span> <span class="o">=</span> <span class="n">names</span><span class="p">[:</span><span class="n">max_items</span><span class="p">]</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">shown_names</span><span class="p">)</span>
+
+        <span class="n">truncated_items</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">total</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">shown_names</span><span class="p">))</span>
+        <span class="n">truncated_chars</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">max_chars</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="p">[:</span><span class="n">max_chars</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;...&quot;</span>
+            <span class="n">truncated_chars</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="n">suffix_parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">truncated_items</span><span class="p">:</span>
+            <span class="n">suffix_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;truncated_items=</span><span class="si">{</span><span class="n">truncated_items</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">truncated_chars</span><span class="p">:</span>
+            <span class="n">suffix_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;truncated_chars=1&quot;</span><span class="p">)</span>
+        <span class="n">suffix</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot; (</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">suffix_parts</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">if</span> <span class="n">suffix_parts</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[merge_urdfs] </span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">: count=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> names=[</span><span class="si">{</span><span class="n">text</span><span class="si">}</span><span class="s2">]</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="URDFAssemblyManager.merge_urdfs">
+<a class="viewcode-back" href="../../../../api_reference/embodichain/embodichain.toolkits.html#embodichain.toolkits.urdf_assembly.URDFAssemblyManager.merge_urdfs">[docs]</a>
+    <span class="nd">@performance_monitor</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">merge_urdfs</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">output_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;./assembly_robot.urdf&quot;</span><span class="p">,</span>
+        <span class="n">use_signature_check</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Merge URDF files according to single base link, connection point naming,</span>
+<span class="sd">        and type compatibility matrix rules.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            output_path (str): Path where the merged URDF file will be saved.</span>
+<span class="sd">            use_signature_check (bool): Whether to check signatures to avoid redundant processing.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            ET.Element: The root element of the merged URDF.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">output_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
+        <span class="n">assembly_signature</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Log components to be merged</span>
+        <span class="n">available_components</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">comp</span>
+            <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">obj</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">obj</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;🔧 Preparing to merge components: </span><span class="si">{</span><span class="n">available_components</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">order_items</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">](</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">prefix</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_order_and_prefix</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[component_order_and_prefix] </span><span class="si">{</span><span class="n">order_items</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">case_keys</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;joint&quot;</span><span class="p">,</span> <span class="s2">&quot;link&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">name_case</span><span class="p">]</span>
+        <span class="n">case_keys</span> <span class="o">+=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name_case</span><span class="p">)</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">case_keys</span><span class="p">]</span>
+        <span class="n">case_items</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">](</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">name_case</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">case_keys</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[name_case] </span><span class="si">{</span><span class="n">case_items</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">comp</span> <span class="ow">in</span> <span class="n">available_components</span><span class="p">:</span>
+            <span class="n">comp_obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">comp</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">]: </span><span class="si">{</span><span class="n">comp_obj</span><span class="o">.</span><span class="n">urdf_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">comp_obj</span><span class="o">.</span><span class="n">params</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    Parameters: </span><span class="si">{</span><span class="n">comp_obj</span><span class="o">.</span><span class="n">params</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">comp_obj</span><span class="o">.</span><span class="n">transform</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    Transform: applied&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">use_signature_check</span><span class="p">:</span>
+            <span class="c1"># Calculate current assembly signature. In addition to the component</span>
+            <span class="c1"># registry contents, include the current component_order_and_prefix</span>
+            <span class="c1"># so that changes to name prefixes also invalidate the cache.</span>
+            <span class="n">component_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+            <span class="n">component_info</span><span class="p">[</span><span class="s2">&quot;__component_order_and_prefix__&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">component_order_and_prefix</span>
+            <span class="p">)</span>
+            <span class="c1"># Also include the assembly-wide name_case policy so that</span>
+            <span class="c1"># renaming rules (e.g. link/joint casing) participate in the</span>
+            <span class="c1"># signature. This ensures that changing naming strategy forces</span>
+            <span class="c1"># a rebuild.</span>
+            <span class="n">component_info</span><span class="p">[</span><span class="s2">&quot;__name_case__&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span><span class="p">)</span>
+
+            <span class="n">assembly_signature</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature_manager</span><span class="o">.</span><span class="n">calculate_assembly_signature</span><span class="p">(</span>
+                <span class="n">component_info</span><span class="p">,</span> <span class="n">output_path</span>
+            <span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current assembly signature: [</span><span class="si">{</span><span class="n">assembly_signature</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Target output path: (</span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+            <span class="c1"># Check if assembly is up-to-date</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature_manager</span><span class="o">.</span><span class="n">is_assembly_up_to_date</span><span class="p">(</span>
+                <span class="n">assembly_signature</span><span class="p">,</span> <span class="n">output_path</span>
+            <span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;✅ URDF assembly is up-to-date: (</span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">), skipping rebuild.&quot;</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="n">ET</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span><span class="o">.</span><span class="n">getroot</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="s2">&quot;Assembly configuration has changed or file doesn&#39;t exist, rebuilding...&quot;</span>
+                <span class="p">)</span>
+
+        <span class="c1"># Perform normal assembly process</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;🔄 Building new URDF assembly...&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 1. Generate standard header with module information</span>
+        <span class="n">module_names</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">obj</span><span class="o">.</span><span class="n">urdf_path</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">obj</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">obj</span>
+        <span class="p">]</span>
+
+        <span class="n">robot_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">output_path</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">merged_urdf</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">(</span><span class="s2">&quot;robot&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">robot_name</span><span class="p">)</span>
+
+        <span class="c1"># Global &lt;material&gt; definitions live directly under &lt;robot&gt; and are not part</span>
+        <span class="c1"># of links/joints. To avoid polluting the merged URDF, we only merge global</span>
+        <span class="c1"># materials that are actually referenced by merged links&#39; visuals.</span>
+        <span class="n">materials</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">material_names</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">material_sources</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">_register_material_source</span><span class="p">(</span><span class="n">root</span><span class="p">:</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">material_sources</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">root</span><span class="p">,</span> <span class="n">source</span><span class="p">))</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">_merge_material_if_defined</span><span class="p">(</span><span class="n">mat_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">            </span><span class="sd">&quot;&quot;&quot;Merge a global &lt;material name=...&gt; definition from known sources.</span>
+
+<span class="sd">            Only merges if the material is referenced and if a source URDF actually</span>
+<span class="sd">            defines it at the &lt;robot&gt; root. This prevents bringing in unused</span>
+<span class="sd">            materials from component URDFs.</span>
+<span class="sd">            &quot;&quot;&quot;</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">mat_name</span> <span class="ow">or</span> <span class="n">mat_name</span> <span class="ow">in</span> <span class="n">material_names</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="n">matches</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">root</span><span class="p">,</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">material_sources</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">mat</span> <span class="ow">in</span> <span class="n">root</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;material&quot;</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">mat</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">mat_name</span><span class="p">:</span>
+                        <span class="n">matches</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">mat</span><span class="p">,</span> <span class="n">source</span><span class="p">))</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">matches</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">matches</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Material &#39;</span><span class="si">{</span><span class="n">mat_name</span><span class="si">}</span><span class="s2">&#39; defined in multiple URDF sources; using the first: </span><span class="si">{</span><span class="n">matches</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+
+            <span class="n">mat</span><span class="p">,</span> <span class="n">source</span> <span class="o">=</span> <span class="n">matches</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">materials</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">mat</span><span class="p">))</span>
+            <span class="n">material_names</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">mat_name</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Merged referenced material &#39;</span><span class="si">{</span><span class="n">mat_name</span><span class="si">}</span><span class="s2">&#39; from </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+        <span class="c1"># 2. Create single base link for the entire robot</span>
+        <span class="n">base_link</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">Element</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">base_link_name</span><span class="p">)</span>
+        <span class="c1"># Store links and joints separately for proper ordering</span>
+        <span class="n">links</span> <span class="o">=</span> <span class="p">[</span><span class="n">base_link</span><span class="p">]</span>
+        <span class="n">joints</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Mapping tables for component processing</span>
+        <span class="n">name_mapping</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># Maps (component, original_name) to new_name</span>
+        <span class="n">base_points</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># Maps component to its base connection link</span>
+        <span class="n">parent_attach_points</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># Maps component to its parent connection link</span>
+
+        <span class="c1"># Initialize managers for mesh handling and component processing</span>
+        <span class="n">output_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;.&quot;</span>
+        <span class="n">ensure_directory_exists</span><span class="p">(</span><span class="n">output_dir</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="p">)</span>
+        <span class="n">mesh_manager</span> <span class="o">=</span> <span class="n">URDFMeshManager</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
+        <span class="n">mesh_manager</span><span class="o">.</span><span class="n">ensure_dirs</span><span class="p">()</span>
+        <span class="n">component_manager</span> <span class="o">=</span> <span class="n">URDFComponentManager</span><span class="p">(</span>
+            <span class="n">mesh_manager</span><span class="p">,</span> <span class="n">name_case</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span>
+        <span class="p">)</span>
+        <span class="n">connection_manager</span> <span class="o">=</span> <span class="n">URDFConnectionManager</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">base_link_name</span><span class="p">,</span> <span class="n">name_case</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_name_case</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Initialize sensor manager with mesh_manager</span>
+        <span class="n">sensor_manager</span> <span class="o">=</span> <span class="n">URDFSensorManager</span><span class="p">(</span><span class="n">mesh_manager</span><span class="p">)</span>
+
+        <span class="c1"># Process any pending enhanced sensors</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_pending_sensors&quot;</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">sensor_name</span><span class="p">,</span> <span class="n">params</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending_sensors</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">success</span> <span class="o">=</span> <span class="n">sensor_manager</span><span class="o">.</span><span class="n">attach_sensor</span><span class="p">(</span>
+                    <span class="n">sensor_name</span><span class="o">=</span><span class="n">sensor_name</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
+                    <span class="c1"># Sync to legacy attach_dict for backward compatibility</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">attach_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">sensor_manager</span><span class="o">.</span><span class="n">convert_to_legacy_format</span><span class="p">())</span>
+
+        <span class="c1"># 3. Process all components in defined order</span>
+        <span class="n">connection_rules</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_generate_connection_rules</span><span class="p">()</span>
+
+        <span class="c1"># Collect component transforms for connection joints</span>
+        <span class="n">component_transforms</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">comp_obj</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">comp_obj</span> <span class="ow">and</span> <span class="n">comp_obj</span><span class="o">.</span><span class="n">transform</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">component_transforms</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span> <span class="o">=</span> <span class="n">comp_obj</span><span class="o">.</span><span class="n">transform</span>
+
+        <span class="k">for</span> <span class="n">comp</span><span class="p">,</span> <span class="n">prefix</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_order_and_prefix</span><span class="p">:</span>
+            <span class="n">comp_obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">component_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">comp</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">comp_obj</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># Add section comments using file writer</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_section_comments</span><span class="p">(</span><span class="n">links</span><span class="p">,</span> <span class="n">comp</span><span class="p">,</span> <span class="s2">&quot;Links&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_section_comments</span><span class="p">(</span><span class="n">joints</span><span class="p">,</span> <span class="n">comp</span><span class="p">,</span> <span class="s2">&quot;Joints&quot;</span><span class="p">)</span>
+
+            <span class="c1"># Parse component URDF to analyze its structure</span>
+            <span class="n">urdf_root</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">comp_obj</span><span class="o">.</span><span class="n">urdf_path</span><span class="p">)</span><span class="o">.</span><span class="n">getroot</span><span class="p">()</span>
+            <span class="n">_register_material_source</span><span class="p">(</span><span class="n">urdf_root</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">comp_obj</span><span class="o">.</span><span class="n">urdf_path</span><span class="p">))</span>
+
+            <span class="c1"># Determine parent component and attachment point for current component</span>
+            <span class="n">parent_component</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">parent_attach_link</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="c1"># Find parent component based on connection rules</span>
+            <span class="k">for</span> <span class="n">parent</span><span class="p">,</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">connection_rules</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">child</span> <span class="o">==</span> <span class="n">comp</span> <span class="ow">and</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">base_points</span><span class="p">:</span>
+                    <span class="n">parent_component</span> <span class="o">=</span> <span class="n">parent</span>
+                    <span class="c1"># Use base connection point for chassis</span>
+                    <span class="k">if</span> <span class="n">parent</span> <span class="o">==</span> <span class="s2">&quot;chassis&quot;</span><span class="p">:</span>
+                        <span class="n">parent_attach_link</span> <span class="o">=</span> <span class="n">base_points</span><span class="p">[</span><span class="n">parent</span><span class="p">]</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="c1"># For other components, find their end link</span>
+                        <span class="n">parent_attach_link</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_find_end_link</span><span class="p">(</span>
+                            <span class="n">parent</span><span class="p">,</span> <span class="n">base_points</span><span class="p">,</span> <span class="n">joints</span>
+                        <span class="p">)</span>
+                    <span class="k">break</span>
+
+            <span class="k">if</span> <span class="n">parent_component</span> <span class="ow">and</span> <span class="n">parent_attach_link</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Component [</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">] will connect to parent [</span><span class="si">{</span><span class="n">parent_component</span><span class="si">}</span><span class="s2">] at link: (</span><span class="si">{</span><span class="n">parent_attach_link</span><span class="si">}</span><span class="s2">)&quot;</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Component [</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">] has no parent component (likely chassis or standalone)&quot;</span>
+                <span class="p">)</span>
+
+            <span class="c1"># Process the component using the component manager</span>
+            <span class="n">component_manager</span><span class="o">.</span><span class="n">process_component</span><span class="p">(</span>
+                <span class="n">comp</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">comp_obj</span><span class="p">,</span> <span class="n">name_mapping</span><span class="p">,</span> <span class="n">base_points</span><span class="p">,</span> <span class="n">links</span><span class="p">,</span> <span class="n">joints</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Determine attachment positions for current component</span>
+            <span class="n">original_links</span> <span class="o">=</span> <span class="n">urdf_root</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">original_links</span><span class="p">:</span>
+                <span class="c1"># Set base connection point (always first link for child connections)</span>
+                <span class="n">first_original_name</span> <span class="o">=</span> <span class="n">original_links</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+                <span class="n">first_mapped_name</span> <span class="o">=</span> <span class="n">name_mapping</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                    <span class="p">(</span><span class="n">comp</span><span class="p">,</span> <span class="n">first_original_name</span><span class="p">),</span> <span class="n">first_original_name</span>
+                <span class="p">)</span>
+                <span class="n">base_points</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span> <span class="o">=</span> <span class="n">first_mapped_name</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Set base_points[</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">] = (</span><span class="si">{</span><span class="n">first_mapped_name</span><span class="si">}</span><span class="s2">) .first link for child connection, original: (</span><span class="si">{</span><span class="n">first_original_name</span><span class="si">}</span><span class="s2">)&quot;</span>
+                <span class="p">)</span>
+
+                <span class="c1"># Set parent connection point based on attach_positions configuration</span>
+                <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attach_positions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">comp</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">index</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">original_links</span><span class="p">):</span>
+                        <span class="n">original_attach_name</span> <span class="o">=</span> <span class="n">original_links</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+                    <span class="k">elif</span> <span class="n">index</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="ow">and</span> <span class="n">original_links</span><span class="p">:</span>
+                        <span class="n">original_attach_name</span> <span class="o">=</span> <span class="n">original_links</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">original_attach_name</span> <span class="o">=</span> <span class="p">(</span>
+                            <span class="n">original_links</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">original_links</span> <span class="k">else</span> <span class="kc">None</span>
+                        <span class="p">)</span>
+
+                    <span class="c1"># Find mapped name for the attachment point</span>
+                    <span class="n">mapped_attach_name</span> <span class="o">=</span> <span class="n">name_mapping</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">comp</span><span class="p">,</span> <span class="n">original_attach_name</span><span class="p">),</span> <span class="n">original_attach_name</span>
+                    <span class="p">)</span>
+                    <span class="n">parent_attach_points</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_attach_name</span>
+
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Set parent_attach_points[</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">] = (</span><span class="si">{</span><span class="n">mapped_attach_name</span><span class="si">}</span><span class="s2">). Index </span><span class="si">{</span><span class="n">index</span><span class="si">}</span><span class="s2"> for parent connection, original: (</span><span class="si">{</span><span class="n">original_attach_name</span><span class="si">}</span><span class="s2">)&quot;</span>
+                    <span class="p">)</span>
+                <span class="k">except</span> <span class="ne">IndexError</span><span class="p">:</span>
+                    <span class="c1"># Fall back to first link if index is out of range</span>
+                    <span class="n">parent_attach_points</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span> <span class="o">=</span> <span class="n">first_mapped_name</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Index </span><span class="si">{</span><span class="n">index</span><span class="si">}</span><span class="s2"> out of range for component </span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2">, using first link: </span><span class="si">{</span><span class="n">first_mapped_name</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="p">)</span>
+
+            <span class="c1"># Add section end comments using file writer</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_section_end_comments</span><span class="p">(</span><span class="n">links</span><span class="p">,</span> <span class="n">comp</span><span class="p">,</span> <span class="s2">&quot;Links&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_section_end_comments</span><span class="p">(</span><span class="n">joints</span><span class="p">,</span> <span class="n">comp</span><span class="p">,</span> <span class="s2">&quot;Joints&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 4. Create connection joints between components using transforms</span>
+        <span class="n">connection_manager</span><span class="o">.</span><span class="n">add_connections</span><span class="p">(</span>
+            <span class="n">joints</span><span class="p">,</span>
+            <span class="n">base_points</span><span class="p">,</span>
+            <span class="n">parent_attach_points</span><span class="p">,</span>
+            <span class="n">connection_rules</span><span class="p">,</span>
+            <span class="n">component_transforms</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Track existing names for sensor processing. Use the same case policy</span>
+        <span class="c1"># as the rest of the assembly so that collision checks are consistent</span>
+        <span class="c1"># with how names are written.</span>
+        <span class="n">existing_link_names</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_apply_case</span><span class="p">(</span><span class="s2">&quot;link&quot;</span><span class="p">,</span> <span class="n">link</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">link</span> <span class="ow">in</span> <span class="n">links</span>
+            <span class="k">if</span> <span class="n">link</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="n">existing_joint_names</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_apply_case</span><span class="p">(</span><span class="s2">&quot;joint&quot;</span><span class="p">,</span> <span class="n">joint</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">joint</span> <span class="ow">in</span> <span class="n">joints</span>
+            <span class="k">if</span> <span class="n">joint</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="c1"># 5. Process sensor attachments using the new sensor manager</span>
+        <span class="k">for</span> <span class="n">sensor_name</span><span class="p">,</span> <span class="n">sensor_attach</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sensor_registry</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="c1"># Register sensor URDF as a material source (do not merge materials eagerly).</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">sensor_root</span> <span class="o">=</span> <span class="n">ET</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">sensor_urdf</span><span class="p">)</span><span class="o">.</span><span class="n">getroot</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Failed to parse sensor URDF for material sourcing (</span><span class="si">{</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">sensor_urdf</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">_register_material_source</span><span class="p">(</span><span class="n">sensor_root</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">sensor_urdf</span><span class="p">))</span>
+
+            <span class="n">sensor_manager</span><span class="o">.</span><span class="n">attach_sensor</span><span class="p">(</span>
+                <span class="n">sensor_name</span><span class="o">=</span><span class="n">sensor_name</span><span class="p">,</span>
+                <span class="n">sensor_source</span><span class="o">=</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">sensor_urdf</span><span class="p">,</span>
+                <span class="n">parent_component</span><span class="o">=</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">parent_component</span><span class="p">,</span>
+                <span class="n">parent_link</span><span class="o">=</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">parent_link</span><span class="p">,</span>
+                <span class="n">transform</span><span class="o">=</span><span class="n">sensor_attach</span><span class="o">.</span><span class="n">transform</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">sensor_manager</span><span class="o">.</span><span class="n">process_sensor_attachments</span><span class="p">(</span>
+            <span class="n">links</span><span class="p">,</span> <span class="n">joints</span><span class="p">,</span> <span class="n">base_points</span><span class="p">,</span> <span class="n">existing_link_names</span><span class="p">,</span> <span class="n">existing_joint_names</span>
+        <span class="p">)</span>
+
+        <span class="c1"># 6. Merge only the global materials that are actually referenced by merged links.</span>
+        <span class="c1"># If a link references &lt;material name=&quot;X&quot;/&gt; but no source URDF defines a global</span>
+        <span class="c1"># &lt;material name=&quot;X&quot;&gt; under &lt;robot&gt;, we warn but do not inject guessed fallbacks.</span>
+        <span class="n">referenced_materials</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">link</span> <span class="ow">in</span> <span class="n">links</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">mat</span> <span class="ow">in</span> <span class="n">link</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="s2">&quot;.//visual/material&quot;</span><span class="p">):</span>
+                <span class="n">mat_name</span> <span class="o">=</span> <span class="n">mat</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">mat_name</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="c1"># A material with children is already defined inline.</span>
+                <span class="k">if</span> <span class="nb">list</span><span class="p">(</span><span class="n">mat</span><span class="p">):</span>
+                    <span class="k">continue</span>
+                <span class="n">referenced_materials</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">mat_name</span><span class="p">)</span>
+
+        <span class="n">missing_materials</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">mat_name</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">referenced_materials</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">mat_name</span> <span class="ow">in</span> <span class="n">material_names</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_merge_material_if_defined</span><span class="p">(</span><span class="n">mat_name</span><span class="p">):</span>
+                <span class="n">missing_materials</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mat_name</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">mat_name</span> <span class="ow">in</span> <span class="n">missing_materials</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Material &#39;</span><span class="si">{</span><span class="n">mat_name</span><span class="si">}</span><span class="s2">&#39; referenced but not defined in any source URDF&quot;</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Add global materials, then links/joints to merged URDF in proper order</span>
+        <span class="k">for</span> <span class="n">mat</span> <span class="ow">in</span> <span class="n">materials</span><span class="p">:</span>
+            <span class="n">merged_urdf</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mat</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_log_names_once</span><span class="p">(</span><span class="s2">&quot;links&quot;</span><span class="p">,</span> <span class="n">links</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">link</span> <span class="ow">in</span> <span class="n">links</span><span class="p">:</span>
+            <span class="n">merged_urdf</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">link</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_log_names_once</span><span class="p">(</span><span class="s2">&quot;joints&quot;</span><span class="p">,</span> <span class="n">joints</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">joint</span> <span class="ow">in</span> <span class="n">joints</span><span class="p">:</span>
+            <span class="n">merged_urdf</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">joint</span><span class="p">)</span>
+
+        <span class="c1"># 7. Write the final URDF file with proper formatting, header and signature</span>
+        <span class="k">if</span> <span class="n">use_signature_check</span> <span class="ow">and</span> <span class="n">assembly_signature</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">write_urdf</span><span class="p">(</span>
+                <span class="n">merged_urdf</span><span class="p">,</span> <span class="n">output_path</span><span class="p">,</span> <span class="n">module_names</span><span class="p">,</span> <span class="n">assembly_signature</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;✅ URDF assembly written with signature: </span><span class="si">{</span><span class="n">assembly_signature</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">write_urdf</span><span class="p">(</span><span class="n">merged_urdf</span><span class="p">,</span> <span class="n">output_path</span><span class="p">,</span> <span class="n">module_names</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;✅ URDF assembly written without signature.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">merged_urdf</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

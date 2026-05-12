@@ -1,0 +1,976 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Atomic Actions &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'overview/sim/atomic_actions';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Gym" href="../gym/index.html" />
+    <link rel="prev" title="MotionGenerator" href="planners/motion_generator.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Simulation Framework</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/overview/sim/atomic_actions.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Atomic Actions</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#design-overview">Design Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#core-concepts">Core Concepts</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#built-in-actions">Built-in Actions</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#moveaction"><code class="docutils literal notranslate"><span class="pre">MoveAction</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pickupaction"><code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#placeaction"><code class="docutils literal notranslate"><span class="pre">PlaceAction</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#typical-workflow">Typical Workflow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-to-extend-adding-a-custom-action">How to Extend: Adding a Custom Action</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#step-1-define-the-config">Step 1 — Define the config</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#step-2-implement-the-action">Step 2 — Implement the action</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#step-3-register-and-use">Step 3 — Register and use</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#target-resolution">Target Resolution</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#further-reading">Further Reading</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="atomic-actions">
+<h1>Atomic Actions<a class="headerlink" href="#atomic-actions" title="Link to this heading">#</a></h1>
+<p>Atomic actions are the building blocks for automated robot motion generation. Each action encapsulates a complete, self-contained motion primitive — such as picking up an object or moving to a pose — that can be chained together to form complex manipulation workflows.</p>
+<section id="design-overview">
+<h2>Design Overview<a class="headerlink" href="#design-overview" title="Link to this heading">#</a></h2>
+<p>The module is organized into three layers:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>AtomicActionEngine          ← orchestrates a sequence of actions
+    │
+    ├── AtomicAction(s)     ← each action plans one motion primitive
+    │       │
+    │       └── MotionGenerator   ← low-level trajectory planner (IK + trajectory optimization)
+    │
+    └── SemanticAnalyzer    ← resolves object labels → ObjectSemantics
+</pre></div>
+</div>
+<p>Each action receives a target (object semantics or a pose tensor), runs its planning pipeline,
+and returns a joint trajectory.  The engine threads the end state of each action as the start
+state of the next, then concatenates all trajectories into one contiguous sequence:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>ObjectSemantics ──► AffordanceEstimation ──► AtomicAction.execute()
+(label + geometry                              │
+ + affordance                                  ├─ IK solve
+ + entity)                                     ├─ Motion plan
+                                               └─ Gripper interpolation
+                                                      │
+AtomicActionEngine ◄─────────────── PlanResult ───────┘
+(sequences actions, accumulates
+ full-robot trajectory)
+</pre></div>
+</div>
+<section id="core-concepts">
+<h3>Core Concepts<a class="headerlink" href="#core-concepts" title="Link to this heading">#</a></h3>
+<p><strong><code class="docutils literal notranslate"><span class="pre">ObjectSemantics</span></code></strong> describes an interaction target. It bundles:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">geometry</span></code> — mesh data (vertices, triangles) used for grasp annotation</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">affordance</span></code> — <em>how</em> to interact with the object (e.g. antipodal grasp poses)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">entity</span></code> — a live reference to the simulation object, so actions can read its current pose</p></li>
+</ul>
+<p><strong><code class="docutils literal notranslate"><span class="pre">Affordance</span></code></strong> is a data class that encodes a specific interaction capability. The built-in affordance types are:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Class</p></th>
+<th class="head"><p>Use case</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">AntipodalAffordance</span></code></p></td>
+<td><p>Parallel-jaw grasping via antipodal point pairs</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">InteractionPoints</span></code></p></td>
+<td><p>Contact-based interactions (push, poke, touch)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong><code class="docutils literal notranslate"><span class="pre">AtomicAction</span></code></strong> is the abstract base class for all motion primitives. Every action must implement:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">execute(target,</span> <span class="pre">start_qpos)</span></code> — plan and return a joint trajectory</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">validate(target,</span> <span class="pre">start_qpos)</span></code> — fast feasibility check without full planning</p></li>
+</ul>
+<p><strong><code class="docutils literal notranslate"><span class="pre">AtomicActionEngine</span></code></strong> manages a named registry of actions and runs them in sequence via <code class="docutils literal notranslate"><span class="pre">execute_static()</span></code>, threading the end state of each action as the start state of the next.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="built-in-actions">
+<h2>Built-in Actions<a class="headerlink" href="#built-in-actions" title="Link to this heading">#</a></h2>
+<p id="supported-atomic-actions">The following actions are available out of the box:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Action</p></th>
+<th class="head"><p>Config class</p></th>
+<th class="head"><p>Target type</p></th>
+<th class="head"><p>Motion phases</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MoveAction</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">MoveActionCfg</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Tensor</span> <span class="pre">(4,4)</span></code> — EEF pose</p></td>
+<td><p>Move arm to pose</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">PickUpActionCfg</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ObjectSemantics</span></code> or <code class="docutils literal notranslate"><span class="pre">Tensor</span> <span class="pre">(4,4)</span></code></p></td>
+<td><p>Approach → close gripper → lift</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">PlaceAction</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">PlaceActionCfg</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Tensor</span> <span class="pre">(4,4)</span></code> — EEF release pose</p></td>
+<td><p>Lower → open gripper → retract</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="moveaction">
+<h3><code class="docutils literal notranslate"><span class="pre">MoveAction</span></code><a class="headerlink" href="#moveaction" title="Link to this heading">#</a></h3>
+<p>Moves the end-effector to a target pose in free space.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Config field</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">control_part</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;arm&quot;</span></code></p></td>
+<td><p>Robot control part to move</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sample_interval</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">50</span></code></p></td>
+<td><p>Number of waypoints in the trajectory</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Target:</strong> <code class="docutils literal notranslate"><span class="pre">torch.Tensor</span></code> of shape <code class="docutils literal notranslate"><span class="pre">(4,</span> <span class="pre">4)</span></code> or <code class="docutils literal notranslate"><span class="pre">(n_envs,</span> <span class="pre">4,</span> <span class="pre">4)</span></code> — a homogeneous EEF pose.</p>
+</section>
+<hr class="docutils" />
+<section id="pickupaction">
+<h3><code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code><a class="headerlink" href="#pickupaction" title="Link to this heading">#</a></h3>
+<p>Three-phase grasp motion: <em>approach → close gripper → lift</em>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Config field</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">approach_direction</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">[0,</span> <span class="pre">0,</span> <span class="pre">-1]</span></code></p></td>
+<td><p>Gripper approach direction in object frame</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">pre_grasp_distance</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0.15</span></code></p></td>
+<td><p>Hover distance before descending (m)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">lift_height</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0.10</span></code></p></td>
+<td><p>Lift height after grasping (m)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hand_open_qpos</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td><p><strong>Required.</strong> Gripper open joint positions</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hand_close_qpos</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td><p><strong>Required.</strong> Gripper closed joint positions</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hand_control_part</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;hand&quot;</span></code></p></td>
+<td><p>Robot control part for the gripper</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hand_interp_steps</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">5</span></code></p></td>
+<td><p>Waypoints for the gripper close phase</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sample_interval</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">80</span></code></p></td>
+<td><p>Total waypoints across all three phases</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Target:</strong> <code class="docutils literal notranslate"><span class="pre">ObjectSemantics</span></code> (grasp pose computed automatically) <strong>or</strong> a <code class="docutils literal notranslate"><span class="pre">torch.Tensor</span></code> EEF pose.</p>
+</section>
+<hr class="docutils" />
+<section id="placeaction">
+<h3><code class="docutils literal notranslate"><span class="pre">PlaceAction</span></code><a class="headerlink" href="#placeaction" title="Link to this heading">#</a></h3>
+<p>Three-phase release motion: <em>lower → open gripper → retract</em>. Mirrors <code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code>.</p>
+<p>Inherits all gripper config fields from <code class="docutils literal notranslate"><span class="pre">GraspActionCfg</span></code>. The <code class="docutils literal notranslate"><span class="pre">approach_direction</span></code> field is not used — the arm moves straight down to the target pose.</p>
+<p><strong>Target:</strong> <code class="docutils literal notranslate"><span class="pre">torch.Tensor</span></code> of shape <code class="docutils literal notranslate"><span class="pre">(4,</span> <span class="pre">4)</span></code> or <code class="docutils literal notranslate"><span class="pre">(n_envs,</span> <span class="pre">4,</span> <span class="pre">4)</span></code> — the EEF pose at release.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="typical-workflow">
+<h2>Typical Workflow<a class="headerlink" href="#typical-workflow" title="Link to this heading">#</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">AtomicActionEngine</span><span class="p">,</span>
+    <span class="n">ObjectSemantics</span><span class="p">,</span>
+    <span class="n">AntipodalAffordance</span><span class="p">,</span>
+    <span class="n">PickUpActionCfg</span><span class="p">,</span>
+    <span class="n">PlaceActionCfg</span><span class="p">,</span>
+    <span class="n">MoveActionCfg</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># 1. Configure each action</span>
+<span class="n">pickup_cfg</span> <span class="o">=</span> <span class="n">PickUpActionCfg</span><span class="p">(</span>
+    <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+    <span class="n">hand_control_part</span><span class="o">=</span><span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+    <span class="n">hand_open_qpos</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]),</span>
+    <span class="n">hand_close_qpos</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.025</span><span class="p">,</span> <span class="mf">0.025</span><span class="p">]),</span>
+<span class="p">)</span>
+<span class="n">place_cfg</span>  <span class="o">=</span> <span class="n">PlaceActionCfg</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="n">move_cfg</span>   <span class="o">=</span> <span class="n">MoveActionCfg</span><span class="p">(</span><span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+
+<span class="c1"># 2. Build the engine — action order matches target_list order</span>
+<span class="n">engine</span> <span class="o">=</span> <span class="n">AtomicActionEngine</span><span class="p">(</span>
+    <span class="n">motion_generator</span><span class="o">=</span><span class="n">motion_gen</span><span class="p">,</span>
+    <span class="n">actions_cfg_list</span><span class="o">=</span><span class="p">[</span><span class="n">pickup_cfg</span><span class="p">,</span> <span class="n">place_cfg</span><span class="p">,</span> <span class="n">move_cfg</span><span class="p">],</span>
+<span class="p">)</span>
+
+<span class="c1"># 3. Describe the object to pick</span>
+<span class="n">semantics</span> <span class="o">=</span> <span class="n">ObjectSemantics</span><span class="p">(</span>
+    <span class="n">label</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span>
+    <span class="n">geometry</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mesh_vertices&quot;</span><span class="p">:</span> <span class="o">...</span><span class="p">,</span> <span class="s2">&quot;mesh_triangles&quot;</span><span class="p">:</span> <span class="o">...</span><span class="p">},</span>
+    <span class="n">affordance</span><span class="o">=</span><span class="n">AntipodalAffordance</span><span class="p">(</span><span class="n">object_label</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span>
+    <span class="n">entity</span><span class="o">=</span><span class="n">mug</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># 4. Plan the full sequence and replay</span>
+<span class="n">is_success</span><span class="p">,</span> <span class="n">traj</span> <span class="o">=</span> <span class="n">engine</span><span class="o">.</span><span class="n">execute_static</span><span class="p">(</span>
+    <span class="n">target_list</span><span class="o">=</span><span class="p">[</span><span class="n">semantics</span><span class="p">,</span> <span class="n">place_pose</span><span class="p">,</span> <span class="n">rest_pose</span><span class="p">]</span>
+<span class="p">)</span>
+<span class="c1"># traj: (n_envs, n_waypoints, dof)</span>
+</pre></div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="how-to-extend-adding-a-custom-action">
+<h2>How to Extend: Adding a Custom Action<a class="headerlink" href="#how-to-extend-adding-a-custom-action" title="Link to this heading">#</a></h2>
+<p>You can add any motion primitive by subclassing <code class="docutils literal notranslate"><span class="pre">AtomicAction</span></code> and registering it with the engine.</p>
+<section id="step-1-define-the-config">
+<h3>Step 1 — Define the config<a class="headerlink" href="#step-1-define-the-config" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="n">ActionCfg</span>
+
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PushActionCfg</span><span class="p">(</span><span class="n">ActionCfg</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;push&quot;</span>
+    <span class="n">push_distance</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.05</span>  <span class="c1"># metres to push forward</span>
+    <span class="n">push_speed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span>          <span class="c1"># waypoints for the push phase</span>
+</pre></div>
+</div>
+</section>
+<section id="step-2-implement-the-action">
+<h3>Step 2 — Implement the action<a class="headerlink" href="#step-2-implement-the-action" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="n">AtomicAction</span><span class="p">,</span> <span class="n">ObjectSemantics</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners</span><span class="w"> </span><span class="kn">import</span> <span class="n">PlanState</span><span class="p">,</span> <span class="n">MoveType</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">PushAction</span><span class="p">(</span><span class="n">AtomicAction</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">motion_generator</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">PushActionCfg</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">motion_generator</span><span class="p">,</span> <span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span> <span class="ow">or</span> <span class="n">PushActionCfg</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_part</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">ObjectSemantics</span><span class="p">],</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+        <span class="c1"># Resolve target to a batched [n_envs, 4, 4] EEF pose</span>
+        <span class="c1"># ... your planning logic here ...</span>
+        <span class="k">return</span> <span class="n">is_success</span><span class="p">,</span> <span class="n">trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">start_qpos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span>  <span class="c1"># add IK check here if needed</span>
+</pre></div>
+</div>
+</section>
+<section id="step-3-register-and-use">
+<h3>Step 3 — Register and use<a class="headerlink" href="#step-3-register-and-use" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_action</span>
+
+<span class="n">register_action</span><span class="p">(</span><span class="s2">&quot;push&quot;</span><span class="p">,</span> <span class="n">PushAction</span><span class="p">,</span> <span class="n">PushActionCfg</span><span class="p">)</span>
+
+<span class="n">engine</span> <span class="o">=</span> <span class="n">AtomicActionEngine</span><span class="p">(</span>
+    <span class="n">motion_generator</span><span class="o">=</span><span class="n">motion_gen</span><span class="p">,</span>
+    <span class="n">actions_cfg_list</span><span class="o">=</span><span class="p">[</span><span class="n">PushActionCfg</span><span class="p">(</span><span class="n">push_distance</span><span class="o">=</span><span class="mf">0.08</span><span class="p">)],</span>
+<span class="p">)</span>
+<span class="n">is_success</span><span class="p">,</span> <span class="n">traj</span> <span class="o">=</span> <span class="n">engine</span><span class="o">.</span><span class="n">execute_static</span><span class="p">(</span><span class="n">target_list</span><span class="o">=</span><span class="p">[</span><span class="n">target_pose</span><span class="p">])</span>
+</pre></div>
+</div>
+<blockquote>
+<div><p><strong>Tip:</strong> The <code class="docutils literal notranslate"><span class="pre">execute()</span></code> return signature is always <code class="docutils literal notranslate"><span class="pre">(is_success,</span> <span class="pre">trajectory,</span> <span class="pre">joint_ids)</span></code>.<br />
+<code class="docutils literal notranslate"><span class="pre">trajectory</span></code> has shape <code class="docutils literal notranslate"><span class="pre">(n_envs,</span> <span class="pre">n_waypoints,</span> <span class="pre">len(joint_ids))</span></code>.<br />
+<code class="docutils literal notranslate"><span class="pre">joint_ids</span></code> tells the engine which columns of the full robot DOF vector the trajectory covers.</p>
+</div></blockquote>
+</section>
+</section>
+<hr class="docutils" />
+<section id="target-resolution">
+<h2>Target Resolution<a class="headerlink" href="#target-resolution" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">AtomicActionEngine</span></code> accepts several target formats in <code class="docutils literal notranslate"><span class="pre">target_list</span></code>, giving you flexibility without boilerplate:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Input type</p></th>
+<th class="head"><p>Resolved to</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">torch.Tensor</span> <span class="pre">(4,4)</span></code> or <code class="docutils literal notranslate"><span class="pre">(n_envs,4,4)</span></code></p></td>
+<td><p>EEF pose, broadcast across envs</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ObjectSemantics</span></code></p></td>
+<td><p>Passed directly to the action</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">str</span></code> (object label)</p></td>
+<td><p>Looked up in <code class="docutils literal notranslate"><span class="pre">SemanticAnalyzer</span></code> cache</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">dict</span></code> with <code class="docutils literal notranslate"><span class="pre">&quot;pose&quot;</span></code> key</p></td>
+<td><p>Unwrapped to tensor</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">dict</span></code> with <code class="docutils literal notranslate"><span class="pre">&quot;label&quot;</span></code> key</p></td>
+<td><p>Analyzed via <code class="docutils literal notranslate"><span class="pre">SemanticAnalyzer</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<hr class="docutils" />
+<section id="further-reading">
+<h2>Further Reading<a class="headerlink" href="#further-reading" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="planners/motion_generator.html"><span class="doc">MotionGenerator</span></a> — the trajectory planner used by every action</p></li>
+<li><p><a class="reference internal" href="sim_robot.html"><span class="doc">Robot</span></a> — how control parts and IK solvers are configured</p></li>
+<li><p>Tutorial: <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim/atomic_actions.py</span></code></p></li>
+</ul>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="planners/motion_generator.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">MotionGenerator</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="../gym/index.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Gym</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#design-overview">Design Overview</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#core-concepts">Core Concepts</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#built-in-actions">Built-in Actions</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#moveaction"><code class="docutils literal notranslate"><span class="pre">MoveAction</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pickupaction"><code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#placeaction"><code class="docutils literal notranslate"><span class="pre">PlaceAction</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#typical-workflow">Typical Workflow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-to-extend-adding-a-custom-action">How to Extend: Adding a Custom Action</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#step-1-define-the-config">Step 1 — Define the config</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#step-2-implement-the-action">Step 2 — Implement the action</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#step-3-register-and-use">Step 3 — Register and use</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#target-resolution">Target Resolution</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#further-reading">Further Reading</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

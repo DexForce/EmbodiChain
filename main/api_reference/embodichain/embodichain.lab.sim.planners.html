@@ -1,0 +1,1749 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>embodichain.lab.sim.planners &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference/embodichain/embodichain.lab.sim.planners';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/api_reference/embodichain/embodichain.lab.sim.planners.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>embodichain.lab.sim.planners</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#base-planner">Base Planner</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlannerCfg"><code class="docutils literal notranslate"><span class="pre">BasePlannerCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlannerCfg.robot_uid"><code class="docutils literal notranslate"><span class="pre">BasePlannerCfg.robot_uid</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner"><code class="docutils literal notranslate"><span class="pre">BasePlanner</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner.__init__"><code class="docutils literal notranslate"><span class="pre">BasePlanner.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner.is_satisfied_constraint"><code class="docutils literal notranslate"><span class="pre">BasePlanner.is_satisfied_constraint()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner.plan"><code class="docutils literal notranslate"><span class="pre">BasePlanner.plan()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#toppra-planner">Toppra Planner</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlannerCfg"><code class="docutils literal notranslate"><span class="pre">ToppraPlannerCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlannerCfg.robot_uid"><code class="docutils literal notranslate"><span class="pre">ToppraPlannerCfg.robot_uid</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner.__init__"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner.is_satisfied_constraint"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner.is_satisfied_constraint()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner.plan"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner.plan()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#motion-generator">Motion Generator</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenCfg"><code class="docutils literal notranslate"><span class="pre">MotionGenCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenCfg.planner_cfg"><code class="docutils literal notranslate"><span class="pre">MotionGenCfg.planner_cfg</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator"><code class="docutils literal notranslate"><span class="pre">MotionGenerator</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.__init__"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.estimate_trajectory_sample_count"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.estimate_trajectory_sample_count()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.generate"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.generate()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.interpolate_trajectory"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.interpolate_trajectory()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.plot_trajectory"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.plot_trajectory()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.register_planner_type"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.register_planner_type()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#utilities">Utilities</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.DISTANCE"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.DISTANCE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.QUANTITY"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.QUANTITY</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.TIME"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.TIME</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.from_str"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.from_str()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart"><code class="docutils literal notranslate"><span class="pre">MovePart</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.LEFT"><code class="docutils literal notranslate"><span class="pre">MovePart.LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.RIGHT"><code class="docutils literal notranslate"><span class="pre">MovePart.RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.BOTH"><code class="docutils literal notranslate"><span class="pre">MovePart.BOTH</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.TORSO"><code class="docutils literal notranslate"><span class="pre">MovePart.TORSO</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.ALL"><code class="docutils literal notranslate"><span class="pre">MovePart.ALL</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">MovePart.ALL</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id1"><code class="docutils literal notranslate"><span class="pre">MovePart.BOTH</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id2"><code class="docutils literal notranslate"><span class="pre">MovePart.LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id3"><code class="docutils literal notranslate"><span class="pre">MovePart.RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id4"><code class="docutils literal notranslate"><span class="pre">MovePart.TORSO</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType"><code class="docutils literal notranslate"><span class="pre">MoveType</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.TOOL"><code class="docutils literal notranslate"><span class="pre">MoveType.TOOL</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.EEF_MOVE"><code class="docutils literal notranslate"><span class="pre">MoveType.EEF_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.JOINT_MOVE"><code class="docutils literal notranslate"><span class="pre">MoveType.JOINT_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.SYNC"><code class="docutils literal notranslate"><span class="pre">MoveType.SYNC</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.PAUSE"><code class="docutils literal notranslate"><span class="pre">MoveType.PAUSE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id5"><code class="docutils literal notranslate"><span class="pre">MoveType.EEF_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id6"><code class="docutils literal notranslate"><span class="pre">MoveType.JOINT_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id7"><code class="docutils literal notranslate"><span class="pre">MoveType.PAUSE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id8"><code class="docutils literal notranslate"><span class="pre">MoveType.SYNC</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id9"><code class="docutils literal notranslate"><span class="pre">MoveType.TOOL</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult"><code class="docutils literal notranslate"><span class="pre">PlanResult</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.__init__"><code class="docutils literal notranslate"><span class="pre">PlanResult.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.accelerations"><code class="docutils literal notranslate"><span class="pre">PlanResult.accelerations</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.dt"><code class="docutils literal notranslate"><span class="pre">PlanResult.dt</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.duration"><code class="docutils literal notranslate"><span class="pre">PlanResult.duration</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.positions"><code class="docutils literal notranslate"><span class="pre">PlanResult.positions</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.success"><code class="docutils literal notranslate"><span class="pre">PlanResult.success</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.velocities"><code class="docutils literal notranslate"><span class="pre">PlanResult.velocities</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.xpos_list"><code class="docutils literal notranslate"><span class="pre">PlanResult.xpos_list</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState"><code class="docutils literal notranslate"><span class="pre">PlanState</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.__init__"><code class="docutils literal notranslate"><span class="pre">PlanState.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.is_open"><code class="docutils literal notranslate"><span class="pre">PlanState.is_open</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.is_world_coordinate"><code class="docutils literal notranslate"><span class="pre">PlanState.is_world_coordinate</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.move_part"><code class="docutils literal notranslate"><span class="pre">PlanState.move_part</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.move_type"><code class="docutils literal notranslate"><span class="pre">PlanState.move_type</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.pause_seconds"><code class="docutils literal notranslate"><span class="pre">PlanState.pause_seconds</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.qacc"><code class="docutils literal notranslate"><span class="pre">PlanState.qacc</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.qpos"><code class="docutils literal notranslate"><span class="pre">PlanState.qpos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.qvel"><code class="docutils literal notranslate"><span class="pre">PlanState.qvel</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.xpos"><code class="docutils literal notranslate"><span class="pre">PlanState.xpos</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-embodichain.lab.sim.planners">
+<span id="embodichain-lab-sim-planners"></span><h1>embodichain.lab.sim.planners<a class="headerlink" href="#module-embodichain.lab.sim.planners" title="Link to this heading">#</a></h1>
+<p class="rubric">Classes</p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlannerCfg" title="embodichain.lab.sim.planners.BasePlannerCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BasePlannerCfg</span></code></a></p></td>
+<td><p>BasePlannerCfg(robot_uid: str = &lt;factory&gt;, planner_type: str = &lt;factory&gt;)</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlanner" title="embodichain.lab.sim.planners.BasePlanner"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BasePlanner</span></code></a></p></td>
+<td><p>Base class for trajectory planners.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlannerCfg" title="embodichain.lab.sim.planners.ToppraPlannerCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ToppraPlannerCfg</span></code></a></p></td>
+<td><p>ToppraPlannerCfg(robot_uid: str = &lt;factory&gt;, planner_type: str = &lt;factory&gt;)</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlanner" title="embodichain.lab.sim.planners.ToppraPlanner"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ToppraPlanner</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenCfg" title="embodichain.lab.sim.planners.MotionGenCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MotionGenCfg</span></code></a></p></td>
+<td><p>MotionGenCfg(planner_cfg: embodichain.lab.sim.planners.base_planner.BasePlannerCfg = &lt;factory&gt;)</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator" title="embodichain.lab.sim.planners.MotionGenerator"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MotionGenerator</span></code></a></p></td>
+<td><p>Unified motion generator for robot trajectory planning.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.TrajectorySampleMethod" title="embodichain.lab.sim.planners.TrajectorySampleMethod"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TrajectorySampleMethod</span></code></a></p></td>
+<td><p>Enumeration for different trajectory sampling methods.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MovePart" title="embodichain.lab.sim.planners.MovePart"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MovePart</span></code></a></p></td>
+<td><p>Enumeration for different robot parts to move.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MoveType" title="embodichain.lab.sim.planners.MoveType"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MoveType</span></code></a></p></td>
+<td><p>Enumeration for different types of movements.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult" title="embodichain.lab.sim.planners.PlanResult"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PlanResult</span></code></a></p></td>
+<td><p>Data class representing the result of a motion plan.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState" title="embodichain.lab.sim.planners.PlanState"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PlanState</span></code></a></p></td>
+<td><p>Data class representing the state for a motion plan.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="base-planner">
+<h2>Base Planner<a class="headerlink" href="#base-planner" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.BasePlannerCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">BasePlannerCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/base_planner.html#BasePlannerCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.BasePlannerCfg" title="Link to this definition">#</a></dt>
+<dd><p>BasePlannerCfg(robot_uid: str = &lt;factory&gt;, planner_type: str = &lt;factory&gt;)</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlannerCfg.robot_uid" title="embodichain.lab.sim.planners.BasePlannerCfg.robot_uid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">robot_uid</span></code></a></p></td>
+<td><p>UID of the robot to control.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.BasePlannerCfg.robot_uid">
+<span class="sig-name descname"><span class="pre">robot_uid</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></em><a class="headerlink" href="#embodichain.lab.sim.planners.BasePlannerCfg.robot_uid" title="Link to this definition">#</a></dt>
+<dd><p>UID of the robot to control. Must correspond to a robot added to the simulation with this UID.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.BasePlanner">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">BasePlanner</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/base_planner.html#BasePlanner"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.BasePlanner" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<p>Base class for trajectory planners.</p>
+<p>This class provides common functionality that can be shared across different
+planner implementations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cfg</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlannerCfg" title="embodichain.lab.sim.planners.base_planner.BasePlannerCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">BasePlannerCfg</span></code></a></span>) – Configuration object for the planner.</p>
+</dd>
+</dl>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlanner.__init__" title="embodichain.lab.sim.planners.BasePlanner.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(cfg)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlanner.is_satisfied_constraint" title="embodichain.lab.sim.planners.BasePlanner.is_satisfied_constraint"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_satisfied_constraint</span></code></a>(vels, accs, constraints)</p></td>
+<td><p>Check if the trajectory satisfies velocity and acceleration constraints.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlanner.plan" title="embodichain.lab.sim.planners.BasePlanner.plan"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plan</span></code></a>(target_states[, options])</p></td>
+<td><p>Execute trajectory planning.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.BasePlanner.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cfg</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/base_planner.html#BasePlanner.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.BasePlanner.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.BasePlanner.is_satisfied_constraint">
+<span class="sig-name descname"><span class="pre">is_satisfied_constraint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vels</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">constraints</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/base_planner.html#BasePlanner.is_satisfied_constraint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.BasePlanner.is_satisfied_constraint" title="Link to this definition">#</a></dt>
+<dd><p>Check if the trajectory satisfies velocity and acceleration constraints.</p>
+<p>This method checks whether the given velocities and accelerations satisfy
+the constraints defined in constraints. It allows for some tolerance
+to account for numerical errors in dense waypoint scenarios.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>vels</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Velocity tensor (…, DOF) where the last dimension is DOF</p></li>
+<li><p><strong>accs</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Acceleration tensor (…, DOF) where the last dimension is DOF</p></li>
+<li><p><strong>constraints</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></span>) – Dictionary containing ‘velocity’ and ‘acceleration’ limits</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if all constraints are satisfied, False otherwise</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>Allows 10% tolerance for velocity constraints</p></li>
+<li><p>Allows 25% tolerance for acceleration constraints</p></li>
+<li><p>Prints exceed information if constraints are violated</p></li>
+<li><p>Assumes symmetric constraints (velocities and accelerations can be positive or negative)</p></li>
+<li><p>Supports batch dimension computation, e.g. (B, N, DOF) or (N, DOF)</p></li>
+</ul>
+</div>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.BasePlanner.plan">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">plan</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">target_states</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">PlanOptions()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/base_planner.html#BasePlanner.plan"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.BasePlanner.plan" title="Link to this definition">#</a></dt>
+<dd><p>Execute trajectory planning.</p>
+<p>This method must be implemented by subclasses to provide the specific
+planning algorithm.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>target_states</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<a class="reference internal" href="#embodichain.lab.sim.planners.PlanState" title="embodichain.lab.sim.planners.utils.PlanState"><code class="xref py py-class docutils literal notranslate"><span class="pre">PlanState</span></code></a>]</span>) – List of dictionaries containing target states</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><dl class="simple">
+<dt>An object containing:</dt><dd><ul class="simple">
+<li><p>success: bool, whether planning succeeded</p></li>
+<li><p>positions: torch.Tensor (N, DOF), joint positions along trajectory</p></li>
+<li><p>velocities: torch.Tensor (N, DOF), joint velocities along trajectory</p></li>
+<li><p>accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory</p></li>
+<li><p>times: torch.Tensor (N,), time stamps for each point</p></li>
+<li><p>duration: float, total trajectory duration</p></li>
+<li><p>error_msg: Optional error message if planning failed</p></li>
+</ul>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult" title="embodichain.lab.sim.planners.PlanResult">PlanResult</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="toppra-planner">
+<h2>Toppra Planner<a class="headerlink" href="#toppra-planner" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.ToppraPlannerCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">ToppraPlannerCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/toppra_planner.html#ToppraPlannerCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.ToppraPlannerCfg" title="Link to this definition">#</a></dt>
+<dd><p>ToppraPlannerCfg(robot_uid: str = &lt;factory&gt;, planner_type: str = &lt;factory&gt;)</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlannerCfg.robot_uid" title="embodichain.lab.sim.planners.ToppraPlannerCfg.robot_uid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">robot_uid</span></code></a></p></td>
+<td><p>UID of the robot to control.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.ToppraPlannerCfg.robot_uid">
+<span class="sig-name descname"><span class="pre">robot_uid</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></em><a class="headerlink" href="#embodichain.lab.sim.planners.ToppraPlannerCfg.robot_uid" title="Link to this definition">#</a></dt>
+<dd><p>UID of the robot to control. Must correspond to a robot added to the simulation with this UID.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.ToppraPlanner">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">ToppraPlanner</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/toppra_planner.html#ToppraPlanner"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.ToppraPlanner" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.lab.sim.planners.BasePlanner" title="embodichain.lab.sim.planners.base_planner.BasePlanner"><code class="xref py py-class docutils literal notranslate"><span class="pre">BasePlanner</span></code></a></p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlanner.__init__" title="embodichain.lab.sim.planners.ToppraPlanner.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(cfg)</p></td>
+<td><p>Initialize the TOPPRA trajectory planner.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlanner.is_satisfied_constraint" title="embodichain.lab.sim.planners.ToppraPlanner.is_satisfied_constraint"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_satisfied_constraint</span></code></a>(vels, accs, constraints)</p></td>
+<td><p>Check if the trajectory satisfies velocity and acceleration constraints.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlanner.plan" title="embodichain.lab.sim.planners.ToppraPlanner.plan"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plan</span></code></a>(target_states[, options])</p></td>
+<td><p>Execute trajectory planning.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.ToppraPlanner.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cfg</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/toppra_planner.html#ToppraPlanner.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.ToppraPlanner.__init__" title="Link to this definition">#</a></dt>
+<dd><p>Initialize the TOPPRA trajectory planner.</p>
+<p class="rubric">References</p>
+<ul class="simple">
+<li><p>TOPPRA: Time-Optimal Path Parameterization for Robotic Systems (<a class="github reference external" href="https://github.com/hungpham2511/toppra">hungpham2511/toppra</a>)</p></li>
+</ul>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cfg</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.planners.ToppraPlannerCfg" title="embodichain.lab.sim.planners.toppra_planner.ToppraPlannerCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">ToppraPlannerCfg</span></code></a></span>) – Configuration object containing ToppraPlanner settings</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.ToppraPlanner.is_satisfied_constraint">
+<span class="sig-name descname"><span class="pre">is_satisfied_constraint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vels</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">constraints</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.planners.ToppraPlanner.is_satisfied_constraint" title="Link to this definition">#</a></dt>
+<dd><p>Check if the trajectory satisfies velocity and acceleration constraints.</p>
+<p>This method checks whether the given velocities and accelerations satisfy
+the constraints defined in constraints. It allows for some tolerance
+to account for numerical errors in dense waypoint scenarios.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>vels</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Velocity tensor (…, DOF) where the last dimension is DOF</p></li>
+<li><p><strong>accs</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Acceleration tensor (…, DOF) where the last dimension is DOF</p></li>
+<li><p><strong>constraints</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></span>) – Dictionary containing ‘velocity’ and ‘acceleration’ limits</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if all constraints are satisfied, False otherwise</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>Allows 10% tolerance for velocity constraints</p></li>
+<li><p>Allows 25% tolerance for acceleration constraints</p></li>
+<li><p>Prints exceed information if constraints are violated</p></li>
+<li><p>Assumes symmetric constraints (velocities and accelerations can be positive or negative)</p></li>
+<li><p>Supports batch dimension computation, e.g. (B, N, DOF) or (N, DOF)</p></li>
+</ul>
+</div>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.ToppraPlanner.plan">
+<span class="sig-name descname"><span class="pre">plan</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">target_states</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options=ToppraPlanOptions(constraints={'velocity':</span> <span class="pre">0.2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">'acceleration':</span> <span class="pre">0.5}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample_method=&lt;TrajectorySampleMethod.QUANTITY:</span> <span class="pre">'quantity'&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample_interval=0.01)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/toppra_planner.html#ToppraPlanner.plan"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.ToppraPlanner.plan" title="Link to this definition">#</a></dt>
+<dd><p>Execute trajectory planning.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>target_states</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<a class="reference internal" href="#embodichain.lab.sim.planners.PlanState" title="embodichain.lab.sim.planners.utils.PlanState"><code class="xref py py-class docutils literal notranslate"><span class="pre">PlanState</span></code></a>]</span>) – List of dictionaries containing target states</p></li>
+<li><p><strong>cfg</strong> – ToppraPlanOptions</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult" title="embodichain.lab.sim.planners.utils.PlanResult"><code class="xref py py-class docutils literal notranslate"><span class="pre">PlanResult</span></code></a></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>PlanResult containing the planned trajectory details.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="motion-generator">
+<h2>Motion Generator<a class="headerlink" href="#motion-generator" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">MotionGenCfg</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenCfg" title="Link to this definition">#</a></dt>
+<dd><p>MotionGenCfg(planner_cfg: embodichain.lab.sim.planners.base_planner.BasePlannerCfg = &lt;factory&gt;)</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenCfg.planner_cfg" title="embodichain.lab.sim.planners.MotionGenCfg.planner_cfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">planner_cfg</span></code></a></p></td>
+<td><p>Configuration for the underlying planner.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenCfg.planner_cfg">
+<span class="sig-name descname"><span class="pre">planner_cfg</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#embodichain.lab.sim.planners.BasePlannerCfg" title="embodichain.lab.sim.planners.base_planner.BasePlannerCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">BasePlannerCfg</span></code></a></em><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenCfg.planner_cfg" title="Link to this definition">#</a></dt>
+<dd><p>Configuration for the underlying planner. Must include ‘planner_type’ attribute to specify
+which planner to use, and any additional parameters required by that planner.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">MotionGenerator</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Unified motion generator for robot trajectory planning.</p>
+<p>This class provides a unified interface for trajectory planning with and without
+collision checking.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cfg</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenCfg" title="embodichain.lab.sim.planners.motion_generator.MotionGenCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">MotionGenCfg</span></code></a></span>) – Configuration object for motion generation, must include ‘planner_cfg’ attribute</p>
+</dd>
+</dl>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator.__init__" title="embodichain.lab.sim.planners.MotionGenerator.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(cfg)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator.estimate_trajectory_sample_count" title="embodichain.lab.sim.planners.MotionGenerator.estimate_trajectory_sample_count"><code class="xref py py-obj docutils literal notranslate"><span class="pre">estimate_trajectory_sample_count</span></code></a>([...])</p></td>
+<td><p>Estimate the number of trajectory sampling points required.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator.generate" title="embodichain.lab.sim.planners.MotionGenerator.generate"><code class="xref py py-obj docutils literal notranslate"><span class="pre">generate</span></code></a>(target_states[, options])</p></td>
+<td><p>Generate motion with given options.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator.interpolate_trajectory" title="embodichain.lab.sim.planners.MotionGenerator.interpolate_trajectory"><code class="xref py py-obj docutils literal notranslate"><span class="pre">interpolate_trajectory</span></code></a>([control_part, ...])</p></td>
+<td><p>Interpolate trajectory based on provided waypoints.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator.plot_trajectory" title="embodichain.lab.sim.planners.MotionGenerator.plot_trajectory"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_trajectory</span></code></a>(positions[, vels, accs])</p></td>
+<td><p>Plot trajectory data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.MotionGenerator.register_planner_type" title="embodichain.lab.sim.planners.MotionGenerator.register_planner_type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">register_planner_type</span></code></a>(name, planner_class, ...)</p></td>
+<td><p>Register a new planner type.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cfg</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator.estimate_trajectory_sample_count">
+<span class="sig-name descname"><span class="pre">estimate_trajectory_sample_count</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">xpos_list</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qpos_list</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">step_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.01</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">angle_step</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.03490658503988659</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">control_part</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator.estimate_trajectory_sample_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator.estimate_trajectory_sample_count" title="Link to this definition">#</a></dt>
+<dd><p>Estimate the number of trajectory sampling points required.</p>
+<p>This function estimates the total number of sampling points needed to generate
+a trajectory based on the given waypoints and sampling parameters. Supports
+parallel computation for batched input trajectories.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>xpos_list</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>], <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code>]</span>) – Tensor of 4x4 transformation matrices, shape [B, N, 4, 4] or [N, 4, 4]</p></li>
+<li><p><strong>qpos_list</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>], <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code>]</span>) – Tensor of joint positions, shape [B, N, D] or [N, D] (optional)</p></li>
+<li><p><strong>step_size</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code> | <code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Maximum allowed distance between points (meters). Float or Tensor [B]</p></li>
+<li><p><strong>angle_step</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code> | <code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Maximum allowed angular difference between points (radians). Float or Tensor [B]</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><dl class="simple">
+<dt>Estimated number of sampling points per trajectory, shape [B]</dt><dd><p>(or scalar tensor if single trajectory)</p>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>torch.Tensor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator.generate">
+<span class="sig-name descname"><span class="pre">generate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">target_states</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MotionGenOptions(start_qpos=None,</span> <span class="pre">control_part=None,</span> <span class="pre">plan_opts=None,</span> <span class="pre">is_interpolate=False,</span> <span class="pre">interpolate_nums=10,</span> <span class="pre">is_linear=False,</span> <span class="pre">interpolate_position_step=0.002,</span> <span class="pre">interpolate_angle_step=0.03490658503988659)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator.generate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator.generate" title="Link to this definition">#</a></dt>
+<dd><p>Generate motion with given options.</p>
+<p>This method generates a smooth trajectory using the selected planner that satisfies
+constraints and perform pre-interpolation if specified in the options.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>target_states</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<a class="reference internal" href="#embodichain.lab.sim.planners.PlanState" title="embodichain.lab.sim.planners.utils.PlanState"><code class="xref py py-class docutils literal notranslate"><span class="pre">PlanState</span></code></a>]</span>) – List[PlanState].</p></li>
+<li><p><strong>options</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">MotionGenOptions</span></code></span>) – MotionGenOptions.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult" title="embodichain.lab.sim.planners.utils.PlanResult"><code class="xref py py-class docutils literal notranslate"><span class="pre">PlanResult</span></code></a></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>PlanResult containing the planned trajectory details.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator.interpolate_trajectory">
+<span class="sig-name descname"><span class="pre">interpolate_trajectory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">control_part</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xpos_list</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qpos_list</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MotionGenOptions(start_qpos=None,</span> <span class="pre">control_part=None,</span> <span class="pre">plan_opts=None,</span> <span class="pre">is_interpolate=False,</span> <span class="pre">interpolate_nums=10,</span> <span class="pre">is_linear=False,</span> <span class="pre">interpolate_position_step=0.002,</span> <span class="pre">interpolate_angle_step=0.03490658503988659)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator.interpolate_trajectory"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator.interpolate_trajectory" title="Link to this definition">#</a></dt>
+<dd><dl class="simple">
+<dt>Interpolate trajectory based on provided waypoints.</dt><dd><p>This method performs interpolation on the provided waypoints to generate a smoother trajectory.
+It supports both Cartesian (end-effector) and joint space interpolation based on the control part and options specified.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>control_part</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span>) – Name of the robot part to control, e.g. ‘left_arm’. Must correspond to a valid control part defined in the robot’s configuration.</p></li>
+<li><p><strong>xpos_list</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>]</span>) – List of end-effector poses (torch.Tensor of shape [N, 4, 4]) to interpolate through. Required if control_part is an end-effector control part.</p></li>
+<li><p><strong>qpos_list</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>]</span>) – List of joint positions (torch.Tensor of shape [N, DOF]) to interpolate through. Required if control_part is a joint control part.</p></li>
+<li><p><strong>options</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">MotionGenOptions</span></code></span>) – MotionGenOptions containing interpolation settings such as step size and whether to use linear interpolation.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p>interpolate_qpos_list: Tensor of interpolated joint positions along the trajectory, shape [M, DOF]</p></li>
+<li><p>feasible_pose_targets: Tensor of corresponding end-effector poses for the interpolated joint positions, shape [M, 4, 4]. This is useful for verifying the interpolation results and can be None if not applicable.</p></li>
+</ul>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Tuple containing</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator.plot_trajectory">
+<span class="sig-name descname"><span class="pre">plot_trajectory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">positions</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vels</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator.plot_trajectory"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator.plot_trajectory" title="Link to this definition">#</a></dt>
+<dd><p>Plot trajectory data.</p>
+<p>This method visualizes the trajectory by plotting position, velocity, and
+acceleration curves for each joint over time. It also displays the constraint
+limits for reference. Supports plotting batched trajectories.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>positions</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></span>) – Position tensor (N, DOF) or (B, N, DOF)</p></li>
+<li><p><strong>vels</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>]</span>) – Velocity tensor (N, DOF) or (B, N, DOF), optional</p></li>
+<li><p><strong>accs</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code>]</span>) – Acceleration tensor (N, DOF) or (B, N, DOF), optional</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>Creates a multi-subplot figure (position, and optional velocity/acceleration)</p></li>
+<li><p>Shows constraint limits as dashed lines</p></li>
+<li><p>If input is (B, N, DOF), plots elements separately per batch sequence.</p></li>
+<li><p>Requires matplotlib to be installed</p></li>
+</ul>
+</div>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MotionGenerator.register_planner_type">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">register_planner_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">planner_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">planner_cfg_class</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/motion_generator.html#MotionGenerator.register_planner_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MotionGenerator.register_planner_type" title="Link to this definition">#</a></dt>
+<dd><p>Register a new planner type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="utilities">
+<h2>Utilities<a class="headerlink" href="#utilities" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.TrajectorySampleMethod">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">TrajectorySampleMethod</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/utils.html#TrajectorySampleMethod"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.TrajectorySampleMethod" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>Enumeration for different trajectory sampling methods.</p>
+<p>This enum defines various methods for sampling trajectories,
+providing meaningful names for different sampling strategies.</p>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.DISTANCE" title="embodichain.lab.sim.planners.TrajectorySampleMethod.DISTANCE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DISTANCE</span></code></a></p></td>
+<td><p>Sample based on distance intervals.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.QUANTITY" title="embodichain.lab.sim.planners.TrajectorySampleMethod.QUANTITY"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QUANTITY</span></code></a></p></td>
+<td><p>Sample based on a specified number of points.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.TIME" title="embodichain.lab.sim.planners.TrajectorySampleMethod.TIME"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TIME</span></code></a></p></td>
+<td><p>Sample based on time intervals.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.from_str" title="embodichain.lab.sim.planners.TrajectorySampleMethod.from_str"><code class="xref py py-obj docutils literal notranslate"><span class="pre">from_str</span></code></a>(value)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.TrajectorySampleMethod.DISTANCE">
+<span class="sig-name descname"><span class="pre">DISTANCE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'distance'</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.DISTANCE" title="Link to this definition">#</a></dt>
+<dd><p>Sample based on distance intervals.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.TrajectorySampleMethod.QUANTITY">
+<span class="sig-name descname"><span class="pre">QUANTITY</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'quantity'</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.QUANTITY" title="Link to this definition">#</a></dt>
+<dd><p>Sample based on a specified number of points.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.TrajectorySampleMethod.TIME">
+<span class="sig-name descname"><span class="pre">TIME</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'time'</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.TIME" title="Link to this definition">#</a></dt>
+<dd><p>Sample based on time intervals.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.TrajectorySampleMethod.from_str">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_str</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/utils.html#TrajectorySampleMethod.from_str"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.from_str" title="Link to this definition">#</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.lab.sim.planners.TrajectorySampleMethod" title="embodichain.lab.sim.planners.utils.TrajectorySampleMethod"><code class="xref py py-class docutils literal notranslate"><span class="pre">TrajectorySampleMethod</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MovePart">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">MovePart</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/utils.html#MovePart"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MovePart" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>Enumeration for different robot parts to move.</p>
+<p>Defines robot part selection for motion planning.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MovePart.LEFT">
+<span class="sig-name descname"><span class="pre">LEFT</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MovePart.LEFT" title="Link to this definition">#</a></dt>
+<dd><p>left arm or end-effector.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MovePart.RIGHT">
+<span class="sig-name descname"><span class="pre">RIGHT</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MovePart.RIGHT" title="Link to this definition">#</a></dt>
+<dd><p>right arm or end-effector.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MovePart.BOTH">
+<span class="sig-name descname"><span class="pre">BOTH</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MovePart.BOTH" title="Link to this definition">#</a></dt>
+<dd><p>both arms or end-effectors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MovePart.TORSO">
+<span class="sig-name descname"><span class="pre">TORSO</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MovePart.TORSO" title="Link to this definition">#</a></dt>
+<dd><p>torso for humanoid robot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MovePart.ALL">
+<span class="sig-name descname"><span class="pre">ALL</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MovePart.ALL" title="Link to this definition">#</a></dt>
+<dd><p>all joints of the robot (joint control only).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id0" title="embodichain.lab.sim.planners.MovePart.ALL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ALL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id1" title="embodichain.lab.sim.planners.MovePart.BOTH"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BOTH</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id2" title="embodichain.lab.sim.planners.MovePart.LEFT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LEFT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id3" title="embodichain.lab.sim.planners.MovePart.RIGHT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RIGHT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id4" title="embodichain.lab.sim.planners.MovePart.TORSO"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TORSO</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id0">
+<span class="sig-name descname"><span class="pre">ALL</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></em><a class="headerlink" href="#id0" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id1">
+<span class="sig-name descname"><span class="pre">BOTH</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#id1" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id2">
+<span class="sig-name descname"><span class="pre">LEFT</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#id2" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id3">
+<span class="sig-name descname"><span class="pre">RIGHT</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></em><a class="headerlink" href="#id3" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id4">
+<span class="sig-name descname"><span class="pre">TORSO</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#id4" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MoveType">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">MoveType</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/utils.html#MoveType"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.MoveType" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>Enumeration for different types of movements.</p>
+<p>Defines movement types for robot planning.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MoveType.TOOL">
+<span class="sig-name descname"><span class="pre">TOOL</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MoveType.TOOL" title="Link to this definition">#</a></dt>
+<dd><p>Tool open or close.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MoveType.EEF_MOVE">
+<span class="sig-name descname"><span class="pre">EEF_MOVE</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MoveType.EEF_MOVE" title="Link to this definition">#</a></dt>
+<dd><p>Move end-effector to target pose (IK + trajectory).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MoveType.JOINT_MOVE">
+<span class="sig-name descname"><span class="pre">JOINT_MOVE</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MoveType.JOINT_MOVE" title="Link to this definition">#</a></dt>
+<dd><p>Move joints to target angles (trajectory planning).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MoveType.SYNC">
+<span class="sig-name descname"><span class="pre">SYNC</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MoveType.SYNC" title="Link to this definition">#</a></dt>
+<dd><p>Synchronized left/right arm movement (dual-arm robots).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.MoveType.PAUSE">
+<span class="sig-name descname"><span class="pre">PAUSE</span></span><a class="headerlink" href="#embodichain.lab.sim.planners.MoveType.PAUSE" title="Link to this definition">#</a></dt>
+<dd><p>Pause for specified duration (see PlanState.pause_seconds).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id5" title="embodichain.lab.sim.planners.MoveType.EEF_MOVE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EEF_MOVE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id6" title="embodichain.lab.sim.planners.MoveType.JOINT_MOVE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">JOINT_MOVE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id7" title="embodichain.lab.sim.planners.MoveType.PAUSE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PAUSE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id8" title="embodichain.lab.sim.planners.MoveType.SYNC"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SYNC</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id9" title="embodichain.lab.sim.planners.MoveType.TOOL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TOOL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id5">
+<span class="sig-name descname"><span class="pre">EEF_MOVE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></em><a class="headerlink" href="#id5" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id6">
+<span class="sig-name descname"><span class="pre">JOINT_MOVE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#id6" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id7">
+<span class="sig-name descname"><span class="pre">PAUSE</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></em><a class="headerlink" href="#id7" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id8">
+<span class="sig-name descname"><span class="pre">SYNC</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#id8" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id9">
+<span class="sig-name descname"><span class="pre">TOOL</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#id9" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">PlanResult</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/utils.html#PlanResult"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Data class representing the result of a motion plan.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.__init__" title="embodichain.lab.sim.planners.PlanResult.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>([success, xpos_list, positions, ...])</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.accelerations" title="embodichain.lab.sim.planners.PlanResult.accelerations"><code class="xref py py-obj docutils literal notranslate"><span class="pre">accelerations</span></code></a></p></td>
+<td><p>Joint accelerations along trajectory with shape <cite>(N, DOF)</cite>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.dt" title="embodichain.lab.sim.planners.PlanResult.dt"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dt</span></code></a></p></td>
+<td><p>Time duration between each point with shape <cite>(N,)</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.duration" title="embodichain.lab.sim.planners.PlanResult.duration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">duration</span></code></a></p></td>
+<td><p>Total trajectory duration in seconds.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.positions" title="embodichain.lab.sim.planners.PlanResult.positions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">positions</span></code></a></p></td>
+<td><p>Joint positions along trajectory with shape <cite>(N, DOF)</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.success" title="embodichain.lab.sim.planners.PlanResult.success"><code class="xref py py-obj docutils literal notranslate"><span class="pre">success</span></code></a></p></td>
+<td><p>Whether planning succeeded.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.velocities" title="embodichain.lab.sim.planners.PlanResult.velocities"><code class="xref py py-obj docutils literal notranslate"><span class="pre">velocities</span></code></a></p></td>
+<td><p>Joint velocities along trajectory with shape <cite>(N, DOF)</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanResult.xpos_list" title="embodichain.lab.sim.planners.PlanResult.xpos_list"><code class="xref py py-obj docutils literal notranslate"><span class="pre">xpos_list</span></code></a></p></td>
+<td><p>End-effector poses along trajectory with shape <cite>(N, 4, 4)</cite>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">success</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xpos_list</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">positions</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">velocities</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accelerations</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dt</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duration</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.accelerations">
+<span class="sig-name descname"><span class="pre">accelerations</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.accelerations" title="Link to this definition">#</a></dt>
+<dd><p>Joint accelerations along trajectory with shape <cite>(N, DOF)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.dt">
+<span class="sig-name descname"><span class="pre">dt</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.dt" title="Link to this definition">#</a></dt>
+<dd><p>Time duration between each point with shape <cite>(N,)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.duration">
+<span class="sig-name descname"><span class="pre">duration</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code> <span class="pre">|</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0.0</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.duration" title="Link to this definition">#</a></dt>
+<dd><p>Total trajectory duration in seconds.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.positions">
+<span class="sig-name descname"><span class="pre">positions</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.positions" title="Link to this definition">#</a></dt>
+<dd><p>Joint positions along trajectory with shape <cite>(N, DOF)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.success">
+<span class="sig-name descname"><span class="pre">success</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code> <span class="pre">|</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.success" title="Link to this definition">#</a></dt>
+<dd><p>Whether planning succeeded.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.velocities">
+<span class="sig-name descname"><span class="pre">velocities</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.velocities" title="Link to this definition">#</a></dt>
+<dd><p>Joint velocities along trajectory with shape <cite>(N, DOF)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanResult.xpos_list">
+<span class="sig-name descname"><span class="pre">xpos_list</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanResult.xpos_list" title="Link to this definition">#</a></dt>
+<dd><p>End-effector poses along trajectory with shape <cite>(N, 4, 4)</cite>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.lab.sim.planners.</span></span><span class="sig-name descname"><span class="pre">PlanState</span></span><a class="reference internal" href="../../_modules/embodichain/lab/sim/planners/utils.html#PlanState"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Data class representing the state for a motion plan.</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.__init__" title="embodichain.lab.sim.planners.PlanState.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>([move_type, move_part, xpos, qpos, ...])</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.is_open" title="embodichain.lab.sim.planners.PlanState.is_open"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_open</span></code></a></p></td>
+<td><p>For <cite>MoveType.TOOL</cite>, indicates whether to open (<cite>True</cite>) or close (<cite>False</cite>) the tool.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.is_world_coordinate" title="embodichain.lab.sim.planners.PlanState.is_world_coordinate"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_world_coordinate</span></code></a></p></td>
+<td><p><cite>True</cite> if the target pose is in world coordinates, <cite>False</cite> if relative to the current pose.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.move_part" title="embodichain.lab.sim.planners.PlanState.move_part"><code class="xref py py-obj docutils literal notranslate"><span class="pre">move_part</span></code></a></p></td>
+<td><p>Robot part that should move.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.move_type" title="embodichain.lab.sim.planners.PlanState.move_type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">move_type</span></code></a></p></td>
+<td><p>Type of movement used by the plan.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.pause_seconds" title="embodichain.lab.sim.planners.PlanState.pause_seconds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">pause_seconds</span></code></a></p></td>
+<td><p>Duration of a pause when <cite>move_type</cite> is <cite>MoveType.PAUSE</cite>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.qacc" title="embodichain.lab.sim.planners.PlanState.qacc"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qacc</span></code></a></p></td>
+<td><p>Target joint accelerations for <cite>MoveType.JOINT_MOVE</cite> with shape <cite>(DOF,)</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.qpos" title="embodichain.lab.sim.planners.PlanState.qpos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qpos</span></code></a></p></td>
+<td><p>Target joint angles for <cite>MoveType.JOINT_MOVE</cite> with shape <cite>(DOF,)</cite>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.qvel" title="embodichain.lab.sim.planners.PlanState.qvel"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qvel</span></code></a></p></td>
+<td><p>Target joint velocities for <cite>MoveType.JOINT_MOVE</cite> with shape <cite>(DOF,)</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.lab.sim.planners.PlanState.xpos" title="embodichain.lab.sim.planners.PlanState.xpos"><code class="xref py py-obj docutils literal notranslate"><span class="pre">xpos</span></code></a></p></td>
+<td><p>Target TCP pose (4x4 matrix) for <cite>MoveType.EEF_MOVE</cite>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">move_type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MoveType.JOINT_MOVE</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">move_part</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MovePart.LEFT</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xpos</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qpos</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qvel</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qacc</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_open</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_world_coordinate</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pause_seconds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.is_open">
+<span class="sig-name descname"><span class="pre">is_open</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">True</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.is_open" title="Link to this definition">#</a></dt>
+<dd><p>For <cite>MoveType.TOOL</cite>, indicates whether to open (<cite>True</cite>) or close (<cite>False</cite>) the tool.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.is_world_coordinate">
+<span class="sig-name descname"><span class="pre">is_world_coordinate</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">True</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.is_world_coordinate" title="Link to this definition">#</a></dt>
+<dd><p><cite>True</cite> if the target pose is in world coordinates, <cite>False</cite> if relative to the current pose.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.move_part">
+<span class="sig-name descname"><span class="pre">move_part</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#embodichain.lab.sim.planners.MovePart" title="embodichain.lab.sim.planners.utils.MovePart"><code class="xref py py-class docutils literal notranslate"><span class="pre">MovePart</span></code></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.move_part" title="Link to this definition">#</a></dt>
+<dd><p>Robot part that should move.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.move_type">
+<span class="sig-name descname"><span class="pre">move_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#embodichain.lab.sim.planners.MoveType" title="embodichain.lab.sim.planners.utils.MoveType"><code class="xref py py-class docutils literal notranslate"><span class="pre">MoveType</span></code></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.move_type" title="Link to this definition">#</a></dt>
+<dd><p>Type of movement used by the plan.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.pause_seconds">
+<span class="sig-name descname"><span class="pre">pause_seconds</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0.0</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.pause_seconds" title="Link to this definition">#</a></dt>
+<dd><p>Duration of a pause when <cite>move_type</cite> is <cite>MoveType.PAUSE</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.qacc">
+<span class="sig-name descname"><span class="pre">qacc</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.qacc" title="Link to this definition">#</a></dt>
+<dd><p>Target joint accelerations for <cite>MoveType.JOINT_MOVE</cite> with shape <cite>(DOF,)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.qpos">
+<span class="sig-name descname"><span class="pre">qpos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.qpos" title="Link to this definition">#</a></dt>
+<dd><p>Target joint angles for <cite>MoveType.JOINT_MOVE</cite> with shape <cite>(DOF,)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.qvel">
+<span class="sig-name descname"><span class="pre">qvel</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.qvel" title="Link to this definition">#</a></dt>
+<dd><p>Target joint velocities for <cite>MoveType.JOINT_MOVE</cite> with shape <cite>(DOF,)</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.lab.sim.planners.PlanState.xpos">
+<span class="sig-name descname"><span class="pre">xpos</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Tensor</span></code> <span class="pre">|</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#embodichain.lab.sim.planners.PlanState.xpos" title="Link to this definition">#</a></dt>
+<dd><p>Target TCP pose (4x4 matrix) for <cite>MoveType.EEF_MOVE</cite>.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#base-planner">Base Planner</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlannerCfg"><code class="docutils literal notranslate"><span class="pre">BasePlannerCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlannerCfg.robot_uid"><code class="docutils literal notranslate"><span class="pre">BasePlannerCfg.robot_uid</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner"><code class="docutils literal notranslate"><span class="pre">BasePlanner</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner.__init__"><code class="docutils literal notranslate"><span class="pre">BasePlanner.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner.is_satisfied_constraint"><code class="docutils literal notranslate"><span class="pre">BasePlanner.is_satisfied_constraint()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.BasePlanner.plan"><code class="docutils literal notranslate"><span class="pre">BasePlanner.plan()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#toppra-planner">Toppra Planner</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlannerCfg"><code class="docutils literal notranslate"><span class="pre">ToppraPlannerCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlannerCfg.robot_uid"><code class="docutils literal notranslate"><span class="pre">ToppraPlannerCfg.robot_uid</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner.__init__"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner.is_satisfied_constraint"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner.is_satisfied_constraint()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.ToppraPlanner.plan"><code class="docutils literal notranslate"><span class="pre">ToppraPlanner.plan()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#motion-generator">Motion Generator</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenCfg"><code class="docutils literal notranslate"><span class="pre">MotionGenCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenCfg.planner_cfg"><code class="docutils literal notranslate"><span class="pre">MotionGenCfg.planner_cfg</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator"><code class="docutils literal notranslate"><span class="pre">MotionGenerator</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.__init__"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.estimate_trajectory_sample_count"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.estimate_trajectory_sample_count()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.generate"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.generate()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.interpolate_trajectory"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.interpolate_trajectory()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.plot_trajectory"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.plot_trajectory()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MotionGenerator.register_planner_type"><code class="docutils literal notranslate"><span class="pre">MotionGenerator.register_planner_type()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#utilities">Utilities</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.DISTANCE"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.DISTANCE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.QUANTITY"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.QUANTITY</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.TIME"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.TIME</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.TrajectorySampleMethod.from_str"><code class="docutils literal notranslate"><span class="pre">TrajectorySampleMethod.from_str()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart"><code class="docutils literal notranslate"><span class="pre">MovePart</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.LEFT"><code class="docutils literal notranslate"><span class="pre">MovePart.LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.RIGHT"><code class="docutils literal notranslate"><span class="pre">MovePart.RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.BOTH"><code class="docutils literal notranslate"><span class="pre">MovePart.BOTH</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.TORSO"><code class="docutils literal notranslate"><span class="pre">MovePart.TORSO</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MovePart.ALL"><code class="docutils literal notranslate"><span class="pre">MovePart.ALL</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">MovePart.ALL</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id1"><code class="docutils literal notranslate"><span class="pre">MovePart.BOTH</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id2"><code class="docutils literal notranslate"><span class="pre">MovePart.LEFT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id3"><code class="docutils literal notranslate"><span class="pre">MovePart.RIGHT</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id4"><code class="docutils literal notranslate"><span class="pre">MovePart.TORSO</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType"><code class="docutils literal notranslate"><span class="pre">MoveType</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.TOOL"><code class="docutils literal notranslate"><span class="pre">MoveType.TOOL</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.EEF_MOVE"><code class="docutils literal notranslate"><span class="pre">MoveType.EEF_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.JOINT_MOVE"><code class="docutils literal notranslate"><span class="pre">MoveType.JOINT_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.SYNC"><code class="docutils literal notranslate"><span class="pre">MoveType.SYNC</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.MoveType.PAUSE"><code class="docutils literal notranslate"><span class="pre">MoveType.PAUSE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id5"><code class="docutils literal notranslate"><span class="pre">MoveType.EEF_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id6"><code class="docutils literal notranslate"><span class="pre">MoveType.JOINT_MOVE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id7"><code class="docutils literal notranslate"><span class="pre">MoveType.PAUSE</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id8"><code class="docutils literal notranslate"><span class="pre">MoveType.SYNC</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id9"><code class="docutils literal notranslate"><span class="pre">MoveType.TOOL</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult"><code class="docutils literal notranslate"><span class="pre">PlanResult</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.__init__"><code class="docutils literal notranslate"><span class="pre">PlanResult.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.accelerations"><code class="docutils literal notranslate"><span class="pre">PlanResult.accelerations</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.dt"><code class="docutils literal notranslate"><span class="pre">PlanResult.dt</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.duration"><code class="docutils literal notranslate"><span class="pre">PlanResult.duration</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.positions"><code class="docutils literal notranslate"><span class="pre">PlanResult.positions</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.success"><code class="docutils literal notranslate"><span class="pre">PlanResult.success</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.velocities"><code class="docutils literal notranslate"><span class="pre">PlanResult.velocities</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanResult.xpos_list"><code class="docutils literal notranslate"><span class="pre">PlanResult.xpos_list</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState"><code class="docutils literal notranslate"><span class="pre">PlanState</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.__init__"><code class="docutils literal notranslate"><span class="pre">PlanState.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.is_open"><code class="docutils literal notranslate"><span class="pre">PlanState.is_open</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.is_world_coordinate"><code class="docutils literal notranslate"><span class="pre">PlanState.is_world_coordinate</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.move_part"><code class="docutils literal notranslate"><span class="pre">PlanState.move_part</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.move_type"><code class="docutils literal notranslate"><span class="pre">PlanState.move_type</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.pause_seconds"><code class="docutils literal notranslate"><span class="pre">PlanState.pause_seconds</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.qacc"><code class="docutils literal notranslate"><span class="pre">PlanState.qacc</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.qpos"><code class="docutils literal notranslate"><span class="pre">PlanState.qpos</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.qvel"><code class="docutils literal notranslate"><span class="pre">PlanState.qvel</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.lab.sim.planners.PlanState.xpos"><code class="docutils literal notranslate"><span class="pre">PlanState.xpos</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

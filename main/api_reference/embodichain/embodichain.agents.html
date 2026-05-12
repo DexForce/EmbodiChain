@@ -1,0 +1,1471 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>embodichain.agents &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference/embodichain/embodichain.agents';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="embodichain.data" href="embodichain.data.html" />
+    <link rel="prev" title="API Reference" href="../index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="../index.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/api_reference/embodichain/embodichain.agents.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>embodichain.agents</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.agents.datasets">Datasets</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.ChunkSizeSampler"><code class="docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.GMMChunkSampler"><code class="docutils literal notranslate"><span class="pre">GMMChunkSampler</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.GMMChunkSampler.__init__"><code class="docutils literal notranslate"><span class="pre">GMMChunkSampler.__init__()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset"><code class="docutils literal notranslate"><span class="pre">OnlineDataset</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset.__init__"><code class="docutils literal notranslate"><span class="pre">OnlineDataset.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset.collate_fn"><code class="docutils literal notranslate"><span class="pre">OnlineDataset.collate_fn()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset.passthrough_collate_fn"><code class="docutils literal notranslate"><span class="pre">OnlineDataset.passthrough_collate_fn()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.UniformChunkSampler"><code class="docutils literal notranslate"><span class="pre">UniformChunkSampler</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.UniformChunkSampler.__init__"><code class="docutils literal notranslate"><span class="pre">UniformChunkSampler.__init__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.agents.engine">Online Data Engine</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.shared_buffer"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.shared_buffer</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.buffer_size"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.buffer_size</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.device"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.device</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.is_init"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.is_init</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.__init__"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.is_init</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.sample_batch()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.start"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.start()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.stop"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.stop()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.__init__"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.action_config"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.action_config</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_device"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.buffer_device</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_size"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.buffer_size</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.copy"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.copy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.gym_config"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.gym_config</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.max_episode_steps"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.max_episode_steps</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.refill_threshold</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.replace"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.replace()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.state_dim"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.state_dim</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.to_dict"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.to_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.validate"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.validate()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.agents.rl">Reinforcement Learning</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-embodichain.agents">
+<span id="embodichain-agents"></span><h1>embodichain.agents<a class="headerlink" href="#module-embodichain.agents" title="Link to this heading">#</a></h1>
+<p class="rubric">Submodules</p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#module-embodichain.agents.datasets" title="embodichain.agents.datasets"><code class="xref py py-obj docutils literal notranslate"><span class="pre">datasets</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#module-embodichain.agents.engine" title="embodichain.agents.engine"><code class="xref py py-obj docutils literal notranslate"><span class="pre">engine</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="embodichain.agents.rl.html#module-embodichain.agents.rl" title="embodichain.agents.rl"><code class="xref py py-obj docutils literal notranslate"><span class="pre">rl</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="module-embodichain.agents.datasets">
+<span id="datasets"></span><h2>Datasets<a class="headerlink" href="#module-embodichain.agents.datasets" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">online_data</span></code></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">sampler</span></code></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.datasets.ChunkSizeSampler" title="embodichain.agents.datasets.ChunkSizeSampler"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a></p></td>
+<td><p>Abstract base class for chunk-size samplers.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.datasets.GMMChunkSampler" title="embodichain.agents.datasets.GMMChunkSampler"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GMMChunkSampler</span></code></a></p></td>
+<td><p>Gaussian Mixture Model chunk-size sampler.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.datasets.OnlineDataset" title="embodichain.agents.datasets.OnlineDataset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OnlineDataset</span></code></a></p></td>
+<td><p>Infinite IterableDataset backed by a live OnlineDataEngine shared buffer.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.datasets.UniformChunkSampler" title="embodichain.agents.datasets.UniformChunkSampler"><code class="xref py py-obj docutils literal notranslate"><span class="pre">UniformChunkSampler</span></code></a></p></td>
+<td><p>Discrete-uniform chunk-size sampler over <code class="docutils literal notranslate"><span class="pre">[low,</span> <span class="pre">high]</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.ChunkSizeSampler">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.datasets.</span></span><span class="sig-name descname"><span class="pre">ChunkSizeSampler</span></span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/sampler.html#ChunkSizeSampler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.ChunkSizeSampler" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<p>Abstract base class for chunk-size samplers.</p>
+<p>Subclasses implement <code class="xref py py-meth docutils literal notranslate"><span class="pre">__call__()</span></code> to return an integer chunk size on
+demand.  A sampler is called once per <code class="xref py py-meth docutils literal notranslate"><span class="pre">OnlineDataset.__iter__()</span></code> step,
+so consecutive samples / batches may have different time dimensions.</p>
+<p>When used in <strong>batch mode</strong> the same chunk size is drawn once and applied
+to every trajectory in the batch so that the resulting TensorDict has a
+consistent shape <code class="docutils literal notranslate"><span class="pre">[batch_size,</span> <span class="pre">chunk_size]</span></code>.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.GMMChunkSampler">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.datasets.</span></span><span class="sig-name descname"><span class="pre">GMMChunkSampler</span></span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/sampler.html#GMMChunkSampler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.GMMChunkSampler" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.agents.datasets.ChunkSizeSampler" title="embodichain.agents.datasets.sampler.ChunkSizeSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a></p>
+<p>Gaussian Mixture Model chunk-size sampler.</p>
+<p>Selects a mixture component according to <code class="docutils literal notranslate"><span class="pre">weights</span></code>, samples a value from
+the corresponding <code class="docutils literal notranslate"><span class="pre">Normal(mean,</span> <span class="pre">std)</span></code> distribution, rounds to the nearest
+integer, and optionally clamps the result to <code class="docutils literal notranslate"><span class="pre">[low,</span> <span class="pre">high]</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>means</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code>]</span>) – Mean of each Gaussian component (number of elements = K).</p></li>
+<li><p><strong>stds</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code>]</span>) – Standard deviation of each component (must be &gt; 0, same length
+as <code class="docutils literal notranslate"><span class="pre">means</span></code>).</p></li>
+<li><p><strong>weights</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code>]]</span>) – Unnormalised mixture weights (same length as <code class="docutils literal notranslate"><span class="pre">means</span></code>).
+Defaults to a uniform distribution over all components.</p></li>
+<li><p><strong>low</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code>]</span>) – Optional lower bound for clamping the sampled value (inclusive,
+must be ≥ 1 if provided).</p></li>
+<li><p><strong>high</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code>]</span>) – Optional upper bound for clamping the sampled value (inclusive,
+must be ≥ <code class="docutils literal notranslate"><span class="pre">low</span></code> if both are provided).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">means</span></code>, <code class="docutils literal notranslate"><span class="pre">stds</span></code>, or <code class="docutils literal notranslate"><span class="pre">weights</span></code> have mismatched
+    lengths, if any <code class="docutils literal notranslate"><span class="pre">std</span> <span class="pre">≤</span> <span class="pre">0</span></code>, or if the bounds are inconsistent.</p>
+</dd>
+</dl>
+<p>Example — two-component mixture favouring short and long chunks:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sampler</span> <span class="o">=</span> <span class="n">GMMChunkSampler</span><span class="p">(</span>
+    <span class="n">means</span><span class="o">=</span><span class="p">[</span><span class="mf">16.0</span><span class="p">,</span> <span class="mf">64.0</span><span class="p">],</span>
+    <span class="n">stds</span><span class="o">=</span><span class="p">[</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">],</span>
+    <span class="n">weights</span><span class="o">=</span><span class="p">[</span><span class="mf">0.6</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">],</span>
+    <span class="n">low</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+    <span class="n">high</span><span class="o">=</span><span class="mi">96</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">chunk_size</span> <span class="o">=</span> <span class="n">sampler</span><span class="p">()</span>  <span class="c1"># e.g. 18</span>
+</pre></div>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.datasets.GMMChunkSampler.__init__" title="embodichain.agents.datasets.GMMChunkSampler.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(means, stds[, weights, low, high])</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.GMMChunkSampler.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">means</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stds</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weights</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">low</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">high</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/sampler.html#GMMChunkSampler.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.GMMChunkSampler.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.OnlineDataset">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.datasets.</span></span><span class="sig-name descname"><span class="pre">OnlineDataset</span></span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/online_data.html#OnlineDataset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.OnlineDataset" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">IterableDataset</span></code></p>
+<p>Infinite IterableDataset backed by a live OnlineDataEngine shared buffer.</p>
+<p>Two sampling modes are supported depending on the <code class="docutils literal notranslate"><span class="pre">batch_size</span></code> argument:</p>
+<dl class="simple">
+<dt><strong>Item mode</strong> (<code class="docutils literal notranslate"><span class="pre">batch_size=None</span></code>, default)</dt><dd><p><code class="docutils literal notranslate"><span class="pre">__iter__</span></code> yields one <code class="docutils literal notranslate"><span class="pre">TensorDict</span></code> of shape <code class="docutils literal notranslate"><span class="pre">[chunk_size]</span></code> per step.
+Use with a standard <code class="docutils literal notranslate"><span class="pre">DataLoader(dataset,</span> <span class="pre">batch_size=B)</span></code> so the
+DataLoader handles collation and worker sharding.</p>
+</dd>
+<dt><strong>Batch mode</strong> (<code class="docutils literal notranslate"><span class="pre">batch_size=N</span></code>)</dt><dd><p><code class="docutils literal notranslate"><span class="pre">__iter__</span></code> yields one pre-batched <code class="docutils literal notranslate"><span class="pre">TensorDict</span></code> of shape
+<code class="docutils literal notranslate"><span class="pre">[N,</span> <span class="pre">chunk_size]</span></code> per step by calling
+<code class="docutils literal notranslate"><span class="pre">engine.sample_batch(N,</span> <span class="pre">chunk_size)</span></code> directly.
+Use with <code class="docutils literal notranslate"><span class="pre">DataLoader(dataset,</span> <span class="pre">batch_size=None)</span></code> to skip DataLoader
+collation and leverage the engine’s bulk-sampling efficiency.</p>
+</dd>
+<dt><strong>Dynamic chunk sizes</strong></dt><dd><p>Pass a <a class="reference internal" href="#embodichain.agents.datasets.ChunkSizeSampler" title="embodichain.agents.datasets.ChunkSizeSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a> as <code class="docutils literal notranslate"><span class="pre">chunk_size</span></code> to draw a fresh
+chunk length on every iteration step.  In batch mode the size is
+sampled once per step and applied uniformly to all trajectories in
+the batch, ensuring a consistent <code class="docutils literal notranslate"><span class="pre">[batch_size,</span> <span class="pre">chunk_size]</span></code> shape.
+Two built-in samplers are provided:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#embodichain.agents.datasets.UniformChunkSampler" title="embodichain.agents.datasets.UniformChunkSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">UniformChunkSampler</span></code></a> — uniform discrete distribution over
+<code class="docutils literal notranslate"><span class="pre">[low,</span> <span class="pre">high]</span></code>.</p></li>
+<li><p><a class="reference internal" href="#embodichain.agents.datasets.GMMChunkSampler" title="embodichain.agents.datasets.GMMChunkSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">GMMChunkSampler</span></code></a> — Gaussian Mixture Model, useful for
+multi-modal chunk-length curricula.</p></li>
+</ul>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code class="docutils literal notranslate"><span class="pre">__len__</span></code> is intentionally absent — <code class="docutils literal notranslate"><span class="pre">IterableDataset</span></code> does not
+require it and the stream is infinite.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Multi-worker DataLoader: each worker gets its own iterator; since
+sampling is independent random draws from shared memory, this is safe.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>engine</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine" title="embodichain.agents.engine.data.OnlineDataEngine"><code class="xref py py-class docutils literal notranslate"><span class="pre">OnlineDataEngine</span></code></a></span>) – A started OnlineDataEngine whose shared buffer is used for
+sampling.</p></li>
+<li><p><strong>chunk_size</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code> | <a class="reference internal" href="#embodichain.agents.datasets.ChunkSizeSampler" title="embodichain.agents.datasets.sampler.ChunkSizeSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a></span>) – Fixed number of consecutive timesteps per chunk (<code class="docutils literal notranslate"><span class="pre">int</span></code>),
+or a <a class="reference internal" href="#embodichain.agents.datasets.ChunkSizeSampler" title="embodichain.agents.datasets.ChunkSizeSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a> that returns a fresh size on every
+iteration step.</p></li>
+<li><p><strong>batch_size</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code>]</span>) – If <code class="docutils literal notranslate"><span class="pre">None</span></code>, yield single chunks of shape <code class="docutils literal notranslate"><span class="pre">[chunk_size]</span></code>
+(item mode). If an int, yield pre-batched TensorDicts of shape
+<code class="docutils literal notranslate"><span class="pre">[batch_size,</span> <span class="pre">chunk_size]</span></code> (batch mode).</p></li>
+<li><p><strong>transform</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code>[[<code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code>], <code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code>]]</span>) – Optional <code class="docutils literal notranslate"><span class="pre">(TensorDict)</span> <span class="pre">-&gt;</span> <span class="pre">TensorDict</span></code> applied to each
+yielded item/batch before returning.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Example — fixed chunk size, item mode:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">dataset</span> <span class="o">=</span> <span class="n">OnlineDataset</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">64</span><span class="p">)</span>
+<span class="n">loader</span>  <span class="o">=</span> <span class="n">DataLoader</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span> <span class="n">num_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+                     <span class="n">collate_fn</span><span class="o">=</span><span class="n">OnlineDataset</span><span class="o">.</span><span class="n">collate_fn</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">loader</span><span class="p">:</span>
+    <span class="c1"># batch has shape [32, 64, ...]</span>
+    <span class="n">train_step</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Example — fixed chunk size, batch mode:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">dataset</span> <span class="o">=</span> <span class="n">OnlineDataset</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">32</span><span class="p">)</span>
+<span class="n">loader</span>  <span class="o">=</span> <span class="n">DataLoader</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                     <span class="n">collate_fn</span><span class="o">=</span><span class="n">OnlineDataset</span><span class="o">.</span><span class="n">passthrough_collate_fn</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">loader</span><span class="p">:</span>
+    <span class="c1"># batch has shape [32, 64, ...]</span>
+    <span class="n">train_step</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Example — dynamic chunk size with uniform sampler:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sampler</span> <span class="o">=</span> <span class="n">UniformChunkSampler</span><span class="p">(</span><span class="n">low</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">high</span><span class="o">=</span><span class="mi">64</span><span class="p">)</span>
+<span class="n">dataset</span> <span class="o">=</span> <span class="n">OnlineDataset</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="n">sampler</span><span class="p">)</span>
+<span class="n">loader</span>  <span class="o">=</span> <span class="n">DataLoader</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">32</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">loader</span><span class="p">:</span>
+    <span class="c1"># chunk dimension varies each batch</span>
+    <span class="n">train_step</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Example — dynamic chunk size with GMM sampler:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sampler</span> <span class="o">=</span> <span class="n">GMMChunkSampler</span><span class="p">(</span>
+    <span class="n">means</span><span class="o">=</span><span class="p">[</span><span class="mf">16.0</span><span class="p">,</span> <span class="mf">64.0</span><span class="p">],</span> <span class="n">stds</span><span class="o">=</span><span class="p">[</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">],</span> <span class="n">weights</span><span class="o">=</span><span class="p">[</span><span class="mf">0.6</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">],</span>
+    <span class="n">low</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">high</span><span class="o">=</span><span class="mi">96</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">dataset</span> <span class="o">=</span> <span class="n">OnlineDataset</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="n">sampler</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">32</span><span class="p">)</span>
+<span class="n">loader</span>  <span class="o">=</span> <span class="n">DataLoader</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">loader</span><span class="p">:</span>
+    <span class="n">train_step</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.datasets.OnlineDataset.__init__" title="embodichain.agents.datasets.OnlineDataset.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(engine, chunk_size[, batch_size, ...])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.datasets.OnlineDataset.collate_fn" title="embodichain.agents.datasets.OnlineDataset.collate_fn"><code class="xref py py-obj docutils literal notranslate"><span class="pre">collate_fn</span></code></a>(batch)</p></td>
+<td><p>Collate a list of TensorDicts into a single batched TensorDict.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.datasets.OnlineDataset.passthrough_collate_fn" title="embodichain.agents.datasets.OnlineDataset.passthrough_collate_fn"><code class="xref py py-obj docutils literal notranslate"><span class="pre">passthrough_collate_fn</span></code></a>(batch)</p></td>
+<td><p>Collate function for batch-mode DataLoaders.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.OnlineDataset.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">engine</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">transform</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/online_data.html#OnlineDataset.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.OnlineDataset.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.OnlineDataset.collate_fn">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">collate_fn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/online_data.html#OnlineDataset.collate_fn"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.OnlineDataset.collate_fn" title="Link to this definition">#</a></dt>
+<dd><p>Collate a list of TensorDicts into a single batched TensorDict.</p>
+<p>Pass this as <code class="docutils literal notranslate"><span class="pre">collate_fn</span></code> to <code class="docutils literal notranslate"><span class="pre">DataLoader</span></code> when using item mode
+(<code class="docutils literal notranslate"><span class="pre">batch_size</span></code> not None on the DataLoader side) to avoid the default
+collation failure with TensorDict objects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>batch</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code>]</span>) – List of TensorDicts, each of shape <code class="docutils literal notranslate"><span class="pre">[chunk_size,</span> <span class="pre">...]</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Stacked TensorDict of shape <code class="docutils literal notranslate"><span class="pre">[len(batch),</span> <span class="pre">chunk_size,</span> <span class="pre">...]</span></code>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.OnlineDataset.passthrough_collate_fn">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">passthrough_collate_fn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/online_data.html#OnlineDataset.passthrough_collate_fn"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.OnlineDataset.passthrough_collate_fn" title="Link to this definition">#</a></dt>
+<dd><p>Collate function for batch-mode DataLoaders.</p>
+<p>When the dataset is in batch mode it already yields pre-batched
+TensorDicts.  With <code class="docutils literal notranslate"><span class="pre">batch_size=None</span></code>, PyTorch’s DataLoader skips
+auto-batching and passes each item directly to <code class="docutils literal notranslate"><span class="pre">collate_fn</span></code> as-is
+(not wrapped in a list).  This function returns the TensorDict
+unchanged.</p>
+<p>Pass this as <code class="docutils literal notranslate"><span class="pre">collate_fn</span></code> to <code class="docutils literal notranslate"><span class="pre">DataLoader</span></code> when using batch mode
+(<code class="docutils literal notranslate"><span class="pre">batch_size=None</span></code> on the DataLoader side) to avoid the default
+collation failure with TensorDict objects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>batch</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span>) – A pre-batched TensorDict of shape
+<code class="docutils literal notranslate"><span class="pre">[batch_size,</span> <span class="pre">chunk_size,</span> <span class="pre">...]</span></code> passed directly by the
+DataLoader.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The pre-batched TensorDict unchanged.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.UniformChunkSampler">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.datasets.</span></span><span class="sig-name descname"><span class="pre">UniformChunkSampler</span></span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/sampler.html#UniformChunkSampler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.UniformChunkSampler" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#embodichain.agents.datasets.ChunkSizeSampler" title="embodichain.agents.datasets.sampler.ChunkSizeSampler"><code class="xref py py-class docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a></p>
+<p>Discrete-uniform chunk-size sampler over <code class="docutils literal notranslate"><span class="pre">[low,</span> <span class="pre">high]</span></code>.</p>
+<p>Draws an integer uniformly at random from the closed interval
+<code class="docutils literal notranslate"><span class="pre">[low,</span> <span class="pre">high]</span></code> on every call.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>low</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></span>) – Minimum chunk size (inclusive, must be ≥ 1).</p></li>
+<li><p><strong>high</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></span>) – Maximum chunk size (inclusive, must be ≥ <code class="docutils literal notranslate"><span class="pre">low</span></code>).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">low</span> <span class="pre">&lt;</span> <span class="pre">1</span></code> or <code class="docutils literal notranslate"><span class="pre">high</span> <span class="pre">&lt;</span> <span class="pre">low</span></code>.</p>
+</dd>
+</dl>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sampler</span> <span class="o">=</span> <span class="n">UniformChunkSampler</span><span class="p">(</span><span class="n">low</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">high</span><span class="o">=</span><span class="mi">64</span><span class="p">)</span>
+<span class="n">chunk_size</span> <span class="o">=</span> <span class="n">sampler</span><span class="p">()</span>  <span class="c1"># e.g. 37</span>
+</pre></div>
+</div>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.datasets.UniformChunkSampler.__init__" title="embodichain.agents.datasets.UniformChunkSampler.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(low, high)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.datasets.UniformChunkSampler.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">low</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">high</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/datasets/sampler.html#UniformChunkSampler.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.datasets.UniformChunkSampler.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-embodichain.agents.engine">
+<span id="online-data-engine"></span><h2>Online Data Engine<a class="headerlink" href="#module-embodichain.agents.engine" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">data</span></code></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Classes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine" title="embodichain.agents.engine.OnlineDataEngine"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OnlineDataEngine</span></code></a></p></td>
+<td><p>Engine for managing Online Data Streaming (ODS) and environment rollouts.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg" title="embodichain.agents.engine.OnlineDataEngineCfg"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OnlineDataEngineCfg</span></code></a></p></td>
+<td><p>OnlineDataEngineCfg(buffer_size: 'int' = &lt;factory&gt;, max_episode_steps: 'int' = &lt;factory&gt;, state_dim: 'int' = &lt;factory&gt;, buffer_device: 'str' = &lt;factory&gt;, gym_config: 'dict' = &lt;factory&gt;, action_config: 'dict' = &lt;factory&gt;, refill_threshold: 'int' = &lt;factory&gt;)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.engine.</span></span><span class="sig-name descname"><span class="pre">OnlineDataEngine</span></span><a class="reference internal" href="../../_modules/embodichain/agents/engine/data.html#OnlineDataEngine"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Engine for managing Online Data Streaming (ODS) and environment rollouts.</p>
+<p>Creates a shared rollout buffer in CPU shared memory, spawns a dedicated
+simulation subprocess that fills the buffer with demonstration trajectories,
+and exposes a <a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-meth docutils literal notranslate"><span class="pre">sample_batch()</span></code></a> method for the training process to draw
+batches of trajectory chunks.</p>
+<p><strong>Subprocess lifecycle</strong></p>
+<p>The simulation subprocess is started in <a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.start" title="embodichain.agents.engine.OnlineDataEngine.start"><code class="xref py py-meth docutils literal notranslate"><span class="pre">start()</span></code></a> and immediately
+receives a fill signal so the buffer is populated before the first call to
+<a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-meth docutils literal notranslate"><span class="pre">sample_batch()</span></code></a>.  The subprocess loops indefinitely: it waits for
+<em>fill_signal</em>, runs <code class="docutils literal notranslate"><span class="pre">buffer_size</span> <span class="pre">//</span> <span class="pre">num_envs</span></code> rollouts to overwrite every
+buffer slot, then goes back to waiting.</p>
+<p><strong>Concurrency and lock protection</strong></p>
+<p><code class="xref py py-attr docutils literal notranslate"><span class="pre">_lock_index</span></code> <code class="docutils literal notranslate"><span class="pre">[write_start,</span> <span class="pre">write_end)</span></code> is updated by the
+subprocess after each rollout so that <a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-meth docutils literal notranslate"><span class="pre">sample_batch()</span></code></a> can skip the
+slot currently being written to, preventing partial reads.</p>
+<p><strong>Refill criterion</strong></p>
+<p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-meth docutils literal notranslate"><span class="pre">sample_batch()</span></code></a> accumulates the total number of individual trajectory
+samples drawn into <code class="xref py py-attr docutils literal notranslate"><span class="pre">_sample_count</span></code>.  When this counter exceeds
+<a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold" title="embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold"><code class="xref py py-attr docutils literal notranslate"><span class="pre">refill_threshold</span></code></a> the fill signal is raised
+and the counter resets to zero.  This amortises the cost of GPU-accelerated
+simulation across many training iterations.</p>
+<p><strong>Initialisation barrier</strong></p>
+<p>The <a class="reference internal" href="#id0" title="embodichain.agents.engine.OnlineDataEngine.is_init"><code class="xref py py-attr docutils literal notranslate"><span class="pre">is_init</span></code></a> property returns <code class="docutils literal notranslate"><span class="pre">False</span></code> until the subprocess
+completes the very first full buffer fill, after which it becomes
+permanently <code class="docutils literal notranslate"><span class="pre">True</span></code>.  Training code should wait on this flag before
+calling <a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-meth docutils literal notranslate"><span class="pre">sample_batch()</span></code></a> to avoid drawing all-zero data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cfg</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg" title="embodichain.agents.engine.data.OnlineDataEngineCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">OnlineDataEngineCfg</span></code></a></span>) – Engine configuration.</p>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.shared_buffer">
+<span class="sig-name descname"><span class="pre">shared_buffer</span></span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.shared_buffer" title="Link to this definition">#</a></dt>
+<dd><p>Shared-memory TensorDict of shape
+<code class="docutils literal notranslate"><span class="pre">[buffer_size,</span> <span class="pre">max_episode_steps,</span> <span class="pre">...]</span></code>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.buffer_size">
+<span class="sig-name descname"><span class="pre">buffer_size</span></span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.buffer_size" title="Link to this definition">#</a></dt>
+<dd><p>Total number of trajectory slots in the shared buffer.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.device">
+<span class="sig-name descname"><span class="pre">device</span></span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.device" title="Link to this definition">#</a></dt>
+<dd><p>Device of the shared buffer.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.is_init">
+<span class="sig-name descname"><span class="pre">is_init</span></span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.is_init" title="Link to this definition">#</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> once the buffer has been populated at least once.</p>
+</dd></dl>
+
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.__init__" title="embodichain.agents.engine.OnlineDataEngine.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>(cfg)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sample_batch</span></code></a>(batch_size, chunk_size)</p></td>
+<td><p>Sample a batch of trajectory chunks from the shared rollout buffer.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.start" title="embodichain.agents.engine.OnlineDataEngine.start"><code class="xref py py-obj docutils literal notranslate"><span class="pre">start</span></code></a>()</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.stop" title="embodichain.agents.engine.OnlineDataEngine.stop"><code class="xref py py-obj docutils literal notranslate"><span class="pre">stop</span></code></a>()</p></td>
+<td><p>Terminate the simulation subprocess and release resources.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#id0" title="embodichain.agents.engine.OnlineDataEngine.is_init"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_init</span></code></a></p></td>
+<td><p>Whether the shared buffer has been fully populated at least once.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cfg</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/engine/data.html#OnlineDataEngine.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="id0">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">is_init</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#id0" title="Link to this definition">#</a></dt>
+<dd><p>Whether the shared buffer has been fully populated at least once.</p>
+<p>Returns <code class="docutils literal notranslate"><span class="pre">True</span></code> after the simulation subprocess completes its first
+full buffer fill, <code class="docutils literal notranslate"><span class="pre">False</span></code> while that initial fill is still in
+progress.  Callers that must not sample stale (all-zero) data can
+poll or block on this property before entering their training loop:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">while</span> <span class="ow">not</span> <span class="n">engine</span><span class="o">.</span><span class="n">is_init</span><span class="p">:</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">True</span></code> once the buffer contains valid trajectory data.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.sample_batch">
+<span class="sig-name descname"><span class="pre">sample_batch</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/engine/data.html#OnlineDataEngine.sample_batch"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="Link to this definition">#</a></dt>
+<dd><p>Sample a batch of trajectory chunks from the shared rollout buffer.</p>
+<p>Randomly draws <em>batch_size</em> environment trajectories from the portion
+of the buffer that has been written at least once, skipping any rows
+currently being overwritten by the simulation subprocess.  For each
+selected trajectory a contiguous window of <em>chunk_size</em> timesteps is
+chosen at a uniformly random offset.</p>
+<p>After sampling the internal <code class="xref py py-attr docutils literal notranslate"><span class="pre">_sample_count</span></code> is incremented by
+<em>batch_size</em>; if the count exceeds
+<a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold" title="embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold"><code class="xref py py-attr docutils literal notranslate"><span class="pre">refill_threshold</span></code></a> a buffer refill is
+triggered automatically.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>batch_size</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></span>) – Number of trajectory chunks to include in the batch.</p></li>
+<li><p><strong>chunk_size</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></span>) – Number of consecutive timesteps in each chunk.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TensorDict</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TensorDict with batch size <code class="docutils literal notranslate"><span class="pre">[batch_size,</span> <span class="pre">chunk_size]</span></code>.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">chunk_size</span></code> exceeds <code class="docutils literal notranslate"><span class="pre">max_episode_steps</span></code>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.start">
+<span class="sig-name descname"><span class="pre">start</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/engine/data.html#OnlineDataEngine.start"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.start" title="Link to this definition">#</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngine.stop">
+<span class="sig-name descname"><span class="pre">stop</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/embodichain/agents/engine/data.html#OnlineDataEngine.stop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngine.stop" title="Link to this definition">#</a></dt>
+<dd><p>Terminate the simulation subprocess and release resources.</p>
+<p>Sets the close signal and waits briefly for the subprocess to exit
+gracefully (it checks the signal between rollout steps).  If the
+subprocess is still alive after the grace period it is force-terminated.</p>
+<p>Safe to call multiple times — subsequent calls are no-ops if the
+subprocess has already been terminated.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">embodichain.agents.engine.</span></span><span class="sig-name descname"><span class="pre">OnlineDataEngineCfg</span></span><a class="reference internal" href="../../_modules/embodichain/agents/engine/data.html#OnlineDataEngineCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>OnlineDataEngineCfg(buffer_size: ‘int’ = &lt;factory&gt;, max_episode_steps: ‘int’ = &lt;factory&gt;, state_dim: ‘int’ = &lt;factory&gt;, buffer_device: ‘str’ = &lt;factory&gt;, gym_config: ‘dict’ = &lt;factory&gt;, action_config: ‘dict’ = &lt;factory&gt;, refill_threshold: ‘int’ = &lt;factory&gt;)</p>
+<p><strong>Methods:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.__init__" title="embodichain.agents.engine.OnlineDataEngineCfg.__init__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></a>([buffer_size, max_episode_steps, ...])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.copy" title="embodichain.agents.engine.OnlineDataEngineCfg.copy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">copy</span></code></a>(**kwargs)</p></td>
+<td><p>Return a new object replacing specified fields with new values.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.replace" title="embodichain.agents.engine.OnlineDataEngineCfg.replace"><code class="xref py py-obj docutils literal notranslate"><span class="pre">replace</span></code></a>(**kwargs)</p></td>
+<td><p>Return a new object replacing specified fields with new values.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.to_dict" title="embodichain.agents.engine.OnlineDataEngineCfg.to_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">to_dict</span></code></a>()</p></td>
+<td><p>Convert an object into dictionary recursively.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.validate" title="embodichain.agents.engine.OnlineDataEngineCfg.validate"><code class="xref py py-obj docutils literal notranslate"><span class="pre">validate</span></code></a>([prefix])</p></td>
+<td><p>Check the validity of configclass object.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Attributes:</strong></p>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.action_config" title="embodichain.agents.engine.OnlineDataEngineCfg.action_config"><code class="xref py py-obj docutils literal notranslate"><span class="pre">action_config</span></code></a></p></td>
+<td><p>Action configuration dictionary.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_device" title="embodichain.agents.engine.OnlineDataEngineCfg.buffer_device"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer_device</span></code></a></p></td>
+<td><p>Device on which the shared buffer is allocated.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_size" title="embodichain.agents.engine.OnlineDataEngineCfg.buffer_size"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer_size</span></code></a></p></td>
+<td><p>Number of episodes (environment trajectories) that can be stored in the shared buffer at once.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.gym_config" title="embodichain.agents.engine.OnlineDataEngineCfg.gym_config"><code class="xref py py-obj docutils literal notranslate"><span class="pre">gym_config</span></code></a></p></td>
+<td><p>Gym environment configuration dictionary (already loaded, not a file path).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.max_episode_steps" title="embodichain.agents.engine.OnlineDataEngineCfg.max_episode_steps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">max_episode_steps</span></code></a></p></td>
+<td><p>Maximum number of timesteps per episode.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold" title="embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold"><code class="xref py py-obj docutils literal notranslate"><span class="pre">refill_threshold</span></code></a></p></td>
+<td><p>Total number of samples (refill_threshold * buffer_size) drawn from the shared buffer before a refill is triggered.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngineCfg.state_dim" title="embodichain.agents.engine.OnlineDataEngineCfg.state_dim"><code class="xref py py-obj docutils literal notranslate"><span class="pre">state_dim</span></code></a></p></td>
+<td><p>Dimensionality of the state space.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">buffer_size=&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_episode_steps=&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">state_dim=&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">buffer_device=&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gym_config=&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">action_config=&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">refill_threshold=&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.action_config">
+<span class="sig-name descname"><span class="pre">action_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.action_config" title="Link to this definition">#</a></dt>
+<dd><p>Action configuration dictionary.  The contents depend on the specific environment and robot being used.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.buffer_device">
+<span class="sig-name descname"><span class="pre">buffer_device</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_device" title="Link to this definition">#</a></dt>
+<dd><p>Device on which the shared buffer is allocated.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.buffer_size">
+<span class="sig-name descname"><span class="pre">buffer_size</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_size" title="Link to this definition">#</a></dt>
+<dd><p>Number of episodes (environment trajectories) that can be stored in the shared buffer at once.
+Must be ≥ num_envs and ideally a multiple of num_envs.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.copy">
+<span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.copy" title="Link to this definition">#</a></dt>
+<dd><p>Return a new object replacing specified fields with new values.</p>
+<p>This is especially useful for frozen classes.  Example usage:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@configclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">C</span><span class="p">:</span>
+    <span class="n">x</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">y</span><span class="p">:</span> <span class="nb">int</span>
+
+<span class="n">c</span> <span class="o">=</span> <span class="n">C</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="n">c1</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">c1</span><span class="o">.</span><span class="n">x</span> <span class="o">==</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">c1</span><span class="o">.</span><span class="n">y</span> <span class="o">==</span> <span class="mi">2</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>obj</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></span>) – The object to replace.</p></li>
+<li><p><strong>**kwargs</strong> – The fields to replace and their new values.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The new object.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.gym_config">
+<span class="sig-name descname"><span class="pre">gym_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.gym_config" title="Link to this definition">#</a></dt>
+<dd><p>Gym environment configuration dictionary (already loaded, not a file path).
+The contents depend on the specific environment being used. Default is None.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.max_episode_steps">
+<span class="sig-name descname"><span class="pre">max_episode_steps</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.max_episode_steps" title="Link to this definition">#</a></dt>
+<dd><p>Maximum number of timesteps per episode.  Must be ≥ chunk_size used by OnlineDataset.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold">
+<span class="sig-name descname"><span class="pre">refill_threshold</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold" title="Link to this definition">#</a></dt>
+<dd><p>Total number of samples (refill_threshold * buffer_size) drawn from the shared buffer before a refill is triggered.
+Accumulates across all calls to <a class="reference internal" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch" title="embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="xref py py-meth docutils literal notranslate"><span class="pre">OnlineDataEngine.sample_batch()</span></code></a>. When this threshold
+is exceeded the engine signals the simulation subprocess to regenerate the entire buffer,
+amortising the cost of environment simulation over many training steps.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.replace">
+<span class="sig-name descname"><span class="pre">replace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.replace" title="Link to this definition">#</a></dt>
+<dd><p>Return a new object replacing specified fields with new values.</p>
+<p>This is especially useful for frozen classes.  Example usage:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@configclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">C</span><span class="p">:</span>
+    <span class="n">x</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">y</span><span class="p">:</span> <span class="nb">int</span>
+
+<span class="n">c</span> <span class="o">=</span> <span class="n">C</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="n">c1</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">c1</span><span class="o">.</span><span class="n">x</span> <span class="o">==</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">c1</span><span class="o">.</span><span class="n">y</span> <span class="o">==</span> <span class="mi">2</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>obj</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></span>) – The object to replace.</p></li>
+<li><p><strong>**kwargs</strong> – The fields to replace and their new values.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The new object.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.state_dim">
+<span class="sig-name descname"><span class="pre">state_dim</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></em><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.state_dim" title="Link to this definition">#</a></dt>
+<dd><p>Dimensionality of the state space.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.to_dict">
+<span class="sig-name descname"><span class="pre">to_dict</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.to_dict" title="Link to this definition">#</a></dt>
+<dd><p>Convert an object into dictionary recursively.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Ignores all names starting with “__” (i.e. built-in methods).</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>obj</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></span>) – An instance of a class to convert.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – When input argument is not an object.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code>]</span></p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Converted dictionary mapping.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="embodichain.agents.engine.OnlineDataEngineCfg.validate">
+<span class="sig-name descname"><span class="pre">validate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#embodichain.agents.engine.OnlineDataEngineCfg.validate" title="Link to this definition">#</a></dt>
+<dd><p>Check the validity of configclass object.</p>
+<p>This function checks if the object is a valid configclass object. A valid configclass object contains no MISSING
+entries.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>obj</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></span>) – The object to check.</p></li>
+<li><p><strong>prefix</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – The prefix to add to the missing fields. Defaults to ‘’.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A list of missing fields.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>TypeError</strong> – When the object is not a valid configuration object.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-embodichain.agents.rl">
+<span id="reinforcement-learning"></span><h2>Reinforcement Learning<a class="headerlink" href="#module-embodichain.agents.rl" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="embodichain.agents.rl.algo.html#module-0" title="embodichain.agents.rl.algo"><code class="xref py py-obj docutils literal notranslate"><span class="pre">algo</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="embodichain.agents.rl.buffer.html#module-embodichain.agents.rl.buffer" title="embodichain.agents.rl.buffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="embodichain.agents.rl.collector.html#module-embodichain.agents.rl.collector" title="embodichain.agents.rl.collector"><code class="xref py py-obj docutils literal notranslate"><span class="pre">collector</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="embodichain.agents.rl.models.html#module-0" title="embodichain.agents.rl.models"><code class="xref py py-obj docutils literal notranslate"><span class="pre">models</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="embodichain.agents.rl.train.html#module-0" title="embodichain.agents.rl.train"><code class="xref py py-obj docutils literal notranslate"><span class="pre">train</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="embodichain.agents.rl.utils.html#module-embodichain.agents.rl.utils" title="embodichain.agents.rl.utils"><code class="xref py py-obj docutils literal notranslate"><span class="pre">utils</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="../index.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">API Reference</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="embodichain.data.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">embodichain.data</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.agents.datasets">Datasets</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.ChunkSizeSampler"><code class="docutils literal notranslate"><span class="pre">ChunkSizeSampler</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.GMMChunkSampler"><code class="docutils literal notranslate"><span class="pre">GMMChunkSampler</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.GMMChunkSampler.__init__"><code class="docutils literal notranslate"><span class="pre">GMMChunkSampler.__init__()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset"><code class="docutils literal notranslate"><span class="pre">OnlineDataset</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset.__init__"><code class="docutils literal notranslate"><span class="pre">OnlineDataset.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset.collate_fn"><code class="docutils literal notranslate"><span class="pre">OnlineDataset.collate_fn()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.OnlineDataset.passthrough_collate_fn"><code class="docutils literal notranslate"><span class="pre">OnlineDataset.passthrough_collate_fn()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.UniformChunkSampler"><code class="docutils literal notranslate"><span class="pre">UniformChunkSampler</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.datasets.UniformChunkSampler.__init__"><code class="docutils literal notranslate"><span class="pre">UniformChunkSampler.__init__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.agents.engine">Online Data Engine</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.shared_buffer"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.shared_buffer</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.buffer_size"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.buffer_size</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.device"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.device</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.is_init"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.is_init</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.__init__"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.is_init</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.sample_batch"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.sample_batch()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.start"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.start()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngine.stop"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngine.stop()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.__init__"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.action_config"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.action_config</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_device"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.buffer_device</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.buffer_size"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.buffer_size</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.copy"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.copy()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.gym_config"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.gym_config</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.max_episode_steps"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.max_episode_steps</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.refill_threshold"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.refill_threshold</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.replace"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.replace()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.state_dim"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.state_dim</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.to_dict"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.to_dict()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#embodichain.agents.engine.OnlineDataEngineCfg.validate"><code class="docutils literal notranslate"><span class="pre">OnlineDataEngineCfg.validate()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-embodichain.agents.rl">Reinforcement Learning</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

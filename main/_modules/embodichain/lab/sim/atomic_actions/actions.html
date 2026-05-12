@@ -1,0 +1,1206 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.sim.atomic_actions.actions &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/sim/atomic_actions/actions';</script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.sim.atomic_actions.actions</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">TYPE_CHECKING</span><span class="p">,</span> <span class="n">Any</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners</span><span class="w"> </span><span class="kn">import</span> <span class="n">PlanResult</span><span class="p">,</span> <span class="n">PlanState</span><span class="p">,</span> <span class="n">MoveType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners.motion_generator</span><span class="w"> </span><span class="kn">import</span> <span class="n">MotionGenOptions</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners.toppra_planner</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToppraPlanOptions</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">AtomicAction</span><span class="p">,</span> <span class="n">ObjectSemantics</span><span class="p">,</span> <span class="n">AntipodalAffordance</span><span class="p">,</span> <span class="n">ActionCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.action_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">interpolate_with_distance</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners</span><span class="w"> </span><span class="kn">import</span> <span class="n">MotionGenerator</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">Robot</span>
+
+
+<div class="viewcode-block" id="MoveActionCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.MoveActionCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">MoveActionCfg</span><span class="p">(</span><span class="n">ActionCfg</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;move&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Name of the action, used for identification and logging.&quot;&quot;&quot;</span>
+
+    <span class="n">sample_interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Number of waypoints to sample for the motion trajectory. Should be large enough to ensure smooth motion, but not too large to cause unnecessary computation overhead.&quot;&quot;&quot;</span></div>
+
+
+
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GraspActionCfg</span><span class="p">(</span><span class="n">MoveActionCfg</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Shared configuration for actions that involve gripper open/close motions.&quot;&quot;&quot;</span>
+
+    <span class="n">hand_open_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;[hand_dof,] of float. Joint positions for open hand state.&quot;&quot;&quot;</span>
+
+    <span class="n">hand_close_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;[hand_dof,] of float. Joint positions for closed hand state.&quot;&quot;&quot;</span>
+
+    <span class="n">hand_control_part</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;hand&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Name of the robot part that controls the hand joints.&quot;&quot;&quot;</span>
+
+    <span class="n">lift_height</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Height (m) to lift the end-effector after the gripper phase.&quot;&quot;&quot;</span>
+
+    <span class="n">sample_interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">80</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Number of waypoints for the full trajectory (approach + hand + lift/back).&quot;&quot;&quot;</span>
+
+    <span class="n">hand_interp_steps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">5</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Number of waypoints for the gripper open/close interpolation phase.&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="MoveAction">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.MoveAction">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MoveAction</span><span class="p">(</span><span class="n">AtomicAction</span><span class="p">):</span>
+<div class="viewcode-block" id="MoveAction.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.MoveAction.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">motion_generator</span><span class="p">:</span> <span class="n">MotionGenerator</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">MoveActionCfg</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize the atomic action.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            motion_generator: The motion generator instance to use for planning.</span>
+<span class="sd">            cfg: Configuration for the action.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="n">motion_generator</span><span class="p">,</span> <span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span> <span class="k">if</span> <span class="n">cfg</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">MoveActionCfg</span><span class="p">()</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">()</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_part</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dof</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_resolve_pose_target</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">ObjectSemantics</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">action_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Resolve a pose target into a batched homogeneous transform tensor.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">ObjectSemantics</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">action_name</span><span class="si">}</span><span class="s2"> currently does not support ObjectSemantics target. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Please provide target pose as torch.Tensor of shape (4, 4) or &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;(n_envs, 4, 4)&quot;</span><span class="p">,</span>
+                <span class="ne">NotImplementedError</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;Target must be either ObjectSemantics or torch.Tensor of shape &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;(4, 4) or (</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="si">}</span><span class="s2">, 4, 4)&quot;</span><span class="p">,</span>
+                <span class="ne">TypeError</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">target</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span>
+            <span class="n">target</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">target</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Target tensor must have shape (4, 4) or (</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="si">}</span><span class="s2">, 4, 4), but got </span><span class="si">{</span><span class="n">target</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="ne">ValueError</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">target</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_resolve_start_qpos</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span>
+        <span class="n">arm_dof</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Resolve planning start joint positions into batched arm joint positions.&quot;&quot;&quot;</span>
+        <span class="n">arm_dof</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span> <span class="k">if</span> <span class="n">arm_dof</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">arm_dof</span>
+        <span class="k">if</span> <span class="n">start_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">start_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_part</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">start_qpos</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="n">arm_dof</span><span class="p">,):</span>
+            <span class="n">start_qpos</span> <span class="o">=</span> <span class="n">start_qpos</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">start_qpos</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">arm_dof</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;start_qpos must have shape (</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">arm_dof</span><span class="si">}</span><span class="s2">), but got </span><span class="si">{</span><span class="n">start_qpos</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="ne">ValueError</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">start_qpos</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_compute_three_phase_waypoints</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">hand_interp_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">first_phase_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">third_phase_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">first_phase_ratio</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.6</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Split total sample interval into motion, hand interpolation, and motion phases.&quot;&quot;&quot;</span>
+        <span class="n">first_phase_waypoint</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">sample_interval</span> <span class="o">-</span> <span class="n">hand_interp_steps</span><span class="p">)</span> <span class="o">*</span> <span class="n">first_phase_ratio</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">first_phase_waypoint</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Not enough waypoints for </span><span class="si">{</span><span class="n">first_phase_name</span><span class="si">}</span><span class="s2"> trajectory. &quot;</span>
+                <span class="s2">&quot;Please increase sample_interval or decrease hand_interp_steps.&quot;</span><span class="p">,</span>
+                <span class="ne">ValueError</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="n">second_phase_waypoint</span> <span class="o">=</span> <span class="n">hand_interp_steps</span>
+        <span class="n">third_phase_waypoint</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">sample_interval</span> <span class="o">-</span> <span class="n">first_phase_waypoint</span> <span class="o">-</span> <span class="n">second_phase_waypoint</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">third_phase_waypoint</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Not enough waypoints for </span><span class="si">{</span><span class="n">third_phase_name</span><span class="si">}</span><span class="s2"> trajectory. &quot;</span>
+                <span class="s2">&quot;Please increase sample_interval or decrease hand_interp_steps.&quot;</span><span class="p">,</span>
+                <span class="ne">ValueError</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">first_phase_waypoint</span><span class="p">,</span> <span class="n">second_phase_waypoint</span><span class="p">,</span> <span class="n">third_phase_waypoint</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_build_motion_gen_options</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">sample_interval</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MotionGenOptions</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Build default motion generation options for an atomic action.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">MotionGenOptions</span><span class="p">(</span>
+            <span class="n">start_qpos</span><span class="o">=</span><span class="n">start_qpos</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="n">control_part</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_part</span><span class="p">,</span>
+            <span class="n">is_interpolate</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">is_linear</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">interpolate_position_step</span><span class="o">=</span><span class="mf">0.001</span><span class="p">,</span>
+            <span class="n">plan_opts</span><span class="o">=</span><span class="n">ToppraPlanOptions</span><span class="p">(</span>
+                <span class="n">sample_interval</span><span class="o">=</span><span class="n">sample_interval</span><span class="p">,</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_plan_arm_trajectory</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target_states_list</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">PlanState</span><span class="p">]],</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">n_waypoints</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">arm_dof</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Plan batched arm trajectories for all environments.&quot;&quot;&quot;</span>
+        <span class="n">arm_dof</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span> <span class="k">if</span> <span class="n">arm_dof</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">arm_dof</span>
+
+        <span class="n">n_state</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">target_states_list</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">xpos_traj</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_state</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">target_states</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">target_states_list</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span><span class="p">,</span> <span class="n">target_state</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">target_states</span><span class="p">):</span>
+                <span class="c1"># [env_i, state_j, 4, 4]</span>
+                <span class="n">xpos_traj</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">target_state</span><span class="o">.</span><span class="n">xpos</span>
+
+        <span class="n">trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_state</span><span class="p">,</span> <span class="n">arm_dof</span><span class="p">),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">start_qpos</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_state</span><span class="p">):</span>
+            <span class="n">is_success</span><span class="p">,</span> <span class="n">qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">compute_ik</span><span class="p">(</span>
+                <span class="n">pose</span><span class="o">=</span><span class="n">xpos_traj</span><span class="p">[:,</span> <span class="n">j</span><span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_part</span><span class="p">,</span> <span class="n">joint_seed</span><span class="o">=</span><span class="n">qpos_seed</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Failed to compute IK for target state </span><span class="si">{</span><span class="n">j</span><span class="si">}</span><span class="s2"> in some environments. &quot;</span>
+                    <span class="s2">&quot;The resulting trajectory may be invalid.&quot;</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">trajectory</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">trajectory</span><span class="p">[:,</span> <span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">qpos</span>
+                <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">qpos</span>
+        <span class="n">trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">start_qpos</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">trajectory</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">interp_traj</span> <span class="o">=</span> <span class="n">interpolate_with_distance</span><span class="p">(</span>
+            <span class="n">trajectory</span><span class="o">=</span><span class="n">trajectory</span><span class="p">,</span> <span class="n">interp_num</span><span class="o">=</span><span class="n">n_waypoints</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">interp_traj</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_interpolate_hand_qpos</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">start_hand_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">end_hand_qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">n_waypoints</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Interpolate hand joint positions between two gripper states.&quot;&quot;&quot;</span>
+        <span class="n">weights</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="n">n_waypoints</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">hand_qpos_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">lerp</span><span class="p">(</span><span class="n">start_hand_qpos</span><span class="p">,</span> <span class="n">end_hand_qpos</span><span class="p">,</span> <span class="n">weight</span><span class="p">)</span> <span class="k">for</span> <span class="n">weight</span> <span class="ow">in</span> <span class="n">weights</span>
+        <span class="p">]</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">hand_qpos_list</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<div class="viewcode-block" id="MoveAction.execute">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.MoveAction.execute">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">ObjectSemantics</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;execute pick up action</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target (ObjectSemantics): object semantics containing grasp affordance and entity information</span>
+<span class="sd">            start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple[bool, torch.Tensor, list[float]]:</span>
+<span class="sd">            is_success,</span>
+<span class="sd">            trajectory of shape (n_envs, n_waypoints, dof),</span>
+<span class="sd">            joint_ids corresponding to trajectory</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">move_xpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_pose_target</span><span class="p">(</span>
+            <span class="n">target</span><span class="p">,</span> <span class="n">action_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="p">)</span>
+        <span class="n">start_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_start_qpos</span><span class="p">(</span><span class="n">start_qpos</span><span class="p">)</span>
+
+        <span class="c1"># TODO: warning and fallback if no valid grasp pose found</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="s2">&quot;Failed to resolve grasp pose, using default approach pose&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span>
+
+        <span class="n">target_states_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">[</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">move_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+            <span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">is_plan_success</span><span class="p">,</span> <span class="n">trajectory</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_plan_arm_trajectory</span><span class="p">(</span>
+            <span class="n">target_states_list</span><span class="p">,</span> <span class="n">start_qpos</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">sample_interval</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">is_plan_success</span><span class="p">,</span> <span class="n">trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span></div>
+
+
+<div class="viewcode-block" id="MoveAction.validate">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.MoveAction.validate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">start_qpos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># TODO: implement proper validation logic for pick up action</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="PickUpActionCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PickUpActionCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PickUpActionCfg</span><span class="p">(</span><span class="n">GraspActionCfg</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;pick_up&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Name of the action, used for identification and logging.&quot;&quot;&quot;</span>
+
+    <span class="n">pre_grasp_distance</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.15</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Distance to offset back from the grasp pose along the approach direction to get</span>
+<span class="sd">    the pre-grasp pose. Should be large enough to avoid collision during approach.&quot;&quot;&quot;</span>
+
+    <span class="n">approach_direction</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Direction from which the gripper approaches the object for grasping, expressed</span>
+<span class="sd">    in the object local frame. Default [0, 0, -1] means approaching from above.&quot;&quot;&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="PickUpAction">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PickUpAction">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PickUpAction</span><span class="p">(</span><span class="n">MoveAction</span><span class="p">):</span>
+<div class="viewcode-block" id="PickUpAction.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PickUpAction.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">motion_generator</span><span class="p">:</span> <span class="n">MotionGenerator</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">PickUpActionCfg</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize the atomic action.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            motion_generator: The motion generator instance to use for planning.</span>
+<span class="sd">            cfg: Configuration for the action.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="n">motion_generator</span><span class="p">,</span> <span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span> <span class="k">if</span> <span class="n">cfg</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">PickUpActionCfg</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">approach_direction</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">approach_direction</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_open_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;hand_open_qpos must be specified in PickUpActionCfg&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_close_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;hand_close_qpos must be specified in PickUpActionCfg&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hand_open_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_open_qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hand_close_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_close_qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">hand_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_control_part</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">hand_joint_ids</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dof</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="PickUpAction.execute">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PickUpAction.execute">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">ObjectSemantics</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;execute pick up action</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target (Union[ObjectSemantics, torch.Tensor]): target object semantics or target pose for grasping</span>
+<span class="sd">            start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple[bool, torch.Tensor, list[float]]:</span>
+<span class="sd">            is_success,</span>
+<span class="sd">            trajectory of shape (n_envs, n_waypoints, dof),</span>
+<span class="sd">            joint_ids corresponding to trajectory</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># Resolve grasp pose</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">ObjectSemantics</span><span class="p">):</span>
+            <span class="n">is_success</span><span class="p">,</span> <span class="n">grasp_xpos</span><span class="p">,</span> <span class="n">open_length</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_grasp_pose</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">is_success</span><span class="p">,</span> <span class="n">grasp_xpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_pose_target</span><span class="p">(</span>
+                <span class="n">target</span><span class="p">,</span> <span class="n">action_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+            <span class="p">)</span>
+
+        <span class="c1"># TODO: warning and fallback if no valid grasp pose found</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="s2">&quot;Failed to resolve grasp pose, using default approach pose&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span>
+
+        <span class="c1"># Compute pre-grasp pose</span>
+        <span class="c1"># TODO: only for parallel gripper, approach in negative grasp z direction</span>
+        <span class="n">grasp_z</span> <span class="o">=</span> <span class="n">grasp_xpos</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
+        <span class="n">pre_grasp_xpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_offset</span><span class="p">(</span>
+            <span class="n">pose</span><span class="o">=</span><span class="n">grasp_xpos</span><span class="p">,</span>
+            <span class="n">offset</span><span class="o">=-</span><span class="n">grasp_z</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">pre_grasp_distance</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="c1"># Compute lift pose</span>
+        <span class="n">start_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_start_qpos</span><span class="p">(</span><span class="n">start_qpos</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">)</span>
+
+        <span class="c1"># compute waypoint number for each phase</span>
+        <span class="n">n_approach_waypoint</span><span class="p">,</span> <span class="n">n_close_waypoint</span><span class="p">,</span> <span class="n">n_lift_waypoint</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_compute_three_phase_waypoints</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_interp_steps</span><span class="p">,</span>
+                <span class="n">first_phase_name</span><span class="o">=</span><span class="s2">&quot;approach&quot;</span><span class="p">,</span>
+                <span class="n">third_phase_name</span><span class="o">=</span><span class="s2">&quot;lift&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="c1"># get pick trajectory</span>
+        <span class="n">target_states_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">[</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">pre_grasp_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">grasp_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+            <span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">pick_trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_approach_waypoint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">plan_traj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_plan_arm_trajectory</span><span class="p">(</span>
+            <span class="n">target_states_list</span><span class="p">,</span>
+            <span class="n">start_qpos</span><span class="p">,</span>
+            <span class="n">n_approach_waypoint</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;Failed to plan approach trajectory.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">pick_trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span>
+        <span class="n">pick_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">]</span> <span class="o">=</span> <span class="n">plan_traj</span>
+        <span class="c1"># Padding hand open qpos to pick trajectory</span>
+        <span class="n">pick_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="p">:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hand_open_qpos</span>
+
+        <span class="c1"># get hand closing trajectory</span>
+        <span class="n">grasp_qpos</span> <span class="o">=</span> <span class="n">pick_trajectory</span><span class="p">[</span>
+            <span class="p">:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span>
+        <span class="p">]</span>  <span class="c1"># Assuming the last point of pick trajectory is the grasp pose</span>
+        <span class="n">hand_close_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interpolate_hand_qpos</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hand_open_qpos</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hand_close_qpos</span><span class="p">,</span>
+            <span class="n">n_close_waypoint</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">hand_close_trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_close_waypoint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">),</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">hand_close_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">]</span> <span class="o">=</span> <span class="n">grasp_qpos</span>
+        <span class="n">hand_close_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">hand_close_path</span>
+
+        <span class="c1"># get lift trajectory</span>
+        <span class="n">lift_trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_lift_waypoint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="c1"># lift_xpos = self._compute_lift_xpos(grasp_xpos)</span>
+        <span class="n">lift_xpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_offset</span><span class="p">(</span>
+            <span class="n">pose</span><span class="o">=</span><span class="n">grasp_xpos</span><span class="p">,</span>
+            <span class="n">offset</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">lift_height</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">target_states_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">[</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">lift_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+            <span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">plan_traj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_plan_arm_trajectory</span><span class="p">(</span>
+            <span class="n">target_states_list</span><span class="p">,</span>
+            <span class="n">grasp_qpos</span><span class="p">,</span>
+            <span class="n">n_lift_waypoint</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;Failed to plan lift trajectory.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">lift_trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span>
+        <span class="n">lift_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">]</span> <span class="o">=</span> <span class="n">plan_traj</span>
+        <span class="c1"># padding hand close qpos to lift trajectory</span>
+        <span class="n">lift_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="p">:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hand_close_qpos</span>
+
+        <span class="c1"># concatenate trajectories</span>
+        <span class="n">trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">pick_trajectory</span><span class="p">,</span> <span class="n">hand_close_trajectory</span><span class="p">,</span> <span class="n">lift_trajectory</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_resolve_grasp_pose</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">semantics</span><span class="p">:</span> <span class="n">ObjectSemantics</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">semantics</span><span class="o">.</span><span class="n">affordance</span><span class="p">,</span> <span class="n">AntipodalAffordance</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;Grasp pose affordance must be of type AntipodalAffordance&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="n">semantics</span><span class="o">.</span><span class="n">entity</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;ObjectSemantics must be associated with an entity to get object pose&quot;</span>
+            <span class="p">)</span>
+        <span class="n">obj_poses</span> <span class="o">=</span> <span class="n">semantics</span><span class="o">.</span><span class="n">entity</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">grasp_xpos</span><span class="p">,</span> <span class="n">open_length</span> <span class="o">=</span> <span class="n">semantics</span><span class="o">.</span><span class="n">affordance</span><span class="o">.</span><span class="n">get_best_grasp_poses</span><span class="p">(</span>
+            <span class="n">obj_poses</span><span class="o">=</span><span class="n">obj_poses</span><span class="p">,</span> <span class="n">approach_direction</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">approach_direction</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">is_success</span><span class="p">,</span> <span class="n">grasp_xpos</span><span class="p">,</span> <span class="n">open_length</span>
+
+<div class="viewcode-block" id="PickUpAction.validate">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PickUpAction.validate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">start_qpos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># TODO: implement proper validation logic for pick up action</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="PlaceActionCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PlaceActionCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PlaceActionCfg</span><span class="p">(</span><span class="n">GraspActionCfg</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;place&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Name of the action, used for identification and logging.&quot;&quot;&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="PlaceAction">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PlaceAction">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PlaceAction</span><span class="p">(</span><span class="n">MoveAction</span><span class="p">):</span>
+<div class="viewcode-block" id="PlaceAction.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PlaceAction.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">motion_generator</span><span class="p">:</span> <span class="n">MotionGenerator</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">PlaceActionCfg</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize the atomic action.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            motion_generator: The motion generator instance to use for planning.</span>
+<span class="sd">            cfg: Configuration for the action.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="n">motion_generator</span><span class="p">,</span> <span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span> <span class="k">if</span> <span class="n">cfg</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">PlaceActionCfg</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_open_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;hand_open_qpos must be specified in PlaceActionCfg&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_close_qpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;hand_close_qpos must be specified in PlaceActionCfg&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hand_open_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_open_qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hand_close_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_close_qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">hand_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_control_part</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">hand_joint_ids</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">arm_joint_ids</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dof</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="PlaceAction.execute">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PlaceAction.execute">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">ObjectSemantics</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span>
+        <span class="n">start_qpos</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;execute pick up action</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target (ObjectSemantics): object semantics containing grasp affordance and entity information</span>
+<span class="sd">            start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple[bool, torch.Tensor, list[float]]:</span>
+<span class="sd">            is_success,</span>
+<span class="sd">            trajectory of shape (n_envs, n_waypoints, dof),</span>
+<span class="sd">            joint_ids corresponding to trajectory</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">place_xpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_pose_target</span><span class="p">(</span>
+            <span class="n">target</span><span class="p">,</span> <span class="n">action_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="p">)</span>
+        <span class="n">start_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_start_qpos</span><span class="p">(</span><span class="n">start_qpos</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">)</span>
+
+        <span class="c1"># TODO: warning and fallback if no valid grasp pose found</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="s2">&quot;Failed to resolve grasp pose, using default approach pose&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span>
+
+        <span class="c1"># compute waypoint number for each phase</span>
+        <span class="n">n_down_waypoint</span><span class="p">,</span> <span class="n">n_open_waypoint</span><span class="p">,</span> <span class="n">n_lift_waypoint</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_compute_three_phase_waypoints</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">hand_interp_steps</span><span class="p">,</span>
+                <span class="n">first_phase_name</span><span class="o">=</span><span class="s2">&quot;approach&quot;</span><span class="p">,</span>
+                <span class="n">third_phase_name</span><span class="o">=</span><span class="s2">&quot;lift&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="n">down_trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_down_waypoint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">lift_xpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_offset</span><span class="p">(</span>
+            <span class="n">pose</span><span class="o">=</span><span class="n">place_xpos</span><span class="p">,</span>
+            <span class="n">offset</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">lift_height</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">target_states_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">[</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">lift_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">place_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+            <span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">plan_traj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_plan_arm_trajectory</span><span class="p">(</span>
+            <span class="n">target_states_list</span><span class="p">,</span>
+            <span class="n">start_qpos</span><span class="p">,</span>
+            <span class="n">n_down_waypoint</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;Failed to plan down trajectory.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">down_trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span>
+        <span class="n">down_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">]</span> <span class="o">=</span> <span class="n">plan_traj</span>
+        <span class="c1"># Padding hand open qpos to pick trajectory</span>
+        <span class="n">down_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="p">:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hand_close_qpos</span>
+
+        <span class="c1"># get hand closing trajectory</span>
+        <span class="n">reach_qpos</span> <span class="o">=</span> <span class="n">down_trajectory</span><span class="p">[</span>
+            <span class="p">:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span>
+        <span class="p">]</span>  <span class="c1"># Assuming the last point of pick trajectory is the grasp pose</span>
+        <span class="n">hand_open_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interpolate_hand_qpos</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hand_close_qpos</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hand_open_qpos</span><span class="p">,</span>
+            <span class="n">n_open_waypoint</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">hand_open_trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_open_waypoint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">),</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">hand_open_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">]</span> <span class="o">=</span> <span class="n">reach_qpos</span>
+        <span class="n">hand_open_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">hand_open_path</span>
+
+        <span class="c1"># get lift trajectory</span>
+        <span class="n">back_trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">,</span> <span class="n">n_lift_waypoint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">target_states_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">[</span>
+                <span class="n">PlanState</span><span class="p">(</span><span class="n">xpos</span><span class="o">=</span><span class="n">lift_xpos</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">move_type</span><span class="o">=</span><span class="n">MoveType</span><span class="o">.</span><span class="n">EEF_MOVE</span><span class="p">),</span>
+            <span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_envs</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">is_success</span><span class="p">,</span> <span class="n">plan_traj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_plan_arm_trajectory</span><span class="p">(</span>
+            <span class="n">target_states_list</span><span class="p">,</span>
+            <span class="n">reach_qpos</span><span class="p">,</span>
+            <span class="n">n_lift_waypoint</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;Failed to plan back trajectory.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="n">back_trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span>
+        <span class="n">back_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span><span class="p">]</span> <span class="o">=</span> <span class="n">plan_traj</span>
+        <span class="c1"># padding hand open qpos to back trajectory</span>
+        <span class="n">back_trajectory</span><span class="p">[:,</span> <span class="p">:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">arm_dof</span> <span class="p">:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hand_open_qpos</span>
+
+        <span class="c1"># concatenate trajectories</span>
+        <span class="n">trajectory</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">down_trajectory</span><span class="p">,</span> <span class="n">hand_open_trajectory</span><span class="p">,</span> <span class="n">back_trajectory</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">trajectory</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_ids</span></div>
+
+
+<div class="viewcode-block" id="PlaceAction.validate">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.atomic_actions.html#embodichain.lab.sim.atomic_actions.PlaceAction.validate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">start_qpos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># TODO: implement proper validation logic for pick up action</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

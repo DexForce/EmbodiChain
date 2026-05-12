@@ -1,0 +1,1147 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Atomic Actions &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'tutorial/atomic_actions';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Interactive Robot Control with Gizmo" href="gizmo.html" />
+    <link rel="prev" title="Motion Generator" href="motion_gen.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Tutorials</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/tutorial/atomic_actions.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Atomic Actions</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features">Key Features</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code">The Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#typical-usage">Typical Usage</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-up-the-engine">Setting up the engine</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#defining-object-semantics">Defining object semantics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#executing-a-pick-place-move-sequence">Executing a pick-place-move sequence</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#registering-custom-actions">Registering custom actions</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#notes-best-practices">Notes &amp; Best Practices</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="atomic-actions">
+<span id="tutorial-atomic-actions"></span><h1>Atomic Actions<a class="headerlink" href="#atomic-actions" title="Link to this heading">#</a></h1>
+<p>EmbodiChain’s <strong>atomic action</strong> layer provides a high-level, composable interface for common
+manipulation primitives such as <em>move</em>, <em>pick up</em>, and <em>place</em>.  Each action encapsulates the
+full planning pipeline — grasp-pose estimation, IK, trajectory generation, and gripper
+interpolation — behind a single <code class="docutils literal notranslate"><span class="pre">execute()</span></code> call, making it straightforward to chain
+multiple actions together into complex robot behaviours.</p>
+<section id="key-features">
+<h2>Key Features<a class="headerlink" href="#key-features" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><strong>Semantic-aware execution</strong> — actions accept either a raw pose tensor or an
+<code class="docutils literal notranslate"><span class="pre">ObjectSemantics</span></code> descriptor that bundles affordance data (grasp poses, interaction
+points) with the simulation entity.</p></li>
+<li><p><strong>Three built-in primitives</strong> — <code class="docutils literal notranslate"><span class="pre">MoveAction</span></code>, <code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code>, and <code class="docutils literal notranslate"><span class="pre">PlaceAction</span></code>
+cover the most common tabletop manipulation workflows out of the box.
+See the <span class="xref std std-ref">supported_atomic_actions</span> table for configs and target types.</p></li>
+<li><p><strong>Extensible registry</strong> — custom actions can be registered globally with
+<code class="docutils literal notranslate"><span class="pre">register_action</span></code> and discovered by the engine at runtime.</p></li>
+<li><p><strong>Engine orchestration</strong> — <code class="docutils literal notranslate"><span class="pre">AtomicActionEngine</span></code> sequences multiple actions,
+threads <code class="docutils literal notranslate"><span class="pre">start_qpos</span></code> from one action to the next, and returns a single concatenated
+trajectory ready to replay in the simulator.</p></li>
+</ul>
+<p>For the full design overview, architecture diagram, and extension guide see
+<a class="reference internal" href="../overview/sim/atomic_actions.html"><span class="doc">Atomic Actions</span></a>.</p>
+</section>
+<section id="the-code">
+<h2>The Code<a class="headerlink" href="#the-code" title="Link to this heading">#</a></h2>
+<p>The tutorial corresponds to the <code class="docutils literal notranslate"><span class="pre">atomic_actions.py</span></code> script in the <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim</span></code>
+directory.</p>
+<details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
+<summary class="sd-summary-title sd-card-header">
+<span class="sd-summary-icon"><svg version="1.1" width="1.0em" height="1.0em" class="sd-octicon sd-octicon-code" viewBox="0 0 16 16" aria-hidden="true"><path d="m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"></path></svg></span><span class="sd-summary-text">Code for atomic_actions.py</span><span class="sd-summary-state-marker sd-summary-chevron-right"><svg version="1.1" width="1.5em" height="1.5em" class="sd-octicon sd-octicon-chevron-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.72 18.78a.75.75 0 0 1 0-1.06L14.44 12 8.72 6.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0Z"></path></svg></span></summary><div class="sd-summary-content sd-card-body docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="linenos">  1</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos">  2</span><span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="linenos">  3</span><span class="c1">#</span>
+<span class="linenos">  4</span><span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="linenos">  5</span><span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="linenos">  6</span><span class="c1"># You may obtain a copy of the License at</span>
+<span class="linenos">  7</span><span class="c1">#</span>
+<span class="linenos">  8</span><span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="linenos">  9</span><span class="c1">#</span>
+<span class="linenos"> 10</span><span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="linenos"> 11</span><span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="linenos"> 12</span><span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="linenos"> 13</span><span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="linenos"> 14</span><span class="c1"># limitations under the License.</span>
+<span class="linenos"> 15</span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="linenos"> 16</span>
+<span class="linenos"> 17</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 18</span><span class="sd">Tutorial: Atomic Actions for Robot Motion Generation</span>
+<span class="linenos"> 19</span><span class="sd">=====================================================</span>
+<span class="linenos"> 20</span>
+<span class="linenos"> 21</span><span class="sd">This script shows how to use the atomic action system to plan and execute</span>
+<span class="linenos"> 22</span><span class="sd">a pick-and-place task with a robot arm.</span>
+<span class="linenos"> 23</span>
+<span class="linenos"> 24</span><span class="sd">Key concepts covered:</span>
+<span class="linenos"> 25</span><span class="sd">  1. Setting up a MotionGenerator and AtomicActionEngine</span>
+<span class="linenos"> 26</span><span class="sd">  2. Describing what to pick using ObjectSemantics and AntipodalAffordance</span>
+<span class="linenos"> 27</span><span class="sd">  3. Running a pick → place → move sequence with execute_static()</span>
+<span class="linenos"> 28</span>
+<span class="linenos"> 29</span><span class="sd">Run with:</span>
+<span class="linenos"> 30</span><span class="sd">    python atomic_actions.py [--num_envs N] [--enable_rt]</span>
+<span class="linenos"> 31</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 32</span>
+<span class="linenos"> 33</span><span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="linenos"> 34</span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="linenos"> 35</span><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="linenos"> 36</span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="linenos"> 37</span>
+<span class="linenos"> 38</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">SimulationManagerCfg</span>
+<span class="linenos"> 39</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">Robot</span><span class="p">,</span> <span class="n">RigidObject</span>
+<span class="linenos"> 40</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.shapes</span><span class="w"> </span><span class="kn">import</span> <span class="n">MeshCfg</span>
+<span class="linenos"> 41</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.solvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">PytorchSolverCfg</span>
+<span class="linenos"> 42</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_path</span>
+<span class="linenos"> 43</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 44</span>    <span class="n">JointDrivePropertiesCfg</span><span class="p">,</span>
+<span class="linenos"> 45</span>    <span class="n">RobotCfg</span><span class="p">,</span>
+<span class="linenos"> 46</span>    <span class="n">RigidObjectCfg</span><span class="p">,</span>
+<span class="linenos"> 47</span>    <span class="n">RigidBodyAttributesCfg</span><span class="p">,</span>
+<span class="linenos"> 48</span>    <span class="n">LightCfg</span><span class="p">,</span>
+<span class="linenos"> 49</span>    <span class="n">URDFCfg</span><span class="p">,</span>
+<span class="linenos"> 50</span><span class="p">)</span>
+<span class="linenos"> 51</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners</span><span class="w"> </span><span class="kn">import</span> <span class="n">MotionGenerator</span><span class="p">,</span> <span class="n">MotionGenCfg</span><span class="p">,</span> <span class="n">ToppraPlannerCfg</span>
+<span class="linenos"> 52</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 53</span>    <span class="n">GripperCollisionCfg</span><span class="p">,</span>
+<span class="linenos"> 54</span><span class="p">)</span>
+<span class="linenos"> 55</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.graspkit.pg_grasp.antipodal_generator</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 56</span>    <span class="n">GraspGenerator</span><span class="p">,</span>
+<span class="linenos"> 57</span>    <span class="n">GraspGeneratorCfg</span><span class="p">,</span>
+<span class="linenos"> 58</span>    <span class="n">AntipodalSamplerCfg</span><span class="p">,</span>
+<span class="linenos"> 59</span><span class="p">)</span>
+<span class="linenos"> 60</span>
+<span class="linenos"> 61</span><span class="c1"># Import everything from the public atomic_actions API</span>
+<span class="linenos"> 62</span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<span class="linenos"> 63</span>    <span class="n">AtomicActionEngine</span><span class="p">,</span>
+<span class="linenos"> 64</span>    <span class="n">ObjectSemantics</span><span class="p">,</span>
+<span class="linenos"> 65</span>    <span class="n">AntipodalAffordance</span><span class="p">,</span>
+<span class="linenos"> 66</span>    <span class="n">PickUpActionCfg</span><span class="p">,</span>
+<span class="linenos"> 67</span>    <span class="n">PlaceActionCfg</span><span class="p">,</span>
+<span class="linenos"> 68</span>    <span class="n">MoveActionCfg</span><span class="p">,</span>
+<span class="linenos"> 69</span><span class="p">)</span>
+<span class="linenos"> 70</span>
+<span class="linenos"> 71</span>
+<span class="linenos"> 72</span><span class="k">def</span><span class="w"> </span><span class="nf">parse_arguments</span><span class="p">():</span>
+<span class="linenos"> 73</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 74</span><span class="sd">    Parse command-line arguments to configure the simulation.</span>
+<span class="linenos"> 75</span>
+<span class="linenos"> 76</span><span class="sd">    Returns:</span>
+<span class="linenos"> 77</span><span class="sd">        argparse.Namespace: Parsed arguments including number of environments, device, and rendering options.</span>
+<span class="linenos"> 78</span><span class="sd">    &quot;&quot;&quot;</span>
+<span class="linenos"> 79</span>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+<span class="linenos"> 80</span>        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create and simulate a robot in SimulationManager&quot;</span>
+<span class="linenos"> 81</span>    <span class="p">)</span>
+<span class="linenos"> 82</span>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+<span class="linenos"> 83</span>        <span class="s2">&quot;--enable_rt&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable ray tracing rendering&quot;</span>
+<span class="linenos"> 84</span>    <span class="p">)</span>
+<span class="linenos"> 85</span>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+<span class="linenos"> 86</span>        <span class="s2">&quot;--num_envs&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Number of parallel environments&quot;</span>
+<span class="linenos"> 87</span>    <span class="p">)</span>
+<span class="linenos"> 88</span>    <span class="k">return</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+<span class="linenos"> 89</span>
+<span class="linenos"> 90</span>
+<span class="linenos"> 91</span><span class="k">def</span><span class="w"> </span><span class="nf">initialize_simulation</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+<span class="linenos"> 92</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos"> 93</span><span class="sd">    Initialize the simulation environment based on the provided arguments.</span>
+<span class="linenos"> 94</span>
+<span class="linenos"> 95</span><span class="sd">    Args:</span>
+<span class="linenos"> 96</span><span class="sd">        args (argparse.Namespace): Parsed command-line arguments.</span>
+<span class="linenos"> 97</span>
+<span class="linenos"> 98</span><span class="sd">    Returns:</span>
+<span class="linenos"> 99</span><span class="sd">        SimulationManager: Configured simulation manager instance.</span>
+<span class="linenos">100</span><span class="sd">    &quot;&quot;&quot;</span>
+<span class="linenos">101</span>    <span class="n">config</span> <span class="o">=</span> <span class="n">SimulationManagerCfg</span><span class="p">(</span>
+<span class="linenos">102</span>        <span class="n">headless</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">103</span>        <span class="n">sim_device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">,</span>
+<span class="linenos">104</span>        <span class="n">enable_rt</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">enable_rt</span><span class="p">,</span>
+<span class="linenos">105</span>        <span class="n">physics_dt</span><span class="o">=</span><span class="mf">1.0</span> <span class="o">/</span> <span class="mf">100.0</span><span class="p">,</span>
+<span class="linenos">106</span>        <span class="n">num_envs</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span>
+<span class="linenos">107</span>    <span class="p">)</span>
+<span class="linenos">108</span>    <span class="n">sim</span> <span class="o">=</span> <span class="n">SimulationManager</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<span class="linenos">109</span>
+<span class="linenos">110</span>    <span class="n">light</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_light</span><span class="p">(</span>
+<span class="linenos">111</span>        <span class="n">cfg</span><span class="o">=</span><span class="n">LightCfg</span><span class="p">(</span><span class="n">uid</span><span class="o">=</span><span class="s2">&quot;main_light&quot;</span><span class="p">,</span> <span class="n">intensity</span><span class="o">=</span><span class="mf">50.0</span><span class="p">,</span> <span class="n">init_pos</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">))</span>
+<span class="linenos">112</span>    <span class="p">)</span>
+<span class="linenos">113</span>
+<span class="linenos">114</span>    <span class="k">return</span> <span class="n">sim</span>
+<span class="linenos">115</span>
+<span class="linenos">116</span>
+<span class="linenos">117</span><span class="k">def</span><span class="w"> </span><span class="nf">create_robot</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]):</span>
+<span class="linenos">118</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="linenos">119</span><span class="sd">    Create and configure a robot with an arm and a dexterous hand in the simulation.</span>
+<span class="linenos">120</span>
+<span class="linenos">121</span><span class="sd">    Args:</span>
+<span class="linenos">122</span><span class="sd">        sim (SimulationManager): The simulation manager instance.</span>
+<span class="linenos">123</span>
+<span class="linenos">124</span><span class="sd">    Returns:</span>
+<span class="linenos">125</span><span class="sd">        Robot: The configured robot instance added to the simulation.</span>
+<span class="linenos">126</span><span class="sd">    &quot;&quot;&quot;</span>
+<span class="linenos">127</span>    <span class="c1"># Retrieve URDF paths for the robot arm and hand</span>
+<span class="linenos">128</span>    <span class="n">ur10_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;UniversalRobots/UR10/UR10.urdf&quot;</span><span class="p">)</span>
+<span class="linenos">129</span>    <span class="n">gripper_urdf_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;DH_PGC_140_50_M/DH_PGC_140_50_M.urdf&quot;</span><span class="p">)</span>
+<span class="linenos">130</span>    <span class="c1"># Configure the robot with its components and control properties</span>
+<span class="linenos">131</span>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">RobotCfg</span><span class="p">(</span>
+<span class="linenos">132</span>        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;UR10&quot;</span><span class="p">,</span>
+<span class="linenos">133</span>        <span class="n">urdf_cfg</span><span class="o">=</span><span class="n">URDFCfg</span><span class="p">(</span>
+<span class="linenos">134</span>            <span class="n">components</span><span class="o">=</span><span class="p">[</span>
+<span class="linenos">135</span>                <span class="p">{</span><span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;arm&quot;</span><span class="p">,</span> <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">ur10_urdf_path</span><span class="p">},</span>
+<span class="linenos">136</span>                <span class="p">{</span><span class="s2">&quot;component_type&quot;</span><span class="p">:</span> <span class="s2">&quot;hand&quot;</span><span class="p">,</span> <span class="s2">&quot;urdf_path&quot;</span><span class="p">:</span> <span class="n">gripper_urdf_path</span><span class="p">},</span>
+<span class="linenos">137</span>            <span class="p">]</span>
+<span class="linenos">138</span>        <span class="p">),</span>
+<span class="linenos">139</span>        <span class="n">drive_pros</span><span class="o">=</span><span class="n">JointDrivePropertiesCfg</span><span class="p">(</span>
+<span class="linenos">140</span>            <span class="n">stiffness</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[0-9]&quot;</span><span class="p">:</span> <span class="mf">1e4</span><span class="p">,</span> <span class="s2">&quot;FINGER[1-2]&quot;</span><span class="p">:</span> <span class="mf">1e2</span><span class="p">},</span>
+<span class="linenos">141</span>            <span class="n">damping</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[0-9]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">,</span> <span class="s2">&quot;FINGER[1-2]&quot;</span><span class="p">:</span> <span class="mf">1e1</span><span class="p">},</span>
+<span class="linenos">142</span>            <span class="n">max_effort</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;JOINT[0-9]&quot;</span><span class="p">:</span> <span class="mf">1e5</span><span class="p">,</span> <span class="s2">&quot;FINGER[1-2]&quot;</span><span class="p">:</span> <span class="mf">1e3</span><span class="p">},</span>
+<span class="linenos">143</span>            <span class="n">drive_type</span><span class="o">=</span><span class="s2">&quot;force&quot;</span><span class="p">,</span>
+<span class="linenos">144</span>        <span class="p">),</span>
+<span class="linenos">145</span>        <span class="n">control_parts</span><span class="o">=</span><span class="p">{</span>
+<span class="linenos">146</span>            <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;JOINT[0-9]&quot;</span><span class="p">],</span>
+<span class="linenos">147</span>            <span class="s2">&quot;hand&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;FINGER[1-2]&quot;</span><span class="p">],</span>
+<span class="linenos">148</span>        <span class="p">},</span>
+<span class="linenos">149</span>        <span class="n">solver_cfg</span><span class="o">=</span><span class="p">{</span>
+<span class="linenos">150</span>            <span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="n">PytorchSolverCfg</span><span class="p">(</span>
+<span class="linenos">151</span>                <span class="n">end_link_name</span><span class="o">=</span><span class="s2">&quot;ee_link&quot;</span><span class="p">,</span>
+<span class="linenos">152</span>                <span class="n">root_link_name</span><span class="o">=</span><span class="s2">&quot;base_link&quot;</span><span class="p">,</span>
+<span class="linenos">153</span>                <span class="n">tcp</span><span class="o">=</span><span class="p">[</span>
+<span class="linenos">154</span>                    <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+<span class="linenos">155</span>                    <span class="p">[</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+<span class="linenos">156</span>                    <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.12</span><span class="p">],</span>
+<span class="linenos">157</span>                    <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span>
+<span class="linenos">158</span>                <span class="p">],</span>
+<span class="linenos">159</span>            <span class="p">)</span>
+<span class="linenos">160</span>        <span class="p">},</span>
+<span class="linenos">161</span>        <span class="n">init_qpos</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+<span class="linenos">162</span>        <span class="n">init_pos</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+<span class="linenos">163</span>    <span class="p">)</span>
+<span class="linenos">164</span>    <span class="k">return</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_robot</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+<span class="linenos">165</span>
+<span class="linenos">166</span>
+<span class="linenos">167</span><span class="k">def</span><span class="w"> </span><span class="nf">create_mug</span><span class="p">(</span><span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RigidObject</span><span class="p">:</span>
+<span class="linenos">168</span>    <span class="n">mug_cfg</span> <span class="o">=</span> <span class="n">RigidObjectCfg</span><span class="p">(</span>
+<span class="linenos">169</span>        <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span>
+<span class="linenos">170</span>        <span class="n">shape</span><span class="o">=</span><span class="n">MeshCfg</span><span class="p">(</span>
+<span class="linenos">171</span>            <span class="n">fpath</span><span class="o">=</span><span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;CoffeeCup/cup.ply&quot;</span><span class="p">),</span>
+<span class="linenos">172</span>        <span class="p">),</span>
+<span class="linenos">173</span>        <span class="n">attrs</span><span class="o">=</span><span class="n">RigidBodyAttributesCfg</span><span class="p">(</span>
+<span class="linenos">174</span>            <span class="n">mass</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+<span class="linenos">175</span>            <span class="n">dynamic_friction</span><span class="o">=</span><span class="mf">0.97</span><span class="p">,</span>
+<span class="linenos">176</span>            <span class="n">static_friction</span><span class="o">=</span><span class="mf">0.99</span><span class="p">,</span>
+<span class="linenos">177</span>        <span class="p">),</span>
+<span class="linenos">178</span>        <span class="n">max_convex_hull_num</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span>
+<span class="linenos">179</span>        <span class="n">init_pos</span><span class="o">=</span><span class="p">[</span><span class="mf">0.55</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">],</span>
+<span class="linenos">180</span>        <span class="n">init_rot</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="mi">90</span><span class="p">],</span>
+<span class="linenos">181</span>        <span class="n">body_scale</span><span class="o">=</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span>
+<span class="linenos">182</span>    <span class="p">)</span>
+<span class="linenos">183</span>    <span class="n">mug</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">mug_cfg</span><span class="p">)</span>
+<span class="linenos">184</span>    <span class="k">return</span> <span class="n">mug</span>
+<span class="linenos">185</span>
+<span class="linenos">186</span>
+<span class="linenos">187</span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+<span class="linenos">188</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Pick up a mug and place it at a new location using atomic actions.&quot;&quot;&quot;</span>
+<span class="linenos">189</span>    <span class="n">args</span> <span class="o">=</span> <span class="n">parse_arguments</span><span class="p">()</span>
+<span class="linenos">190</span>
+<span class="linenos">191</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">192</span>    <span class="c1"># Step 1: Set up simulation, robot, and object                        #</span>
+<span class="linenos">193</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">194</span>    <span class="n">sim</span><span class="p">:</span> <span class="n">SimulationManager</span> <span class="o">=</span> <span class="n">initialize_simulation</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+<span class="linenos">195</span>    <span class="n">robot</span> <span class="o">=</span> <span class="n">create_robot</span><span class="p">(</span><span class="n">sim</span><span class="p">)</span>
+<span class="linenos">196</span>    <span class="n">mug</span> <span class="o">=</span> <span class="n">create_mug</span><span class="p">(</span><span class="n">sim</span><span class="p">)</span>
+<span class="linenos">197</span>
+<span class="linenos">198</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">199</span>    <span class="c1"># Step 2: Create a MotionGenerator for the robot                      #</span>
+<span class="linenos">200</span>    <span class="c1"># MotionGenerator handles trajectory planning (IK + TOPPRA smoothing) #</span>
+<span class="linenos">201</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">202</span>    <span class="n">motion_gen</span> <span class="o">=</span> <span class="n">MotionGenerator</span><span class="p">(</span>
+<span class="linenos">203</span>        <span class="n">cfg</span><span class="o">=</span><span class="n">MotionGenCfg</span><span class="p">(</span><span class="n">planner_cfg</span><span class="o">=</span><span class="n">ToppraPlannerCfg</span><span class="p">(</span><span class="n">robot_uid</span><span class="o">=</span><span class="n">robot</span><span class="o">.</span><span class="n">uid</span><span class="p">))</span>
+<span class="linenos">204</span>    <span class="p">)</span>
+<span class="linenos">205</span>
+<span class="linenos">206</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">207</span>    <span class="c1"># Step 3: Configure the three atomic actions                          #</span>
+<span class="linenos">208</span>    <span class="c1">#                                                                     #</span>
+<span class="linenos">209</span>    <span class="c1">#  PickUpAction  — approach → close gripper → lift                   #</span>
+<span class="linenos">210</span>    <span class="c1">#  PlaceAction   — lower → open gripper → retract                    #</span>
+<span class="linenos">211</span>    <span class="c1">#  MoveAction    — free-space move to a target EEF pose               #</span>
+<span class="linenos">212</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">213</span>    <span class="c1"># Gripper joint values for this robot (DH_PGC_140):</span>
+<span class="linenos">214</span>    <span class="c1">#   open  = [0.00, 0.00]   (fully open)</span>
+<span class="linenos">215</span>    <span class="c1">#   close = [0.025, 0.025] (grasping width)</span>
+<span class="linenos">216</span>    <span class="n">hand_open</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+<span class="linenos">217</span>    <span class="n">hand_close</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.025</span><span class="p">,</span> <span class="mf">0.025</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+<span class="linenos">218</span>
+<span class="linenos">219</span>    <span class="n">pickup_cfg</span> <span class="o">=</span> <span class="n">PickUpActionCfg</span><span class="p">(</span>
+<span class="linenos">220</span>        <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+<span class="linenos">221</span>        <span class="n">hand_control_part</span><span class="o">=</span><span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+<span class="linenos">222</span>        <span class="n">hand_open_qpos</span><span class="o">=</span><span class="n">hand_open</span><span class="p">,</span>
+<span class="linenos">223</span>        <span class="n">hand_close_qpos</span><span class="o">=</span><span class="n">hand_close</span><span class="p">,</span>
+<span class="linenos">224</span>        <span class="c1"># Approach the object from directly above (negative world-Z)</span>
+<span class="linenos">225</span>        <span class="n">approach_direction</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">226</span>            <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span>
+<span class="linenos">227</span>        <span class="p">),</span>
+<span class="linenos">228</span>        <span class="n">pre_grasp_distance</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>  <span class="c1"># hover 15 cm above before descending</span>
+<span class="linenos">229</span>        <span class="n">lift_height</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>  <span class="c1"># lift 15 cm after grasping</span>
+<span class="linenos">230</span>    <span class="p">)</span>
+<span class="linenos">231</span>
+<span class="linenos">232</span>    <span class="n">place_cfg</span> <span class="o">=</span> <span class="n">PlaceActionCfg</span><span class="p">(</span>
+<span class="linenos">233</span>        <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+<span class="linenos">234</span>        <span class="n">hand_control_part</span><span class="o">=</span><span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+<span class="linenos">235</span>        <span class="n">hand_open_qpos</span><span class="o">=</span><span class="n">hand_open</span><span class="p">,</span>
+<span class="linenos">236</span>        <span class="n">hand_close_qpos</span><span class="o">=</span><span class="n">hand_close</span><span class="p">,</span>
+<span class="linenos">237</span>        <span class="n">lift_height</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>
+<span class="linenos">238</span>    <span class="p">)</span>
+<span class="linenos">239</span>
+<span class="linenos">240</span>    <span class="n">move_cfg</span> <span class="o">=</span> <span class="n">MoveActionCfg</span><span class="p">(</span>
+<span class="linenos">241</span>        <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+<span class="linenos">242</span>    <span class="p">)</span>
+<span class="linenos">243</span>
+<span class="linenos">244</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">245</span>    <span class="c1"># Step 4: Build the AtomicActionEngine                                #</span>
+<span class="linenos">246</span>    <span class="c1">#                                                                     #</span>
+<span class="linenos">247</span>    <span class="c1"># actions_cfg_list defines the ORDER of actions that execute_static() #</span>
+<span class="linenos">248</span>    <span class="c1"># will run. Each entry is matched positionally to target_list.        #</span>
+<span class="linenos">249</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">250</span>    <span class="n">atomic_engine</span> <span class="o">=</span> <span class="n">AtomicActionEngine</span><span class="p">(</span>
+<span class="linenos">251</span>        <span class="n">motion_generator</span><span class="o">=</span><span class="n">motion_gen</span><span class="p">,</span>
+<span class="linenos">252</span>        <span class="n">actions_cfg_list</span><span class="o">=</span><span class="p">[</span><span class="n">pickup_cfg</span><span class="p">,</span> <span class="n">place_cfg</span><span class="p">,</span> <span class="n">move_cfg</span><span class="p">],</span>
+<span class="linenos">253</span>    <span class="p">)</span>
+<span class="linenos">254</span>
+<span class="linenos">255</span>    <span class="n">sim</span><span class="o">.</span><span class="n">init_gpu_physics</span><span class="p">()</span>
+<span class="linenos">256</span>    <span class="n">sim</span><span class="o">.</span><span class="n">open_window</span><span class="p">()</span>
+<span class="linenos">257</span>
+<span class="linenos">258</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">259</span>    <span class="c1"># Step 5: Describe the mug with ObjectSemantics                       #</span>
+<span class="linenos">260</span>    <span class="c1">#                                                                     #</span>
+<span class="linenos">261</span>    <span class="c1"># ObjectSemantics bundles together:                                   #</span>
+<span class="linenos">262</span>    <span class="c1">#   - geometry (mesh vertices/triangles for grasp annotation)         #</span>
+<span class="linenos">263</span>    <span class="c1">#   - affordance (how to grasp the object — here antipodal grasps)   #</span>
+<span class="linenos">264</span>    <span class="c1">#   - entity reference (so the action can read the live object pose)  #</span>
+<span class="linenos">265</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">266</span>    <span class="n">mug_grasp_affordance</span> <span class="o">=</span> <span class="n">AntipodalAffordance</span><span class="p">(</span>
+<span class="linenos">267</span>        <span class="n">object_label</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span>
+<span class="linenos">268</span>        <span class="n">force_reannotate</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="linenos">269</span>        <span class="n">custom_config</span><span class="o">=</span><span class="p">{</span>
+<span class="linenos">270</span>            <span class="s2">&quot;gripper_collision_cfg&quot;</span><span class="p">:</span> <span class="n">GripperCollisionCfg</span><span class="p">(</span>
+<span class="linenos">271</span>                <span class="n">max_open_length</span><span class="o">=</span><span class="mf">0.088</span><span class="p">,</span> <span class="n">finger_length</span><span class="o">=</span><span class="mf">0.078</span><span class="p">,</span> <span class="n">point_sample_dense</span><span class="o">=</span><span class="mf">0.012</span>
+<span class="linenos">272</span>            <span class="p">),</span>
+<span class="linenos">273</span>            <span class="s2">&quot;generator_cfg&quot;</span><span class="p">:</span> <span class="n">GraspGeneratorCfg</span><span class="p">(</span>
+<span class="linenos">274</span>                <span class="n">viser_port</span><span class="o">=</span><span class="mi">11801</span><span class="p">,</span>
+<span class="linenos">275</span>                <span class="n">antipodal_sampler_cfg</span><span class="o">=</span><span class="n">AntipodalSamplerCfg</span><span class="p">(</span>
+<span class="linenos">276</span>                    <span class="n">n_sample</span><span class="o">=</span><span class="mi">20000</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mf">0.088</span><span class="p">,</span> <span class="n">min_length</span><span class="o">=</span><span class="mf">0.003</span>
+<span class="linenos">277</span>                <span class="p">),</span>
+<span class="linenos">278</span>            <span class="p">),</span>
+<span class="linenos">279</span>        <span class="p">},</span>
+<span class="linenos">280</span>    <span class="p">)</span>
+<span class="linenos">281</span>    <span class="n">mug_semantics</span> <span class="o">=</span> <span class="n">ObjectSemantics</span><span class="p">(</span>
+<span class="linenos">282</span>        <span class="n">label</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span>
+<span class="linenos">283</span>        <span class="n">geometry</span><span class="o">=</span><span class="p">{</span>
+<span class="linenos">284</span>            <span class="s2">&quot;mesh_vertices&quot;</span><span class="p">:</span> <span class="n">mug</span><span class="o">.</span><span class="n">get_vertices</span><span class="p">(</span><span class="n">env_ids</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">scale</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">],</span>
+<span class="linenos">285</span>            <span class="s2">&quot;mesh_triangles&quot;</span><span class="p">:</span> <span class="n">mug</span><span class="o">.</span><span class="n">get_triangles</span><span class="p">(</span><span class="n">env_ids</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">])[</span><span class="mi">0</span><span class="p">],</span>
+<span class="linenos">286</span>        <span class="p">},</span>
+<span class="linenos">287</span>        <span class="n">affordance</span><span class="o">=</span><span class="n">mug_grasp_affordance</span><span class="p">,</span>
+<span class="linenos">288</span>        <span class="n">entity</span><span class="o">=</span><span class="n">mug</span><span class="p">,</span>  <span class="c1"># needed so PickUpAction can read the mug&#39;s live pose</span>
+<span class="linenos">289</span>    <span class="p">)</span>
+<span class="linenos">290</span>
+<span class="linenos">291</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">292</span>    <span class="c1"># Step 6: Define target poses for place and final rest                #</span>
+<span class="linenos">293</span>    <span class="c1">#                                                                     #</span>
+<span class="linenos">294</span>    <span class="c1"># Poses are 4×4 homogeneous transforms (rotation | translation).     #</span>
+<span class="linenos">295</span>    <span class="c1"># For PickUpAction the target is mug_semantics — the action computes  #</span>
+<span class="linenos">296</span>    <span class="c1"># the grasp pose automatically from the affordance.                   #</span>
+<span class="linenos">297</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">298</span>    <span class="c1"># Place the mug 20 cm to the left and 40 cm forward from its pickup pose</span>
+<span class="linenos">299</span>    <span class="n">place_xpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">300</span>        <span class="p">[</span>
+<span class="linenos">301</span>            <span class="p">[</span><span class="o">-</span><span class="mf">0.0539</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.9985</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.0022</span><span class="p">,</span> <span class="mf">0.2489</span><span class="p">],</span>
+<span class="linenos">302</span>            <span class="p">[</span><span class="o">-</span><span class="mf">0.9977</span><span class="p">,</span> <span class="mf">0.0540</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.0401</span><span class="p">,</span> <span class="mf">0.3970</span><span class="p">],</span>
+<span class="linenos">303</span>            <span class="p">[</span><span class="mf">0.0401</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.9992</span><span class="p">,</span> <span class="mf">0.2400</span><span class="p">],</span>
+<span class="linenos">304</span>            <span class="p">[</span><span class="mf">0.0000</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">,</span> <span class="mf">1.0000</span><span class="p">],</span>
+<span class="linenos">305</span>        <span class="p">],</span>
+<span class="linenos">306</span>        <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+<span class="linenos">307</span>        <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+<span class="linenos">308</span>    <span class="p">)</span>
+<span class="linenos">309</span>
+<span class="linenos">310</span>    <span class="c1"># Move the arm to a safe resting pose after placing</span>
+<span class="linenos">311</span>    <span class="n">rest_xpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+<span class="linenos">312</span>        <span class="p">[</span>
+<span class="linenos">313</span>            <span class="p">[</span><span class="o">-</span><span class="mf">0.0539</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.9985</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.0022</span><span class="p">,</span> <span class="mf">0.5000</span><span class="p">],</span>
+<span class="linenos">314</span>            <span class="p">[</span><span class="o">-</span><span class="mf">0.9977</span><span class="p">,</span> <span class="mf">0.0540</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.0401</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">],</span>
+<span class="linenos">315</span>            <span class="p">[</span><span class="mf">0.0401</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.9992</span><span class="p">,</span> <span class="mf">0.5000</span><span class="p">],</span>
+<span class="linenos">316</span>            <span class="p">[</span><span class="mf">0.0000</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">,</span> <span class="mf">0.0000</span><span class="p">,</span> <span class="mf">1.0000</span><span class="p">],</span>
+<span class="linenos">317</span>        <span class="p">],</span>
+<span class="linenos">318</span>        <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+<span class="linenos">319</span>        <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+<span class="linenos">320</span>    <span class="p">)</span>
+<span class="linenos">321</span>
+<span class="linenos">322</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">323</span>    <span class="c1"># Step 7: Plan and execute the full sequence                          #</span>
+<span class="linenos">324</span>    <span class="c1">#                                                                     #</span>
+<span class="linenos">325</span>    <span class="c1"># execute_static() plans all three actions in order and returns a     #</span>
+<span class="linenos">326</span>    <span class="c1"># single concatenated joint trajectory (n_envs, n_waypoints, dof).   #</span>
+<span class="linenos">327</span>    <span class="c1"># We then replay it frame-by-frame in the simulator.                 #</span>
+<span class="linenos">328</span>    <span class="c1"># ------------------------------------------------------------------ #</span>
+<span class="linenos">329</span>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Planning pick → place → move trajectory...&quot;</span><span class="p">)</span>
+<span class="linenos">330</span>    <span class="n">is_success</span><span class="p">,</span> <span class="n">traj</span> <span class="o">=</span> <span class="n">atomic_engine</span><span class="o">.</span><span class="n">execute_static</span><span class="p">(</span>
+<span class="linenos">331</span>        <span class="n">target_list</span><span class="o">=</span><span class="p">[</span><span class="n">mug_semantics</span><span class="p">,</span> <span class="n">place_xpos</span><span class="p">,</span> <span class="n">rest_xpos</span><span class="p">]</span>
+<span class="linenos">332</span>    <span class="p">)</span>
+<span class="linenos">333</span>
+<span class="linenos">334</span>    <span class="k">if</span> <span class="ow">not</span> <span class="n">is_success</span><span class="p">:</span>
+<span class="linenos">335</span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Planning failed. Check that the target poses are reachable.&quot;</span><span class="p">)</span>
+<span class="linenos">336</span>        <span class="k">return</span>
+<span class="linenos">337</span>
+<span class="linenos">338</span>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Success! Replaying </span><span class="si">{</span><span class="n">traj</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2"> waypoints...&quot;</span><span class="p">)</span>
+<span class="linenos">339</span>    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">traj</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+<span class="linenos">340</span>        <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">traj</span><span class="p">[:,</span> <span class="n">i</span><span class="p">])</span>
+<span class="linenos">341</span>        <span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+<span class="linenos">342</span>        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">1e-2</span><span class="p">)</span>
+<span class="linenos">343</span>
+<span class="linenos">344</span>    <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Press Enter to exit...&quot;</span><span class="p">)</span>
+<span class="linenos">345</span>
+<span class="linenos">346</span>
+<span class="linenos">347</span><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+<span class="linenos">348</span>    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</details></section>
+<section id="typical-usage">
+<h2>Typical Usage<a class="headerlink" href="#typical-usage" title="Link to this heading">#</a></h2>
+<section id="setting-up-the-engine">
+<h3>Setting up the engine<a class="headerlink" href="#setting-up-the-engine" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.planners</span><span class="w"> </span><span class="kn">import</span> <span class="n">MotionGenerator</span><span class="p">,</span> <span class="n">MotionGenCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">AtomicActionEngine</span><span class="p">,</span>
+    <span class="n">PickUpActionCfg</span><span class="p">,</span>
+    <span class="n">PlaceActionCfg</span><span class="p">,</span>
+    <span class="n">MoveActionCfg</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">motion_gen</span> <span class="o">=</span> <span class="n">MotionGenerator</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">MotionGenCfg</span><span class="p">(</span><span class="o">...</span><span class="p">))</span>
+
+<span class="n">hand_open</span>  <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.00</span><span class="p">,</span>  <span class="mf">0.00</span><span class="p">],</span>  <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">hand_close</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.025</span><span class="p">,</span> <span class="mf">0.025</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">pickup_cfg</span> <span class="o">=</span> <span class="n">PickUpActionCfg</span><span class="p">(</span>
+    <span class="n">hand_open_qpos</span><span class="o">=</span><span class="n">hand_open</span><span class="p">,</span>
+    <span class="n">hand_close_qpos</span><span class="o">=</span><span class="n">hand_close</span><span class="p">,</span>
+    <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+    <span class="n">hand_control_part</span><span class="o">=</span><span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+    <span class="n">approach_direction</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">),</span>
+    <span class="n">pre_grasp_distance</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>
+    <span class="n">lift_height</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">place_cfg</span> <span class="o">=</span> <span class="n">PlaceActionCfg</span><span class="p">(</span>
+    <span class="n">hand_open_qpos</span><span class="o">=</span><span class="n">hand_open</span><span class="p">,</span>
+    <span class="n">hand_close_qpos</span><span class="o">=</span><span class="n">hand_close</span><span class="p">,</span>
+    <span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">,</span>
+    <span class="n">hand_control_part</span><span class="o">=</span><span class="s2">&quot;hand&quot;</span><span class="p">,</span>
+    <span class="n">lift_height</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">move_cfg</span> <span class="o">=</span> <span class="n">MoveActionCfg</span><span class="p">(</span><span class="n">control_part</span><span class="o">=</span><span class="s2">&quot;arm&quot;</span><span class="p">)</span>
+
+<span class="n">engine</span> <span class="o">=</span> <span class="n">AtomicActionEngine</span><span class="p">(</span>
+    <span class="n">motion_generator</span><span class="o">=</span><span class="n">motion_gen</span><span class="p">,</span>
+    <span class="n">actions_cfg_list</span><span class="o">=</span><span class="p">[</span><span class="n">pickup_cfg</span><span class="p">,</span> <span class="n">place_cfg</span><span class="p">,</span> <span class="n">move_cfg</span><span class="p">],</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="defining-object-semantics">
+<h3>Defining object semantics<a class="headerlink" href="#defining-object-semantics" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ObjectSemantics</span><span class="p">,</span>
+    <span class="n">AntipodalAffordance</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.graspkit.pg_grasp</span><span class="w"> </span><span class="kn">import</span> <span class="n">GraspGeneratorCfg</span><span class="p">,</span> <span class="n">AntipodalSamplerCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker</span><span class="w"> </span><span class="kn">import</span> <span class="n">GripperCollisionCfg</span>
+
+<span class="n">affordance</span> <span class="o">=</span> <span class="n">AntipodalAffordance</span><span class="p">(</span>
+    <span class="n">object_label</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span>
+    <span class="n">force_reannotate</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">custom_config</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;gripper_collision_cfg&quot;</span><span class="p">:</span> <span class="n">GripperCollisionCfg</span><span class="p">(</span>
+            <span class="n">max_open_length</span><span class="o">=</span><span class="mf">0.088</span><span class="p">,</span> <span class="n">finger_length</span><span class="o">=</span><span class="mf">0.078</span><span class="p">,</span> <span class="n">point_sample_dense</span><span class="o">=</span><span class="mf">0.012</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;generator_cfg&quot;</span><span class="p">:</span> <span class="n">GraspGeneratorCfg</span><span class="p">(</span>
+            <span class="n">antipodal_sampler_cfg</span><span class="o">=</span><span class="n">AntipodalSamplerCfg</span><span class="p">(</span>
+                <span class="n">n_sample</span><span class="o">=</span><span class="mi">20000</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mf">0.088</span><span class="p">,</span> <span class="n">min_length</span><span class="o">=</span><span class="mf">0.003</span>
+            <span class="p">)</span>
+        <span class="p">),</span>
+    <span class="p">},</span>
+<span class="p">)</span>
+
+<span class="n">semantics</span> <span class="o">=</span> <span class="n">ObjectSemantics</span><span class="p">(</span>
+    <span class="n">label</span><span class="o">=</span><span class="s2">&quot;mug&quot;</span><span class="p">,</span>
+    <span class="n">geometry</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;mesh_vertices&quot;</span><span class="p">:</span> <span class="n">mug</span><span class="o">.</span><span class="n">get_vertices</span><span class="p">(</span><span class="n">env_ids</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">scale</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">],</span>
+        <span class="s2">&quot;mesh_triangles&quot;</span><span class="p">:</span> <span class="n">mug</span><span class="o">.</span><span class="n">get_triangles</span><span class="p">(</span><span class="n">env_ids</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">])[</span><span class="mi">0</span><span class="p">],</span>
+    <span class="p">},</span>
+    <span class="n">affordance</span><span class="o">=</span><span class="n">affordance</span><span class="p">,</span>
+    <span class="n">entity</span><span class="o">=</span><span class="n">mug</span><span class="p">,</span>   <span class="c1"># required so the action can query the live object pose</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="executing-a-pick-place-move-sequence">
+<h3>Executing a pick-place-move sequence<a class="headerlink" href="#executing-a-pick-place-move-sequence" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">place_xpos</span> <span class="o">=</span> <span class="o">...</span>  <span class="c1"># torch.Tensor [4, 4] — target placement pose</span>
+<span class="n">rest_xpos</span>  <span class="o">=</span> <span class="o">...</span>  <span class="c1"># torch.Tensor [4, 4] — resting pose after placing</span>
+
+<span class="n">is_success</span><span class="p">,</span> <span class="n">trajectory</span> <span class="o">=</span> <span class="n">engine</span><span class="o">.</span><span class="n">execute_static</span><span class="p">(</span>
+    <span class="n">target_list</span><span class="o">=</span><span class="p">[</span><span class="n">semantics</span><span class="p">,</span> <span class="n">place_xpos</span><span class="p">,</span> <span class="n">rest_xpos</span><span class="p">]</span>
+<span class="p">)</span>
+<span class="c1"># trajectory: [n_envs, n_waypoints, robot_dof]</span>
+
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">trajectory</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+    <span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span><span class="n">trajectory</span><span class="p">[:,</span> <span class="n">i</span><span class="p">])</span>
+    <span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="registering-custom-actions">
+<h3>Registering custom actions<a class="headerlink" href="#registering-custom-actions" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.atomic_actions</span><span class="w"> </span><span class="kn">import</span> <span class="n">AtomicAction</span><span class="p">,</span> <span class="n">ActionCfg</span><span class="p">,</span> <span class="n">register_action</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">PushAction</span><span class="p">(</span><span class="n">AtomicAction</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">start_qpos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># ... your planning logic ...</span>
+        <span class="k">return</span> <span class="n">is_success</span><span class="p">,</span> <span class="n">trajectory</span><span class="p">,</span> <span class="n">joint_ids</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="n">start_qpos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>   <span class="c1"># quick feasibility check</span>
+
+<span class="n">register_action</span><span class="p">(</span><span class="s2">&quot;push&quot;</span><span class="p">,</span> <span class="n">PushAction</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="notes-best-practices">
+<h2>Notes &amp; Best Practices<a class="headerlink" href="#notes-best-practices" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">PickUpAction</span></code> expects an <code class="docutils literal notranslate"><span class="pre">AntipodalAffordance</span></code> with valid mesh data
+(<code class="docutils literal notranslate"><span class="pre">mesh_vertices</span></code> / <code class="docutils literal notranslate"><span class="pre">mesh_triangles</span></code>) so the grasp generator can annotate the object.
+Set <code class="docutils literal notranslate"><span class="pre">force_reannotate=False</span></code> (the default) to reuse cached annotations across episodes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ObjectSemantics.entity</span></code> must be set when using semantic targets so the action can read
+the object’s current world pose at planning time.</p></li>
+<li><p>For static (non-physics) playback, iterate over <code class="docutils literal notranslate"><span class="pre">trajectory[:,</span> <span class="pre">i]</span></code> and call
+<code class="docutils literal notranslate"><span class="pre">robot.set_qpos</span></code> directly; for physics-enabled playback, feed waypoints through your
+controller or gym wrapper instead.</p></li>
+<li><p>To add a new action type, see <a class="reference internal" href="../overview/sim/atomic_actions.html"><span class="doc">Atomic Actions</span></a>.</p></li>
+</ul>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="motion_gen.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Motion Generator</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="gizmo.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Interactive Robot Control with Gizmo</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features">Key Features</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-code">The Code</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#typical-usage">Typical Usage</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-up-the-engine">Setting up the engine</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#defining-object-semantics">Defining object semantics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#executing-a-pick-place-move-sequence">Executing a pick-place-move sequence</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#registering-custom-actions">Registering custom actions</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#notes-best-practices">Notes &amp; Best Practices</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

@@ -1,0 +1,1160 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Rigid Object &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'overview/sim/sim_rigid_object';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Rigid Object Group" href="sim_rigid_object_group.html" />
+    <link rel="prev" title="Simulation Assets" href="sim_assets.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Simulation Framework</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 current active has-children"><a class="reference internal" href="sim_assets.html">Simulation Assets</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l3 current active"><a class="current reference internal" href="#">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/overview/sim/sim_rigid_object.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Rigid Object</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#rigid-body-attributes-rigidbodyattributescfg">Rigid Body Attributes (<code class="xref py py-class docutils literal notranslate"><span class="pre">RigidBodyAttributesCfg</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#setup-initialization">Setup &amp; Initialization</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#usd-import">USD Import</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#rigid-object-class-common-methods-attributes">Rigid Object Class — Common Methods &amp; Attributes</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pose-state">Pose &amp; State</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dynamics-control">Dynamics Control</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#physical-properties">Physical Properties</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#geometry-body-type">Geometry &amp; Body Type</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#collision-filtering">Collision &amp; Filtering</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visual-appearance">Visual &amp; Appearance</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#utility-identification">Utility &amp; Identification</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#observation-shapes">Observation Shapes</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#notes-best-practices">Notes &amp; Best Practices</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-applying-force-and-torque">Example: Applying Force and Torque</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-with-sensors-scenes">Integration with Sensors &amp; Scenes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#related-topics">Related Topics</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="rigid-object">
+<h1>Rigid Object<a class="headerlink" href="#rigid-object" title="Link to this heading">#</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">RigidObject</span></code> class represents non-deformable (rigid) physical objects in EmbodiChain. Rigid objects are characterized by a single pose (position + orientation), collision and visual shapes, and standard rigid-body physical properties.</p>
+<section id="configuration">
+<h2>Configuration<a class="headerlink" href="#configuration" title="Link to this heading">#</a></h2>
+<p>Configured via the <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.RigidObjectCfg" title="embodichain.lab.sim.cfg.RigidObjectCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">RigidObjectCfg</span></code></a> class.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">shape</span></code></p></td>
+<td class="text-left"><p><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.shapes.ShapeCfg" title="embodichain.lab.sim.shapes.ShapeCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">ShapeCfg</span></code></a></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ShapeCfg()</span></code></p></td>
+<td class="text-left"><p>Geometry configuration for visual and collision shapes. Use <code class="docutils literal notranslate"><span class="pre">MeshCfg</span></code> for mesh files or primitive cfgs (e.g., <code class="docutils literal notranslate"><span class="pre">CubeCfg</span></code>).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_type</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Literal[&quot;dynamic&quot;,&quot;kinematic&quot;,&quot;static&quot;]</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">&quot;dynamic&quot;</span></code></p></td>
+<td class="text-left"><p>Actor type for the rigid body. See <code class="docutils literal notranslate"><span class="pre">{class}</span></code>~cfg.RigidObjectCfg.to_dexsim_body_type` for conversion.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">attrs</span></code></p></td>
+<td class="text-left"><p><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.RigidBodyAttributesCfg" title="embodichain.lab.sim.cfg.RigidBodyAttributesCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">RigidBodyAttributesCfg</span></code></a></p></td>
+<td class="text-left"><p>defaults in code</p></td>
+<td class="text-left"><p>Physical attributes (mass, damping, friction, restitution, collision offsets, CCD, etc.).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">init_pos</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Sequence[float]</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(0,0,0)</span></code></p></td>
+<td class="text-left"><p>Initial root position (x, y, z).</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">init_rot</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Sequence[float]</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(0,0,0)</span></code> (Euler degrees)</p></td>
+<td class="text-left"><p>Initial root orientation (Euler angles in degrees) or provide <code class="docutils literal notranslate"><span class="pre">init_local_pose</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">use_usd_properties</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>If True, use physical properties from USD file; if False, override with config values. Only effective for usd files.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">uid</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">str</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td class="text-left"><p>Optional unique identifier for the object; manager will assign one if omitted.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="rigid-body-attributes-rigidbodyattributescfg">
+<h3>Rigid Body Attributes (<a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.RigidBodyAttributesCfg" title="embodichain.lab.sim.cfg.RigidBodyAttributesCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">RigidBodyAttributesCfg</span></code></a>)<a class="headerlink" href="#rigid-body-attributes-rigidbodyattributescfg" title="Link to this heading">#</a></h3>
+<p>The full attribute set lives in <code class="docutils literal notranslate"><span class="pre">{class}</span></code>~cfg.RigidBodyAttributesCfg`. Common fields shown in code include:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-center"><p>Default (from code)</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">mass</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">1.0</span></code></p></td>
+<td class="text-left"><p>Mass of the rigid body in kilograms (set to 0 to use density).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">density</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">1000.0</span></code></p></td>
+<td class="text-left"><p>Density used when mass is negative/zero.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">linear_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.7</span></code></p></td>
+<td class="text-left"><p>Linear damping coefficient.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">angular_damping</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.7</span></code></p></td>
+<td class="text-left"><p>Angular damping coefficient.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dynamic_friction</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.5</span></code></p></td>
+<td class="text-left"><p>Dynamic friction coefficient.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">static_friction</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.5</span></code></p></td>
+<td class="text-left"><p>Static friction coefficient.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">restitution</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.0</span></code></p></td>
+<td class="text-left"><p>Restitution (bounciness).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">contact_offset</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.002</span></code></p></td>
+<td class="text-left"><p>Contact offset for collision detection.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">rest_offset</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">0.001</span></code></p></td>
+<td class="text-left"><p>Rest offset for collision detection.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_ccd</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-center"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable continuous collision detection.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Use the <code class="docutils literal notranslate"><span class="pre">.attr()</span></code> helper to convert to <code class="docutils literal notranslate"><span class="pre">dexsim.PhysicalAttr</span></code> when interfacing with the engine.</p>
+</section>
+</section>
+<section id="setup-initialization">
+<h2>Setup &amp; Initialization<a class="headerlink" href="#setup-initialization" title="Link to this heading">#</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimulationManager</span><span class="p">,</span> <span class="n">SimulationManagerCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">RigidObject</span><span class="p">,</span> <span class="n">RigidObjectCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.shapes</span><span class="w"> </span><span class="kn">import</span> <span class="n">CubeCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="n">RigidBodyAttributesCfg</span>
+
+<span class="c1"># 1. Initialize Simulation</span>
+<span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+<span class="n">sim_cfg</span> <span class="o">=</span> <span class="n">SimulationManagerCfg</span><span class="p">(</span><span class="n">sim_device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">sim</span> <span class="o">=</span> <span class="n">SimulationManager</span><span class="p">(</span><span class="n">sim_cfg</span><span class="p">)</span>
+
+<span class="c1"># 2. Configure a rigid object (cube)</span>
+<span class="n">physics_attrs</span> <span class="o">=</span> <span class="n">RigidBodyAttributesCfg</span><span class="p">(</span><span class="n">mass</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">dynamic_friction</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">static_friction</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">restitution</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+
+<span class="n">cfg</span> <span class="o">=</span> <span class="n">RigidObjectCfg</span><span class="p">(</span>
+    <span class="n">uid</span><span class="o">=</span><span class="s2">&quot;cube&quot;</span><span class="p">,</span>
+    <span class="n">shape</span><span class="o">=</span><span class="n">CubeCfg</span><span class="p">(</span><span class="n">size</span><span class="o">=</span><span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">]),</span>
+    <span class="n">body_type</span><span class="o">=</span><span class="s2">&quot;dynamic&quot;</span><span class="p">,</span>
+    <span class="n">attrs</span><span class="o">=</span><span class="n">physics_attrs</span><span class="p">,</span>
+    <span class="n">init_pos</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>
+<span class="p">)</span>
+
+<span class="c1"># 3. Spawn Rigid Object</span>
+<span class="n">cube</span><span class="p">:</span> <span class="n">RigidObject</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+<span class="c1"># 4. (Optional) Open window and run</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">sim</span><span class="o">.</span><span class="n">sim_config</span><span class="o">.</span><span class="n">headless</span><span class="p">:</span>
+    <span class="n">sim</span><span class="o">.</span><span class="n">open_window</span><span class="p">()</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+<blockquote>
+<div><p>Note: <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim/create_scene.py</span></code> provides a minimal working example of adding a rigid cube and running the simulation loop.</p>
+</div></blockquote>
+<section id="usd-import">
+<h3>USD Import<a class="headerlink" href="#usd-import" title="Link to this heading">#</a></h3>
+<p>You can import USD files (<code class="docutils literal notranslate"><span class="pre">.usd</span></code>, <code class="docutils literal notranslate"><span class="pre">.usda</span></code>, <code class="docutils literal notranslate"><span class="pre">.usdc</span></code>) as rigid objects:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_path</span>
+
+<span class="c1"># Import USD with properties from file</span>
+<span class="n">usd_cfg</span> <span class="o">=</span> <span class="n">RigidObjectCfg</span><span class="p">(</span>
+    <span class="n">shape</span><span class="o">=</span><span class="n">MeshCfg</span><span class="p">(</span><span class="n">fpath</span><span class="o">=</span><span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;path/to/object.usd&quot;</span><span class="p">)),</span>
+    <span class="n">body_type</span><span class="o">=</span><span class="s2">&quot;dynamic&quot;</span><span class="p">,</span>
+    <span class="n">use_usd_properties</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Keep USD properties</span>
+<span class="p">)</span>
+<span class="n">obj</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">usd_cfg</span><span class="p">)</span>
+
+<span class="c1"># Or override USD properties with config</span>
+<span class="n">usd_cfg_override</span> <span class="o">=</span> <span class="n">RigidObjectCfg</span><span class="p">(</span>
+    <span class="n">shape</span><span class="o">=</span><span class="n">MeshCfg</span><span class="p">(</span><span class="n">fpath</span><span class="o">=</span><span class="n">get_data_path</span><span class="p">(</span><span class="s2">&quot;path/to/object.usd&quot;</span><span class="p">)),</span>
+    <span class="n">body_type</span><span class="o">=</span><span class="s2">&quot;dynamic&quot;</span><span class="p">,</span>
+    <span class="n">use_usd_properties</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># Use config instead</span>
+    <span class="n">attrs</span><span class="o">=</span><span class="n">RigidBodyAttributesCfg</span><span class="p">(</span><span class="n">mass</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+<span class="p">)</span>
+<span class="n">obj2</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">usd_cfg_override</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="rigid-object-class-common-methods-attributes">
+<h2>Rigid Object Class — Common Methods &amp; Attributes<a class="headerlink" href="#rigid-object-class-common-methods-attributes" title="Link to this heading">#</a></h2>
+<p>Rigid objects are observed and controlled via single poses and linear/angular velocities. Key APIs include:</p>
+<section id="pose-state">
+<h3>Pose &amp; State<a class="headerlink" href="#pose-state" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_local_pose(to_matrix=False)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">7)</span></code> or <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">4,</span> <span class="pre">4)</span></code></p></td>
+<td class="text-left"><p>Get object local pose as (x, y, z, qw, qx, qy, qz) or 4x4 matrix per environment.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_local_pose(pose,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">pose:</span> <span class="pre">(N,</span> <span class="pre">7)</span></code> or <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">4,</span> <span class="pre">4)</span></code></p></td>
+<td class="text-left"><p>Teleport object to given pose (requires calling <code class="docutils literal notranslate"><span class="pre">sim.update()</span></code> to apply).</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.pose</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">7)</span></code></p></td>
+<td class="text-left"><p>Access object pose directly (for dynamic/kinematic bodies).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.lin_vel</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Access linear velocity of object root (for dynamic bodies).</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.ang_vel</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Access angular velocity of object root (for dynamic bodies).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.vel</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">6)</span></code></p></td>
+<td class="text-left"><p>Concatenated linear and angular velocities.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.lin_acc</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Access linear acceleration of object root (for dynamic bodies).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.ang_acc</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Access angular acceleration of object root (for dynamic bodies).</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.acc</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">6)</span></code></p></td>
+<td class="text-left"><p>Concatenated linear and angular accelerations.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.com_pose</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">7)</span></code></p></td>
+<td class="text-left"><p>Get center of mass pose of rigid bodies.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_data.default_com_pose</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">7)</span></code></p></td>
+<td class="text-left"><p>Default center of mass pose.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_state</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">13)</span></code></p></td>
+<td class="text-left"><p>Get full body state: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z].</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="dynamics-control">
+<h3>Dynamics Control<a class="headerlink" href="#dynamics-control" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">add_force_torque(force,</span> <span class="pre">torque,</span> <span class="pre">pos,</span> <span class="pre">env_ids)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">force:</span> <span class="pre">(N,</span> <span class="pre">3)</span></code>, <code class="docutils literal notranslate"><span class="pre">torque:</span> <span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Apply continuous force and/or torque to object.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_velocity(lin_vel,</span> <span class="pre">ang_vel,</span> <span class="pre">env_ids)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">lin_vel:</span> <span class="pre">(N,</span> <span class="pre">3)</span></code>, <code class="docutils literal notranslate"><span class="pre">ang_vel:</span> <span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Set linear and/or angular velocity directly.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">clear_dynamics(env_ids=None)</span></code></p></td>
+<td class="text-left"><p>-</p></td>
+<td class="text-left"><p>Reset velocities and clear all forces/torques.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="physical-properties">
+<h3>Physical Properties<a class="headerlink" href="#physical-properties" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_attrs(attrs,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">attrs:</span> <span class="pre">RigidBodyAttributesCfg</span></code></p></td>
+<td class="text-left"><p>Set physical attributes (mass, friction, damping, etc.).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_mass(mass,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">mass:</span> <span class="pre">(N,)</span></code></p></td>
+<td class="text-left"><p>Set mass for rigid object.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_mass(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,)</span></code></p></td>
+<td class="text-left"><p>Get mass for rigid object.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_friction(friction,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">friction:</span> <span class="pre">(N,)</span></code></p></td>
+<td class="text-left"><p>Set dynamic and static friction.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_friction(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,)</span></code></p></td>
+<td class="text-left"><p>Get friction (dynamic friction value).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_damping(damping,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">damping:</span> <span class="pre">(N,</span> <span class="pre">2)</span></code></p></td>
+<td class="text-left"><p>Set linear and angular damping.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_damping(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">2)</span></code></p></td>
+<td class="text-left"><p>Get linear and angular damping.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_inertia(inertia,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">inertia:</span> <span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Set inertia tensor diagonal values.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_inertia(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Get inertia tensor diagonal values.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_com_pose(com_pose,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">com_pose:</span> <span class="pre">(N,</span> <span class="pre">7)</span></code></p></td>
+<td class="text-left"><p>Set center of mass pose (dynamic/kinematic only).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="geometry-body-type">
+<h3>Geometry &amp; Body Type<a class="headerlink" href="#geometry-body-type" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_vertices(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">num_verts,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Get mesh vertices of the rigid objects.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_body_scale(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Get the body scale.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_body_scale(scale,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">scale:</span> <span class="pre">(N,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Set scale of rigid body (CPU only).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_body_type(body_type)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">body_type:</span> <span class="pre">str</span></code></p></td>
+<td class="text-left"><p>Change body type between ‘dynamic’ and ‘kinematic’.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">is_static</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p>Check if the rigid object is static.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">is_non_dynamic</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p>Check if the rigid object is non-dynamic (static or kinematic).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="collision-filtering">
+<h3>Collision &amp; Filtering<a class="headerlink" href="#collision-filtering" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_collision(enable,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable:</span> <span class="pre">(N,)</span></code></p></td>
+<td class="text-left"><p>Enable/disable collision for specific instances.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_collision_filter(filter_data,</span> <span class="pre">env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">filter_data:</span> <span class="pre">(N,</span> <span class="pre">4)</span></code></p></td>
+<td class="text-left"><p>Set collision filter data (arena id, collision flag, …).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="visual-appearance">
+<h3>Visual &amp; Appearance<a class="headerlink" href="#visual-appearance" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_visual_material(mat,</span> <span class="pre">env_ids=None,</span> <span class="pre">shared=False)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">mat:</span> <span class="pre">VisualMaterial</span></code></p></td>
+<td class="text-left"><p>Change visual appearance at runtime.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_visual_material_inst(env_ids=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">List[VisualMaterialInst]</span></code></p></td>
+<td class="text-left"><p>Get material instances for the rigid object.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">share_visual_material_inst(mat_insts)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">mat_insts:</span> <span class="pre">List[VisualMaterialInst]</span></code></p></td>
+<td class="text-left"><p>Share material instances between objects.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_visible(visible)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">visible:</span> <span class="pre">bool</span></code></p></td>
+<td class="text-left"><p>Set visibility of the rigid object.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">set_physical_visible(visible,</span> <span class="pre">rgba=None)</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">visible:</span> <span class="pre">bool</span></code>, <code class="docutils literal notranslate"><span class="pre">rgba:</span> <span class="pre">(4,)</span></code></p></td>
+<td class="text-left"><p>Set collision body render visibility.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="utility-identification">
+<h3>Utility &amp; Identification<a class="headerlink" href="#utility-identification" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method / Property</p></th>
+<th class="head text-left"><p>Return / Args</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">get_user_ids()</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(N,)</span></code></p></td>
+<td class="text-left"><p>Get the user IDs of the rigid bodies.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">reset(env_ids=None)</span></code></p></td>
+<td class="text-left"><p>-</p></td>
+<td class="text-left"><p>Reset objects to initial configuration.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">destroy()</span></code></p></td>
+<td class="text-left"><p>-</p></td>
+<td class="text-left"><p>Destroy and remove the rigid object from simulation.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="observation-shapes">
+<h3>Observation Shapes<a class="headerlink" href="#observation-shapes" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Pose: <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">7)</span></code> per-object pose (position + quaternion).</p></li>
+<li><p>Velocities: <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code> for linear and angular velocities respectively.</p></li>
+</ul>
+<p>N denotes the number of parallel environments when using vectorized simulation (<code class="docutils literal notranslate"><span class="pre">SimulationManagerCfg.num_envs</span></code>).</p>
+</section>
+</section>
+<section id="notes-best-practices">
+<h2>Notes &amp; Best Practices<a class="headerlink" href="#notes-best-practices" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>When moving objects programmatically via <code class="docutils literal notranslate"><span class="pre">set_local_pose</span></code>, call <code class="docutils literal notranslate"><span class="pre">sim.update()</span></code> (or step the sim) to ensure transforms and collision state are synchronized.</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">static</span></code> body type for fixed obstacles or environment pieces (they do not consume dynamic simulation resources).</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">kinematic</span></code> for objects whose pose is driven by code (teleporting or animation) but still interact with dynamic objects.</p></li>
+<li><p>For complex meshes, enabling convex decomposition (<code class="docutils literal notranslate"><span class="pre">RigidObjectCfg.max_convex_hull_num</span></code>) or providing a simplified collision mesh improves stability and performance.</p></li>
+<li><p>To use GPU physics, ensure <code class="docutils literal notranslate"><span class="pre">SimulationManagerCfg.sim_device</span></code> is set to <code class="docutils literal notranslate"><span class="pre">cuda</span></code> and call <code class="docutils literal notranslate"><span class="pre">sim.init_gpu_physics()</span></code> before large-batch simulations.</p></li>
+</ul>
+</section>
+<section id="example-applying-force-and-torque">
+<h2>Example: Applying Force and Torque<a class="headerlink" href="#example-applying-force-and-torque" title="Link to this heading">#</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="c1"># Apply force to the cube</span>
+<span class="n">force</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">]],</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>  <span class="c1"># (N, 3) upward force</span>
+<span class="n">cube</span><span class="o">.</span><span class="n">add_force_torque</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="n">force</span><span class="p">,</span> <span class="n">torque</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+
+<span class="c1"># Apply torque to the cube</span>
+<span class="n">torque</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">]],</span> <span class="n">device</span><span class="o">=</span><span class="n">sim</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>  <span class="c1"># (N, 3) torque around z-axis</span>
+<span class="n">cube</span><span class="o">.</span><span class="n">add_force_torque</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">torque</span><span class="o">=</span><span class="n">torque</span><span class="p">)</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+
+<span class="c1"># Access velocity data</span>
+<span class="n">linear_vel</span> <span class="o">=</span> <span class="n">cube</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">lin_vel</span>  <span class="c1"># (N, 3)</span>
+<span class="n">angular_vel</span> <span class="o">=</span> <span class="n">cube</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">ang_vel</span>  <span class="c1"># (N, 3)</span>
+</pre></div>
+</div>
+</section>
+<section id="integration-with-sensors-scenes">
+<h2>Integration with Sensors &amp; Scenes<a class="headerlink" href="#integration-with-sensors-scenes" title="Link to this heading">#</a></h2>
+<p>Rigid objects integrate with sensors (cameras, contact sensors) and gizmos. You can attach sensors referencing object <code class="docutils literal notranslate"><span class="pre">uid</span></code>s or query contacts for collision-based events.</p>
+</section>
+<section id="related-topics">
+<h2>Related Topics<a class="headerlink" href="#related-topics" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Soft bodies: see the Soft Object documentation for deformable object interfaces. (<a class="reference external" href="https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html">Soft Body Simulation Tutorial</a>)</p></li>
+<li><p>Examples: check <code class="docutils literal notranslate"><span class="pre">scripts/tutorials/sim/create_scene.py</span></code> and <code class="docutils literal notranslate"><span class="pre">examples/sim</span></code> for more usage patterns.</p></li>
+</ul>
+<!-- End of rigid object overview --></section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="sim_assets.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Simulation Assets</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="sim_rigid_object_group.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Rigid Object Group</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#rigid-body-attributes-rigidbodyattributescfg">Rigid Body Attributes (<code class="xref py py-class docutils literal notranslate"><span class="pre">RigidBodyAttributesCfg</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#setup-initialization">Setup &amp; Initialization</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#usd-import">USD Import</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#rigid-object-class-common-methods-attributes">Rigid Object Class — Common Methods &amp; Attributes</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pose-state">Pose &amp; State</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dynamics-control">Dynamics Control</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#physical-properties">Physical Properties</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#geometry-body-type">Geometry &amp; Body Type</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#collision-filtering">Collision &amp; Filtering</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visual-appearance">Visual &amp; Appearance</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#utility-identification">Utility &amp; Identification</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#observation-shapes">Observation Shapes</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#notes-best-practices">Notes &amp; Best Practices</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-applying-force-and-torque">Example: Applying Force and Torque</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-with-sensors-scenes">Integration with Sensors &amp; Scenes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#related-topics">Related Topics</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

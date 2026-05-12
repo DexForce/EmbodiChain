@@ -1,0 +1,1035 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.sim.solvers.pytorch_solver &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/sim/solvers/pytorch_solver';</script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.sim.solvers.pytorch_solver</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">TYPE_CHECKING</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">MISSING</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">copy</span><span class="w"> </span><span class="kn">import</span> <span class="n">deepcopy</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span><span class="p">,</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.solvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">SolverCfg</span><span class="p">,</span> <span class="n">BaseSolver</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.solvers.qpos_seed_sampler</span><span class="w"> </span><span class="kn">import</span> <span class="n">QposSeedSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.solver_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">validate_iteration_params</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Self</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.import_utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">lazy_import_pytorch_kinematics</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="PytorchSolverCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolverCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PytorchSolverCfg</span><span class="p">(</span><span class="n">SolverCfg</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for the pytorch kinematics solver used in the robot simulation.</span>
+
+<span class="sd">    This configuration includes properties related to the solver setup, such as the URDF path,</span>
+<span class="sd">    the end link name, and the root link name, along with the Tool Center Point (TCP).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">class_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;PytorchSolver&quot;</span>
+
+    <span class="c1"># Solver iteration parameters</span>
+    <span class="n">pos_eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5e-4</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tolerance for convergence for position&quot;&quot;&quot;</span>
+
+    <span class="n">rot_eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5e-4</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tolerance for convergence for rotation&quot;&quot;&quot;</span>
+
+    <span class="n">max_iterations</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">500</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Maximum number of iterations for the solver&quot;&quot;&quot;</span>
+
+    <span class="n">dt</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Time step for numerical integration&quot;&quot;&quot;</span>
+
+    <span class="n">damp</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-6</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Damping factor to prevent numerical instability&quot;&quot;&quot;</span>
+
+    <span class="n">is_only_position_constraint</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Flag to indicate whether the solver should only consider position constraints.&quot;&quot;&quot;</span>
+
+    <span class="n">num_samples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">5</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Number of samples to generate different joint seeds for IK iterations.</span>
+
+<span class="sd">    A higher number of samples increases the chances of finding a valid solution</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">ik_nearest_weight</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Weights for the inverse kinematics nearest calculation.</span>
+<span class="sd">    </span>
+<span class="sd">    The weights influence how the solver prioritizes closeness to the seed position</span>
+<span class="sd">    when multiple solutions are available.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="PytorchSolverCfg.init_solver">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolverCfg.init_solver">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">init_solver</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">),</span> <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;PytorchSolver&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the solver with the configuration.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            device (torch.device): The device to use for the solver. Defaults to CPU.</span>
+<span class="sd">            **kwargs: Additional keyword arguments that may be used for solver initialization.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            PytorchSolver: An initialized solver instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">solver</span> <span class="o">=</span> <span class="n">PytorchSolver</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="c1"># Set the Tool Center Point (TCP) for the solver</span>
+        <span class="n">solver</span><span class="o">.</span><span class="n">set_tcp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_tcp_as_numpy</span><span class="p">())</span>
+
+        <span class="k">return</span> <span class="n">solver</span></div>
+</div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ensure_pose_shape</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Decorator to ensure the input target_pose is of shape (n, 4, 4).</span>
+<span class="sd">    If input is (4, 4), it will be converted to (1, 4, 4).</span>
+<span class="sd">    Raises ValueError if shape is invalid.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">wrapper</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target_xpos</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">target_xpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+            <span class="n">target_xpos</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;target_xpos must be of shape (4, 4) or (n, 4, 4).&quot;</span><span class="p">)</span>
+            <span class="n">target_xpos</span> <span class="o">=</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">!=</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;target_xpos must be of shape (4, 4) or (n, 4, 4).&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;target_xpos must be a tensor of shape (4, 4) or (n, 4, 4).&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target_xpos</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">wrapper</span>
+
+
+<div class="viewcode-block" id="PytorchSolver">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolver">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PytorchSolver</span><span class="p">(</span><span class="n">BaseSolver</span><span class="p">):</span>
+<div class="viewcode-block" id="PytorchSolver.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolver.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">PytorchSolverCfg</span><span class="p">,</span>
+        <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Initializes the PyTorch kinematics solver.</span>
+
+<span class="sd">            This constructor sets up the kinematics solver using PyTorch,</span>
+<span class="sd">            allowing for efficient computation of robot kinematics based on</span>
+<span class="sd">            the specified URDF model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg: The configuration for the solver.</span>
+<span class="sd">            device (str, optional): The device to use for the solver (e.g., &quot;cpu&quot; or &quot;cuda&quot;).</span>
+<span class="sd">            **kwargs: Additional keyword arguments passed to the base solver.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">pk</span> <span class="o">=</span> <span class="n">lazy_import_pytorch_kinematics</span><span class="p">()</span>
+
+        <span class="c1"># Initialize solver parameters from configuration</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pos_eps</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">pos_eps</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rot_eps</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">rot_eps</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_max_iterations</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">max_iterations</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dt</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">dt</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_damp</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">damp</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_only_position_constraint</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">is_only_position_constraint</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">num_samples</span>
+
+        <span class="c1"># Get agent joint limits.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lim</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pk_serial_chain</span><span class="o">.</span><span class="n">get_joint_limits</span><span class="p">(),</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Inverse kinematics is available via damped least squares (iterative steps with Jacobian pseudo-inverse damped to avoid oscillation near singularlities).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pik</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pk</span><span class="o">.</span><span class="n">PseudoInverseIK</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pk_serial_chain</span><span class="p">,</span>
+            <span class="n">pos_tolerance</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_pos_eps</span><span class="p">,</span>
+            <span class="n">rot_tolerance</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_rot_eps</span><span class="p">,</span>
+            <span class="n">joint_limits</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">lim</span><span class="o">.</span><span class="n">T</span><span class="p">,</span>
+            <span class="n">early_stopping_any_converged</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">max_iterations</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_max_iterations</span><span class="p">,</span>
+            <span class="n">lr</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_dt</span><span class="p">,</span>
+            <span class="n">num_retries</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">use_compile</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">dof</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pk_serial_chain</span><span class="o">.</span><span class="n">n_joints</span></div>
+
+
+<div class="viewcode-block" id="PytorchSolver.get_iteration_params">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolver.get_iteration_params">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_iteration_params</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Returns the current iteration parameters.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            dict: A dictionary containing the current values of:</span>
+<span class="sd">                - pos_eps (float): Pos convergence threshold</span>
+<span class="sd">                - rot_eps (float): Rot convergence threshold</span>
+<span class="sd">                - max_iterations (int): Maximum number of iterations.</span>
+<span class="sd">                - dt (float): Time step size.</span>
+<span class="sd">                - damp (float): Damping factor.</span>
+<span class="sd">                - num_samples (int): Number of samples.</span>
+<span class="sd">                - is_only_position_constraint (bool): Flag to indicate whether the solver should only consider position constraints.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;pos_eps&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pos_eps</span><span class="p">,</span>
+            <span class="s2">&quot;rot_eps&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rot_eps</span><span class="p">,</span>
+            <span class="s2">&quot;max_iterations&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_max_iterations</span><span class="p">,</span>
+            <span class="s2">&quot;dt&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dt</span><span class="p">,</span>
+            <span class="s2">&quot;damp&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_damp</span><span class="p">,</span>
+            <span class="s2">&quot;num_samples&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">,</span>
+        <span class="p">}</span></div>
+
+
+<div class="viewcode-block" id="PytorchSolver.set_iteration_params">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolver.set_iteration_params">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_iteration_params</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">pos_eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5e-4</span><span class="p">,</span>
+        <span class="n">rot_eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5e-4</span><span class="p">,</span>
+        <span class="n">max_iterations</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">,</span>
+        <span class="n">dt</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span>
+        <span class="n">damp</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-6</span><span class="p">,</span>
+        <span class="n">num_samples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span><span class="p">,</span>
+        <span class="n">is_only_position_constraint</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Sets the iteration parameters for the kinematics solver.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            pos_eps (float): Pos convergence threshold, must be positive.</span>
+<span class="sd">            rot_eps (float): Rot convergence threshold, must be positive.</span>
+<span class="sd">            max_iterations (int): Maximum number of iterations, must be positive.</span>
+<span class="sd">            dt (float): Time step size, must be positive.</span>
+<span class="sd">            damp (float): Damping factor, must be non-negative.</span>
+<span class="sd">            num_samples (int): Number of samples, must be positive.</span>
+<span class="sd">            is_only_position_constraint (bool): Flag to indicate whether the solver should only consider position constraints.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            bool: True if all parameters are valid and set, False otherwise.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Validate parameters</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">validate_iteration_params</span><span class="p">(</span>
+            <span class="n">pos_eps</span><span class="p">,</span> <span class="n">rot_eps</span><span class="p">,</span> <span class="n">max_iterations</span><span class="p">,</span> <span class="n">dt</span><span class="p">,</span> <span class="n">damp</span><span class="p">,</span> <span class="n">num_samples</span>
+        <span class="p">):</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="c1"># Set parameters if all are valid</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pos_eps</span> <span class="o">=</span> <span class="n">pos_eps</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rot_eps</span> <span class="o">=</span> <span class="n">rot_eps</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_max_iterations</span> <span class="o">=</span> <span class="n">max_iterations</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dt</span> <span class="o">=</span> <span class="n">dt</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_damp</span> <span class="o">=</span> <span class="n">damp</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span> <span class="o">=</span> <span class="n">num_samples</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_only_position_constraint</span> <span class="o">=</span> <span class="n">is_only_position_constraint</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">pik</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pk</span><span class="o">.</span><span class="n">PseudoInverseIK</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pk_serial_chain</span><span class="p">,</span>
+            <span class="n">pos_tolerance</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_pos_eps</span><span class="p">,</span>
+            <span class="n">rot_tolerance</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_rot_eps</span><span class="p">,</span>
+            <span class="n">joint_limits</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">lim</span><span class="o">.</span><span class="n">T</span><span class="p">,</span>
+            <span class="n">early_stopping_any_converged</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">max_iterations</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_max_iterations</span><span class="p">,</span>
+            <span class="n">lr</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_dt</span><span class="p">,</span>
+            <span class="n">num_retries</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">use_compile</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_compute_inverse_kinematics</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">target_pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">joint_seed</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Computes the inverse kinematics solutions for the given target poses and joint seeds.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target_pose (torch.Tensor): The target poses represented as a (batch_size, 4, 4) tensor.</span>
+<span class="sd">            joint_seed (torch.Tensor): The initial joint positions used as a seed. It can be either a 1D tensor of shape (dof,) or a 2D tensor of shape (batch_size, dof).</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[Union[bool, torch.Tensor], torch.Tensor]:</span>
+<span class="sd">                - First element:</span>
+<span class="sd">                    - If solutions exist: torch.BoolTensor of shape (batch_size,) indicating convergence per pose</span>
+<span class="sd">                    - If no solutions: Python False</span>
+<span class="sd">                - Second element:</span>
+<span class="sd">                    - If solutions exist: torch.Tensor of shape (batch_size, dof) containing joint solutions</span>
+<span class="sd">                    - If no solutions: Empty torch.Tensor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">target_pose</span> <span class="o">=</span> <span class="n">target_pose</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+        <span class="n">joint_seed</span> <span class="o">=</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+
+        <span class="c1"># Extract translation and rotation parts</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">target_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+        <span class="n">rot</span> <span class="o">=</span> <span class="n">target_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+
+        <span class="n">tf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pk</span><span class="o">.</span><span class="n">Transform3d</span><span class="p">(</span>
+            <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+            <span class="n">rot</span><span class="o">=</span><span class="n">rot</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pik</span><span class="o">.</span><span class="n">initial_config</span> <span class="o">=</span> <span class="n">joint_seed</span>
+
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pik</span><span class="o">.</span><span class="n">solve</span><span class="p">(</span><span class="n">tf</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span><span class="o">.</span><span class="n">converged_any</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">solutions</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_qpos_map_to_limits</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Maps a batch of joint positions to fit within joint limits and computes the distance to the seed position.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor): Batch of candidate joint positions, shape (N, dof).</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple[torch.Tensor, torch.Tensor]: A tuple containing:</span>
+<span class="sd">                - torch.Tensor: whether qpos exactly within joint limit, shape (N).</span>
+<span class="sd">                - torch.Tensor: qpos that roughly mapped into joint limit, shape (N, dof).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">two_pi</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">pi</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ceil</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span> <span class="o">-</span> <span class="n">qpos</span><span class="p">)</span> <span class="o">/</span> <span class="n">two_pi</span><span class="p">)</span>
+        <span class="n">qpos_mapped</span> <span class="o">=</span> <span class="n">qpos</span> <span class="o">+</span> <span class="n">k</span> <span class="o">*</span> <span class="n">two_pi</span>
+        <span class="n">is_within_limits</span> <span class="o">=</span> <span class="p">(</span><span class="n">qpos_mapped</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span>
+            <span class="n">qpos_mapped</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span>
+        <span class="p">)</span>
+
+        <span class="c1"># if qpos_mapped is valid near zero, use it</span>
+        <span class="n">k_zero</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span>
+            <span class="p">(</span><span class="o">-</span><span class="n">torch</span><span class="o">.</span><span class="n">pi</span> <span class="o">-</span> <span class="n">qpos</span><span class="p">)</span> <span class="o">/</span> <span class="n">two_pi</span>
+        <span class="p">)</span>  <span class="c1"># [-pi, pi] is the valid range near zero</span>
+        <span class="n">qpos_mapped_near_zero</span> <span class="o">=</span> <span class="n">qpos</span> <span class="o">+</span> <span class="n">k_zero</span> <span class="o">*</span> <span class="n">two_pi</span>
+        <span class="n">is_within_limits_near_zero</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">qpos_mapped_near_zero</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span>
+        <span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">qpos_mapped_near_zero</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">)</span>
+        <span class="n">qpos_mapped</span><span class="p">[</span><span class="n">is_within_limits_near_zero</span><span class="p">]</span> <span class="o">=</span> <span class="n">qpos_mapped_near_zero</span><span class="p">[</span>
+            <span class="n">is_within_limits_near_zero</span>
+        <span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">is_within_limits</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">qpos_mapped</span>
+
+<div class="viewcode-block" id="PytorchSolver.get_ik">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolver.get_ik">[docs]</a>
+    <span class="nd">@ensure_pose_shape</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_ik</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target_xpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">qpos_seed</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">num_samples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">return_all_solutions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Computes the inverse kinematics for given target poses.</span>
+
+<span class="sd">        This function generates random joint configurations within the specified limits,</span>
+<span class="sd">        including the provided joint_seed, and attempts to find valid inverse kinematics solutions.</span>
+<span class="sd">        It then identifies the joint positions that are closest to the joint_seed.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target_xpos (torch.Tensor): A tensor representing the target positions. It can be of shape</span>
+<span class="sd">                                         (batch_size, 3) for multiple positions or (3,) for a single position.</span>
+<span class="sd">            qpos_seed (torch.Tensor | None): Initial joint positions used as seed for IK solving.</span>
+<span class="sd">                                            Can be:</span>
+<span class="sd">                                            - 1D tensor of shape (dof,): Single seed for all target positions</span>
+<span class="sd">                                            - 2D tensor of shape (batch_size, dof): Individual seed per position</span>
+<span class="sd">                                            If None, defaults to zero configuration. Defaults to None.</span>
+<span class="sd">            num_samples (int | None): The number of random samples to generate. Must be positive.</span>
+<span class="sd">                                     Defaults to None.</span>
+<span class="sd">            return_all_solutions (bool, optional): If True, returns all valid solutions found.</span>
+<span class="sd">            **kwargs: Additional arguments for future extensions.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            tuple[list[bool], torch.Tensor]: A tuple containing:</span>
+<span class="sd">                - A tensor of booleans indicating whether valid solutions were found for each target pose. (Shape: (batch_size,))</span>
+<span class="sd">                - A tensor of shape (batch_size, 1, dof) containing joint positions for</span>
+<span class="sd">                  each target pose, or an empty tensor if no valid solutions were found.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Convert target_pose to tensor and ensure correct device and dtype</span>
+        <span class="n">target_xpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+            <span class="n">target_xpos</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">num_samples</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span> <span class="o">=</span> <span class="n">num_samples</span>
+
+        <span class="c1"># Prepare qpos_seed</span>
+        <span class="k">if</span> <span class="n">qpos_seed</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">qpos_seed</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="c1"># Check qpos_seed dimensions</span>
+        <span class="n">n_batch</span> <span class="o">=</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="n">n_batch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">):</span>
+            <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">qpos_seed</span>
+        <span class="k">elif</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">,):</span>
+            <span class="n">qpos_seed</span> <span class="o">=</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">n_batch</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Invalid qpos_seed shape </span><span class="si">{</span><span class="n">qpos_seed</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> for batch_size </span><span class="si">{</span><span class="n">n_batch</span><span class="si">}</span><span class="s2"> and dof </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="ne">ValueError</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="c1"># output qpos_seed shape: (batch_size, dof)</span>
+
+        <span class="c1"># Transform target_xpos by TCP</span>
+        <span class="n">tcp_xpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tcp_xpos</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span>
+        <span class="p">)</span>
+        <span class="n">tcp_xpos_inv</span> <span class="o">=</span> <span class="n">tcp_xpos</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+        <span class="n">tcp_xpos_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">tcp_xpos_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">tcp_xpos_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">tcp_xpos_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">@</span> <span class="n">tcp_xpos_inv</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+        <span class="n">target_xpos</span> <span class="o">=</span> <span class="n">target_xpos</span> <span class="o">@</span> <span class="n">tcp_xpos_inv</span>
+
+        <span class="c1"># Get joint limits and ensure shape matches dof</span>
+
+        <span class="n">batch_size</span> <span class="o">=</span> <span class="n">target_xpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">sampler</span> <span class="o">=</span> <span class="n">QposSeedSampler</span><span class="p">(</span>
+            <span class="n">num_samples</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">,</span> <span class="n">dof</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span>
+        <span class="n">random_qpos_seeds</span> <span class="o">=</span> <span class="n">sampler</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span>
+            <span class="n">qpos_seed</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lower_qpos_limits</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">upper_qpos_limits</span><span class="p">,</span>
+            <span class="n">batch_size</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">target_xpos_repeated</span> <span class="o">=</span> <span class="n">sampler</span><span class="o">.</span><span class="n">repeat_target_xpos</span><span class="p">(</span>
+            <span class="n">target_xpos</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Compute IK solutions for all samples</span>
+        <span class="n">is_ik_success</span><span class="p">,</span> <span class="n">ik_qpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compute_inverse_kinematics</span><span class="p">(</span>
+            <span class="n">target_xpos_repeated</span><span class="p">,</span> <span class="n">random_qpos_seeds</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">is_ik_success</span><span class="o">.</span><span class="n">any</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;No IK solutions found for any of the target poses.&quot;</span><span class="p">)</span>
+            <span class="n">failed_state</span> <span class="o">=</span> <span class="n">is_ik_success</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">)[:,</span> <span class="mi">0</span><span class="p">]</span>
+            <span class="n">failed_qpos</span> <span class="o">=</span> <span class="n">ik_qpos</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">)[</span>
+                <span class="p">:,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">:</span>
+            <span class="p">]</span>
+            <span class="k">return</span> <span class="n">failed_state</span><span class="p">,</span> <span class="n">failed_qpos</span>
+        <span class="c1"># map ik_qpos to within limits and check validity</span>
+        <span class="n">is_mask_valid</span><span class="p">,</span> <span class="n">ik_qpos_mapped</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_qpos_map_to_limits</span><span class="p">(</span><span class="n">ik_qpos</span><span class="p">)</span>
+        <span class="n">is_success</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">is_ik_success</span><span class="p">,</span> <span class="n">is_mask_valid</span><span class="p">)</span>
+
+        <span class="n">all_is_success</span> <span class="o">=</span> <span class="n">is_success</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">)</span>
+        <span class="n">all_results</span> <span class="o">=</span> <span class="n">ik_qpos_mapped</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">return_all_solutions</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">all_is_success</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">all_results</span>
+        <span class="n">qpos_seed_repeat</span> <span class="o">=</span> <span class="n">qpos_seed</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_samples</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">weighed_diff</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ik_nearest_weight</span> <span class="o">*</span> <span class="p">(</span><span class="n">all_results</span> <span class="o">-</span> <span class="n">qpos_seed_repeat</span><span class="p">)</span>
+        <span class="n">qpos_seed_dis</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">weighed_diff</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="c1"># Tricky: mask out invalid solutions by setting distance to inf, so they won&#39;t be selected as closest</span>
+        <span class="n">qpos_seed_dis</span><span class="p">[</span><span class="o">~</span><span class="n">all_is_success</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">)</span>
+        <span class="n">closest_indices</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">qpos_seed_dis</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">closest_qpos</span> <span class="o">=</span> <span class="n">all_results</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">batch_size</span><span class="p">),</span> <span class="n">closest_indices</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">all_is_success</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">closest_qpos</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">:]</span></div>
+
+
+<div class="viewcode-block" id="PytorchSolver.get_all_fk">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.solvers.html#embodichain.lab.sim.solvers.PytorchSolver.get_all_fk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_all_fk</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get the forward kinematics for all links from root to end link.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor): The joint positions.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list: A list of 4x4 homogeneous transformation matrices representing the poses of all links from root to end link.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">qpos</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">qpos</span><span class="p">)</span>
+        <span class="n">qpos</span> <span class="o">=</span> <span class="n">qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="n">ret</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pk_serial_chain</span><span class="o">.</span><span class="n">forward_kinematics</span><span class="p">(</span><span class="n">qpos</span><span class="p">,</span> <span class="n">end_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">link_names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ret</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">root_link_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">start_index</span> <span class="o">=</span> <span class="n">link_names</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">root_link_name</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Root link name &#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">root_link_name</span><span class="si">}</span><span class="s2">&#39; not found in the kinematic chain&quot;</span>
+                <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">start_index</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_link_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">end_index</span> <span class="o">=</span> <span class="n">link_names</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">end_link_name</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;End link name &#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">end_link_name</span><span class="si">}</span><span class="s2">&#39; not found in the kinematic chain&quot;</span>
+                <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">end_index</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">link_names</span><span class="p">)</span>
+
+        <span class="n">poses</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">link_name</span> <span class="ow">in</span> <span class="n">link_names</span><span class="p">[</span><span class="n">start_index</span><span class="p">:</span><span class="n">end_index</span><span class="p">]:</span>
+            <span class="n">xpos</span> <span class="o">=</span> <span class="n">ret</span><span class="p">[</span><span class="n">link_name</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">xpos</span><span class="p">,</span> <span class="s2">&quot;get_matrix&quot;</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The result for link &#39;</span><span class="si">{</span><span class="n">link_name</span><span class="si">}</span><span class="s2">&#39; must have &#39;get_matrix&#39; attributes.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">xpos_t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">xpos</span><span class="o">.</span><span class="n">get_matrix</span><span class="p">()</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">xpos</span><span class="o">.</span><span class="n">get_matrix</span><span class="p">()</span>
+            <span class="n">xpos_t</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">m</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+            <span class="n">xpos_t</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">m</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+            <span class="n">poses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">xpos_t</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">poses</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

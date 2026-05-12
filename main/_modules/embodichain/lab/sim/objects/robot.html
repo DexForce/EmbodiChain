@@ -1,0 +1,1712 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.sim.objects.robot &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/sim/objects/robot';</script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.sim.objects.robot</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Sequence</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tensordict</span><span class="w"> </span><span class="kn">import</span> <span class="n">TensorDict</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dexsim.engine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Articulation</span> <span class="k">as</span> <span class="n">_Articulation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="n">RobotCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.solvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">SolverCfg</span><span class="p">,</span> <span class="n">BaseSolver</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">Articulation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.utility.tensor</span><span class="w"> </span><span class="kn">import</span> <span class="n">to_tensor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.math</span><span class="w"> </span><span class="kn">import</span> <span class="n">quat_from_matrix</span><span class="p">,</span> <span class="n">matrix_from_quat</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.string</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">is_regular_expression</span><span class="p">,</span>
+    <span class="n">resolve_matching_names_values</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ControlGroup</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Represents a group of controllable joints in a robot.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        joint_names (List[str]): Names of the joints in this control group.</span>
+<span class="sd">        joint_ids (List[int]): IDs corresponding to the joints in this control group.</span>
+<span class="sd">        link_names (List[str]): Names of child links associated with the joints.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">joint_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">joint_ids</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">link_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+
+<div class="viewcode-block" id="Robot">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Robot</span><span class="p">(</span><span class="n">Articulation</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A class representing a batch of robots in the simulation environment.</span>
+
+<span class="sd">    Robot is a specific type of articulation that can have additional properties or methods.</span>
+<span class="sd">    - `control_parts`: Specify the parts that can be controlled in a different manner. Different part may have</span>
+<span class="sd">        different joint ids, drive properties, pyhsical attributes, kinematic solvers or motion planners.</span>
+<span class="sd">    - `solvers`: Specify the kinematic solvers for the robot.</span>
+<span class="sd">    - `planners`: Specify the motion planner for the robot.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Robot.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">cfg</span><span class="p">:</span> <span class="n">RobotCfg</span><span class="p">,</span>
+        <span class="n">entities</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">_Articulation</span><span class="p">],</span>
+        <span class="n">device</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_entities</span> <span class="o">=</span> <span class="n">entities</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span>
+
+        <span class="c1"># Initialize joint ids for control parts.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_joint_ids</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ControlGroup</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_init_control_parts</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">)</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">entities</span><span class="p">,</span> <span class="n">device</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">solver_cfg</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">init_solver</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">solver_cfg</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">parent_str</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__str__</span><span class="p">()</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">parent_str</span>
+            <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot; | control_parts: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="si">}</span><span class="s2">, solvers: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">control_parts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the control parts of the robot.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span>
+
+<div class="viewcode-block" id="Robot.get_joint_ids">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_joint_ids">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_joint_ids</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">remove_mimic</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint ids of the robot for a specific control part.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the joint ids for. If None, the default part is used.</span>
+<span class="sd">            remove_mimic (bool, optional): If True, mimic joints will be excluded from the returned joint ids. Defaults to False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List[int]: The joint ids of the robot for the specified control part.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span>
+                <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dof</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">remove_mimic</span>
+                <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_joint_ids</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">remove_mimic</span>
+            <span class="k">else</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_joint_ids</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">mimic_ids</span><span class="p">]</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_link_names">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_link_names">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_link_names</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the link names of the robot for a specific control part.</span>
+
+<span class="sd">        If no control part is specified, return all link names.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str, optional): The name of the control part to get the link names for. If None, the default part is used.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List[str]: The link names of the robot for the specified control part.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">link_names</span>
+
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">link_names</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_qpos_limits">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qpos_limits">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_qpos_limits</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint position limits (qpos) of the robot for a specific control part.</span>
+
+<span class="sd">        It returns all joint position limits if no control part is specified.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the qpos limits for.</span>
+<span class="sd">            env_ids (Sequence[int] | None): The environment ids to get the qpos limits for. If None, all environments are used.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: Joint position limits with shape (N, dof, 2), where N is the number of environments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="n">qpos_limits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos_limits</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">qpos_limits</span><span class="p">[</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">qpos_limits</span><span class="p">[</span><span class="n">local_env_ids</span><span class="p">][:,</span> <span class="n">part_joint_ids</span><span class="p">,</span> <span class="p">:]</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_qvel_limits">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qvel_limits">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_qvel_limits</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint velocity limits (qvel) of the robot for a specific control part.</span>
+
+<span class="sd">        It returns all joint velocity limits if no control part is specified.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the qvel limits for.</span>
+<span class="sd">            env_ids (Sequence[int] | None): The environment ids to get the qvel limits for. If None, all environments are used.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: Joint velocity limits with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="n">qvel_limits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qvel_limits</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">qvel_limits</span><span class="p">[</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">qvel_limits</span><span class="p">[</span><span class="n">local_env_ids</span><span class="p">][:,</span> <span class="n">part_joint_ids</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_qf_limits">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qf_limits">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_qf_limits</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint effort limits (qf) of the robot for a specific control part.</span>
+
+<span class="sd">        It returns all joint effort limits if no control part is specified.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the qf limits for.</span>
+<span class="sd">            env_ids (Sequence[int] | None): The environment ids to get the qf limits for. If None, all environments are used.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: Joint effort limits with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="n">qf_limits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qf_limits</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">qf_limits</span><span class="p">[</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">qf_limits</span><span class="p">[</span><span class="n">local_env_ids</span><span class="p">][:,</span> <span class="n">part_joint_ids</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_proprioception">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_proprioception">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_proprioception</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Gets robot proprioception information, primarily for agent state representation in robot learning scenarios.</span>
+
+<span class="sd">        The default proprioception information includes:</span>
+<span class="sd">            - qpos: Joint positions.</span>
+<span class="sd">            - qvel: Joint velocities.</span>
+<span class="sd">            - qf: Joint efforts.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Dict[str, torch.Tensor]: A dictionary containing the robot&#39;s proprioception information</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">return</span> <span class="n">TensorDict</span><span class="p">(</span>
+            <span class="n">qpos</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos</span><span class="p">,</span>
+            <span class="n">qvel</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qvel</span><span class="p">,</span>
+            <span class="n">qf</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qf</span><span class="p">,</span>
+            <span class="n">batch_size</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">num_instances</span><span class="p">],</span>
+            <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.set_qpos">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.set_qpos">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_qpos</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">joint_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the joint positions (qpos) or target positions for the articulation.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor): Joint positions with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">            joint_ids (Sequence[int] | None, optional): Joint indices to apply the positions. If None, applies to all joints.</span>
+<span class="sd">            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.</span>
+<span class="sd">            target (bool): If True, sets target positions for simulation. If False, updates current positions directly.</span>
+<span class="sd">            name (str | None): The name of the control part to set the qpos for. If None, the default part is used.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the length of `env_ids` does not match the length of `qpos`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span>
+                <span class="n">qpos</span><span class="o">=</span><span class="n">qpos</span><span class="p">,</span>
+                <span class="n">joint_ids</span><span class="o">=</span><span class="n">joint_ids</span><span class="p">,</span>
+                <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+                <span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">joint_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;`joint_ids` is ignored when `name` is specified.&quot;</span><span class="p">)</span>
+
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span>
+                <span class="n">qpos</span><span class="o">=</span><span class="n">qpos</span><span class="p">,</span>
+                <span class="n">joint_ids</span><span class="o">=</span><span class="n">part_joint_ids</span><span class="p">,</span>
+                <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+                <span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_qpos">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qpos">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_qpos</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">target</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint positions (qpos) of the robot.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the qpos for. If None, the default part is used.</span>
+<span class="sd">            target (bool): If True, gets target positions for simulation. If False, gets current positions. The default is False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: Joint positions with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">qpos</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">qpos</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">qpos</span><span class="p">[:,</span> <span class="n">part_joint_ids</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="Robot.set_qvel">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.set_qvel">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_qvel</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">qvel</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">joint_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">target</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the joint velocities (qvel) or target velocities for the articulation.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qvel (torch.Tensor): Joint velocities with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">            joint_ids (Sequence[int] | None, optional): Joint indices to apply the velocities. If None, applies to all joints.</span>
+<span class="sd">            env_ids (Sequence[int] | None): Environment indices to apply the velocities. Defaults to all environments.</span>
+<span class="sd">            target (bool): If True, sets target velocities for simulation. If False, updates current velocities directly.</span>
+<span class="sd">            name (str | None): The name of the control part to set the qvel for. If None, the default part is used.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the length of `env_ids` does not match the length of `qvel`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_qvel</span><span class="p">(</span>
+                <span class="n">qvel</span><span class="o">=</span><span class="n">qvel</span><span class="p">,</span>
+                <span class="n">joint_ids</span><span class="o">=</span><span class="n">joint_ids</span><span class="p">,</span>
+                <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+                <span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">joint_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;`joint_ids` is ignored when `name` is specified.&quot;</span><span class="p">)</span>
+
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_qvel</span><span class="p">(</span>
+                <span class="n">qvel</span><span class="o">=</span><span class="n">qvel</span><span class="p">,</span>
+                <span class="n">joint_ids</span><span class="o">=</span><span class="n">part_joint_ids</span><span class="p">,</span>
+                <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+                <span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_qvel">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qvel">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_qvel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">target</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint velocities (qvel) of the robot.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the qvel for. If None, the default part is used.</span>
+<span class="sd">            target (bool): If True, gets target velocities for simulation. If False, gets current velocities. The default is False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: Joint velocities with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">qvel</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">get_qvel</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">qvel</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">qvel</span><span class="p">[:,</span> <span class="n">part_joint_ids</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="Robot.set_qf">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.set_qf">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_qf</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">qf</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">joint_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the joint efforts (qf) for the articulation.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qf (torch.Tensor): Joint efforts with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">            joint_ids (Sequence[int] | None, optional): Joint indices to apply the efforts. If None, applies to all joints.</span>
+<span class="sd">            env_ids (Sequence[int] | None): Environment indices to apply the efforts. Defaults to all environments.</span>
+<span class="sd">            name (str | None): The name of the control part to set the qf for. If None, the default part is used.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the length of `env_ids` does not match the length of `qf`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_qf</span><span class="p">(</span>
+                <span class="n">qf</span><span class="o">=</span><span class="n">qf</span><span class="p">,</span>
+                <span class="n">joint_ids</span><span class="o">=</span><span class="n">joint_ids</span><span class="p">,</span>
+                <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">joint_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;`joint_ids` is ignored when `name` is specified.&quot;</span><span class="p">)</span>
+
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_qf</span><span class="p">(</span>
+                <span class="n">qf</span><span class="o">=</span><span class="n">qf</span><span class="p">,</span>
+                <span class="n">joint_ids</span><span class="o">=</span><span class="n">part_joint_ids</span><span class="p">,</span>
+                <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_qf">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_qf">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_qf</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the joint efforts (qf) of the robot.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the qf for. If None, the default part is used.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: Joint efforts with shape (N, dof), where N is the number of environments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">qf</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">get_qf</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">qf</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span> <span class="ow">or</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">part_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">qf</span><span class="p">[:,</span> <span class="n">part_joint_ids</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="Robot.compute_fk">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.compute_fk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_fk</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">link_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">end_link_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">root_link_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute the forward kinematics of the robot given joint positions and optionally a specific part name.</span>
+<span class="sd">        The output pose will be in the local arena frame.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, num_joints).</span>
+<span class="sd">            name (str | None): The name of the control part to compute the FK for. If None, the default part is used.</span>
+<span class="sd">            link_names (List[str] | None): The names of the links to compute the FK for. If None, all links are used.</span>
+<span class="sd">            end_link_name (str | None): The name of the end link to compute the FK for. If None, the default end link is used.</span>
+<span class="sd">            root_link_name (str | None): The name of the root link to compute the FK for. If None, the default root link is used.</span>
+<span class="sd">            env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.</span>
+<span class="sd">            to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: The forward kinematics result with shape (n_envs, 7) or (n_envs, 4, 4) if `to_matrix` is True.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="nb">super</span><span class="p">(),</span> <span class="s2">&quot;compute_fk&quot;</span><span class="p">):</span>
+            <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">compute_fk</span><span class="p">(</span>
+                <span class="n">qpos</span><span class="o">=</span><span class="n">qpos</span><span class="p">,</span>
+                <span class="n">link_names</span><span class="o">=</span><span class="n">link_names</span><span class="p">,</span>
+                <span class="n">end_link_name</span><span class="o">=</span><span class="n">end_link_name</span><span class="p">,</span>
+                <span class="n">root_link_name</span><span class="o">=</span><span class="n">root_link_name</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;No solvers are defined for the robot. Please ensure that the robot has solvers configured.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">solver</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">solver</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not have an associated solver. Please ensure that a valid control part with an available solver is provided.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">qpos</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">qpos</span> <span class="o">=</span> <span class="n">qpos</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint positions batch size mismatch. Expected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">solver</span><span class="o">.</span><span class="n">dof</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint positions shape mismatch. Expected </span><span class="si">{</span><span class="n">solver</span><span class="o">.</span><span class="n">dof</span><span class="si">}</span><span class="s2"> joints, got </span><span class="si">{</span><span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">qpos_</span> <span class="o">=</span> <span class="n">qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">result_matrix</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">get_fk</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">qpos_</span><span class="p">)</span>
+
+        <span class="n">base_pose</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_link_pose</span><span class="p">(</span>
+            <span class="n">link_name</span><span class="o">=</span><span class="n">solver</span><span class="o">.</span><span class="n">root_link_name</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="n">result_matrix</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">base_pose</span><span class="p">,</span> <span class="n">result_matrix</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">to_matrix</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">result_matrix</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">result_matrix</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+            <span class="n">quat</span> <span class="o">=</span> <span class="n">quat_from_matrix</span><span class="p">(</span><span class="n">result_matrix</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">])</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">((</span><span class="n">pos</span><span class="p">,</span> <span class="n">quat</span><span class="p">),</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.compute_ik">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.compute_ik">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_ik</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">joint_seed</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">return_all_solutions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute the inverse kinematics of the robot given joint positions and optionally a specific part name.</span>
+<span class="sd">        The input pose should be in the local arena frame.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            pose (torch.Tensor): The end effector pose of the robot, (n_envs, 7) or (n_envs, 4, 4).</span>
+<span class="sd">            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, dof).</span>
+<span class="sd">                If None, the zero joint positions will be used as the seed.</span>
+<span class="sd">            name (str | None): The name of the control part to compute the IK for. If None, the default part is used.</span>
+<span class="sd">            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.</span>
+<span class="sd">            return_all_solutions (bool): Whether to return all IK solutions or just the best one. Defaults to False.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[torch.Tensor, torch.Tensor] | None: The success Tensor with shape (n_envs, ) and qpos Tensor with shape (n_envs, max_results, dof), or None if solver not found.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="n">solver</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">solver</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not have an associated solver. Please ensure that a valid control part with an available solver is provided.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">pose</span> <span class="o">=</span> <span class="n">to_tensor</span><span class="p">(</span><span class="n">pose</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">pose</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">7</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span>
+            <span class="n">pose</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">4</span>
+        <span class="p">):</span>
+            <span class="n">pose</span> <span class="o">=</span> <span class="n">pose</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Pose batch size mismatch. Expected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">joint_seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">joint_seed</span> <span class="o">=</span> <span class="n">to_tensor</span><span class="p">(</span><span class="n">joint_seed</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">joint_seed</span> <span class="o">=</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Joint seed batch size mismatch. Expected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+                <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">7</span> <span class="ow">and</span> <span class="n">pose</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="c1"># Convert pose from (batch, 7) to (batch, 4, 4)</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+            <span class="n">quat</span> <span class="o">=</span> <span class="n">pose</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">:]</span>
+            <span class="c1"># Convert quaternion to rotation matrix</span>
+            <span class="n">rot</span> <span class="o">=</span> <span class="n">matrix_from_quat</span><span class="p">(</span><span class="n">quat</span><span class="p">)</span>
+            <span class="c1"># Build homogeneous transformation matrix efficiently</span>
+            <span class="n">pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">pose</span><span class="o">.</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">rot</span>
+            <span class="n">pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">pos</span>
+
+        <span class="n">base_pose</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_link_pose</span><span class="p">(</span>
+            <span class="n">link_name</span><span class="o">=</span><span class="n">solver</span><span class="o">.</span><span class="n">root_link_name</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="n">pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">inverse</span><span class="p">(</span><span class="n">base_pose</span><span class="p">),</span> <span class="n">pose</span><span class="p">)</span>
+
+        <span class="n">ret</span><span class="p">,</span> <span class="n">qpos</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">get_ik</span><span class="p">(</span>
+            <span class="n">target_xpos</span><span class="o">=</span><span class="n">pose</span><span class="p">,</span>
+            <span class="n">qpos_seed</span><span class="o">=</span><span class="n">joint_seed</span><span class="p">,</span>
+            <span class="n">return_all_solutions</span><span class="o">=</span><span class="n">return_all_solutions</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">dof</span> <span class="o">=</span> <span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">return_all_solutions</span><span class="p">:</span>
+            <span class="n">qpos</span> <span class="o">=</span> <span class="n">qpos</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">dof</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">ret</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="n">qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.compute_batch_fk">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.compute_batch_fk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_batch_fk</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">qpos</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute the forward kinematics of the robot given joint positions and optionally a specific part name.</span>
+<span class="sd">        The output pose will be in the local arena frame.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, n_batch, num_joints).</span>
+<span class="sd">            name (str | None): The name of the control part to compute the FK for. If None, the default part is used.</span>
+<span class="sd">            env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.</span>
+<span class="sd">            to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            torch.Tensor: The forward kinematics result with shape (n_envs, batch, 7) or (n_envs, batch, 4, 4) if `to_matrix` is True.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;No solvers are defined for the robot. Please ensure that the robot has solvers configured.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">solver</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">solver</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not have an associated solver. Please ensure that a valid control part with an available solver is provided.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint positions batch size mismatch. Expected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">!=</span> <span class="n">solver</span><span class="o">.</span><span class="n">dof</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint positions shape mismatch. Expected </span><span class="si">{</span><span class="n">solver</span><span class="o">.</span><span class="n">dof</span><span class="si">}</span><span class="s2"> joints, got </span><span class="si">{</span><span class="n">qpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">qpos_</span> <span class="o">=</span> <span class="n">qpos</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">n_batch</span> <span class="o">=</span> <span class="n">qpos_</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">qpos_batch</span> <span class="o">=</span> <span class="n">qpos_</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">solver</span><span class="o">.</span><span class="n">dof</span><span class="p">)</span>
+        <span class="n">xpos_batch</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">get_fk</span><span class="p">(</span><span class="n">qpos</span><span class="o">=</span><span class="n">qpos_batch</span><span class="p">)</span>
+
+        <span class="c1"># get xpos from link root</span>
+        <span class="n">base_xpos_n_envs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_link_pose</span><span class="p">(</span>
+            <span class="n">link_name</span><span class="o">=</span><span class="n">solver</span><span class="o">.</span><span class="n">root_link_name</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="n">base_xpos_batch</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">base_xpos_n_envs</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_batch</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">result_matrix</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">base_xpos_batch</span><span class="p">,</span> <span class="n">xpos_batch</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">to_matrix</span><span class="p">:</span>
+            <span class="n">result_matrix</span> <span class="o">=</span> <span class="n">result_matrix</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">),</span> <span class="n">n_batch</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">result_matrix</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">result_matrix</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+            <span class="n">quat</span> <span class="o">=</span> <span class="n">quat_from_matrix</span><span class="p">(</span><span class="n">result_matrix</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">])</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">((</span><span class="n">pos</span><span class="p">,</span> <span class="n">quat</span><span class="p">),</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">),</span> <span class="n">n_batch</span><span class="p">,</span> <span class="mi">7</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">result</span></div>
+
+
+<div class="viewcode-block" id="Robot.compute_batch_ik">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.compute_batch_ik">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_batch_ik</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">pose</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">joint_seed</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute the inverse kinematics of the robot given joint positions and optionally a specific part name.</span>
+<span class="sd">        The input pose should be in the local arena frame.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            pose (torch.Tensor): The end effector pose of the robot, (n_envs, n_batch, 7) or (n_envs, n_batch, 4, 4).</span>
+<span class="sd">            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.</span>
+<span class="sd">            name (str | None): The name of the control part to compute the IK for. If None, the default part is used.</span>
+<span class="sd">            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[torch.Tensor, torch.Tensor]:</span>
+<span class="sd">                Success Tensor with shape (n_envs, n_batch)</span>
+<span class="sd">                Qpos Tensor with shape (n_envs, n_batch, dof).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="n">solver</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">solver</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not have an associated solver. Please ensure that a valid control part with an available solver is provided.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">pose</span> <span class="o">=</span> <span class="n">to_tensor</span><span class="p">(</span><span class="n">pose</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Pose batch size mismatch. Expected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">n_batch</span> <span class="o">=</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">n_dof</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">dof</span>
+        <span class="k">if</span> <span class="n">joint_seed</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">joint_seed</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+                <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">),</span> <span class="n">n_batch</span><span class="p">,</span> <span class="n">n_dof</span><span class="p">),</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+                <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint seed env size mismatch. Expected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">n_batch</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint seed batch size mismatch. Expected </span><span class="si">{</span><span class="n">n_batch</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">n_dof</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Joint seed dof size mismatch. Expected </span><span class="si">{</span><span class="n">n_batch</span><span class="si">}</span><span class="s2"> but got </span><span class="si">{</span><span class="n">joint_seed</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">pose</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">7</span> <span class="ow">and</span> <span class="n">pose</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="c1"># Convert pose from (n_envs, n_batch, 7) to (n_envs * n_batch, 4, 4)</span>
+            <span class="n">pose_batch</span> <span class="o">=</span> <span class="n">pose</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">7</span><span class="p">)</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">pose_batch</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+            <span class="n">quat</span> <span class="o">=</span> <span class="n">pose_batch</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">:]</span>
+            <span class="c1"># Convert quaternion to rotation matrix</span>
+            <span class="n">rot</span> <span class="o">=</span> <span class="n">matrix_from_quat</span><span class="p">(</span><span class="n">quat</span><span class="p">)</span>
+            <span class="c1"># Build homogeneous transformation matrix efficiently</span>
+            <span class="n">pose_batch</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">pose</span><span class="o">.</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span>
+                <span class="n">pose_batch</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span>
+            <span class="p">)</span>
+            <span class="n">pose_batch</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">rot</span>
+            <span class="n">pose_batch</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">pos</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Convert pose from (n_envs, n_batch, 4, 4) to (n_envs * n_batch, 4, 4)</span>
+            <span class="n">pose_batch</span> <span class="o">=</span> <span class="n">pose</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+
+        <span class="c1"># get xpos from link root</span>
+        <span class="n">base_xpos_n_envs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_link_pose</span><span class="p">(</span>
+            <span class="n">link_name</span><span class="o">=</span><span class="n">solver</span><span class="o">.</span><span class="n">root_link_name</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="n">base_inv_xpos_n_envs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">inverse</span><span class="p">(</span><span class="n">base_xpos_n_envs</span><span class="p">)</span>
+        <span class="n">base_inv_xpos_batch</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">base_inv_xpos_n_envs</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+            <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_batch</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">pose_batch</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">base_inv_xpos_batch</span><span class="p">,</span> <span class="n">pose_batch</span><span class="p">)</span>
+
+        <span class="n">joint_seed_batch</span> <span class="o">=</span> <span class="n">joint_seed</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_dof</span><span class="p">)</span>
+        <span class="n">ret</span><span class="p">,</span> <span class="n">qpos_batch</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">get_ik</span><span class="p">(</span>
+            <span class="n">target_xpos</span><span class="o">=</span><span class="n">pose_batch</span><span class="p">,</span>
+            <span class="n">qpos_seed</span><span class="o">=</span><span class="n">joint_seed_batch</span><span class="p">,</span>
+            <span class="n">return_all_solutions</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">ret</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">),</span> <span class="n">n_batch</span><span class="p">)</span>
+        <span class="n">qpos</span> <span class="o">=</span> <span class="n">qpos_batch</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">local_env_ids</span><span class="p">),</span> <span class="n">n_batch</span><span class="p">,</span> <span class="n">n_dof</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ret</span><span class="p">,</span> <span class="n">qpos</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_control_parts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">control_parts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the control parts of the robot.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            control_parts (Dict[str, List[str]]): A dictionary where keys are control part names and values are lists of</span>
+<span class="sd">                joint names or regular expressions that match joint names.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">joint_name_to_ids</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">name</span><span class="p">:</span> <span class="n">i</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_entities</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_actived_joint_names</span><span class="p">())</span>
+        <span class="p">}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">joint_names</span> <span class="ow">in</span> <span class="n">control_parts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="c1"># convert joint_names which is a regular expression to a list of joint names</span>
+            <span class="n">joint_names_expanded</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">jn</span> <span class="ow">in</span> <span class="n">joint_names</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">is_regular_expression</span><span class="p">(</span><span class="n">jn</span><span class="p">):</span>
+                    <span class="n">_</span><span class="p">,</span> <span class="n">names</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">resolve_matching_names_values</span><span class="p">(</span>
+                        <span class="p">{</span><span class="n">jn</span><span class="p">:</span> <span class="kc">None</span><span class="p">},</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_names</span>
+                    <span class="p">)</span>
+                    <span class="n">joint_names_expanded</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">names</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">joint_names_expanded</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">jn</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_joint_ids</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">joint_name_to_ids</span><span class="p">[</span><span class="n">joint_name</span><span class="p">]</span>
+                <span class="k">for</span> <span class="n">joint_name</span> <span class="ow">in</span> <span class="n">joint_names_expanded</span>
+                <span class="k">if</span> <span class="n">joint_name</span> <span class="ow">in</span> <span class="n">joint_name_to_ids</span>
+            <span class="p">]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_joint_ids</span><span class="p">[</span><span class="n">name</span><span class="p">])</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">joint_names_expanded</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;joint names in control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; do not match the robot&#39;s joint names. The full joint names are: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">joint_names</span><span class="si">}</span><span class="s2">.&quot;</span>
+                <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">joint_names_expanded</span>
+
+        <span class="c1"># Initialize control groups</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_extract_control_groups</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Robot.set_joint_drive">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.set_joint_drive">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_joint_drive</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">stiffness</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">damping</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">max_effort</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">max_velocity</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">friction</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">drive_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;force&quot;</span><span class="p">,</span>
+        <span class="n">joint_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the drive properties for the robot.</span>
+<span class="sd">           Different from Articulation, default drive type is &#39;force&#39; instead of &#39;none&#39;</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            stiffness (torch.Tensor): The stiffness of the joint drive with shape (len(env_ids), len(joint_ids)).</span>
+<span class="sd">            damping (torch.Tensor): The damping of the joint drive with shape (len(env_ids), len(joint_ids)).</span>
+<span class="sd">            max_effort (torch.Tensor): The maximum effort of the joint drive with shape (len(env_ids), len(joint_ids)).</span>
+<span class="sd">            max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).</span>
+<span class="sd">            friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).</span>
+<span class="sd">            drive_type (str, optional): The type of drive to apply. Defaults to &quot;force&quot;.</span>
+<span class="sd">            joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.</span>
+<span class="sd">            env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">set_joint_drive</span><span class="p">(</span>
+            <span class="n">stiffness</span><span class="o">=</span><span class="n">stiffness</span><span class="p">,</span>
+            <span class="n">damping</span><span class="o">=</span><span class="n">damping</span><span class="p">,</span>
+            <span class="n">max_effort</span><span class="o">=</span><span class="n">max_effort</span><span class="p">,</span>
+            <span class="n">max_velocity</span><span class="o">=</span><span class="n">max_velocity</span><span class="p">,</span>
+            <span class="n">friction</span><span class="o">=</span><span class="n">friction</span><span class="p">,</span>
+            <span class="n">drive_type</span><span class="o">=</span><span class="n">drive_type</span><span class="p">,</span>
+            <span class="n">joint_ids</span><span class="o">=</span><span class="n">joint_ids</span><span class="p">,</span>
+            <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_set_default_joint_drive</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set default joint drive parameters based on the configuration.&quot;&quot;&quot;</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">numbers</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.string</span><span class="w"> </span><span class="kn">import</span> <span class="n">resolve_matching_names_values</span>
+
+        <span class="n">drive_props</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;damping&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_joint_damping</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;stiffness&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_joint_stiffness</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;max_effort&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_joint_max_effort</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;max_velocity&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_joint_max_velocity</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;friction&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_joint_friction</span><span class="p">),</span>
+        <span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">prop_name</span><span class="p">,</span> <span class="n">default_array</span> <span class="ow">in</span> <span class="n">drive_props</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">drive_pros</span><span class="p">,</span> <span class="n">prop_name</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">numbers</span><span class="o">.</span><span class="n">Number</span><span class="p">):</span>
+                <span class="n">default_array</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">value</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">control_part_dict</span> <span class="o">=</span> <span class="p">{}</span>
+                    <span class="n">value_copy</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                        <span class="c1"># Extract control part and map the corresponding joint names</span>
+                        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                                <span class="n">control_part_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value_copy</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+                    <span class="n">indices</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">values</span> <span class="o">=</span> <span class="n">resolve_matching_names_values</span><span class="p">(</span>
+                        <span class="n">value_copy</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_names</span>
+                    <span class="p">)</span>
+
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                        <span class="c1"># Add control part joints to indices and values</span>
+                        <span class="k">for</span> <span class="n">part_name</span><span class="p">,</span> <span class="n">part_value</span> <span class="ow">in</span> <span class="n">control_part_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                            <span class="n">part_joint_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">[</span><span class="n">part_name</span><span class="p">]</span>
+                            <span class="n">part_indices</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">part_values</span> <span class="o">=</span> <span class="p">(</span>
+                                <span class="n">resolve_matching_names_values</span><span class="p">(</span>
+                                    <span class="p">{</span><span class="n">jn</span><span class="p">:</span> <span class="n">part_value</span> <span class="k">for</span> <span class="n">jn</span> <span class="ow">in</span> <span class="n">part_joint_names</span><span class="p">},</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">joint_names</span><span class="p">,</span>
+                                <span class="p">)</span>
+                            <span class="p">)</span>
+                            <span class="n">indices</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">part_indices</span><span class="p">)</span>
+                            <span class="n">values</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">part_values</span><span class="p">)</span>
+
+                    <span class="n">default_array</span><span class="p">[:,</span> <span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+                        <span class="n">values</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+                    <span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to set </span><span class="si">{</span><span class="n">prop_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">drive_pros</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">drive_pros</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">drive_pros</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="n">drive_type</span> <span class="o">=</span> <span class="n">drive_pros</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;drive_type&quot;</span><span class="p">,</span> <span class="s2">&quot;force&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">drive_type</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">drive_pros</span><span class="p">,</span> <span class="s2">&quot;drive_type&quot;</span><span class="p">,</span> <span class="s2">&quot;force&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Apply drive parameters to all articulations in the batch</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_joint_drive</span><span class="p">(</span>
+            <span class="n">stiffness</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_joint_stiffness</span><span class="p">,</span>
+            <span class="n">damping</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_joint_damping</span><span class="p">,</span>
+            <span class="n">max_effort</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_joint_max_effort</span><span class="p">,</span>
+            <span class="n">max_velocity</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_joint_max_velocity</span><span class="p">,</span>
+            <span class="n">friction</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">default_joint_friction</span><span class="p">,</span>
+            <span class="n">drive_type</span><span class="o">=</span><span class="n">drive_type</span><span class="p">,</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="Robot.init_solver">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.init_solver">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">init_solver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">SolverCfg</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">SolverCfg</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the kinematic solver for the robot.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg (Union[SolverCfg, Dict[str, SolverCfg]]): The configuration for the kinematic solver.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="p">:</span> <span class="n">RobotCfg</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">SolverCfg</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="s2">&quot;Control parts are defined in the robot configuration, solver_cfg must be a dictionary.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">cfg</span><span class="o">.</span><span class="n">urdf_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">cfg</span><span class="o">.</span><span class="n">urdf_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">fpath</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">init_solver</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">Dict</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">,</span> <span class="n">Dict</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="s2">&quot;When `solver_cfg` is a dictionary, `control_parts` must also be a dictionary.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="c1"># If solver_cfg is a dictionary, iterate through it to create solvers</span>
+            <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">solver_cfg</span> <span class="ow">in</span> <span class="n">cfg</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">solver_cfg</span><span class="o">.</span><span class="n">urdf_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">solver_cfg</span><span class="o">.</span><span class="n">urdf_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">fpath</span>
+                <span class="n">_</span><span class="p">,</span> <span class="n">part_names</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">resolve_matching_names_values</span><span class="p">(</span>
+                    <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">solver_cfg</span><span class="p">},</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+                <span class="p">)</span>
+                <span class="k">for</span> <span class="n">part_name</span> <span class="ow">in</span> <span class="n">part_names</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="p">(</span>
+                        <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">solver_cfg</span><span class="p">,</span> <span class="s2">&quot;joint_names&quot;</span><span class="p">)</span>
+                        <span class="ow">or</span> <span class="n">solver_cfg</span><span class="o">.</span><span class="n">joint_names</span> <span class="ow">is</span> <span class="kc">None</span>
+                    <span class="p">):</span>
+                        <span class="n">solver_cfg</span><span class="o">.</span><span class="n">joint_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">[</span><span class="n">part_name</span><span class="p">]</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">solver_cfg</span><span class="o">.</span><span class="n">init_solver</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+                    <span class="n">joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">part_name</span><span class="p">)</span>
+                    <span class="n">joint_limits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_data</span><span class="o">.</span><span class="n">qpos_limits</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="n">joint_ids</span><span class="p">]</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">update_with_robot_limit</span><span class="p">(</span><span class="n">joint_limits</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_solver">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_solver">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_solver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BaseSolver</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the kinematic solver for a specific control part.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part to get the solver for. If None, the default part is used.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            BaseSolver | None: The kinematic solver for the specified control part, or None if not found.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;No solvers are defined for the robot. Please ensure that the robot has solvers configured.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solvers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_control_part_base_pose">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_control_part_base_pose">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_control_part_base_pose</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Retrieves the base pose of the control part for a specified robot.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part the solver adhere to. If None, the default solver is used.</span>
+<span class="sd">            env_ids (Sequence[int] | None): A sequence of environment IDs to specify the environments. If None, all indices are used.</span>
+<span class="sd">            to_matrix (bool): If True, returns the pose in the form of a 4x4 matrix.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The pose of the specified link in the form of a matrix.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">local_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="n">root_link_name</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span><span class="p">:</span>
+            <span class="n">root_link_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">link_names</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_link_pose</span><span class="p">(</span>
+            <span class="n">link_name</span><span class="o">=</span><span class="n">root_link_name</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">local_env_ids</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="n">to_matrix</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.get_control_part_link_names">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.get_control_part_link_names">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_control_part_link_names</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the link names of the control part.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str | None): The name of the control part. If None, return all link names.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            List[str]: link names of the control part.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">link_names</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_control_groups</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">link_names</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The control part &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; does not exist in the robot&#39;s control parts.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="p">[]</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extract_control_groups</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ControlGroup</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Extract control groups from the active joint names.</span>
+
+<span class="sd">        This method creates a dictionary of control groups where each control</span>
+<span class="sd">        group is associated with its corresponding joint names. It utilizes</span>
+<span class="sd">        the `_extract_control_group` method to populate the control groups.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Dict[str, ControlGroup]: A dictionary mapping control group names</span>
+<span class="sd">                                    to their corresponding ControlGroup instances.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{}</span>
+
+        <span class="n">control_groups</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">control_group_name</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_extract_control_group</span><span class="p">(</span><span class="n">joint_names</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">control_group_name</span><span class="p">,</span> <span class="n">joint_names</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">control_parts</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+        <span class="p">}</span>
+
+        <span class="k">return</span> <span class="n">control_groups</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extract_control_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">joint_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">ControlGroup</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Extract a control group from the given list of joint names.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            joint_names (List[str]): A list of joint names</span>
+<span class="sd">                                        to be included in the control group.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            ControlGroup: An instance of ControlGroup containing the specified joints</span>
+<span class="sd">                            and their associated links.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">control_group</span> <span class="o">=</span> <span class="n">ControlGroup</span><span class="p">()</span>
+        <span class="n">joint_id_list</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">joint_name</span> <span class="ow">in</span> <span class="n">joint_names</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">joint_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_names</span><span class="p">:</span>
+                <span class="n">joint_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">joint_names</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">joint_name</span><span class="p">)</span>
+                <span class="n">joint_id_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">joint_index</span><span class="p">)</span>
+                <span class="n">control_group</span><span class="o">.</span><span class="n">joint_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">joint_name</span><span class="p">)</span>
+
+                <span class="c1"># Set root link for first joint</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">control_group</span><span class="o">.</span><span class="n">link_names</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">parent_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_entities</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_ancestral_link_names</span><span class="p">(</span>
+                        <span class="n">joint_index</span>
+                    <span class="p">)</span>
+                    <span class="n">control_group</span><span class="o">.</span><span class="n">link_names</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">parent_names</span><span class="p">)</span>
+
+                <span class="n">child_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_entities</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_child_link_name</span><span class="p">(</span><span class="n">joint_index</span><span class="p">)</span>
+                <span class="n">control_group</span><span class="o">.</span><span class="n">link_names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">child_name</span><span class="p">)</span>
+
+        <span class="n">control_group</span><span class="o">.</span><span class="n">joint_ids</span> <span class="o">=</span> <span class="n">joint_id_list</span>
+        <span class="k">return</span> <span class="n">control_group</span>
+
+<div class="viewcode-block" id="Robot.build_pk_serial_chain">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.build_pk_serial_chain">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">build_pk_serial_chain</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Build the kinematic serial chain for the robot.</span>
+
+<span class="sd">        This method is mainly used for robot learning scenarios, for example:</span>
+<span class="sd">            - Imitation learning dataset generation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pk_serial_chain</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">build_pk_serial_chain</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.set_physical_visible">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.set_physical_visible">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_physical_visible</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">visible</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">control_part</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">rgba</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;set collision of the robot or a specific control part.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            visible (bool, optional): is collision body visible. Defaults to True.</span>
+<span class="sd">            control_part (str | None, optional): control part to set visibility. Defaults to None. If None, all links are set.</span>
+<span class="sd">            rgba (Sequence[float] | None, optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">rgba</span> <span class="o">=</span> <span class="n">rgba</span> <span class="k">if</span> <span class="n">rgba</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">(</span><span class="mf">0.8</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">rgba</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">4</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid rgba </span><span class="si">{</span><span class="n">rgba</span><span class="si">}</span><span class="s2">, should be a sequence of 4 floats.&quot;</span><span class="p">)</span>
+        <span class="n">rgba</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span>
+                <span class="n">rgba</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                <span class="n">rgba</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                <span class="n">rgba</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+                <span class="n">rgba</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
+            <span class="p">]</span>
+        <span class="p">)</span>
+        <span class="n">link_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_control_part_link_names</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">control_part</span><span class="p">)</span>
+
+        <span class="c1"># create collision visible node if not exist</span>
+        <span class="k">if</span> <span class="n">visible</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">env_idx</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">link_name</span> <span class="ow">in</span> <span class="n">link_names</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_has_collision_visible_node_dict</span><span class="p">[</span><span class="n">link_name</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_entities</span><span class="p">[</span><span class="n">env_idx</span><span class="p">]</span><span class="o">.</span><span class="n">create_physical_visible_node</span><span class="p">(</span>
+                            <span class="n">rgba</span><span class="p">,</span> <span class="n">link_name</span>
+                        <span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_has_collision_visible_node_dict</span><span class="p">[</span><span class="n">link_name</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="c1"># set visibility</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">env_idx</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_all_indices</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">link_name</span> <span class="ow">in</span> <span class="n">link_names</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_entities</span><span class="p">[</span><span class="n">env_idx</span><span class="p">]</span><span class="o">.</span><span class="n">set_physical_visible</span><span class="p">(</span><span class="n">visible</span><span class="p">,</span> <span class="n">link_name</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Robot.destroy">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.sim.objects.html#embodichain.lab.sim.objects.Robot.destroy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">destroy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

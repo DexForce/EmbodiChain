@@ -1,0 +1,1134 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Sensors &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'overview/sim/sim_sensor';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Solvers" href="solvers/index.html" />
+    <link rel="prev" title="Robot" href="sim_robot.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Simulation Framework</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/overview/sim/sim_sensor.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Sensors</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#camera">Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#camera-extrinsics">Camera Extrinsics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#usage">Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#code-example">Code Example</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#observation-data">Observation Data</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stereo-camera">Stereo Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">Code Example</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#contact-sensor">Contact Sensor</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id4">Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#articulation-contact-filter-configuration">Articulation Contact Filter Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id5">Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id6">Code Example</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id7">Observation Data</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#additional-methods">Additional Methods</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="sensors">
+<h1>Sensors<a class="headerlink" href="#sensors" title="Link to this heading">#</a></h1>
+<p>The Simulation framework provides sensor interfaces for agents to perceive the environment. Currently, the primary supported sensor type is the <strong>Camera</strong>.</p>
+<section id="camera">
+<h2>Camera<a class="headerlink" href="#camera" title="Link to this heading">#</a></h2>
+<section id="configuration">
+<h3>Configuration<a class="headerlink" href="#configuration" title="Link to this heading">#</a></h3>
+<p>The <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.sensors.html#embodichain.lab.sim.sensors.CameraCfg" title="embodichain.lab.sim.sensors.CameraCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">CameraCfg</span></code></a> class defines the configuration for camera sensors. It inherits from <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.sensors.html#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.SensorCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SensorCfg</span></code></a> and controls resolution, clipping planes, intrinsics, and active data modalities.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">width</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">640</span></code></p></td>
+<td class="text-left"><p>Width of the captured image.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">height</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">480</span></code></p></td>
+<td class="text-left"><p>Height of the captured image.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">intrinsics</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(600,</span> <span class="pre">600,</span> <span class="pre">320.0,</span> <span class="pre">240.0)</span></code></p></td>
+<td class="text-left"><p>Camera intrinsics <code class="docutils literal notranslate"><span class="pre">(fx,</span> <span class="pre">fy,</span> <span class="pre">cx,</span> <span class="pre">cy)</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">extrinsics</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ExtrinsicsCfg</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ExtrinsicsCfg()</span></code></p></td>
+<td class="text-left"><p>Pose configuration (see below).</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">near</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">0.005</span></code></p></td>
+<td class="text-left"><p>Near clipping plane distance.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">far</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">100.0</span></code></p></td>
+<td class="text-left"><p>Far clipping plane distance.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_color</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">True</span></code></p></td>
+<td class="text-left"><p>Enable RGBA image capture.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_depth</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable depth map capture.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_mask</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable segmentation mask capture.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_normal</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable surface normal capture.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_position</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable 3D position map capture.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="camera-extrinsics">
+<h3>Camera Extrinsics<a class="headerlink" href="#camera-extrinsics" title="Link to this heading">#</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">ExtrinsicsCfg</span></code> class defines the position and orientation of the camera.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">parent</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">str</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td class="text-left"><p>Name of the link to attach to (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;ee_link&quot;</span></code>). If <code class="docutils literal notranslate"><span class="pre">None</span></code>, camera is fixed in world.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">pos</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">list</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">[0.0,</span> <span class="pre">0.0,</span> <span class="pre">0.0]</span></code></p></td>
+<td class="text-left"><p>Position offset <code class="docutils literal notranslate"><span class="pre">[x,</span> <span class="pre">y,</span> <span class="pre">z]</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">quat</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">list</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">[1.0,</span> <span class="pre">0.0,</span> <span class="pre">0.0,</span> <span class="pre">0.0]</span></code></p></td>
+<td class="text-left"><p>Orientation quaternion <code class="docutils literal notranslate"><span class="pre">[w,</span> <span class="pre">x,</span> <span class="pre">y,</span> <span class="pre">z]</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">eye</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td class="text-left"><p>(Optional) Camera eye position for look-at mode.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">target</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td class="text-left"><p>(Optional) Target position for look-at mode.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">up</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></td>
+<td class="text-left"><p>(Optional) Up vector for look-at mode.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="usage">
+<h3>Usage<a class="headerlink" href="#usage" title="Link to this heading">#</a></h3>
+<p>You can create a camera sensor using <code class="docutils literal notranslate"><span class="pre">sim.add_sensor()</span></code> with a <code class="docutils literal notranslate"><span class="pre">CameraCfg</span></code> object.</p>
+<section id="code-example">
+<h4>Code Example<a class="headerlink" href="#code-example" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.sensors</span><span class="w"> </span><span class="kn">import</span> <span class="n">Camera</span><span class="p">,</span> <span class="n">CameraCfg</span>
+
+<span class="c1"># 1. Define Configuration</span>
+<span class="n">camera_cfg</span> <span class="o">=</span> <span class="n">CameraCfg</span><span class="p">(</span>
+    <span class="n">width</span><span class="o">=</span><span class="mi">640</span><span class="p">,</span>
+    <span class="n">height</span><span class="o">=</span><span class="mi">480</span><span class="p">,</span>
+    <span class="n">intrinsics</span><span class="o">=</span><span class="p">(</span><span class="mi">600</span><span class="p">,</span> <span class="mi">600</span><span class="p">,</span> <span class="mf">320.0</span><span class="p">,</span> <span class="mf">240.0</span><span class="p">),</span>
+    <span class="n">extrinsics</span><span class="o">=</span><span class="n">CameraCfg</span><span class="o">.</span><span class="n">ExtrinsicsCfg</span><span class="p">(</span>
+        <span class="n">parent</span><span class="o">=</span><span class="s2">&quot;ee_link&quot;</span><span class="p">,</span>        <span class="c1"># Attach to robot end-effector</span>
+        <span class="n">pos</span><span class="o">=</span><span class="p">[</span><span class="mf">0.09</span><span class="p">,</span> <span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.04</span><span class="p">],</span>  <span class="c1"># Relative position</span>
+        <span class="n">quat</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>       <span class="c1"># Relative rotation [w, x, y, z]</span>
+    <span class="p">),</span>
+    <span class="n">enable_color</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">enable_depth</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># 2. Add Sensor to Simulation</span>
+<span class="n">camera</span><span class="p">:</span> <span class="n">Camera</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_sensor</span><span class="p">(</span><span class="n">sensor_cfg</span><span class="o">=</span><span class="n">camera_cfg</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="observation-data">
+<h3>Observation Data<a class="headerlink" href="#observation-data" title="Link to this heading">#</a></h3>
+<p>Retrieve sensor data using camera.get_data(). The data is returned as a dictionary of tensors on the specified device.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Key</p></th>
+<th class="head text-left"><p>Data Type</p></th>
+<th class="head text-left"><p>Shape</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">color</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.uint8</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">H,</span> <span class="pre">W,</span> <span class="pre">4)</span></code></p></td>
+<td class="text-left"><p>RGBA image data.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">depth</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">H,</span> <span class="pre">W)</span></code></p></td>
+<td class="text-left"><p>Depth map in meters.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">mask</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.int32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">H,</span> <span class="pre">W)</span></code></p></td>
+<td class="text-left"><p>Segmentation mask / Instance IDs.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">normal</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">H,</span> <span class="pre">W,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Surface normal vectors.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">position</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">H,</span> <span class="pre">W,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>3D Position map (OpenGL coords).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><em>Note: <code class="docutils literal notranslate"><span class="pre">B</span></code> represents the number of environments (batch size).</em></p>
+</section>
+</section>
+<section id="stereo-camera">
+<h2>Stereo Camera<a class="headerlink" href="#stereo-camera" title="Link to this heading">#</a></h2>
+<section id="id1">
+<h3>Configuration<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
+<p>The <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.sensors.html#embodichain.lab.sim.sensors.StereoCameraCfg" title="embodichain.lab.sim.sensors.StereoCameraCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">StereoCameraCfg</span></code></a> class defines the configuration for stereo camera sensors. It inherits from <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.sensors.html#embodichain.lab.sim.sensors.CameraCfg" title="embodichain.lab.sim.sensors.CameraCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">CameraCfg</span></code></a> and includes additional settings for the right camera and stereo-specific features like disparity computation.</p>
+<p>In addition to the standard <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.sensors.html#embodichain.lab.sim.sensors.CameraCfg" title="embodichain.lab.sim.sensors.CameraCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">CameraCfg</span></code></a> parameters, it supports the following:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">intrinsics_right</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(600,</span> <span class="pre">600,</span> <span class="pre">320.0,</span> <span class="pre">240.0)</span></code></p></td>
+<td class="text-left"><p>The intrinsics for the right camera <code class="docutils literal notranslate"><span class="pre">(fx,</span> <span class="pre">fy,</span> <span class="pre">cx,</span> <span class="pre">cy)</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">left_to_right_pos</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(0.05,</span> <span class="pre">0.0,</span> <span class="pre">0.0)</span></code></p></td>
+<td class="text-left"><p>Position offset <code class="docutils literal notranslate"><span class="pre">[x,</span> <span class="pre">y,</span> <span class="pre">z]</span></code> from the left camera to the right camera.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">left_to_right_rot</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(0.0,</span> <span class="pre">0.0,</span> <span class="pre">0.0)</span></code></p></td>
+<td class="text-left"><p>Rotation offset <code class="docutils literal notranslate"><span class="pre">[x,</span> <span class="pre">y,</span> <span class="pre">z]</span></code> (Euler angles in degrees) from the left camera to the right camera.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">enable_disparity</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">False</span></code></p></td>
+<td class="text-left"><p>Enable disparity map computation. <em>Note: Requires <code class="docutils literal notranslate"><span class="pre">enable_depth</span></code> to be <code class="docutils literal notranslate"><span class="pre">True</span></code>.</em></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id2">
+<h3>Usage<a class="headerlink" href="#id2" title="Link to this heading">#</a></h3>
+<p>You can create a stereo camera sensor using <code class="docutils literal notranslate"><span class="pre">sim.add_sensor()</span></code> with a <code class="docutils literal notranslate"><span class="pre">StereoCameraCfg</span></code> object.</p>
+<section id="id3">
+<h4>Code Example<a class="headerlink" href="#id3" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.sensors</span><span class="w"> </span><span class="kn">import</span> <span class="n">StereoCamera</span><span class="p">,</span> <span class="n">StereoCameraCfg</span>
+
+<span class="c1"># 1. Define Configuration</span>
+<span class="n">stereo_cfg</span> <span class="o">=</span> <span class="n">StereoCameraCfg</span><span class="p">(</span>
+    <span class="n">width</span><span class="o">=</span><span class="mi">640</span><span class="p">,</span>
+    <span class="n">height</span><span class="o">=</span><span class="mi">480</span><span class="p">,</span>
+    <span class="c1"># Intrinsics for Left (inherited) and Right cameras</span>
+    <span class="n">intrinsics</span><span class="o">=</span><span class="p">(</span><span class="mi">600</span><span class="p">,</span> <span class="mi">600</span><span class="p">,</span> <span class="mf">320.0</span><span class="p">,</span> <span class="mf">240.0</span><span class="p">),</span>
+    <span class="n">intrinsics_right</span><span class="o">=</span><span class="p">(</span><span class="mi">600</span><span class="p">,</span> <span class="mi">600</span><span class="p">,</span> <span class="mf">320.0</span><span class="p">,</span> <span class="mf">240.0</span><span class="p">),</span>
+    <span class="c1"># Baseline configuration (e.g., 5cm baseline)</span>
+    <span class="n">left_to_right_pos</span><span class="o">=</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
+    <span class="n">extrinsics</span><span class="o">=</span><span class="n">StereoCameraCfg</span><span class="o">.</span><span class="n">ExtrinsicsCfg</span><span class="p">(</span>
+        <span class="n">parent</span><span class="o">=</span><span class="s2">&quot;head_link&quot;</span><span class="p">,</span>
+        <span class="n">pos</span><span class="o">=</span><span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+    <span class="p">),</span>
+    <span class="c1"># Data modalities</span>
+    <span class="n">enable_color</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">enable_depth</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">enable_disparity</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># 2. Add Sensor to Simulation</span>
+<span class="n">stereo_camera</span><span class="p">:</span> <span class="n">StereoCamera</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_sensor</span><span class="p">(</span><span class="n">sensor_cfg</span><span class="o">=</span><span class="n">stereo_cfg</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+<section id="contact-sensor">
+<h2>Contact Sensor<a class="headerlink" href="#contact-sensor" title="Link to this heading">#</a></h2>
+<section id="id4">
+<h3>Configuration<a class="headerlink" href="#id4" title="Link to this heading">#</a></h3>
+<p>The <code class="xref py py-class docutils literal notranslate"><span class="pre">ContactSensorCfg</span></code> class defines the configuration for contact sensors. It inherits from <a class="reference internal" href="../../api_reference/embodichain/embodichain.lab.sim.sensors.html#embodichain.lab.sim.sensors.SensorCfg" title="embodichain.lab.sim.sensors.SensorCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">SensorCfg</span></code></a> and enables filtering and monitoring of contact events between specific rigid bodies and articulation links in the simulation.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">rigid_uid_list</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">List[str]</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">[]</span></code></p></td>
+<td class="text-left"><p>List of rigid body UIDs to monitor for contacts.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">articulation_cfg_list</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">List[ArticulationContactFilterCfg]</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">[]</span></code></p></td>
+<td class="text-left"><p>List of articulation link contact filter configurations.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">filter_need_both_actor</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">True</span></code></p></td>
+<td class="text-left"><p>Whether to filter contact only when both actors are in the filter list. If <code class="docutils literal notranslate"><span class="pre">False</span></code>, contact is reported if either actor is in the filter.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">max_contacts_per_env</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">64</span></code></p></td>
+<td class="text-left"><p>Maximum number of contacts per environment that the sensor can handle.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="articulation-contact-filter-configuration">
+<h3>Articulation Contact Filter Configuration<a class="headerlink" href="#articulation-contact-filter-configuration" title="Link to this heading">#</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">ArticulationContactFilterCfg</span></code> class specifies which articulation links to monitor for contacts.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Parameter</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Default</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">articulation_uid</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">str</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code></p></td>
+<td class="text-left"><p>Unique identifier of the articulation (robot or articulated object).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">link_name_list</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">List[str]</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">[]</span></code></p></td>
+<td class="text-left"><p>List of link names in the articulation to monitor. If empty, all links are monitored.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id5">
+<h3>Usage<a class="headerlink" href="#id5" title="Link to this heading">#</a></h3>
+<p>You can create a contact sensor using <code class="docutils literal notranslate"><span class="pre">sim.add_sensor()</span></code> with a <code class="docutils literal notranslate"><span class="pre">ContactSensorCfg</span></code> object.</p>
+<section id="id6">
+<h4>Code Example<a class="headerlink" href="#id6" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.sensors</span><span class="w"> </span><span class="kn">import</span> <span class="n">ContactSensor</span><span class="p">,</span> <span class="n">ContactSensorCfg</span><span class="p">,</span> <span class="n">ArticulationContactFilterCfg</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="c1"># 1. Define Contact Filter Configuration</span>
+<span class="n">contact_filter_cfg</span> <span class="o">=</span> <span class="n">ContactSensorCfg</span><span class="p">()</span>
+
+<span class="c1"># Monitor contacts for specific rigid bodies</span>
+<span class="n">contact_filter_cfg</span><span class="o">.</span><span class="n">rigid_uid_list</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;cube0&quot;</span><span class="p">,</span> <span class="s2">&quot;cube1&quot;</span><span class="p">,</span> <span class="s2">&quot;cube2&quot;</span><span class="p">]</span>
+
+<span class="c1"># Monitor contacts for specific articulation links</span>
+<span class="n">contact_filter_art_cfg</span> <span class="o">=</span> <span class="n">ArticulationContactFilterCfg</span><span class="p">()</span>
+<span class="n">contact_filter_art_cfg</span><span class="o">.</span><span class="n">articulation_uid</span> <span class="o">=</span> <span class="s2">&quot;UR10_PGI&quot;</span>
+<span class="n">contact_filter_art_cfg</span><span class="o">.</span><span class="n">link_name_list</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;finger1_link&quot;</span><span class="p">,</span> <span class="s2">&quot;finger2_link&quot;</span><span class="p">]</span>
+<span class="n">contact_filter_cfg</span><span class="o">.</span><span class="n">articulation_cfg_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">contact_filter_art_cfg</span><span class="p">]</span>
+
+<span class="c1"># Only report contacts when both actors are in the filter list</span>
+<span class="n">contact_filter_cfg</span><span class="o">.</span><span class="n">filter_need_both_actor</span> <span class="o">=</span> <span class="kc">True</span>
+
+<span class="c1"># Set maximum contacts per environment</span>
+<span class="n">contact_filter_cfg</span><span class="o">.</span><span class="n">max_contacts_per_env</span> <span class="o">=</span> <span class="mi">128</span>
+
+<span class="c1"># 2. Add Sensor to Simulation</span>
+<span class="n">contact_sensor</span><span class="p">:</span> <span class="n">ContactSensor</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">add_sensor</span><span class="p">(</span><span class="n">sensor_cfg</span><span class="o">=</span><span class="n">contact_filter_cfg</span><span class="p">)</span>
+
+<span class="c1"># 3. Update and Retrieve Contact Data</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">contact_sensor</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+<span class="n">contact_report</span> <span class="o">=</span> <span class="n">contact_sensor</span><span class="o">.</span><span class="n">get_data</span><span class="p">()</span>
+
+<span class="c1"># Access contacts for a specific environment using is_valid mask</span>
+<span class="n">env_id</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">env_valid_mask</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;is_valid&quot;</span><span class="p">][</span><span class="n">env_id</span><span class="p">]</span>
+<span class="n">env_contact_positions</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">][</span><span class="n">env_id</span><span class="p">][</span><span class="n">env_valid_mask</span><span class="p">]</span>
+
+<span class="c1"># Or get all valid contacts across all environments</span>
+<span class="n">valid_mask</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;is_valid&quot;</span><span class="p">]</span>
+<span class="n">all_valid_positions</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">][</span><span class="n">valid_mask</span><span class="p">]</span>  <span class="c1"># Shape: (total_valid_contacts, 3)</span>
+
+<span class="c1"># 4. Filter contacts by specific user IDs</span>
+<span class="n">cube2_user_ids</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object</span><span class="p">(</span><span class="s2">&quot;cube2&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_user_ids</span><span class="p">()</span>
+<span class="n">finger1_user_ids</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">get_robot</span><span class="p">(</span><span class="s2">&quot;UR10_PGI&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_user_ids</span><span class="p">(</span><span class="s2">&quot;finger1_link&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">filter_user_ids</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">cube2_user_ids</span><span class="p">,</span> <span class="n">finger1_user_ids</span><span class="p">])</span>
+<span class="c1"># Filter for specific environments</span>
+<span class="n">filter_contact_report</span> <span class="o">=</span> <span class="n">contact_sensor</span><span class="o">.</span><span class="n">filter_by_user_ids</span><span class="p">(</span><span class="n">filter_user_ids</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="p">[</span><span class="n">env_id</span><span class="p">])</span>
+
+<span class="c1"># 5. Visualize Contact Points</span>
+<span class="n">contact_sensor</span><span class="o">.</span><span class="n">set_contact_point_visibility</span><span class="p">(</span>
+    <span class="n">visible</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">rgba</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>  <span class="c1"># Blue color</span>
+    <span class="n">point_size</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="o">=</span><span class="p">[</span><span class="n">env_id</span><span class="p">],</span>  <span class="c1"># Optional: visualize only specific environments</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="id7">
+<h3>Observation Data<a class="headerlink" href="#id7" title="Link to this heading">#</a></h3>
+<p>Retrieve contact data using <code class="docutils literal notranslate"><span class="pre">contact_sensor.get_data()</span></code>. The data is returned as a dictionary of tensors on the specified device.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Key</p></th>
+<th class="head text-left"><p>Data Type</p></th>
+<th class="head text-left"><p>Shape</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">position</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Contact positions in arena frame (world coordinates minus arena offset).</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">normal</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Contact normal vectors.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">friction</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env,</span> <span class="pre">3)</span></code></p></td>
+<td class="text-left"><p>Contact friction forces. <em>Note: Currently this value may not be accurate.</em></p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">impulse</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env)</span></code></p></td>
+<td class="text-left"><p>Contact impulse magnitudes.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">distance</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.float32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env)</span></code></p></td>
+<td class="text-left"><p>Contact penetration distances.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">user_ids</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.int32</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env,</span> <span class="pre">2)</span></code></p></td>
+<td class="text-left"><p>Pair of user IDs for the two actors in contact. Use with <code class="docutils literal notranslate"><span class="pre">rigid_object.get_user_ids()</span></code> to identify objects.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">is_valid</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">torch.bool</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">(num_envs,</span> <span class="pre">max_contacts_per_env)</span></code></p></td>
+<td class="text-left"><p>Boolean mask indicating which contact slots contain valid data. Use this mask to filter out unused slots.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Note</strong>: Use the <code class="docutils literal notranslate"><span class="pre">is_valid</span></code> mask to access only valid contacts:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Get all valid contacts across all environments</span>
+<span class="n">valid_mask</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;is_valid&quot;</span><span class="p">]</span>
+<span class="n">valid_positions</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">][</span><span class="n">valid_mask</span><span class="p">]</span>  <span class="c1"># Shape: (total_valid_contacts, 3)</span>
+
+<span class="c1"># Or access per-environment</span>
+<span class="n">env_id</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">num_valid</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;is_valid&quot;</span><span class="p">][</span><span class="n">env_id</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+<span class="n">env_positions</span> <span class="o">=</span> <span class="n">contact_report</span><span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">][</span><span class="n">env_id</span><span class="p">,</span> <span class="p">:</span><span class="n">num_valid</span><span class="p">]</span>
+</pre></div>
+</div>
+</section>
+<section id="additional-methods">
+<h3>Additional Methods<a class="headerlink" href="#additional-methods" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">filter_by_user_ids(item_user_ids,</span> <span class="pre">env_ids=None)</span></code></strong>: Filter contact report to include only contacts involving specific user IDs. Optionally filter by specific environment IDs.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">set_contact_point_visibility(visible,</span> <span class="pre">rgba,</span> <span class="pre">point_size,</span> <span class="pre">env_ids=None)</span></code></strong>: Enable/disable visualization of contact points with customizable color and size. Optionally visualize only specific environments.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="sim_robot.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Robot</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="solvers/index.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Solvers</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#camera">Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#camera-extrinsics">Camera Extrinsics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#usage">Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#code-example">Code Example</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#observation-data">Observation Data</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stereo-camera">Stereo Camera</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">Code Example</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#contact-sensor">Contact Sensor</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id4">Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#articulation-contact-filter-configuration">Articulation Contact Filter Configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id5">Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id6">Code Example</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id7">Observation Data</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#additional-methods">Additional Methods</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

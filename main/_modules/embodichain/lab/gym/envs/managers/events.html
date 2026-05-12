@@ -1,0 +1,1169 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.gym.envs.managers.events &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/gym/envs/managers/events';</script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.gym.envs.managers.events</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">copy</span><span class="w"> </span><span class="kn">import</span> <span class="n">deepcopy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TYPE_CHECKING</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Dict</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">Light</span><span class="p">,</span>
+    <span class="n">RigidObject</span><span class="p">,</span>
+    <span class="n">RigidObjectGroup</span><span class="p">,</span>
+    <span class="n">Articulation</span><span class="p">,</span>
+    <span class="n">Robot</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="n">RigidObjectCfg</span><span class="p">,</span> <span class="n">ArticulationCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.shapes</span><span class="w"> </span><span class="kn">import</span> <span class="n">MeshCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="n">SceneEntityCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Functor</span><span class="p">,</span> <span class="n">FunctorCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.module_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_function_from_modules</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.string</span><span class="w"> </span><span class="kn">import</span> <span class="n">remove_regex_chars</span><span class="p">,</span> <span class="n">resolve_matching_names</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.file</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_all_files_in_directory</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.math</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">sample_uniform</span><span class="p">,</span>
+    <span class="n">pose_inv</span><span class="p">,</span>
+    <span class="n">xyz_quat_to_4x4_matrix</span><span class="p">,</span>
+    <span class="n">trans_matrix_to_xyz_quat</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_path</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbodiedEnv</span>
+
+
+<div class="viewcode-block" id="replace_assets_from_group">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.replace_assets_from_group">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">replace_assets_from_group</span><span class="p">(</span><span class="n">Functor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Replace assets in the environment from a specified group of assets.</span>
+
+<span class="sd">    The group of assets can be defined in the following ways:</span>
+<span class="sd">        - A directory containing multiple asset files.</span>
+<span class="sd">        - A json file listing multiple assets with their properties. (not supported yet)</span>
+<span class="sd">        - ... (other methods can be added in the future)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="replace_assets_from_group.__init__">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.replace_assets_from_group.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">FunctorCfg</span><span class="p">,</span> <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the term.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg: The configuration of the functor.</span>
+<span class="sd">            env: The environment instance.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the asset is not a RigidObject or an Articulation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">env</span><span class="p">)</span>
+
+        <span class="c1"># extract the used quantities (to enable type-hinting)</span>
+        <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;entity_cfg&quot;</span><span class="p">]</span>
+        <span class="n">asset</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">asset</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Asset with UID &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; not found in the simulation.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="nb">isinstance</span><span class="p">(</span><span class="n">asset</span><span class="p">,</span> <span class="n">RigidObject</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">asset</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">MeshCfg</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">False</span>
+        <span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;Only mesh-based RigidObject assets are supported for replacement.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">asset_cfg</span> <span class="o">=</span> <span class="n">asset</span><span class="o">.</span><span class="n">cfg</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">asset_type</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">asset</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">asset</span><span class="p">,</span> <span class="n">Articulation</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;Replacing articulation assets is not supported yet.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_asset_group_path</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># The following block of code only handle rigid object assets.</span>
+        <span class="c1"># If we want to support articulation assets, the group path format</span>
+        <span class="c1"># should be changed into list of folder (each folder contains a urdf file</span>
+        <span class="c1"># and its associated resources)</span>
+        <span class="n">folder_path</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;folder_path&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">folder_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="s2">&quot;folder_path must be specified in the functor configuration.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">folder_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+            <span class="n">folder_path</span><span class="p">,</span> <span class="n">patterns</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">folder_path</span><span class="p">)</span>
+
+            <span class="c1"># remove regular expression from patterns</span>
+            <span class="n">patterns</span> <span class="o">=</span> <span class="n">remove_regex_chars</span><span class="p">(</span><span class="n">patterns</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_full_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">folder_path</span><span class="si">}</span><span class="s2">/&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_asset_group_path</span> <span class="o">=</span> <span class="n">get_all_files_in_directory</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_full_path</span><span class="p">,</span> <span class="n">patterns</span><span class="o">=</span><span class="n">patterns</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_full_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">(</span><span class="n">folder_path</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_asset_group_path</span> <span class="o">=</span> <span class="n">get_all_files_in_directory</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_full_path</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+        <span class="n">folder_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+
+        <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">remove_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+        <span class="n">asset_path</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_asset_group_path</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">asset_cfg</span><span class="o">.</span><span class="n">shape</span><span class="o">.</span><span class="n">fpath</span> <span class="o">=</span> <span class="n">asset_path</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">asset_type</span> <span class="o">==</span> <span class="n">RigidObject</span><span class="p">:</span>
+            <span class="n">new_asset</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">asset_cfg</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;Only RigidObject assets are supported for replacement.&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="prepare_extra_attr">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.prepare_extra_attr">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">prepare_extra_attr</span><span class="p">(</span><span class="n">Functor</span><span class="p">):</span>
+<div class="viewcode-block" id="prepare_extra_attr.__init__">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.prepare_extra_attr.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">FunctorCfg</span><span class="p">,</span> <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the event manager with the given configuration and environment.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cfg (FunctorCfg): The configuration object for the functor.</span>
+<span class="sd">            env (EmbodiedEnv): The embodied environment instance.</span>
+
+<span class="sd">        Attributes:</span>
+<span class="sd">            extra_attrs (dict): A dictionary to hold additional attributes.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">env</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span> <span class="o">=</span> <span class="p">{}</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">attrs</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">]</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Processes extra attributes for the given environment.</span>
+
+<span class="sd">        This method iterates over a list of attributes, validates them, and updates</span>
+<span class="sd">        the `extra_attrs` dictionary based on the specified modes and values. It handles</span>
+<span class="sd">        both static and callable attributes, logging warnings for any issues encountered.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            env (EmbodiedEnv): The environment instance to which the attributes are applied.</span>
+<span class="sd">            env_ids (torch.Tensor | None): Optional tensor of environment IDs (not used in this method).</span>
+<span class="sd">            attrs (List[Dict]): A list of dictionaries containing attribute configurations.</span>
+<span class="sd">                Each dictionary must contain a &#39;name&#39;, and may contain &#39;entity_cfg&#39;, &#39;entities&#39;,</span>
+<span class="sd">                &#39;mode&#39;, &#39;value&#39;, &#39;func_name&#39;, and &#39;func_kwargs&#39;.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: This method does not return a value.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">attr_idx</span><span class="p">,</span> <span class="n">attr</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">attrs</span><span class="p">):</span>
+            <span class="n">attr_name</span> <span class="o">=</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">attr_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">attr_idx</span><span class="si">}</span><span class="s2">-th extra attribute got no name, skipping..&quot;</span>
+                <span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;entity_cfg&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">entity_cfgs</span> <span class="o">=</span> <span class="p">[</span><span class="n">SceneEntityCfg</span><span class="p">(</span><span class="o">**</span><span class="n">attr</span><span class="p">[</span><span class="s2">&quot;entity_cfg&quot;</span><span class="p">])]</span>
+            <span class="k">elif</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;entity_uids&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">entity_uids</span> <span class="o">=</span> <span class="n">attr</span><span class="p">[</span><span class="s2">&quot;entity_uids&quot;</span><span class="p">]</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entity_uids</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">)):</span>
+                    <span class="n">entity_uids</span> <span class="o">=</span> <span class="n">resolve_uids</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">entity_uids</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">entity_uids</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Entities string </span><span class="si">{</span><span class="n">entity_uids</span><span class="si">}</span><span class="s2"> is not supported, skipping..&quot;</span>
+                        <span class="p">)</span>
+                        <span class="k">continue</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Entities type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">entity_uids</span><span class="p">)</span><span class="si">}</span><span class="s2"> is not supported, skipping..&quot;</span>
+                    <span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="n">entity_cfgs</span> <span class="o">=</span> <span class="p">[</span><span class="n">SceneEntityCfg</span><span class="p">(</span><span class="n">uid</span><span class="o">=</span><span class="n">uid</span><span class="p">)</span> <span class="k">for</span> <span class="n">uid</span> <span class="ow">in</span> <span class="n">entity_uids</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;&#39;entity_cfg&#39; or &#39;entity_uids&#39; must be provieded, skipping..&quot;</span>
+                <span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="n">attr_mode</span> <span class="o">=</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;mode&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">attr_mode</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Extra attribute </span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2"> got no mode, setting mode to default &#39;static&#39;.&quot;</span><span class="p">,</span>
+                    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">attr_mode</span> <span class="o">=</span> <span class="s2">&quot;static&quot;</span>
+
+            <span class="k">if</span> <span class="n">attr_mode</span> <span class="o">==</span> <span class="s2">&quot;static&quot;</span><span class="p">:</span>
+                <span class="n">attr_value</span> <span class="o">=</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">attr_value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Extra attribute </span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2"> got mode &#39;static&#39; but no value, skipping..&quot;</span>
+                    <span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="n">entity_cfgs</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span><span class="p">[</span><span class="n">cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span><span class="p">[</span><span class="n">cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">]</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">attr_name</span><span class="p">:</span> <span class="n">attr_value</span><span class="p">})</span>
+
+            <span class="k">elif</span> <span class="n">attr_mode</span> <span class="o">==</span> <span class="s2">&quot;callable&quot;</span><span class="p">:</span>
+                <span class="n">attr_func_name</span> <span class="o">=</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;func_name&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">attr_func_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Extra attribute </span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2"> got mode &#39;callable&#39; but no &#39;func_name&#39;, skipping..&quot;</span><span class="p">,</span>
+                        <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+                    <span class="p">)</span>
+                    <span class="k">continue</span>
+
+                <span class="n">attr_func_kwargs</span> <span class="o">=</span> <span class="n">attr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;func_kwargs&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">attr_func_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Extra attribute </span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2"> got no func_kwargs, setting func_kwargs to default empty dict..&quot;</span><span class="p">,</span>
+                        <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+                    <span class="p">)</span>
+                    <span class="n">attr_func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+
+                <span class="n">is_global_func</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">ASSET_MODULES</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="s2">&quot;embodichain.lab.gym.envs.managers.object&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;embodichain.lab.gym.utils.misc&quot;</span><span class="p">,</span>
+                <span class="p">]</span>
+                <span class="n">global_func</span> <span class="o">=</span> <span class="n">find_function_from_modules</span><span class="p">(</span>
+                    <span class="n">attr_func_name</span><span class="p">,</span> <span class="n">modules</span><span class="o">=</span><span class="n">ASSET_MODULES</span><span class="p">,</span> <span class="n">raise_if_not_found</span><span class="o">=</span><span class="kc">False</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">global_func</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">is_global_func</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="n">entity_cfgs</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">cfg</span><span class="o">.</span><span class="n">uid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span><span class="p">[</span><span class="n">cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">is_global_func</span><span class="p">:</span>
+                        <span class="n">asset</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="nb">callable</span><span class="p">((</span><span class="n">attr_func</span> <span class="o">:=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">asset</span><span class="p">,</span> <span class="n">attr_func_name</span><span class="p">))):</span>
+                            <span class="n">attr_func_ret</span> <span class="o">=</span> <span class="n">attr_func</span><span class="p">(</span><span class="o">**</span><span class="n">attr_func_kwargs</span><span class="p">)</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                                <span class="sa">f</span><span class="s2">&quot;Extra attribute </span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2"> got no attr_func_name &#39;</span><span class="si">{</span><span class="n">attr_func_name</span><span class="si">}</span><span class="s2">&#39;, skipping..&quot;</span>
+                            <span class="p">)</span>
+                            <span class="k">continue</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">attr_func_kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+                            <span class="p">{</span><span class="s2">&quot;env&quot;</span><span class="p">:</span> <span class="n">env</span><span class="p">,</span> <span class="s2">&quot;env_ids&quot;</span><span class="p">:</span> <span class="n">env_ids</span><span class="p">,</span> <span class="s2">&quot;entity_cfg&quot;</span><span class="p">:</span> <span class="n">cfg</span><span class="p">}</span>
+                        <span class="p">)</span>
+                        <span class="n">attr_func_ret</span> <span class="o">=</span> <span class="n">global_func</span><span class="p">(</span><span class="o">**</span><span class="n">attr_func_kwargs</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">extra_attrs</span><span class="p">[</span><span class="n">cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">]</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">attr_name</span><span class="p">:</span> <span class="n">attr_func_ret</span><span class="p">})</span></div>
+
+
+
+<div class="viewcode-block" id="register_entity_attrs">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.register_entity_attrs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">register_entity_attrs</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">registration</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;affordance_datas&quot;</span><span class="p">,</span>
+    <span class="n">attrs</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[],</span>
+    <span class="n">prefix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Register the atrributes of an entity to the `env.registration` dict.</span>
+
+<span class="sd">    TODO: Currently this method only support 1 env or multi-envs that reset() together,</span>
+
+<span class="sd">    as it&#39;s behavior is to update a overall dict every time it&#39;s called.</span>
+
+<span class="sd">    In the future, asynchronously reset mode shall be supported.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env (EmbodiedEnv): The environment the entity is in.</span>
+<span class="sd">        env_ids (torch.Tensor | None): The ids of the envs that the entity should be registered.</span>
+<span class="sd">        entity_cfg (SceneEntityCfg): The config of the entity.</span>
+<span class="sd">        attrs (List[str]): The list of entity attributes that asked to be registered.</span>
+<span class="sd">        registration (str, optional): The env&#39;s registration string where the attributes should be injected to.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">entity</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">registration</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Environment has no atrtribute </span><span class="si">{</span><span class="n">registration</span><span class="si">}</span><span class="s2"> for registration, please check again.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">registration_dict</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">registration</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">registration_dict</span><span class="p">,</span> <span class="n">Dict</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Got registration env.</span><span class="si">{</span><span class="n">registration</span><span class="si">}</span><span class="s2"> with type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">registration_dict</span><span class="p">)</span><span class="si">}</span><span class="s2">, please check again.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span>
+
+    <span class="k">for</span> <span class="n">attr</span> <span class="ow">in</span> <span class="n">attrs</span><span class="p">:</span>
+        <span class="n">attr_key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">attr</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">prefix</span> <span class="k">else</span> <span class="n">attr</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">attr_val</span> <span class="o">:=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">attr_key</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">attr_key</span><span class="p">:</span> <span class="n">attr_val</span><span class="p">})</span>
+        <span class="k">elif</span> <span class="p">(</span>
+            <span class="n">attr_val</span> <span class="o">:=</span> <span class="nb">getattr</span><span class="p">(</span>
+                <span class="n">env</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">get_functor</span><span class="p">(</span><span class="s2">&quot;prepare_extra_attr&quot;</span><span class="p">),</span> <span class="s2">&quot;extra_attrs&quot;</span><span class="p">,</span> <span class="p">{}</span>
+            <span class="p">)</span>
+            <span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="p">{})</span>
+            <span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">attr</span><span class="p">)</span>
+        <span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">attr_key</span><span class="p">:</span> <span class="n">attr_val</span><span class="p">})</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Attr </span><span class="si">{</span><span class="n">attr</span><span class="si">}</span><span class="s2"> for entity </span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2"> has neither been found in entity attrbutes nor prepare_extra_attrs functor, skipping..&quot;</span>
+            <span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">register_entity_pose</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">registration</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;affordance_datas&quot;</span><span class="p">,</span>
+    <span class="n">compute_relative</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="n">List</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;all_robots&quot;</span><span class="p">,</span>
+    <span class="n">compute_pose_object_to_arena</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">):</span>
+    <span class="n">update_registration_dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">registration</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Environment has no atrtribute </span><span class="si">{</span><span class="n">registration</span><span class="si">}</span><span class="s2"> for registration, please check again.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">registration_dict</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">registration</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">registration_dict</span><span class="p">,</span> <span class="n">Dict</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Got registration env.</span><span class="si">{</span><span class="n">registration</span><span class="si">}</span><span class="s2"> with type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">registration_dict</span><span class="p">)</span><span class="si">}</span><span class="s2">, please check again.&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span>
+
+    <span class="n">entity_pose_name</span><span class="p">,</span> <span class="n">entity_pose</span> <span class="o">=</span> <span class="n">get_pose</span><span class="p">(</span>
+        <span class="n">env</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">,</span> <span class="n">entity_cfg</span><span class="p">,</span> <span class="n">return_name</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+    <span class="n">update_registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">entity_pose_name</span><span class="p">:</span> <span class="n">entity_pose</span><span class="p">})</span>
+
+    <span class="k">if</span> <span class="n">compute_relative</span><span class="p">:</span>
+        <span class="c1"># transform other entity&#39;s pose to entity frame</span>
+        <span class="n">relative_poses</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">compute_relative</span> <span class="o">==</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_articulation_uid_list</span><span class="p">()</span>
+                <span class="o">+</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object_uid_list</span><span class="p">()</span>
+                <span class="o">+</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_robot_uid_list</span><span class="p">()</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">compute_relative</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">)):</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="n">resolve_uids</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">compute_relative</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Compute relative pose option with type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">compute_relative</span><span class="p">)</span><span class="si">}</span><span class="s2"> is not supported, using empty list for skipping..&quot;</span>
+            <span class="p">)</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">other_entity_uid</span> <span class="ow">in</span> <span class="n">entity_uids</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">other_entity_uid</span> <span class="o">!=</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">:</span>
+                <span class="c1"># TODO: this is only for asset</span>
+                <span class="n">other_entity_pose</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">other_entity_uid</span><span class="p">)</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span>
+                    <span class="n">to_matrix</span><span class="o">=</span><span class="kc">True</span>
+                <span class="p">)[</span><span class="n">env_ids</span><span class="p">,</span> <span class="p">:]</span>
+                <span class="n">relative_pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">pose_inv</span><span class="p">(</span><span class="n">entity_pose</span><span class="p">),</span> <span class="n">other_entity_pose</span><span class="p">)</span>
+                <span class="n">relative_poses</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">other_entity_uid</span><span class="si">}</span><span class="s2">_pose_</span><span class="si">{</span><span class="n">entity_pose_name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_pose&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">relative_pose</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+
+        <span class="n">update_registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">relative_poses</span><span class="p">)</span>
+
+    <span class="n">entity</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">RigidObject</span><span class="p">):</span>
+        <span class="n">extra_attr_functor</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">get_functor</span><span class="p">(</span><span class="s2">&quot;prepare_extra_attr&quot;</span><span class="p">)</span>
+        <span class="n">entity_extra_attrs</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">extra_attr_functor</span><span class="p">,</span> <span class="s2">&quot;extra_attrs&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+            <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">,</span> <span class="p">{}</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="p">(</span>
+            <span class="n">entity_extra_attr_key</span><span class="p">,</span>
+            <span class="n">entity_extra_attr_val</span><span class="p">,</span>
+        <span class="p">)</span> <span class="ow">in</span> <span class="n">entity_extra_attrs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">entity_extra_attr_key</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;_pose_object&quot;</span><span class="p">):</span>
+                <span class="n">entity_extra_attr_val</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span>
+                    <span class="n">entity_extra_attr_val</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">entity_extra_attr_val</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Got xyz_quat pose </span><span class="si">{</span><span class="n">entity_extra_attr_key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">entity_extra_attr_val</span><span class="si">}</span><span class="s2">, transforming it to matrix.&quot;</span><span class="p">,</span>
+                        <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+                    <span class="p">)</span>
+                    <span class="n">entity_extra_attr_val</span> <span class="o">=</span> <span class="n">xyz_quat_to_4x4_matrix</span><span class="p">(</span>
+                        <span class="n">entity_extra_attr_val</span>
+                    <span class="p">)</span>
+                <span class="n">update_registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span>
+                        <span class="o">+</span> <span class="s2">&quot;_&quot;</span>
+                        <span class="o">+</span> <span class="p">(</span><span class="n">entity_extra_attr_key</span><span class="p">):</span> <span class="n">entity_extra_attr_val</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">compute_pose_object_to_arena</span><span class="p">:</span>
+                    <span class="n">pose_arena</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">entity_pose</span><span class="p">,</span> <span class="n">entity_extra_attr_val</span><span class="p">)</span>
+                    <span class="n">update_registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+                        <span class="p">{</span>
+                            <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span>
+                            <span class="o">+</span> <span class="s2">&quot;_&quot;</span>
+                            <span class="o">+</span> <span class="p">(</span>
+                                <span class="n">entity_extra_attr_key</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_pose_object&quot;</span><span class="p">,</span> <span class="s2">&quot;_pose&quot;</span><span class="p">)</span>
+                            <span class="p">):</span> <span class="n">pose_arena</span>
+                        <span class="p">}</span>
+                    <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Now compute_pose_object_to_arena only support RigidObject type entity, skipping..&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">to_matrix</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">update_registration_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">update_registration_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">trans_matrix_to_xyz_quat</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+
+    <span class="n">registration_dict</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">registration</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">registration_dict</span><span class="p">,</span> <span class="n">Dict</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Got registration env.</span><span class="si">{</span><span class="n">registration</span><span class="si">}</span><span class="s2"> with type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">registration_dict</span><span class="p">)</span><span class="si">}</span><span class="s2">, please check again.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">registration_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">update_registration_dict</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">register_info_to_env</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">registry</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">],</span>
+    <span class="n">registration</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;affordance_datas&quot;</span><span class="p">,</span>
+    <span class="n">sim_update</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">):</span>
+    <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">env_ids</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">sim_update</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+            <span class="s2">&quot;Calling env.sim.update(100) for after-physics-applied object attributes..&quot;</span><span class="p">,</span>
+            <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">entity_registry</span> <span class="ow">in</span> <span class="n">registry</span><span class="p">:</span>
+        <span class="n">entity_cfg</span> <span class="o">=</span> <span class="n">SceneEntityCfg</span><span class="p">(</span><span class="o">**</span><span class="n">entity_registry</span><span class="p">[</span><span class="s2">&quot;entity_cfg&quot;</span><span class="p">])</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Registering </span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">..&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">entity_attrs</span> <span class="o">:=</span> <span class="n">entity_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;attrs&quot;</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">prefix</span> <span class="o">=</span> <span class="n">entity_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;prefix&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+            <span class="n">register_entity_attrs</span><span class="p">(</span>
+                <span class="n">env</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">,</span> <span class="n">entity_cfg</span><span class="p">,</span> <span class="n">registration</span><span class="p">,</span> <span class="n">entity_attrs</span><span class="p">,</span> <span class="n">prefix</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="n">pose_register_params</span> <span class="o">:=</span> <span class="n">entity_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pose_register_params&quot;</span><span class="p">)</span>
+        <span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">register_entity_pose</span><span class="p">(</span>
+                <span class="n">env</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">,</span> <span class="n">entity_cfg</span><span class="p">,</span> <span class="n">registration</span><span class="p">,</span> <span class="o">**</span><span class="n">pose_register_params</span>
+            <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">resolve_uids</span><span class="p">(</span><span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span> <span class="n">entity_uids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entity_uids</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">entity_uids</span> <span class="o">==</span> <span class="s2">&quot;all_objects&quot;</span><span class="p">:</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object_uid_list</span><span class="p">()</span>
+                <span class="o">+</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_articulation_uid_list</span><span class="p">()</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="n">entity_uids</span> <span class="o">==</span> <span class="s2">&quot;all_robots&quot;</span><span class="p">:</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_robot_uid_list</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">entity_uids</span> <span class="o">==</span> <span class="s2">&quot;all_sensors&quot;</span><span class="p">:</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_sensor_uid_list</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># logger.log_warning(f&quot;Entity uids {entity_uids} not supported in [&#39;all_objects&#39;, &#39;all_robots&#39;, &#39;all_sensors&#39;], wrapping it as a list..&quot;)</span>
+            <span class="n">entity_uids</span> <span class="o">=</span> <span class="p">[</span><span class="n">entity_uids</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entity_uids</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">set</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+        <span class="n">entity_uids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">entity_uids</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Entity uids </span><span class="si">{</span><span class="n">entity_uids</span><span class="si">}</span><span class="s2"> with type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">entity_uids</span><span class="p">)</span><span class="si">}</span><span class="s2"> not supported in [List[str], str], please check again.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">entity_uids</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">resolve_dict</span><span class="p">(</span><span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span> <span class="n">entity_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">entity_key</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">entity_dict</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
+        <span class="n">entity_val</span> <span class="o">=</span> <span class="n">entity_dict</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">entity_key</span><span class="p">)</span>
+        <span class="n">entity_uids</span> <span class="o">=</span> <span class="n">resolve_uids</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">entity_key</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">entity_uid</span> <span class="ow">in</span> <span class="n">entity_uids</span><span class="p">:</span>
+            <span class="n">entity_dict</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">entity_uid</span><span class="p">:</span> <span class="n">deepcopy</span><span class="p">(</span><span class="n">entity_val</span><span class="p">)})</span>
+    <span class="k">return</span> <span class="n">entity_dict</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_pose</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">return_name</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">to_matrix</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">):</span>
+    <span class="n">entity</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_asset</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">RigidObject</span><span class="p">):</span>
+        <span class="n">entity_pose</span> <span class="o">=</span> <span class="n">entity</span><span class="o">.</span><span class="n">get_local_pose</span><span class="p">(</span><span class="n">to_matrix</span><span class="o">=</span><span class="n">to_matrix</span><span class="p">)[</span><span class="n">env_ids</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="n">entity_pose_register_name</span> <span class="o">=</span> <span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span> <span class="o">+</span> <span class="s2">&quot;_pose&quot;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">Robot</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">control_parts</span> <span class="o">=</span> <span class="n">resolve_matching_names</span><span class="p">(</span>
+            <span class="n">entity_cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">entity</span><span class="o">.</span><span class="n">control_parts</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">control_parts</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="s2">&quot;Only 1 control part can be assigned for computing the robot pose, please check again. Skipping&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">entity_cfg</span><span class="o">.</span><span class="n">control_parts</span> <span class="o">=</span> <span class="n">control_parts</span>
+        <span class="n">control_part</span> <span class="o">=</span> <span class="n">control_parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">control_part_qpos</span> <span class="o">=</span> <span class="n">entity</span><span class="o">.</span><span class="n">get_qpos</span><span class="p">()[</span>
+            <span class="n">env_ids</span><span class="p">,</span> <span class="n">entity</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">control_part</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">entity_pose</span> <span class="o">=</span> <span class="n">entity</span><span class="o">.</span><span class="n">compute_fk</span><span class="p">(</span>
+            <span class="n">control_part_qpos</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">control_part</span><span class="p">,</span> <span class="n">to_matrix</span><span class="o">=</span><span class="n">to_matrix</span>
+        <span class="p">)</span>  <span class="c1"># NOTE: now compute_fk returns arena pose</span>
+        <span class="n">entity_pose_register_name</span> <span class="o">=</span> <span class="n">control_part</span> <span class="o">+</span> <span class="s2">&quot;_pose&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Entity with tyope </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span><span class="si">}</span><span class="s2"> is not supported, please check again.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">return_name</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">entity_pose_register_name</span><span class="p">,</span> <span class="n">entity_pose</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">entity_pose</span>
+
+
+<div class="viewcode-block" id="drop_rigid_object_group_sequentially">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.drop_rigid_object_group_sequentially">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">drop_rigid_object_group_sequentially</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">entity_cfg</span><span class="p">:</span> <span class="n">SceneEntityCfg</span><span class="p">,</span>
+    <span class="n">drop_position</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span>
+    <span class="n">position_range</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="p">[</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+    <span class="p">),</span>
+    <span class="n">physics_step</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Drop rigid object group from a specified height sequentially in the environment.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env (EmbodiedEnv): The environment instance.</span>
+<span class="sd">        env_ids (torch.Tensor | None): The environment IDs to apply the event.</span>
+<span class="sd">        entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.</span>
+<span class="sd">        drop_position (List[float]): The base position from which to drop the objects. Default is [0.0, 0.0, 1.0].</span>
+<span class="sd">        position_range (Tuple[List[float], List[float]]): The range for randomizing the drop position around the base position.</span>
+<span class="sd">        physics_step (int): The number of physics steps to simulate after dropping the objects. Default is 2.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">obj_group</span><span class="p">:</span> <span class="n">RigidObjectGroup</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">get_rigid_object_group</span><span class="p">(</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">obj_group</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;RigidObjectGroup with UID &#39;</span><span class="si">{</span><span class="n">entity_cfg</span><span class="o">.</span><span class="n">uid</span><span class="si">}</span><span class="s2">&#39; not found in the simulation.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="n">num_instance</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">env_ids</span><span class="p">)</span>
+    <span class="n">num_objects</span> <span class="o">=</span> <span class="n">obj_group</span><span class="o">.</span><span class="n">num_objects</span>
+
+    <span class="n">range_low</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">position_range</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">range_high</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">position_range</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">drop_pos</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">drop_position</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">unsqueeze_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">num_instance</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">drop_pose</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_instance</span><span class="p">,</span> <span class="mi">7</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">drop_pose</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>  <span class="c1"># w component of quaternion</span>
+    <span class="n">drop_pose</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">drop_pos</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_objects</span><span class="p">):</span>
+        <span class="n">random_offset</span> <span class="o">=</span> <span class="n">sample_uniform</span><span class="p">(</span>
+            <span class="n">lower</span><span class="o">=</span><span class="n">range_low</span><span class="p">,</span>
+            <span class="n">upper</span><span class="o">=</span><span class="n">range_high</span><span class="p">,</span>
+            <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="n">num_instance</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">drop_pose_i</span> <span class="o">=</span> <span class="n">drop_pose</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">drop_pose_i</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">drop_pos</span> <span class="o">+</span> <span class="n">random_offset</span>
+
+        <span class="n">obj_group</span><span class="o">.</span><span class="n">set_local_pose</span><span class="p">(</span><span class="n">pose</span><span class="o">=</span><span class="n">drop_pose_i</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">,</span> <span class="n">obj_ids</span><span class="o">=</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+        <span class="n">env</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">physics_step</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="set_detached_uids_for_env_reset">
+<a class="viewcode-back" href="../../../../../../api_reference/embodichain/embodichain.lab.gym.envs.managers.html#embodichain.lab.gym.envs.managers.events.set_detached_uids_for_env_reset">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">set_detached_uids_for_env_reset</span><span class="p">(</span>
+    <span class="n">env</span><span class="p">:</span> <span class="n">EmbodiedEnv</span><span class="p">,</span>
+    <span class="n">env_ids</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">uids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Set the UIDs of objects that are detached from automatic reset in the environment.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        env (EmbodiedEnv): The environment instance.</span>
+<span class="sd">        env_ids (torch.Tensor | None): The environment IDs to apply the event.</span>
+<span class="sd">        uids (list[str]): The list of UIDs to be detached from automatic reset.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">env</span><span class="o">.</span><span class="n">add_detached_uids_for_reset</span><span class="p">(</span><span class="n">uids</span><span class="o">=</span><span class="n">uids</span><span class="p">)</span></div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

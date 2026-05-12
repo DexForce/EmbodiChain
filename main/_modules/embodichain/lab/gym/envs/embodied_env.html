@@ -1,0 +1,1620 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>embodichain.lab.gym.envs.embodied_env &#8212; EmbodiChain  documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../../../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/embodichain/lab/gym/envs/embodied_env';</script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">EmbodiChain  documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav">
+  <div class="bd-toc-item navbar-nav">
+    <ul class="nav bd-sidenav">
+      <li class="toctree-l1 has-children" style="display:flex;justify-content:center;align-items:center;flex-direction:column;">
+        <div style="text-align:center;">
+          <label for="version-select" style="font-weight:bold;display:block;">Version</label>
+        </div>
+        <select id="version-select" class="version-dropdown" style="margin:0 auto;display:block;">
+          <option>Loading...</option>
+        </select>
+      </li>
+    </ul>
+  </div>
+</nav>
+<script>
+(function() {
+  var sel = document.getElementById("version-select");
+  var path = window.location.pathname;
+
+  // Derive the docs root by stripping the version segment from the current path.
+  // CI layout: /<prefix>/v0.1.3/api.html -> /<prefix>
+  // Local layout (no version segment): keep path as-is and try root
+  var match = path.match(/^(.*\/)(main|v[\d.]+)\//);
+  var base = match ? match[1].replace(/\/$/, "") : "";
+
+  fetch(base + "/versions.json")
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.versions || data.versions.length === 0) throw new Error("no versions");
+      sel.innerHTML = "";
+      data.versions.forEach(function(v) {
+        var opt = document.createElement("option");
+        opt.value = base + "/" + v.name + "/index.html";
+        opt.textContent = v.name + (v.name === data.latest ? " (latest)" : "");
+        if (path.indexOf("/" + v.name + "/") !== -1) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function() {
+      // Local build or versions.json unavailable — show current version label
+      var label = match ? match[2] : "local";
+      sel.innerHTML = "";
+      var opt = document.createElement("option");
+      opt.textContent = label;
+      opt.selected = true;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    });
+  sel.onchange = function() { if (this.value) window.location.href = this.value; };
+})();
+</script></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../introduction.html">EmbodiChain</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/install.html">Installation</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../tutorial/index.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_scene.html">Creating a simulation scene</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_softbody.html">Creating a soft-body simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/create_cloth.html">Creating a cloth simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rigid_object_group.html">Rigid object group tutorial</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/robot.html">Simulating a Robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/solver.html">Create a solver</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/sensor.html">Simulating a Camera Sensor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/motion_gen.html">Motion Generator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/atomic_actions.html">Atomic Actions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/gizmo.html">Interactive Robot Control with Gizmo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/basic_env.html">Creating a Basic Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/modular_env.html">Creating a Modular Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/data_generation.html">Data Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../tutorial/rl.html">Reinforcement Learning Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../guides/index.html">How-to Guides</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/custom_functors.html">Writing Custom Functors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/configuration.html">Configuration Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/add_robot.html">Adding a New Robot — Quick Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../guides/cli.html">CLI Reference</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../quick_start/docs.html">Build Documentation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Overview</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/sim/index.html">Simulation Framework</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_manager.html">Simulation Manager</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/sim_assets.html">Simulation Assets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object.html">Rigid Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_rigid_object_group.html">Rigid Object Group</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_cloth.html">Cloth Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_soft_object.html">Soft Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_articulation.html">Articulation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/sim_robot.html">Robot</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/sim_sensor.html">Sensors</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/solvers/index.html">Solvers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pytorch_solver.html">PytorchSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/differential_solver.html">DifferentialSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pink_solver.html">PinkSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/pinocchio_solver.html">PinocchioSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/opw_solver.html">OPWSolver</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/solvers/srs_solver.html">SRSSolver</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/sim/planners/index.html">Planners</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/toppra_planner.html">ToppraPlanner</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/trajectory_sample_method.html">TrajectorySampleMethod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/sim/planners/motion_generator.html">MotionGenerator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/sim/atomic_actions.html">Atomic Actions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/gym/index.html">Gym</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../overview/gym/env.html">Embodied Environments</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/event_functors.html">Event Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/observation_functors.html">Observation Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/reward_functors.html">Reward Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/action_functors.html">Action Functors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../overview/gym/dataset_functors.html">Dataset Functors</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../overview/rl/index.html">Reinforcement Learning</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/algorithm.html">RL Algorithms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/buffer.html">Rollout Buffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/models.html">Policy Models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/trainer.html">Trainer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/config.html">Config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/train_script.html">Train Script</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../overview/rl/multi_gpu.html">Multi-GPU Training</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Features</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/online_data.html">Online Data Streaming</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../features/agents.html">EmbodiAgent</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/workspace_analyzer/index.html">Workspace Analyzer</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/workspace_analyzer.html">Overview and Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/configs.html">Configuration System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/samplers.html">Sampling Strategies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/visualizers.html">Visualization Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/caches.html">Caching System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/constraints.html">Constraint Handling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/workspace_analyzer/metrics.html">Metric Computation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/interaction/index.html">Interactive Simulation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/window.html">Window interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/interaction/preview_asset.html">Asset preview</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../features/toolkits/index.html">ToolKits</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/convex_decomposition.html">convex_decomposition</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/urdf_assembly.html">urdf_assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../features/toolkits/grasp_generator.html">Generating and Executing Robot Grasps</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/assets.html">Data Assets</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/robot/index.html">Supported Robots</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/dexforce_w1.html">Dexforce W1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../resources/robot/cobotmagic.html">CobotMagic</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../resources/task/index.html">Supported Tasks</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../resources/roadmap.html">Roadmap</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../../../api_reference/index.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.agents.html">embodichain.agents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.data.html">embodichain.data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.lab.html">embodichain.lab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.toolkits.html">embodichain.toolkits</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.html">embodichain.utils</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../../api_reference/embodichain/embodichain.utils.warp.html">embodichain.utils.warp</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for embodichain.lab.gym.envs.embodied_env</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ----------------------------------------------------------------------------</span>
+<span class="c1"># Copyright (c) 2021-2026 DexForce Technology Co., Ltd.</span>
+<span class="c1">#</span>
+<span class="c1"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c1"># you may not use this file except in compliance with the License.</span>
+<span class="c1"># You may obtain a copy of the License at</span>
+<span class="c1">#</span>
+<span class="c1">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c1">#</span>
+<span class="c1"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="c1"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c1"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c1"># See the License for the specific language governing permissions and</span>
+<span class="c1"># limitations under the License.</span>
+<span class="c1"># ----------------------------------------------------------------------------</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">math</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">wraps</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">gymnasium</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gym</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">MISSING</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tensordict</span><span class="w"> </span><span class="kn">import</span> <span class="n">TensorDict</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">RobotCfg</span><span class="p">,</span>
+    <span class="n">RigidObjectCfg</span><span class="p">,</span>
+    <span class="n">RigidObjectGroupCfg</span><span class="p">,</span>
+    <span class="n">ArticulationCfg</span><span class="p">,</span>
+    <span class="n">LightCfg</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.action_bank.configurable_action</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">get_func_tag</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.action_bank.configurable_action</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ActionBank</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.objects</span><span class="w"> </span><span class="kn">import</span> <span class="n">Robot</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.sensors</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseSensor</span><span class="p">,</span> <span class="n">SensorCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.sim.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvObs</span><span class="p">,</span> <span class="n">EnvAction</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseEnv</span><span class="p">,</span> <span class="n">EnvCfg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">EventManager</span><span class="p">,</span>
+    <span class="n">ObservationManager</span><span class="p">,</span>
+    <span class="n">RewardManager</span><span class="p">,</span>
+    <span class="n">ActionManager</span><span class="p">,</span>
+    <span class="n">DatasetManager</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.utils.registration</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_env</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.utils.gym_utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">init_rollout_buffer_from_gym_space</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">configclass</span><span class="p">,</span> <span class="n">logger</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;EmbodiedEnvCfg&quot;</span><span class="p">,</span> <span class="s2">&quot;EmbodiedEnv&quot;</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="EmbodiedEnvCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnvCfg">[docs]</a>
+<span class="nd">@configclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">EmbodiedEnvCfg</span><span class="p">(</span><span class="n">EnvCfg</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for Embodied AI environments.</span>
+
+<span class="sd">    `EmbodiedEnvCfg` extends `EnvCfg` with high-level scene, robot, sensor,</span>
+<span class="sd">    object and manager declarations used to build modular embodied environments.</span>
+<span class="sd">    The configuration is intended to be declarative: the environment and its</span>
+<span class="sd">    managers (events, observations, rewards, dataset) are assembled from the</span>
+<span class="sd">    provided config fields with minimal additional code.</span>
+
+<span class="sd">    Typical usage: declare robots, sensors, lights, rigid objects/articulations,</span>
+<span class="sd">    and manager configurations. Additional task-specific parameters can be</span>
+<span class="sd">    supplied via the `extensions` dict and will be bound to the environment</span>
+<span class="sd">    instance as attributes during initialization.</span>
+
+<span class="sd">    Key fields</span>
+<span class="sd">    - **robot**: `RobotCfg` (required) — the agent definition (URDF/MJCF, initial</span>
+<span class="sd">        state, control mode, etc.).</span>
+<span class="sd">    - **control_parts**: Optional[List[str]] — named robot parts to control. If</span>
+<span class="sd">        `None`, all controllable joints are used.</span>
+<span class="sd">    - **active_joint_ids**: List[int] — explicit joint indices to use for</span>
+<span class="sd">        control (alternative to `control_parts`).</span>
+<span class="sd">    - **sensor**: List[`SensorCfg`] — sensors attached to the robot or scene</span>
+<span class="sd">        (cameras, depth, segmentation, force sensors, ...).</span>
+<span class="sd">    - **light**: `EnvLightCfg` — lighting configuration (direct lights now,</span>
+<span class="sd">        indirect/IBL planned for future releases).</span>
+<span class="sd">    - **background**, **rigid_object**, **rigid_object_group**, **articulation**:</span>
+<span class="sd">        scene object lists for static/kinematic props, dynamic objects, grouped</span>
+<span class="sd">        object pools, and articulated mechanisms respectively.</span>
+<span class="sd">    - **events**: Optional manager config — event functors for startup/reset/</span>
+<span class="sd">        periodic randomization and scripted behaviors.</span>
+<span class="sd">    - **observations**, **rewards**, **dataset**: Optional manager configs to</span>
+<span class="sd">        compose observation transforms, reward functors, and dataset/recorder</span>
+<span class="sd">        settings (auto-saving on episode completion).</span>
+<span class="sd">    - **extensions**: Optional[Dict[str, Any]] — arbitrary task-specific key/value</span>
+<span class="sd">        pairs (e.g. `success_threshold`, `control_frequency`) that are automatically</span>
+<span class="sd">        set on the config *and* bound to the environment instance.</span>
+<span class="sd">    - **filter_visual_rand** / **filter_dataset_saving**: booleans to disable</span>
+<span class="sd">        visual randomization or dataset saving for debugging purposes.</span>
+<span class="sd">    - **init_rollout_buffer**: bool — when true (or when a dataset manager is</span>
+<span class="sd">        present and dataset saving is enabled) the environment will initialize a</span>
+<span class="sd">        rollout buffer matching the observation/action spaces for episode</span>
+<span class="sd">        recording.</span>
+
+<span class="sd">    See `EmbodiedEnv` for usage patterns and the project documentation</span>
+<span class="sd">    for full examples showing how to declare environments from these configs.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="EmbodiedEnvCfg.EnvLightCfg">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnvCfg.EnvLightCfg">[docs]</a>
+    <span class="nd">@configclass</span>
+    <span class="k">class</span><span class="w"> </span><span class="nc">EnvLightCfg</span><span class="p">:</span>
+        <span class="n">direct</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">LightCfg</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># TODO: support more types of indirect light in the future.</span>
+        <span class="n">indirect</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+    <span class="n">robot</span><span class="p">:</span> <span class="n">RobotCfg</span> <span class="o">=</span> <span class="n">MISSING</span>
+
+    <span class="n">control_parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;List of robot parts to control. If None, all controllable joints will be used. </span>
+<span class="sd">    This is useful when we want to control only a subset of the robot joints for certain tasks or demonstrations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">active_joint_ids</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;List of active joint IDs for control. User also can directly specify the active joint IDs instead of control \</span>
+<span class="sd">    parts. This is useful when the control parts are not well defined or we want to have more fine-grained control.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">sensor</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">SensorCfg</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">light</span><span class="p">:</span> <span class="n">EnvLightCfg</span> <span class="o">=</span> <span class="n">EnvLightCfg</span><span class="p">()</span>
+
+    <span class="n">background</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RigidObjectCfg</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">rigid_object</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RigidObjectCfg</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">rigid_object_group</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RigidObjectGroupCfg</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">articulation</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">ArticulationCfg</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">events</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Event settings. Defaults to None, in which case no events are applied through the event manager.</span>
+
+<span class="sd">    Please refer to the :class:`embodichain.lab.gym.managers.EventManager` class for more details.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">observations</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Observation settings. Defaults to None, in which case no additional observations are applied through</span>
+<span class="sd">    the observation manager.</span>
+
+<span class="sd">    Please refer to the :class:`embodichain.lab.gym.managers.ObservationManager` class for more details.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">rewards</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Reward settings. Defaults to None, in which case no reward computation is performed through</span>
+<span class="sd">    the reward manager.</span>
+
+<span class="sd">    Please refer to the :class:`embodichain.lab.gym.managers.RewardManager` class for more details.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">dataset</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Dataset settings. Defaults to None, in which case no dataset collection is performed.</span>
+
+<span class="sd">    Please refer to the :class:`embodichain.lab.gym.managers.DatasetManager` class for more details.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">actions</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Action manager settings. Defaults to None, in which case no action preprocessing is applied.</span>
+
+<span class="sd">    When configured, the ActionManager preprocesses raw policy actions (e.g., delta_qpos, eef_pose)</span>
+<span class="sd">    into robot control format.</span>
+
+<span class="sd">    Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">extensions</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extension parameters for task-specific configurations.</span>
+
+<span class="sd">    This field can be used to pass additional parameters that are specific to certain</span>
+<span class="sd">    environments or tasks without modifying the base configuration class. For example:</span>
+<span class="sd">    - success_threshold: Task-specific success distance threshold</span>
+<span class="sd">    - vr_joint_mapping: VR joint mapping for teleoperation</span>
+<span class="sd">    - control_frequency: Control frequency for VR teleoperation</span>
+
+<span class="sd">    Note: Action configuration (e.g., delta_qpos, scale) should use the ``actions``</span>
+<span class="sd">    field and ActionManager, not extensions.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Some helper attributes</span>
+    <span class="n">filter_visual_rand</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Whether to filter out visual randomization </span>
+<span class="sd">    </span>
+<span class="sd">    This is useful when we want to disable visual randomization for debug motion and physics issues.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">filter_dataset_saving</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Whether to filter out dataset saving</span>
+<span class="sd">    </span>
+<span class="sd">    This is useful when we want to disable dataset saving for debug motion and physics issues.</span>
+<span class="sd">    If no dataset manager is configured, this flag will have no effect.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">init_rollout_buffer</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Whether to initialize the rollout buffer in the environment.</span>
+
+<span class="sd">    If filter_dataset_saving is False and a dataset manager is configured, the rollout buffer will be initialized by default</span>
+<span class="sd">    &quot;&quot;&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="EmbodiedEnv">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv">[docs]</a>
+<span class="nd">@register_env</span><span class="p">(</span><span class="s2">&quot;EmbodiedEnv-v1&quot;</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">EmbodiedEnv</span><span class="p">(</span><span class="n">BaseEnv</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Embodied AI environment that is used to simulate the Embodied AI tasks.</span>
+
+<span class="sd">    Core simulation components for Embodied AI environments.</span>
+<span class="sd">    - sensor: The sensors used to perceive the environment, which could be attached to the agent or the environment.</span>
+<span class="sd">    - robot: The robot which will be used to interact with the environment.</span>
+<span class="sd">    - light: The lights in the environment, which could be used to illuminate the environment.</span>
+<span class="sd">        - indirect: the indirect light sources, such as ambient light, IBL, etc.</span>
+<span class="sd">            The indirect light sources are used for global illumination which affects the entire scene.</span>
+<span class="sd">        - direct: The direct light sources, such as point light, spot light, etc.</span>
+<span class="sd">            The direct light sources are used for local illumination which mainly affects the arena in the scene.</span>
+<span class="sd">    - background: Kinematic or Static rigid objects, such as obstacles or landmarks.</span>
+<span class="sd">    - rigid_object: Dynamic objects that can be interacted with.</span>
+<span class="sd">    - rigid_object_group: Groups of rigid objects that can be interacted with.</span>
+<span class="sd">    - deformable_object(TODO: supported in the future): Deformable volumes or surfaces (cloth) that can be interacted with.</span>
+<span class="sd">    - articulation: Articulated objects that can be manipulated, such as doors, drawers, etc.</span>
+<span class="sd">    - event manager: The event manager is used to manage the events in the environment, such as randomization,</span>
+<span class="sd">        perturbation, etc.</span>
+<span class="sd">    - observation manager: The observation manager is used to manage the observations in the environment,</span>
+<span class="sd">        such as depth, segmentation, etc.</span>
+<span class="sd">    - action bank: The action bank is used to manage the actions in the environment, such as action composition, action graph, etc.</span>
+<span class="sd">    - affordance_datas: The affordance data that can be used to store the intermediate results or information</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">__init_subclass__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Automatically wrap subclass demo-action builders with shape checks.</span>
+
+<span class="sd">        Any subclass overriding ``create_demo_action_list`` will be wrapped so its</span>
+<span class="sd">        returned action sequence is validated and, when possible, converted to the</span>
+<span class="sd">        environment action dimension.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">__init_subclass__</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">method</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;create_demo_action_list&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">method</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="s2">&quot;_demo_action_shape_wrapped&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="k">return</span>
+
+        <span class="nd">@wraps</span><span class="p">(</span><span class="n">method</span><span class="p">)</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">wrapped_create_demo_action_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="n">action_list</span> <span class="o">=</span> <span class="n">method</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_demo_action_list</span><span class="p">(</span><span class="n">action_list</span><span class="p">)</span>
+
+        <span class="n">wrapped_create_demo_action_list</span><span class="o">.</span><span class="n">_demo_action_shape_wrapped</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="s2">&quot;create_demo_action_list&quot;</span><span class="p">,</span> <span class="n">wrapped_create_demo_action_list</span><span class="p">)</span>
+
+<div class="viewcode-block" id="EmbodiedEnv.__init__">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">EmbodiedEnvCfg</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">affordance_datas</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">action_bank</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">extensions</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="s2">&quot;extensions&quot;</span><span class="p">,</span> <span class="p">{})</span> <span class="ow">or</span> <span class="p">{}</span>
+
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">extensions</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">setattr</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+            <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="p">:</span> <span class="n">EventManager</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">observation_manager</span><span class="p">:</span> <span class="n">ObservationManager</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reward_manager</span><span class="p">:</span> <span class="n">RewardManager</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span><span class="p">:</span> <span class="n">ActionManager</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span><span class="p">:</span> <span class="n">DatasetManager</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">dataset</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">filter_dataset_saving</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span> <span class="o">=</span> <span class="n">DatasetManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">dataset</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">init_rollout_buffer</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="c1"># Rollout buffer for episode data collection.</span>
+        <span class="c1"># The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.</span>
+        <span class="c1"># The default key in the buffer are:</span>
+        <span class="c1"># - obs: the observation returned by the environment.</span>
+        <span class="c1"># - action: the action applied to the environment.</span>
+        <span class="c1"># - reward: the reward returned by the environment.</span>
+        <span class="c1"># TODO: we may add more keys and make the buffer extensible in the future.</span>
+        <span class="c1"># This buffer should also be support initialized from outside of the environment.</span>
+        <span class="c1"># For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">:</span> <span class="n">TensorDict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_max_rollout_steps</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rollout_buffer_mode</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">init_rollout_buffer</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span> <span class="o">=</span> <span class="n">init_rollout_buffer_from_gym_space</span><span class="p">(</span>
+                <span class="n">obs_space</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">observation_space</span><span class="p">,</span>
+                <span class="n">action_space</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">action_space</span><span class="p">,</span>
+                <span class="n">max_episode_steps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">max_episode_steps</span><span class="p">,</span>
+                <span class="n">num_envs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span>
+                <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_max_rollout_steps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_rollout_buffer_mode</span> <span class="o">=</span> <span class="s2">&quot;expert&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">episode_success_status</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="EmbodiedEnv.set_rollout_buffer">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.set_rollout_buffer">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_rollout_buffer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rollout_buffer</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the rollout buffer for episode data collection.</span>
+
+<span class="sd">        This function can be used to set the rollout buffer from outside of the environment,</span>
+<span class="sd">        such as a shared rollout buffer initialized in model training process and passed to the environment for data collection.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            rollout_buffer (TensorDict): The rollout buffer to be set. RL</span>
+<span class="sd">                rollouts use a uniform `[num_envs, time + 1]` layout so all</span>
+<span class="sd">                fields share the same batch shape; the last slot of</span>
+<span class="sd">                transition-only fields is reserved as padding. Expert buffers</span>
+<span class="sd">                keep the legacy `[num_envs, time]` batch layout.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span> <span class="o">=</span> <span class="n">rollout_buffer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rollout_buffer_mode</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_infer_rollout_buffer_mode</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rollout_buffer_mode</span> <span class="o">==</span> <span class="s2">&quot;rl&quot;</span><span class="p">:</span>
+            <span class="n">batch_size</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">batch_size</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">batch_size</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="n">message</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Invalid RL rollout buffer batch size: </span><span class="si">{</span><span class="n">batch_size</span><span class="si">}</span><span class="s2">. &quot;</span>
+                    <span class="s2">&quot;Expected a 2D batch layout [num_envs, time + 1] for RL rollouts.&quot;</span>
+                <span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_max_rollout_steps</span> <span class="o">=</span> <span class="n">batch_size</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Invalid rollout buffer shape: </span><span class="si">{</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">. The expected shape is (num_envs, max_episode_steps) for each key.&quot;</span>
+                <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_max_rollout_steps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span> <span class="o">=</span> <span class="mi">0</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_sim_state</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the simulation state at the beginning of scene creation.&quot;&quot;&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_apply_functor_filter</span><span class="p">()</span>
+
+        <span class="c1"># create event manager</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="p">:</span> <span class="n">EmbodiedEnvCfg</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span> <span class="o">=</span> <span class="n">EventManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+            <span class="c1"># perform events at the start of the simulation</span>
+            <span class="k">if</span> <span class="s2">&quot;startup&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">available_modes</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;startup&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">observations</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">observation_manager</span> <span class="o">=</span> <span class="n">ObservationManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">observations</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">rewards</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">reward_manager</span> <span class="o">=</span> <span class="n">RewardManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">rewards</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">actions</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span> <span class="o">=</span> <span class="n">ActionManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">actions</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span>
+            <span class="c1"># Override action space to match ActionManager output dim.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">single_action_space</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span><span class="o">.</span><span class="n">single_action_space</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_functor_filter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply functor filters to the environment components based on configuration.</span>
+
+<span class="sd">        This method is used to filter out certain components of the environment, such as visual randomization,</span>
+<span class="sd">        based on the configuration settings. For example, if `filter_visual_rand` is set to True in the configuration,</span>
+<span class="sd">        all visual randomization functors will be removed from the event manager.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.utils.module_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_all_exported_items_from_module</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers.cfg</span><span class="w"> </span><span class="kn">import</span> <span class="n">EventCfg</span>
+
+        <span class="n">functors_to_remove</span> <span class="o">=</span> <span class="n">get_all_exported_items_from_module</span><span class="p">(</span>
+            <span class="s2">&quot;embodichain.lab.gym.envs.managers.randomization.visual&quot;</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">filter_visual_rand</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">:</span>
+            <span class="c1"># Iterate through all attributes of the events object</span>
+            <span class="k">for</span> <span class="n">attr_name</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">):</span>
+                <span class="n">attr</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">attr</span><span class="p">,</span> <span class="n">EventCfg</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">attr</span><span class="o">.</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span> <span class="ow">in</span> <span class="n">functors_to_remove</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">log_info</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Filtering out visual randomization functor: </span><span class="si">{</span><span class="n">attr</span><span class="o">.</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+                        <span class="p">)</span>
+                        <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_action_bank</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">action_bank_cls</span><span class="p">:</span> <span class="n">ActionBank</span><span class="p">,</span> <span class="n">action_config</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize action bank and parse action graph structure.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            action_bank_cls: The ActionBank class for this environment.</span>
+<span class="sd">            action_config: The configuration dict for the action bank.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">action_bank</span> <span class="o">=</span> <span class="n">action_bank_cls</span><span class="p">(</span><span class="n">action_config</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">this_class_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_bank</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+            <span class="n">node_func</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">edge_func</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">class_name</span> <span class="ow">in</span> <span class="p">[</span><span class="n">this_class_name</span><span class="p">,</span> <span class="n">ActionBank</span><span class="o">.</span><span class="vm">__name__</span><span class="p">]:</span>
+                <span class="n">node_func</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">get_func_tag</span><span class="p">(</span><span class="s2">&quot;node&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">class_name</span><span class="p">,</span> <span class="p">{}))</span>
+                <span class="n">edge_func</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">get_func_tag</span><span class="p">(</span><span class="s2">&quot;edge&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">class_name</span><span class="p">,</span> <span class="p">{}))</span>
+        <span class="k">except</span> <span class="ne">KeyError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Function tag for </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2"> not found in action bank function registry.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">graph_compose</span><span class="p">,</span> <span class="n">jobs_data</span><span class="p">,</span> <span class="n">jobkey2index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_bank</span><span class="o">.</span><span class="n">parse_network</span><span class="p">(</span>
+            <span class="n">node_functions</span><span class="o">=</span><span class="n">node_func</span><span class="p">,</span> <span class="n">edge_functions</span><span class="o">=</span><span class="n">edge_func</span><span class="p">,</span> <span class="n">vis_graph</span><span class="o">=</span><span class="kc">False</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">packages</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_bank</span><span class="o">.</span><span class="n">gantt</span><span class="p">(</span>
+            <span class="n">tasks_data</span><span class="o">=</span><span class="n">jobs_data</span><span class="p">,</span> <span class="n">taskkey2index</span><span class="o">=</span><span class="n">jobkey2index</span><span class="p">,</span> <span class="n">vis</span><span class="o">=</span><span class="kc">False</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="EmbodiedEnv.set_affordance">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.set_affordance">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_affordance</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Set an affordance value by key.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            key (str): The affordance key.</span>
+<span class="sd">            value (Any): The affordance value.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">affordance_datas</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span></div>
+
+
+<div class="viewcode-block" id="EmbodiedEnv.get_affordance">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.get_affordance">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_affordance</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get an affordance value by key.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            key (str): The affordance key.</span>
+<span class="sd">            default (Any, optional): Default value if key not found.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Any: The affordance value or default.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">affordance_datas</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_hook_after_sim_step</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">action</span><span class="p">:</span> <span class="n">EnvAction</span><span class="p">,</span>
+        <span class="n">rewards</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">dones</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">info</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="c1"># TODO: We may make the data collection customizable for rollout buffer.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_max_rollout_steps</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rollout_buffer_mode</span> <span class="o">==</span> <span class="s2">&quot;rl&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_write_rl_rollout_step</span><span class="p">(</span>
+                        <span class="n">obs</span><span class="o">=</span><span class="n">obs</span><span class="p">,</span>
+                        <span class="n">rewards</span><span class="o">=</span><span class="n">rewards</span><span class="p">,</span>
+                        <span class="n">dones</span><span class="o">=</span><span class="n">dones</span><span class="p">,</span>
+                        <span class="n">terminateds</span><span class="o">=</span><span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;terminateds&quot;</span><span class="p">),</span>
+                        <span class="n">truncateds</span><span class="o">=</span><span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;truncateds&quot;</span><span class="p">),</span>
+                    <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_write_episode_rollout_step</span><span class="p">(</span>
+                        <span class="n">obs</span><span class="o">=</span><span class="n">obs</span><span class="p">,</span>
+                        <span class="n">action</span><span class="o">=</span><span class="n">action</span><span class="p">,</span>
+                        <span class="n">rewards</span><span class="o">=</span><span class="n">rewards</span><span class="p">,</span>
+                    <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Current rollout step </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span><span class="si">}</span><span class="s2"> exceeds max rollout steps </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_max_rollout_steps</span><span class="si">}</span><span class="s2">. </span><span class="se">\</span>
+<span class="s2">                        Data will not be recorded in the rollout buffer.&quot;</span>
+                <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="c1"># Update success status for all environments where episode is done</span>
+        <span class="k">if</span> <span class="s2">&quot;success&quot;</span> <span class="ow">in</span> <span class="n">info</span><span class="p">:</span>
+            <span class="c1"># info[&quot;success&quot;] should be a tensor or array of shape (num_envs,)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">episode_success_status</span><span class="p">[</span><span class="n">dones</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;success&quot;</span><span class="p">][</span><span class="n">dones</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extend_obs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EnvObs</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">observation_manager</span><span class="p">:</span>
+            <span class="n">obs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observation_manager</span><span class="o">.</span><span class="n">compute</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">obs</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extend_reward</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">rewards</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">action</span><span class="p">:</span> <span class="n">EnvAction</span><span class="p">,</span>
+        <span class="n">info</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">reward_manager</span><span class="p">:</span>
+            <span class="n">extra_rewards</span><span class="p">,</span> <span class="n">reward_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">reward_manager</span><span class="o">.</span><span class="n">compute</span><span class="p">(</span>
+                <span class="n">obs</span><span class="o">=</span><span class="n">obs</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="n">action</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="n">info</span>
+            <span class="p">)</span>
+            <span class="n">info</span><span class="p">[</span><span class="s2">&quot;rewards&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">reward_info</span>
+            <span class="c1"># Add manager terms to base reward from get_reward() so task reward is kept</span>
+            <span class="n">rewards</span> <span class="o">=</span> <span class="n">rewards</span> <span class="o">+</span> <span class="n">extra_rewards</span>
+        <span class="k">return</span> <span class="n">rewards</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_prepare_scene</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_setup_lights</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_setup_background</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_setup_interactive_objects</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_update_sim_state</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Perform the simulation step and apply events if configured.</span>
+
+<span class="sd">        The events manager applies its functors after physics simulation and rendering,</span>
+<span class="sd">        and before the observation and reward computation (if applicable).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s2">&quot;interval&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">available_modes</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;interval&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_initialize_episode</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">env_ids</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">log_debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Initializing episode for env_ids: </span><span class="si">{</span><span class="n">env_ids</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+        <span class="n">save_data</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;save_data&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Determine which environments to process</span>
+        <span class="n">env_ids_to_process</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">))</span> <span class="k">if</span> <span class="n">env_ids</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">env_ids</span>
+
+        <span class="c1"># Save dataset before clearing buffers for environments that are being reset</span>
+        <span class="k">if</span> <span class="n">save_data</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s2">&quot;save&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span><span class="o">.</span><span class="n">available_modes</span><span class="p">:</span>
+
+                <span class="c1"># Filter to only save successful episodes</span>
+                <span class="n">successful_env_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">episode_success_status</span> <span class="o">|</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task_success</span>
+
+                <span class="k">if</span> <span class="n">successful_env_ids</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+
+                    <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span>
+                        <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;save&quot;</span><span class="p">,</span>
+                        <span class="n">env_ids</span><span class="o">=</span><span class="n">successful_env_ids</span><span class="o">.</span><span class="n">nonzero</span><span class="p">(</span><span class="n">as_tuple</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">],</span>
+                    <span class="p">)</span>
+
+        <span class="c1"># Save recorded camera data before resetting</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">embodichain.lab.gym.envs.managers.record</span><span class="w"> </span><span class="kn">import</span> <span class="n">record_camera_data</span>
+
+            <span class="k">for</span> <span class="n">mode_cfgs</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">_mode_functor_cfgs</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                <span class="k">for</span> <span class="n">functor_cfg</span> <span class="ow">in</span> <span class="n">mode_cfgs</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">functor_cfg</span><span class="o">.</span><span class="n">func</span><span class="p">,</span> <span class="n">record_camera_data</span><span class="p">):</span>
+                        <span class="n">functor_cfg</span><span class="o">.</span><span class="n">func</span><span class="o">.</span><span class="n">save_and_clear</span><span class="p">()</span>
+
+        <span class="c1"># Clear episode buffers and reset success status for environments being reset</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rollout_buffer_mode</span> <span class="o">!=</span> <span class="s2">&quot;rl&quot;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">episode_success_status</span><span class="p">[</span><span class="n">env_ids_to_process</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="c1"># apply events such as randomization for environments that need a reset</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">events</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s2">&quot;reset&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">available_modes</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">event_manager</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reset&quot;</span><span class="p">,</span> <span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">)</span>
+
+        <span class="c1"># reset observation manager for environments that need a reset</span>
+        <span class="c1"># This clears any cached data in observation functors (e.g., physics attributes)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">observations</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">observation_manager</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">)</span>
+
+        <span class="c1"># reset reward manager for environments that need a reset</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">rewards</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">reward_manager</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">env_ids</span><span class="o">=</span><span class="n">env_ids</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_infer_rollout_buffer_mode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rollout_buffer</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Infer whether the rollout buffer is expert recording or RL training data.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="p">{</span>
+            <span class="s2">&quot;obs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;action&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;reward&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;done&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;value&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;terminated&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;truncated&quot;</span><span class="p">,</span>
+        <span class="p">}</span><span class="o">.</span><span class="n">issubset</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">keys</span><span class="p">())):</span>
+            <span class="k">return</span> <span class="s2">&quot;rl&quot;</span>
+        <span class="k">return</span> <span class="s2">&quot;expert&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_write_episode_rollout_step</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">action</span><span class="p">:</span> <span class="n">EnvAction</span><span class="p">,</span>
+        <span class="n">rewards</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Write one step into the legacy episode recording rollout buffer.&quot;&quot;&quot;</span>
+        <span class="n">buffer_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">device</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;obs&quot;</span><span class="p">][:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span>
+            <span class="n">obs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">):</span>
+            <span class="n">action_to_store</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">action</span><span class="p">[</span><span class="s2">&quot;qpos&quot;</span><span class="p">]</span>
+                <span class="k">if</span> <span class="s2">&quot;qpos&quot;</span> <span class="ow">in</span> <span class="n">action</span>
+                <span class="k">else</span> <span class="p">(</span><span class="n">action</span><span class="p">[</span><span class="s2">&quot;qvel&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;qvel&quot;</span> <span class="ow">in</span> <span class="n">action</span> <span class="k">else</span> <span class="n">action</span><span class="p">[</span><span class="s2">&quot;qf&quot;</span><span class="p">])</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">action_to_store</span> <span class="o">=</span> <span class="n">action</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Unexpected action type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">action</span><span class="p">)</span><span class="si">}</span><span class="s2"> in _hook_after_sim_step; &quot;</span>
+                <span class="s2">&quot;skipping action storage in rollout buffer.&quot;</span>
+            <span class="p">)</span>
+            <span class="n">action_to_store</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">action_to_store</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;actions&quot;</span><span class="p">][:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span>
+                <span class="n">action_to_store</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span>
+            <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;rewards&quot;</span><span class="p">][:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span><span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span>
+            <span class="n">rewards</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_write_rl_rollout_step</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">obs</span><span class="p">:</span> <span class="n">EnvObs</span><span class="p">,</span>
+        <span class="n">rewards</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">dones</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">terminateds</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">truncateds</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Write environment-side fields into an externally managed RL rollout buffer.&quot;&quot;&quot;</span>
+        <span class="n">buffer_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="o">.</span><span class="n">device</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;reward&quot;</span><span class="p">][:</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span><span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span>
+            <span class="n">rewards</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;done&quot;</span><span class="p">][:</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span><span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span>
+            <span class="n">dones</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="n">terminateds</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">terminateds</span>
+            <span class="k">if</span> <span class="n">terminateds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">else</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">dones</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">truncateds</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">truncateds</span>
+            <span class="k">if</span> <span class="n">truncateds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">else</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">dones</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;terminated&quot;</span><span class="p">][</span>
+            <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span>
+        <span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span><span class="n">terminateds</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s2">&quot;truncated&quot;</span><span class="p">][</span>
+            <span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_rollout_step</span>
+        <span class="p">]</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span><span class="n">truncateds</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">buffer_device</span><span class="p">),</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_normalize_demo_action_list</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">action_list</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">EnvAction</span><span class="p">]</span> <span class="o">|</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">EnvAction</span><span class="p">]</span> <span class="o">|</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Validate/convert demo action outputs to match single action-space dim.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">action_list</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">expected_dim</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">action_space</span><span class="o">.</span><span class="n">shape</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action_list</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_demo_action_tensor</span><span class="p">(</span><span class="n">action_list</span><span class="p">,</span> <span class="n">expected_dim</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action_list</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+                <span class="s2">&quot;create_demo_action_list must return None, a torch.Tensor, or a sequence of actions. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">action_list</span><span class="p">)</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">normalized_action_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_demo_action_tensor</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">expected_dim</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">action</span> <span class="ow">in</span> <span class="n">action_list</span>
+        <span class="p">]</span>
+        <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">action_list</span><span class="p">)(</span><span class="n">normalized_action_list</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_normalize_demo_action_tensor</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="n">EnvAction</span> <span class="o">|</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">expected_dim</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EnvAction</span> <span class="o">|</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Normalize one action tensor to the expected action dimension.</span>
+
+<span class="sd">        Conversion rule:</span>
+<span class="sd">        - If last-dim equals action-space dim, keep as-is.</span>
+<span class="sd">        - If last-dim is larger, slice with ``active_joint_ids``.</span>
+<span class="sd">        - If last-dim is smaller, raise ``ValueError``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_demo_action_tensordict</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">expected_dim</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+                <span class="s2">&quot;Each demo action must be a torch.Tensor or TensorDict. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">action</span><span class="p">)</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">action</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Demo action tensor must have at least one dimension with action features on the last axis.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">action_dim</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">action</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">action_dim</span> <span class="o">==</span> <span class="n">expected_dim</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">action</span>
+        <span class="k">if</span> <span class="n">action_dim</span> <span class="o">&lt;</span> <span class="n">expected_dim</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Demo action dim is smaller than action space dim and cannot be auto-converted. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Got action dim=</span><span class="si">{</span><span class="n">action_dim</span><span class="si">}</span><span class="s2">, expected=</span><span class="si">{</span><span class="n">expected_dim</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slice_action_with_active_joint_ids</span><span class="p">(</span>
+            <span class="n">action</span><span class="p">,</span> <span class="n">action_dim</span><span class="p">,</span> <span class="n">expected_dim</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_normalize_demo_action_tensordict</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">expected_dim</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Normalize tensor entries in a TensorDict action payload.&quot;&quot;&quot;</span>
+        <span class="n">converted_action</span> <span class="o">=</span> <span class="n">action</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;qpos&quot;</span><span class="p">,</span> <span class="s2">&quot;qvel&quot;</span><span class="p">,</span> <span class="s2">&quot;qf&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">converted_action</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">converted_action</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">value</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Demo action TensorDict[&#39;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">&#39;] must have at least one dimension.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">action_dim</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">action_dim</span> <span class="o">==</span> <span class="n">expected_dim</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">action_dim</span> <span class="o">&lt;</span> <span class="n">expected_dim</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Demo action TensorDict[&#39;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">&#39;] dim=</span><span class="si">{</span><span class="n">action_dim</span><span class="si">}</span><span class="s2"> is smaller than expected action dim=</span><span class="si">{</span><span class="n">expected_dim</span><span class="si">}</span><span class="s2">.&quot;</span>
+                <span class="p">)</span>
+            <span class="n">converted_action</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_slice_action_with_active_joint_ids</span><span class="p">(</span>
+                <span class="n">value</span><span class="p">,</span> <span class="n">action_dim</span><span class="p">,</span> <span class="n">expected_dim</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">converted_action</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_slice_action_with_active_joint_ids</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">action_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">expected_dim</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Slice a high-dimensional action to active joints.</span>
+
+<span class="sd">        This is used when demo actions are generated in full-DoF form while the</span>
+<span class="sd">        environment action-space only controls active joints.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">)</span> <span class="o">!=</span> <span class="n">expected_dim</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Cannot convert demo action by active_joint_ids because their length does not match the action space dim. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;len(active_joint_ids)=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">)</span><span class="si">}</span><span class="s2">, expected=</span><span class="si">{</span><span class="n">expected_dim</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Cannot convert demo action by active_joint_ids because active_joint_ids is empty.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">action</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_step_action</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="n">EnvAction</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EnvAction</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set action control command into simulation.</span>
+
+<span class="sd">        Supports multiple action formats:</span>
+<span class="sd">        1. torch.Tensor: Interpreted as qpos (joint positions)</span>
+<span class="sd">        2. Dict with keys:</span>
+<span class="sd">           - &quot;qpos&quot;: Joint positions</span>
+<span class="sd">           - &quot;qvel&quot;: Joint velocities</span>
+<span class="sd">           - &quot;qf&quot;: Joint forces/torques</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            action: The action applied to the robot agent.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The action return.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">):</span>
+            <span class="c1"># Support multiple control modes simultaneously</span>
+            <span class="k">if</span> <span class="s2">&quot;qpos&quot;</span> <span class="ow">in</span> <span class="n">action</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span>
+                    <span class="n">qpos</span><span class="o">=</span><span class="n">action</span><span class="p">[</span><span class="s2">&quot;qpos&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="n">joint_ids</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span>
+                <span class="p">)</span>
+            <span class="k">if</span> <span class="s2">&quot;qvel&quot;</span> <span class="ow">in</span> <span class="n">action</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">set_qvel</span><span class="p">(</span>
+                    <span class="n">qvel</span><span class="o">=</span><span class="n">action</span><span class="p">[</span><span class="s2">&quot;qvel&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="n">joint_ids</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span>
+                <span class="p">)</span>
+            <span class="k">if</span> <span class="s2">&quot;qf&quot;</span> <span class="ow">in</span> <span class="n">action</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">set_qf</span><span class="p">(</span>
+                    <span class="n">qf</span><span class="o">=</span><span class="n">action</span><span class="p">[</span><span class="s2">&quot;qf&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="n">joint_ids</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span>
+                <span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">robot</span><span class="o">.</span><span class="n">set_qpos</span><span class="p">(</span>
+                <span class="n">qpos</span><span class="o">=</span><span class="n">action</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="n">joint_ids</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported action type: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">action</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">action</span>
+
+<div class="viewcode-block" id="EmbodiedEnv.compute_task_state">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.compute_task_state">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_task_state</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute task-specific state: success, fail, and metrics.</span>
+
+<span class="sd">        Override this method in subclass to define task-specific logic for RL tasks.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple of (success, fail, metrics):</span>
+<span class="sd">                - success: Boolean tensor of shape (num_envs,)</span>
+<span class="sd">                - fail: Boolean tensor of shape (num_envs,)</span>
+<span class="sd">                - metrics: Dict of metric tensors</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">success</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="n">fail</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_envs</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="n">metrics</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">return</span> <span class="n">success</span><span class="p">,</span> <span class="n">fail</span><span class="p">,</span> <span class="n">metrics</span></div>
+
+
+<div class="viewcode-block" id="EmbodiedEnv.get_info">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.get_info">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get environment info dictionary.</span>
+
+<span class="sd">        Calls compute_task_state() to get task-specific success/fail/metrics when</span>
+<span class="sd">        available. Subclasses should override compute_task_state() for RL tasks.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Info dictionary with success, fail, elapsed_steps, metrics</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">success</span><span class="p">,</span> <span class="n">fail</span><span class="p">,</span> <span class="n">metrics</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">compute_task_state</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">info</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="n">success</span><span class="p">,</span>
+            <span class="s2">&quot;fail&quot;</span><span class="p">:</span> <span class="n">fail</span><span class="p">,</span>
+            <span class="s2">&quot;elapsed_steps&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_elapsed_steps</span><span class="p">,</span>
+            <span class="s2">&quot;metrics&quot;</span><span class="p">:</span> <span class="n">metrics</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">info</span></div>
+
+
+<div class="viewcode-block" id="EmbodiedEnv.evaluate">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.evaluate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evaluate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Evaluate the environment state.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Evaluation dictionary with success and metrics</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_info</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">eval_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;success&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="s2">&quot;metrics&quot;</span> <span class="ow">in</span> <span class="n">info</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;metrics&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">eval_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="k">return</span> <span class="n">eval_dict</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_preprocess_action</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="n">EnvAction</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EnvAction</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Delegate to ActionManager when configured.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span><span class="o">.</span><span class="n">process_action</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;pre&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_preprocess_action</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_postprocess_action</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">action_manager</span><span class="o">.</span><span class="n">process_action</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;post&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_postprocess_action</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_robot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Robot</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the robot in the environment.</span>
+
+<span class="sd">        Currently, only joint position control is supported. Would be extended to support joint velocity and torque</span>
+<span class="sd">            control in the future.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Robot: The robot instance added to the scene.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">robot</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span><span class="s2">&quot;Robot configuration is not provided.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Initialize the robot based on the configuration.</span>
+        <span class="n">robot</span><span class="p">:</span> <span class="n">Robot</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_robot</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">robot</span><span class="p">)</span>
+
+        <span class="c1"># Setup active joints for robot to control.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Both control_parts and active_joint_ids are specified in the configuration. Please specify only one of them.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="c1"># Check env control parts are valid</span>
+            <span class="k">for</span> <span class="n">part_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">part_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">robot</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Invalid control part: </span><span class="si">{</span><span class="n">part_name</span><span class="si">}</span><span class="s2">. The supported control parts are: </span><span class="si">{</span><span class="n">robot</span><span class="o">.</span><span class="n">control_parts</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">part_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">control_parts</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+                    <span class="n">robot</span><span class="o">.</span><span class="n">get_joint_ids</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">part_name</span><span class="p">,</span> <span class="n">remove_mimic</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">:</span>
+            <span class="c1"># Check env active joint ids are valid</span>
+            <span class="k">for</span> <span class="n">joint_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">joint_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">robot</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Invalid active joint id: </span><span class="si">{</span><span class="n">joint_id</span><span class="si">}</span><span class="s2">. The supported active joint ids are: </span><span class="si">{</span><span class="n">robot</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">active_joint_ids</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Use all joints of the robot.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">robot</span><span class="o">.</span><span class="n">dof</span><span class="p">))</span>
+
+        <span class="n">robot</span><span class="o">.</span><span class="n">build_pk_serial_chain</span><span class="p">()</span>
+
+        <span class="n">qpos_limits</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">robot</span><span class="o">.</span><span class="n">body_data</span><span class="o">.</span><span class="n">qpos_limits</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">active_joint_ids</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">single_action_space</span> <span class="o">=</span> <span class="n">gym</span><span class="o">.</span><span class="n">spaces</span><span class="o">.</span><span class="n">Box</span><span class="p">(</span>
+            <span class="n">low</span><span class="o">=</span><span class="n">qpos_limits</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">high</span><span class="o">=</span><span class="n">qpos_limits</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">robot</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_sensors</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BaseSensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the sensors in the environment.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Dict[str, BaseSensor]: A dictionary mapping sensor UIDs to sensor instances.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># TODO: support sensor attachment to the robot.</span>
+
+        <span class="n">sensors</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">sensor</span><span class="p">:</span>
+            <span class="n">sensor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_sensor</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
+            <span class="n">sensors</span><span class="p">[</span><span class="n">cfg</span><span class="o">.</span><span class="n">uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">sensor</span>
+        <span class="k">return</span> <span class="n">sensors</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_lights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the lights in the environment.&quot;&quot;&quot;</span>
+        <span class="c1"># Set direct lights.</span>
+        <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">light</span><span class="o">.</span><span class="n">direct</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_light</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+        <span class="c1"># Set indirect lights.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">light</span><span class="o">.</span><span class="n">indirect</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s2">&quot;emission_light&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">light</span><span class="o">.</span><span class="n">indirect</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">set_emission_light</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">light</span><span class="o">.</span><span class="n">indirect</span><span class="p">[</span><span class="s2">&quot;emission_light&quot;</span><span class="p">])</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_background</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the static rigid objects in the environment.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">background</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">cfg</span><span class="o">.</span><span class="n">body_type</span> <span class="o">==</span> <span class="s2">&quot;dynamic&quot;</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Background object must be kinematic or static rigid object.&quot;</span>
+                <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_interactive_objects</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the interactive objects in the environment.&quot;&quot;&quot;</span>
+
+        <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">articulation</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_articulation</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">rigid_object</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">cfg</span><span class="o">.</span><span class="n">body_type</span> <span class="o">!=</span> <span class="s2">&quot;dynamic&quot;</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Interactive rigid object must be dynamic rigid object.&quot;</span>
+                <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">rigid_object_group</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">add_rigid_object_group</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="n">cfg</span><span class="p">)</span>
+
+<div class="viewcode-block" id="EmbodiedEnv.preview_sensor_data">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.preview_sensor_data">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">preview_sensor_data</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">data_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;color&quot;</span><span class="p">,</span>
+        <span class="n">env_ids</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;cv2&quot;</span><span class="p">,</span>
+        <span class="n">save</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Preview the sensor data by matplotlib</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            Currently only support RGB image preview.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            name (str): name of the sensor to preview.</span>
+<span class="sd">            data_type (str): type of the sensor data to preview.</span>
+<span class="sd">            env_ids (int): index of the arena to preview. Defaults to 0.</span>
+<span class="sd">            method (str): method to preview the sensor data. Currently support &quot;plt&quot; and &quot;cv2&quot;. Defaults to &quot;cv2&quot;.</span>
+<span class="sd">            save (bool): whether to save the preview image. Defaults to False.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># TODO: this function need to be improved to support more sensor types and data types.</span>
+
+        <span class="n">sensor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_sensor</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">data_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sensor</span><span class="o">.</span><span class="n">SUPPORTED_DATA_TYPES</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">log_error</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Data type &#39;</span><span class="si">{</span><span class="n">data_type</span><span class="si">}</span><span class="s2">&#39; not supported by sensor &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39;. Supported types: </span><span class="si">{</span><span class="n">sensor</span><span class="o">.</span><span class="n">SUPPORTED_DATA_TYPES</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">sensor</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="n">sensor</span><span class="o">.</span><span class="n">get_data</span><span class="p">()</span>
+
+        <span class="c1"># TODO: maybe put the preview (visualization) method to the sensor class.</span>
+        <span class="k">if</span> <span class="n">sensor</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">sensor_type</span> <span class="o">==</span> <span class="s2">&quot;StereoCamera&quot;</span><span class="p">:</span>
+            <span class="n">view</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">data_type</span><span class="p">][</span><span class="n">env_ids</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="n">view_right</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">data_type</span><span class="si">}</span><span class="s2">_right&quot;</span><span class="p">][</span><span class="n">env_ids</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="n">view</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">((</span><span class="n">view</span><span class="p">,</span> <span class="n">view_right</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">view</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">data_type</span><span class="p">][</span><span class="n">env_ids</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;cv2&quot;</span><span class="p">:</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">cv2</span>
+
+            <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
+                <span class="n">cv2</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;sensor_data_</span><span class="si">{</span><span class="n">data_type</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">,</span>
+                    <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">view</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">),</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">window_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;sensor_data_</span><span class="si">{</span><span class="n">data_type</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="n">height</span><span class="p">,</span> <span class="n">width</span> <span class="o">=</span> <span class="n">view</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+                <span class="n">cv2</span><span class="o">.</span><span class="n">namedWindow</span><span class="p">(</span><span class="n">window_name</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">WINDOW_NORMAL</span><span class="p">)</span>
+                <span class="n">cv2</span><span class="o">.</span><span class="n">resizeWindow</span><span class="p">(</span><span class="n">window_name</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">)</span>
+                <span class="n">cv2</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">window_name</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">view</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">))</span>
+                <span class="n">cv2</span><span class="o">.</span><span class="n">waitKey</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                <span class="n">cv2</span><span class="o">.</span><span class="n">destroyWindow</span><span class="p">(</span><span class="n">window_name</span><span class="p">)</span>
+
+        <span class="k">elif</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;plt&quot;</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+
+            <span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">view</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
+                <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sensor_data_</span><span class="si">{</span><span class="n">data_type</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+                <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="EmbodiedEnv.create_demo_action_list">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.create_demo_action_list">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">create_demo_action_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">EnvAction</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a demonstration action list for the environment.</span>
+
+<span class="sd">        This function should be implemented in subclasses to generate a sequence of actions</span>
+<span class="sd">        that demonstrate a specific task or behavior within the environment.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Sequence[EnvAction] | None: A list of actions if a demonstration is available, otherwise None.</span>
+
+<span class="sd">        Note:</span>
+<span class="sd">            Subclass outputs are automatically post-processed by the base class:</span>
+<span class="sd">            action last-dimension must match ``single_action_space``. If larger,</span>
+<span class="sd">            actions are sliced by ``active_joint_ids``; if smaller, ``ValueError``</span>
+<span class="sd">            is raised.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s2">&quot;The method &#39;create_demo_action_list&#39; must be implemented in subclasses.&quot;</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="EmbodiedEnv.close">
+<a class="viewcode-back" href="../../../../../api_reference/embodichain/embodichain.lab.gym.envs.html#embodichain.lab.gym.envs.EmbodiedEnv.close">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Close the environment and release resources.&quot;&quot;&quot;</span>
+        <span class="c1"># Finalize dataset if present</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">dataset_manager</span><span class="o">.</span><span class="n">finalize</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">sim</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By The EmbodiChain Project Developers
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, The EmbodiChain Project Developers.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
