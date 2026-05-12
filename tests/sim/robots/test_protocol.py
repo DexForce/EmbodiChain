@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for the RobotDef protocol and its build_cfg method."""
+"""Tests for the RobotDef protocol, its build_cfg method, and the robot registry."""
 
 from __future__ import annotations
 
@@ -153,3 +153,75 @@ class TestRobotDefProtocol:
         )
 
         np.testing.assert_array_almost_equal(cfg.solver_cfg["arm"].tcp, override_tcp)
+
+
+# ---------------------------------------------------------------------------
+# Registry tests
+# ---------------------------------------------------------------------------
+
+from embodichain.lab.sim.robots.registry import (
+    _ROBOT_REGISTRY,
+    register_robot,
+    get_robot_def,
+    build_robot_cfg,
+)
+
+
+@register_robot("TestDummy")
+class _TestDummyRobotDef:
+    """Minimal robot def registered as 'TestDummy' for registry tests."""
+
+    def __init__(self, name: str = "TestDummy", **kwargs: object) -> None:
+        self.name = name
+        self._kwargs = kwargs
+
+    @property
+    def urdf_cfg(self) -> URDFCfg | None:
+        return None
+
+    @property
+    def control_parts(self) -> dict[str, list[str]] | None:
+        return {"arm": ["j1"]}
+
+    @property
+    def solver_cfg(self) -> SolverCfg | None:
+        return None
+
+    @property
+    def drive_pros(self) -> JointDrivePropertiesCfg:
+        return JointDrivePropertiesCfg()
+
+    @property
+    def attrs(self) -> RigidBodyAttributesCfg:
+        return RigidBodyAttributesCfg()
+
+    def build_cfg(self, **overrides: object) -> RobotCfg:
+        cfg = RobotCfg()
+        cfg.uid = overrides.pop("uid", self.name)
+        return cfg
+
+
+class TestRobotRegistry:
+    """Tests for the robot registry (register_robot, get_robot_def, build_robot_cfg)."""
+
+    def test_register_and_lookup(self) -> None:
+        """Verify that a registered robot can be looked up and instantiated."""
+        instance = get_robot_def("TestDummy")
+        assert instance.name == "TestDummy"
+
+    def test_get_unknown_robot_raises(self) -> None:
+        """Verify that looking up an unknown name raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown robot"):
+            get_robot_def("NonExistentRobotXYZ")
+
+    def test_build_robot_cfg_convenience(self) -> None:
+        """Verify build_robot_cfg returns a RobotCfg with the correct uid."""
+        cfg = build_robot_cfg("TestDummy")
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "TestDummy"
+
+    def test_build_robot_cfg_with_overrides(self) -> None:
+        """Verify build_robot_cfg passes overrides through to build_cfg."""
+        cfg = build_robot_cfg("TestDummy", overrides={"uid": "custom_uid"})
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "custom_uid"
