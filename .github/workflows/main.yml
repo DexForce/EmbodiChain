@@ -45,6 +45,7 @@ jobs:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
+      DOCS_MAX_VERSIONS: 5
     container: *container_template
     steps:
       - uses: actions/checkout@v4
@@ -89,7 +90,7 @@ jobs:
 
             # Prune old release versions beyond the window
             mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS:-5} ]]; do
               echo "Pruning old version: ${TAG_DIRS[0]}"
               rm -rf "${TAG_DIRS[0]}"
               TAG_DIRS=("${TAG_DIRS[@]:1}")
@@ -145,7 +146,7 @@ jobs:
   publish:
     if: github.event_name == 'push'
     needs: build
-    runs-on: Linux
+    runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
