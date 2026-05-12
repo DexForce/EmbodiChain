@@ -58,6 +58,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-docs-
 
+      # Restore the full multi-version site from the last successful build.
+      # The key never matches exactly (run_id is unique), so restore-keys is
+      # always used to pick up the most recently saved full site.
+      - name: Restore full multi-version docs site
+        if: github.event_name == 'push'
+        uses: actions/cache/restore@v4
+        with:
+          path: docs/build/html
+          key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            docs-full-site-${{ github.repository }}-
+
       - name: Build docs
         shell: bash
         run: |
@@ -72,10 +84,36 @@ jobs:
             VERSION="${GITHUB_REF_NAME}"
             echo "Building docs for release tag ${VERSION}..."
             sphinx-build source build/html/${VERSION}
+
+            cd build/html
+
+            # Prune old release versions beyond the window
+            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+              echo "Pruning old version: ${TAG_DIRS[0]}"
+              rm -rf "${TAG_DIRS[0]}"
+              TAG_DIRS=("${TAG_DIRS[@]:1}")
+            done
+
           else
             echo "Building dev docs for main branch..."
+            # Only rebuild main/ — all other version dirs come from the cache
+            rm -rf build/html/main
             sphinx-build source build/html/main
+            cd build/html
           fi
+
+          # Regenerate versions.json and root index.html from all present dirs
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+            --build-dir .
+
+      # Save the updated full site so the next run can restore all versions
+      - name: Save full multi-version docs site
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: docs/build/html
+          key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
 
       - name: Upload docs artifact
         if: github.event_name == 'push'
