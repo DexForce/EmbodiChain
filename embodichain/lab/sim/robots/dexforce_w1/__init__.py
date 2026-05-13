@@ -15,3 +15,4 @@
 # ----------------------------------------------------------------------------
 
 from .cfg import DexforceW1Cfg
+from .robot_def import DexforceW1Def

@@ -247,6 +247,59 @@ class TestCobotMagicDef:
         assert "right_arm" in cfg.control_parts
 
 
+class TestDexforceW1Def:
+    """Tests for the DexforceW1 robot definition and registry integration."""
+
+    def test_anthropomorphic_default(self) -> None:
+        """Verify DexforceW1Def with anthropomorphic arms produces valid cfg."""
+        from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Def
+
+        robot_def = DexforceW1Def(arm_kind="anthropomorphic")
+        cfg = robot_def.build_cfg()
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "DexforceW1"
+        assert cfg.control_parts is not None
+        assert "left_arm" in cfg.control_parts
+        assert "right_arm" in cfg.control_parts
+        assert cfg.solver_cfg is not None
+        assert "left_arm" in cfg.solver_cfg
+        assert "right_arm" in cfg.solver_cfg
+
+    def test_industrial_default(self) -> None:
+        """Verify DexforceW1Def with industrial arms produces valid cfg."""
+        from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Def
+
+        robot_def = DexforceW1Def(arm_kind="industrial")
+        cfg = robot_def.build_cfg()
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.control_parts is not None
+        assert "left_arm" in cfg.control_parts
+        assert "right_arm" in cfg.control_parts
+
+    def test_registry_lookup(self) -> None:
+        """Verify DexforceW1 can be looked up via the registry."""
+        cfg = build_robot_cfg("DexforceW1", arm_kind="anthropomorphic")
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "DexforceW1"
+        assert cfg.control_parts is not None
+
+    def test_backward_compat_from_dict(self) -> None:
+        """Verify DexforceW1Cfg.from_dict still works as backward-compat wrapper."""
+        from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
+
+        cfg = DexforceW1Cfg.from_dict(
+            {"version": "v021", "arm_kind": "anthropomorphic"}
+        )
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.control_parts is not None
+        assert "left_arm" in cfg.control_parts
+        assert "right_arm" in cfg.control_parts
+
+
 class TestRobotRegistry:
     """Tests for the robot registry (register_robot, get_robot_def, build_robot_cfg)."""
 
