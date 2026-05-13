@@ -14,5 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .dexforce_w1 import *
+from .protocol import RobotDef
+from .registry import register_robot, get_robot_def, build_robot_cfg
+from .dexforce_w1 import DexforceW1Cfg, DexforceW1Def
 from .cobotmagic import CobotMagicCfg, CobotMagicDef
+
+__all__ = [
+    "RobotDef",
+    "register_robot",
+    "get_robot_def",
+    "build_robot_cfg",
+    "CobotMagicDef",
+    "CobotMagicCfg",
+    "DexforceW1Def",
+    "DexforceW1Cfg",
+]
