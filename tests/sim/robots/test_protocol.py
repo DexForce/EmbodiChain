@@ -201,6 +201,52 @@ class _TestDummyRobotDef:
         return cfg
 
 
+class TestCobotMagicDef:
+    """Tests for the CobotMagic robot definition and registry integration."""
+
+    def test_cobotmagic_def_builds_valid_cfg(self) -> None:
+        """Verify CobotMagicDef produces a valid RobotCfg with correct fields."""
+        from embodichain.lab.sim.robots.cobotmagic import CobotMagicDef
+
+        robot_def = CobotMagicDef()
+        cfg = robot_def.build_cfg()
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "CobotMagic"
+        assert cfg.urdf_cfg is not None
+        assert cfg.control_parts is not None
+        assert "left_arm" in cfg.control_parts
+        assert "right_arm" in cfg.control_parts
+        assert cfg.solver_cfg is not None
+        assert "left_arm" in cfg.solver_cfg
+        assert "right_arm" in cfg.solver_cfg
+
+    def test_cobotmagic_def_registry(self) -> None:
+        """Verify CobotMagicDef is registered and can be looked up by name."""
+        from embodichain.lab.sim.robots.registry import get_robot_def
+
+        robot_def = get_robot_def("CobotMagic")
+        cfg = robot_def.build_cfg()
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "CobotMagic"
+        assert cfg.control_parts is not None
+        assert "left_arm" in cfg.control_parts
+        assert "right_arm" in cfg.control_parts
+
+    def test_cobotmagic_backward_compat_from_dict(self) -> None:
+        """Verify CobotMagicCfg.from_dict still works as backward-compatible wrapper."""
+        from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
+
+        cfg = CobotMagicCfg.from_dict({})
+
+        assert isinstance(cfg, RobotCfg)
+        assert cfg.uid == "CobotMagic"
+        assert cfg.control_parts is not None
+        assert "left_arm" in cfg.control_parts
+        assert "right_arm" in cfg.control_parts
+
+
 class TestRobotRegistry:
     """Tests for the robot registry (register_robot, get_robot_def, build_robot_cfg)."""
 
