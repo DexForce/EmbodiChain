@@ -204,31 +204,7 @@ class ConvexCollisionChecker:
                 collision_threshold=collision_threshold,
             )
         )
-        is_pose_collide = is_point_collide.any(dim=-1)  # [B]
-        pose_surface_distance = point_signed_distance.min(dim=-1).values  # [B]
-        if is_visual:
-            # visualize result
-            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-            for i in range(n_batch):
-                query_points_o3d = o3d.geometry.PointCloud()
-                query_points_np = batch_points[i].cpu().numpy()
-                query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
-                query_points_color = np.zeros_like(query_points_np)
-                query_points_color[is_point_collide[i].cpu().numpy()] = [
-                    1.0,
-                    0,
-                    0,
-                ]  # red for colliding points
-                query_points_color[~is_point_collide[i].cpu().numpy()] = [
-                    0,
-                    1.0,
-                    0,
-                ]  # green for non-colliding points
-                query_points_o3d.colors = o3d.utility.Vector3dVector(query_points_color)
-                o3d.visualization.draw_geometries(
-                    [self.mesh, query_points_o3d, frame], mesh_show_back_face=True
-                )
-        return is_pose_collide, pose_surface_distance
+        return is_point_collide, point_signed_distance
 
     def query(
         self,

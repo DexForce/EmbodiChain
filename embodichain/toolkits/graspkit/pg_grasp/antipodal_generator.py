@@ -79,6 +79,13 @@ class GraspGeneratorCfg:
     deviate more than this threshold from perpendicular to the approach are
     discarded during grasp pose computation."""
 
+    is_partial_annotate: bool = True
+    """When ``True``, the annotator allows selecting a partial region of the 
+    mesh for grasp sampling. If ``False``, the entire mesh is used."""
+
+    is_filter_ground_collision: bool = True
+    """Whether to filter out grasp poses that would cause the gripper to 
+    collide."""
 
 class GraspGenerator:
     """Antipodal grasp-pose generator for parallel-jaw grippers.
@@ -236,7 +243,12 @@ class GraspGenerator:
             torch.Tensor: A tensor of shape (N, 2, 3) representing N antipodal point pairs.
                 Each pair consists of a hit point and its corresponding surface point.
         """
-
+        if self.cfg.is_partial_annotate == False:
+            hit_point_pairs = self._generate_hit_point_pairs(
+                self.vertices, self.triangles
+            )
+            self._cache_hit_point_pairs(hit_point_pairs)
+            return self._hit_point_pairs
         logger.log_info(
             f"[Viser] *****Annotate grasp region in http://localhost:{self.cfg.viser_port}"
         )
@@ -343,7 +355,7 @@ class GraspGenerator:
                         f"[Selection] Selected {sel_vertex_indices.size} vertices and {sel_face_indices.size} faces."
                     )
 
-                    hit_point_pairs = self._antipodal_sampler.sample(
+                    hit_point_pairs = self._generate_hit_point_pairs(
                         torch.tensor(sel_vertices, device=self.device),
                         torch.tensor(sel_faces, device=self.device),
                     )
@@ -378,12 +390,23 @@ class GraspGenerator:
         while True:
             if return_flag:
                 if hit_point_pairs is not None:
-                    self._hit_point_pairs = hit_point_pairs
-                    cache_path = self._get_cache_dir(self.vertices, self.triangles)
-                    self._save_cache(cache_path, hit_point_pairs)
+                    self._cache_hit_point_pairs(hit_point_pairs)
                 break
             time.sleep(0.5)
         return self._hit_point_pairs
+    
+    def _generate_hit_point_pairs(
+        self, vertices: torch.Tensor, triangles: torch.Tensor
+    ) -> torch.Tensor:
+        return self._antipodal_sampler.sample(
+            vertices=vertices,
+            faces=triangles,
+        )
+
+    def _cache_hit_point_pairs(self, hit_point_pairs: torch.Tensor):
+        self._hit_point_pairs = hit_point_pairs
+        cache_path = self._get_cache_dir(self.vertices, self.triangles)
+        self._save_cache(cache_path, hit_point_pairs)
 
     def _get_cache_dir(self, vertices: torch.Tensor, triangles: torch.Tensor):
         vert_bytes = vertices.to("cpu").numpy().tobytes()
@@ -653,6 +676,7 @@ class GraspGenerator:
             valid_grasp_poses,
             valid_open_lengths,
             is_visual=visualize_collision,
+            is_filter_ground_collision=self.cfg.is_filter_ground_collision,
             collision_threshold=0.0,
         )
         if is_colliding.logical_not().sum() == 0:
