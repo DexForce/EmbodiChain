@@ -87,6 +87,7 @@ class GraspGeneratorCfg:
     """Whether to filter out grasp poses that would cause the gripper to 
     collide."""
 
+
 class GraspGenerator:
     """Antipodal grasp-pose generator for parallel-jaw grippers.
 
@@ -394,7 +395,7 @@ class GraspGenerator:
                 break
             time.sleep(0.5)
         return self._hit_point_pairs
-    
+
     def _generate_hit_point_pairs(
         self, vertices: torch.Tensor, triangles: torch.Tensor
     ) -> torch.Tensor:
