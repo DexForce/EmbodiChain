@@ -141,6 +141,8 @@ class StereoCameraTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
+        if hasattr(self, "camera"):
+            self.camera = None
         self.sim.destroy()
 
 

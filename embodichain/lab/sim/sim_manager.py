@@ -169,6 +169,13 @@ class SimulationManager:
 
     def __new__(cls, sim_config: SimulationManagerCfg = SimulationManagerCfg()):
         """Create or return the instance based on instance_id."""
+        if len(cls._instances) > 0:
+            logger.log_warning("Cleaning up an orphaned SimulationManager instance before creating a new one.")
+            for _, instance in list(cls._instances.items()):
+                try:
+                    instance.destroy()
+                except Exception:
+                    pass
         n_instance = len(list(cls._instances.keys()))
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
@@ -337,8 +344,7 @@ class SimulationManager:
     @cached_property
     def is_use_gpu_physics(self) -> bool:
         """Check if the physics simulation is using GPU."""
-        world_config = dexsim.get_world_config()
-        return self.device.type == "cuda" and world_config.enable_gpu_sim
+        return self.device.type == "cuda"
 
     @cached_property
     def is_rt_enabled(self) -> bool:
@@ -667,15 +673,22 @@ class SimulationManager:
         mat_name = "plane_mat"
         mat = None
         mat_path = self._default_resources.get_material_path("PlaneDark")
-        color_texture = os.path.join(mat_path, "PlaneDark_2K_Color.jpg")
-        roughness_texture = os.path.join(mat_path, "PlaneDark_2K_Roughness.jpg")
-        mat = self.create_visual_material(
-            cfg=VisualMaterialCfg(
-                uid=mat_name,
-                base_color_texture=color_texture,
-                roughness_texture=roughness_texture,
+        if self.sim_config.headless:
+            # Skip texture loading in headless mode to avoid Filament rendering
+            # engine instability after many World create/destroy cycles.
+            mat = self.create_visual_material(
+                cfg=VisualMaterialCfg(uid=mat_name)
             )
-        )
+        else:
+            color_texture = os.path.join(mat_path, "PlaneDark_2K_Color.jpg")
+            roughness_texture = os.path.join(mat_path, "PlaneDark_2K_Roughness.jpg")
+            mat = self.create_visual_material(
+                cfg=VisualMaterialCfg(
+                    uid=mat_name,
+                    base_color_texture=color_texture,
+                    roughness_texture=roughness_texture,
+                )
+            )
 
         if self.is_rt_enabled:
             self.set_emission_light([1.0, 1.0, 1.0], 120.0)
@@ -1795,7 +1808,30 @@ class SimulationManager:
 
         self.clean_materials()
 
-        self._env.clean()
-        self._world.quit()
+        self._arenas.clear()
+        self._markers.clear()
+        self._rigid_objects.clear()
+        self._rigid_object_groups.clear()
+        self._soft_objects.clear()
+        self._cloth_objects.clear()
+        self._articulations.clear()
+        self._robots.clear()
+        self._sensors.clear()
+        self._lights.clear()
+        self._gizmos.clear()
+
+        if hasattr(self, '_env') and self._env is not None:
+            self._env.clean()
+            self._env = None
+            
+        if hasattr(self, '_world') and self._world is not None:
+            self._world.quit()
+            self._world = None
+
+        import gc
+        import torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         SimulationManager.reset(self.instance_id)

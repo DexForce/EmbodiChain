@@ -19,6 +19,7 @@ import open3d as o3d
 from pathlib import Path
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
+    get_download_url,
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
@@ -46,7 +47,7 @@ class SceneData(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
 
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, scene_assets, "SceneData.zip"),
+            get_download_url(scene_assets, "SceneData.zip"),
             "fb46e4694cc88886fc785704e891a68a",
         )
         prefix = type(self).__name__
@@ -57,7 +58,7 @@ class SceneData(EmbodiChainDataset):
 class EmptyRoom(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, scene_assets, "empty_room.zip"),
+            get_download_url(scene_assets, "empty_room.zip"),
             "612ffead4fac95114bec2e3812469f96",
         )
         prefix = type(self).__name__

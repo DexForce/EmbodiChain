@@ -18,9 +18,25 @@
 import os
 from pathlib import Path
 
-EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://hf-mirror.com/datasets/dexforce/embodichain_data/resolve/main/"
+EMBODICHAIN_DOWNLOAD_PREFIX = os.environ.get(
+    "EMBODICHAIN_DOWNLOAD_PREFIX",
+    "http://192.168.3.120/CoreEngine/Data/embodychain_data/",
 )
+
+# When True, all assets are served flat (no subdirectory) under the prefix.
+# Detected automatically: local/http servers typically use a flat layout.
+_is_flat = not EMBODICHAIN_DOWNLOAD_PREFIX.startswith("https://")
+
+
+def get_download_url(*path_parts: str) -> str:
+    """Build a download URL from the configured prefix.
+
+    On the local server assets are stored flat (no subdirectories),
+    so the intermediate directory components are dropped.
+    """
+    if _is_flat:
+        return EMBODICHAIN_DOWNLOAD_PREFIX + path_parts[-1]
+    return os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, *path_parts)
 EMBODICHAIN_DEFAULT_DATA_ROOT = os.environ.get(
     "EMBODICHAIN_DATA_ROOT", str(Path.home() / ".cache" / "embodichain_data")
 )

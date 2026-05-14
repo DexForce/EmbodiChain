@@ -19,6 +19,7 @@ import os
 
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
+    get_download_url,
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
@@ -43,7 +44,7 @@ class ScoopIceNewEnv(EmbodiChainDataset):
 class MultiW1Data(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, demo_assets, "multi_w1_demo.zip"),
+            get_download_url(demo_assets, "multi_w1_demo.zip"),
             "984e8fa3aa05cb36a1fd973a475183ed",
         )
         prefix = type(self).__name__

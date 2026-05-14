@@ -18,6 +18,7 @@ import os
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
+    get_download_url,
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
@@ -65,7 +66,7 @@ class DexforceW1V021(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "DexforceW1V021.zip"),
+            get_download_url(w1_assets, "DexforceW1V021.zip"),
             "3cc3a0bfd1c50ebed5bee9dadeee6756",
         )
         prefix = type(self).__name__
@@ -129,7 +130,7 @@ class DexforceW1V021_ANTHROPOMORPHIC_BRAINCO_HAND_REVO1(EmbodiChainDataset):
 class DexforceW1ChassisV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Chassis_v021.zip"),
+            get_download_url(w1_assets, "W1_Chassis_v021.zip"),
             "6b0517a4d92a572988641d46269d063f",
         )
         prefix = type(self).__name__
@@ -141,7 +142,7 @@ class DexforceW1ChassisV021(EmbodiChainDataset):
 class DexforceW1TorsoV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Torso_v021.zip"),
+            get_download_url(w1_assets, "W1_Torso_v021.zip"),
             "4f762a3ae6ef2acbe484c915cf80da7b",
         )
         prefix = type(self).__name__
@@ -153,7 +154,7 @@ class DexforceW1TorsoV021(EmbodiChainDataset):
 class DexforceW1EyesV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Eyes_v021.zip"),
+            get_download_url(w1_assets, "W1_Eyes_v021.zip"),
             "80e0b86ef2e934f439c99b79074f6f3c",
         )
         prefix = type(self).__name__
@@ -165,7 +166,7 @@ class DexforceW1EyesV021(EmbodiChainDataset):
 class DexforceW1HeadV021(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "W1_Head_v021.zip"),
+            get_download_url(w1_assets, "W1_Head_v021.zip"),
             "ba72805828c5fd62ad55d6a1458893d0",
         )
         prefix = type(self).__name__

@@ -19,6 +19,7 @@ import os
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
+    get_download_url,
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
@@ -57,7 +58,7 @@ class CircleTableSimple(EmbodiChainDataset):
 class PlasticBin(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "plastic_bin.zip"),
+            get_download_url(obj_assets, "plastic_bin.zip"),
             "21e00083689a4a3c4e4ae3fd89c61e55",
         )
         prefix = type(self).__name__
@@ -69,7 +70,7 @@ class PlasticBin(o3d.data.DownloadDataset):
 class Chair(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "chair.zip"),
+            get_download_url(obj_assets, "chair.zip"),
             "2a971a92e0956e72f262308a1054dc73",
         )
         prefix = type(self).__name__
@@ -109,7 +110,7 @@ class SimpleBoxDrawer(EmbodiChainDataset):
 class AdrianoTable(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "adriano_table.zip"),
+            get_download_url(obj_assets, "adriano_table.zip"),
             "8453583a9a1a9d04d50268f8a3da554f",
         )
         prefix = type(self).__name__
@@ -121,7 +122,7 @@ class AdrianoTable(EmbodiChainDataset):
 class CoffeeCup(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "CoffeeCup.zip"),
+            get_download_url(obj_assets, "CoffeeCup.zip"),
             "f05fce385826414c15e19df3b75dc886",
         )
         prefix = type(self).__name__
@@ -147,7 +148,7 @@ class SlidingBoxDrawer(EmbodiChainDataset):
 class AluminumTable(o3d.data.DownloadDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "AluminumTable.glb"),
+            get_download_url(obj_assets, "AluminumTable.glb"),
             "02991d36ca9b70f019ed330a61143aa9",
         )
         prefix = type(self).__name__
@@ -159,7 +160,7 @@ class AluminumTable(o3d.data.DownloadDataset):
 class ToyDuck(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "ToyDuck.zip"),
+            get_download_url(obj_assets, "ToyDuck.zip"),
             "2f5c00ba487edf34ad668f7257c0264e",
         )
         prefix = type(self).__name__
@@ -171,7 +172,7 @@ class ToyDuck(EmbodiChainDataset):
 class PaperCup(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "PaperCup.zip"),
+            get_download_url(obj_assets, "PaperCup.zip"),
             "359d13af8c5f31ad3226d8994a1a7198",
         )
         prefix = type(self).__name__
@@ -183,7 +184,7 @@ class PaperCup(EmbodiChainDataset):
 class ChainRainSec(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "lianguijie.zip"),
+            get_download_url(obj_assets, "lianguijie.zip"),
             "2387589040a4d3f2676b622362452242",
         )
         prefix = type(self).__name__
@@ -195,7 +196,7 @@ class ChainRainSec(EmbodiChainDataset):
 class TableWare(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "tableware.zip"),
+            get_download_url(obj_assets, "tableware.zip"),
             "403e340fc0e4996c002ee774f89cd236",
         )
         prefix = type(self).__name__
@@ -207,7 +208,7 @@ class TableWare(EmbodiChainDataset):
 class ScannedBottle(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "ScannedBottle.zip"),
+            get_download_url(obj_assets, "ScannedBottle.zip"),
             "d2b2d4deb7b463a734af099f7624b4af",
         )
         prefix = type(self).__name__
@@ -219,7 +220,7 @@ class ScannedBottle(EmbodiChainDataset):
 class SugarBox(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "sugar_box_usd.zip"),
+            get_download_url(obj_assets, "sugar_box_usd.zip"),
             "a1bc5075512cedecd08af4f9c3e8f636",
         )
         prefix = type(self).__name__

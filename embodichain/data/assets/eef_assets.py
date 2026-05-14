@@ -19,6 +19,7 @@ import os
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
+    get_download_url,
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
@@ -46,7 +47,7 @@ class DH_PGC_140_50(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "DH_PGC_140_50.zip"),
+            get_download_url(eef_assets, "DH_PGC_140_50.zip"),
             "c2a642308a76e99b1b8b7cb3a11c5df3",
         )
         prefix = type(self).__name__
@@ -75,7 +76,7 @@ class DH_PGI_140_80(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "DH_PGI_140_80.zip"),
+            get_download_url(eef_assets, "DH_PGI_140_80.zip"),
             "05a1a08b13c6250cc12affeeda3a08ba",
         )
         prefix = type(self).__name__
@@ -137,7 +138,7 @@ class DH_AG95(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "DH_AG95.zip"),
+            get_download_url(eef_assets, "DH_AG95.zip"),
             "34b6f3c2f649697ea7f12814b6a50529",
         )
         prefix = type(self).__name__
@@ -166,7 +167,7 @@ class ZH_CTM2F110(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "ZH_CTM2F110.zip"),
+            get_download_url(eef_assets, "ZH_CTM2F110.zip"),
             "0e7c3310425609797fe010b2a76fe465",
         )
         prefix = type(self).__name__
@@ -234,7 +235,7 @@ class InspireHand(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "InspireHand.zip"),
+            get_download_url(eef_assets, "InspireHand.zip"),
             "c60132a6f03866fb021cca5b6d72845e",
         )
         prefix = type(self).__name__
@@ -267,7 +268,7 @@ class Robotiq(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "Robotiq.zip"),
+            get_download_url(eef_assets, "Robotiq.zip"),
             "9cc84f3a2bfc3a80f428b8ed6864fbeb",
         )
         prefix = type(self).__name__
@@ -296,7 +297,7 @@ class Robotiq2F85(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "Robotiq2F85.zip"),
+            get_download_url(eef_assets, "Robotiq2F85.zip"),
             "53ecbf2c953f43f1134aa7223e592292",
         )
         prefix = type(self).__name__
@@ -325,7 +326,7 @@ class WheelTecFA2F(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "WheelTecFA2F.zip"),
+            get_download_url(eef_assets, "WheelTecFA2F.zip"),
             "feaf13f25b1c6ce58d011b1f2fa72f58",
         )
         prefix = type(self).__name__

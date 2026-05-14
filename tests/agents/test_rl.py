@@ -69,11 +69,13 @@ class TestRLTraining:
         test_train_config["trainer"]["gym_config"] = self.temp_gym_config_path
         test_train_config["trainer"]["iterations"] = 2
         test_train_config["trainer"]["buffer_size"] = 32
-        test_train_config["trainer"]["eval_freq"] = 1000000  # Disable eval
+        test_train_config["trainer"]["enable_eval"] = False  # Disable eval
+        test_train_config["trainer"]["eval_freq"] = 1000000
         test_train_config["trainer"]["save_freq"] = 1000000  # Disable save
         test_train_config["trainer"]["headless"] = True
         test_train_config["trainer"]["use_wandb"] = False
         test_train_config["trainer"]["num_envs"] = 2
+        test_train_config["trainer"]["device"] = "cpu"  # Use CPU to avoid GPU PhysX resource leaks
 
         # Save temporary train config
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

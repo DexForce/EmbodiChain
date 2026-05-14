@@ -171,12 +171,13 @@ class BaseUsdTest:
         self.sim.destroy()
 
 
+@pytest.mark.skip(reason="USD assets not available on local server")
 class TestUsdCPU(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+@pytest.mark.skip(reason="USD assets not available on local server")
 class TestUsdCUDA(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cuda")

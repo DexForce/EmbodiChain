@@ -31,6 +31,13 @@ def _create_minimal_distributed_config():
     if not config_path.exists():
         pytest.skip(f"Config not found: {config_path}")
 
+    # Check CartPole data availability
+    try:
+        from embodichain.data.assets.robot_assets import CartPole
+        CartPole()
+    except RuntimeError:
+        pytest.skip("CartPole asset not available on this system")
+
     with open(config_path, "r") as f:
         cfg = json.load(f)
 

@@ -212,8 +212,7 @@ class ContactSensor(BaseSensor):
         self._precompute_filter_ids(config)
         self._world: dexsim.World = dexsim.default_world()
         self._ps = self._world.get_physics_scene()
-        world_config = dexsim.get_world_config()
-        self.is_use_gpu_physics = device.type == "cuda" and world_config.enable_gpu_sim
+        self.is_use_gpu_physics = device.type == "cuda"
         if self.is_use_gpu_physics:
             self.contact_data_buffer = torch.zeros(
                 self.max_total_contacts,
