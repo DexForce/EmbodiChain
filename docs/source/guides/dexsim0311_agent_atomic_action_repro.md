@@ -185,6 +185,19 @@ conda run --no-capture-output -n embodichain pytest -q \
 
 ## Demo 1：Agent Skill Pick-Place
 
+这个 demo 对应一个更小的 Agent 原子技能闭环验证。它复用
+`scripts/tutorials/sim/atomic_actions.py` 的 mug 场景风格，但执行路径不是直接调用
+`AtomicActionEngine.execute_static()`，而是通过 Agent 原子技能完成动作序列。
+
+主要验证内容：
+
+- `grasp`：通过 Agent skill 抓取 mug。
+- `move_by_relative_offset` / `move_to_absolute_position`：抓取后移动到中间和放置位置。
+- `place_on_table`：调用 public place 路径完成释放和撤离。
+- `back_to_initial_pose`：动作结束后回到初始位姿。
+- public atomic action adapter：验证 Agent skill 能调到 public move/place/gripper/grasp
+  路径，并在需要时保留 fallback。
+
 运行：
 
 ```bash
@@ -211,6 +224,20 @@ ${OUT}.runner.log
 - Agent skill 序列应完成 pick、lift、move、place 和 return 步骤。
 - `summary.tsv` 应标记运行成功。
 - 视频长度应足够观察完整动作，不应只有很短一段。
+- 如果启用了 semantic grasp，mug 应在 lift 阶段跟随夹爪上升；如果只看到夹爪移动而
+  mug 留在桌面上，应判定 grasp 失败。
+- place 后 mug 不应被明显拖拽、推飞或从桌面边缘掉落。
+
+建议检查的输出文件：
+
+```text
+${OUT}/summary.tsv
+${OUT}/outputs/videos/episode_0_cam1.mp4
+${OUT}.runner.log
+```
+
+`summary.tsv` 用于快速判断脚本结果，视频用于确认真实视觉效果。两者不一致时，以视频和
+物理状态为准。例如脚本成功但视频中 mug 没有被抓起，应继续排查 grasp validation。
 
 如果 `grasp_cup.py` 失败，优先按这个顺序判断：
 
@@ -222,6 +249,15 @@ ${OUT}.runner.log
 5. 是否是回初始位姿失败：重点看 `back_to_initial_pose` 的 public move 规划。
 
 ## Demo 2：Pour-Water Recovery Matrix
+
+这个 demo 是主要的 recovery 验证入口。它一次性比较单臂/双臂、正常/错误、启用/禁用
+recovery 的组合，目的是证明：
+
+- clean case 在没有错误时可以正常完成。
+- no-recovery error case 在 monitor 触发后应停止，作为对照组。
+- with-recovery error case 在相同错误注入下应恢复并完成任务。
+- blind no-recovery case 用于观察“没有 monitor recovery 时继续执行或停止”的失败状态。
+- public move/place/gripper 路径和 Agent recovery runtime 可以在同一任务中协同工作。
 
 运行：
 
@@ -247,20 +283,62 @@ ${OUT}/<case>/outputs/videos/episode_0_cam1.mp4
 ${OUT}.runner.log
 ```
 
-预期 case：
+### 10 个 case 的含义
+
+| case | 机械臂 | recovery graph | runtime recovery | 错误注入 | blind 注入 | 期望脚本结果 | 作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `single_clean_no_recovery` | 单臂 | 否 | 否 | 否 | 否 | 成功 | 验证单臂无恢复基础任务是否能跑通 |
+| `single_error_no_recovery` | 单臂 | 是 | 否 | 是 | 否 | 失败 | 对照组：monitor 应触发，但不允许执行 recovery |
+| `single_error_blind_no_recovery` | 单臂 | 否 | 否 | 是 | 是 | 失败 | 对照组：直接移动指定对象，不依赖 recovery graph |
+| `single_clean_with_recovery` | 单臂 | 是 | 是 | 否 | 否 | 成功 | 验证启用 recovery 不应破坏正常任务 |
+| `single_error_with_recovery` | 单臂 | 是 | 是 | 是 | 否 | 成功 | 验证单臂 monitor 触发后能执行 recovery |
+| `dual_clean_no_recovery` | 双臂 | 否 | 否 | 否 | 否 | 成功 | 验证双臂无恢复基础任务是否能跑通 |
+| `dual_error_no_recovery` | 双臂 | 是 | 否 | 是 | 否 | 失败 | 对照组：双臂 monitor 触发但不允许 recovery |
+| `dual_error_blind_no_recovery` | 双臂 | 否 | 否 | 是 | 是 | 失败 | 对照组：双臂 blind 错误注入下不启用 recovery |
+| `dual_clean_with_recovery` | 双臂 | 是 | 是 | 否 | 否 | 成功 | 验证双臂启用 recovery 不应破坏正常任务 |
+| `dual_error_with_recovery` | 双臂 | 是 | 是 | 是 | 否 | 成功 | 验证双臂 monitor 触发后能执行 recovery |
+
+这里的“期望脚本结果”指 `program_success` 的预期值，不等同于所有 case 都应该完成倒水。
+例如 `single_error_no_recovery` 和 `dual_error_no_recovery` 预期就是失败，因为它们是
+no-recovery 对照组。只要 `summary.tsv` 中 `expectation_matched=True`，就说明该 case
+符合预期。
+
+### 输出目录结构
+
+完整 matrix 会把每个 case 隔离到单独子目录中：
 
 ```text
-single_clean_no_recovery
-single_error_no_recovery
-single_error_blind_no_recovery
-single_clean_with_recovery
-single_error_with_recovery
-dual_clean_no_recovery
-dual_error_no_recovery
-dual_error_blind_no_recovery
-dual_clean_with_recovery
-dual_error_with_recovery
+${OUT}/
+  logs/
+    summary.tsv
+    single_clean_no_recovery.log
+    ...
+    dual_error_with_recovery.log
+  report.md
+  single_clean_no_recovery/
+    artifacts/
+      agent_task_graph.json
+      agent_compiled_graph.json
+      case_result.json
+    outputs/videos/episode_0_cam1.mp4
+  single_error_with_recovery/
+    artifacts/
+      agent_task_graph.json
+      agent_recovery_spec.json
+      agent_compiled_graph.json
+      case_result.json
+    outputs/videos/episode_0_cam1.mp4
+  ...
 ```
+
+重点文件说明：
+
+- `logs/summary.tsv`：最先看的总表，包含 exit code、程序判定、语义判定和预期是否匹配。
+- `report.md`：脚本自动生成的概要报告。
+- `<case>/artifacts/case_result.json`：任务状态验证结果，包含 object pose、height drop、
+  semantic success 等细节。
+- `<case>/artifacts/agent_compiled_graph.json`：最终执行的 graph runtime artifact。
+- `<case>/outputs/videos/episode_0_cam1.mp4`：最终人工验收必须看的视频。
 
 已验证的 0.3.11 运行中，`summary.tsv` 的预期行为：
 
@@ -270,6 +348,13 @@ dual_error_with_recovery
   `program_success=False`。
 - 启用 recovery 的 error case 应为 `program_success=True` 且
   `semantic_success=True`。
+- `single_error_no_recovery`、`single_error_blind_no_recovery`、
+  `dual_error_no_recovery`、`dual_error_blind_no_recovery` 的失败是预期行为，不应当作为
+  demo 崩溃处理。
+- 如果某个 case 的 `expectation_matched=False`，再进入该 case 的 log、video 和
+  `case_result.json` 进一步分析。
+
+### 默认错误注入语义
 
 默认确定性错误是 bottle 水平平移：
 
@@ -283,6 +368,44 @@ dual_error_with_recovery
 ```bash
 --error_injection_type fallen_object
 ```
+
+这点很重要：当前 matrix 的默认目标是验证“物体被平移后 recovery 能否找回任务状态”，
+不是验证“bottle 倒下后机械臂能否扶正”。如果测试时发现默认 case 里 bottle 直接倒下，
+应先检查实际命令、runner log 和脚本版本，而不是直接归因到 recovery graph 失败。
+
+### 推荐的分步复现方式
+
+如果一次性跑 `--case all` 失败，建议按下面顺序缩小问题：
+
+```bash
+# 1. 单臂正常路径
+conda run --no-capture-output -n embodichain python \
+  "scripts/tutorials/gym/pour_water_recovery_compare.py" \
+  --case single_clean_no_recovery
+
+# 2. 单臂错误但不允许 recovery，预期失败
+conda run --no-capture-output -n embodichain python \
+  "scripts/tutorials/gym/pour_water_recovery_compare.py" \
+  --case single_error_no_recovery
+
+# 3. 单臂错误并允许 recovery，预期成功
+conda run --no-capture-output -n embodichain python \
+  "scripts/tutorials/gym/pour_water_recovery_compare.py" \
+  --case single_error_with_recovery
+
+# 4. 双臂正常路径
+conda run --no-capture-output -n embodichain python \
+  "scripts/tutorials/gym/pour_water_recovery_compare.py" \
+  --case dual_clean_no_recovery
+
+# 5. 双臂错误并允许 recovery，预期成功
+conda run --no-capture-output -n embodichain python \
+  "scripts/tutorials/gym/pour_water_recovery_compare.py" \
+  --case dual_error_with_recovery
+```
+
+如果上述单 case 都符合预期，再运行完整 matrix。这样更容易区分是单臂/双臂差异、错误注入差异，
+还是完整 matrix 子进程调度导致的问题。
 
 ## 关键帧检查
 
