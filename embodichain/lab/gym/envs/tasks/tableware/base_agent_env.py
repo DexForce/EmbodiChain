@@ -108,6 +108,7 @@ class BaseAgentEnv:
                     f"{obj_name}_grasp_pose_object", None
                 )
                 obj_info[obj_name] = {
+                    "initial_pose": obj_pose.clone(),
                     "pose": obj_pose,  # Store the full pose (4x4 matrix)
                     "height": obj_height,  # Store the initial height (z-coordinate)
                     "grasp_pose_obj": (
@@ -222,10 +223,66 @@ class BaseAgentEnv:
         self, regenerate=False, recovery=False, *args, **kwargs
     ):
         graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
-            regenerate=regenerate, recovery=recovery
+            regenerate=regenerate, recovery=recovery, **kwargs
         )
         compile_kwargs["interactive_error_injection"] = kwargs.get(
             "interactive_error_injection", False
         )
+        if "forced_recovery_injection" in kwargs:
+            compile_kwargs["forced_recovery_injection"] = kwargs[
+                "forced_recovery_injection"
+            ]
+        if "disable_recovery_branches" in kwargs:
+            compile_kwargs["disable_recovery_branches"] = kwargs[
+                "disable_recovery_branches"
+            ]
+        for key in (
+            "use_public_atomic_actions",
+            "use_public_grasp_action",
+            "require_public_grasp_action",
+            "use_public_grasp_semantics",
+            "allow_public_grasp_annotation",
+            "force_public_grasp_reannotate",
+            "public_grasp_candidate_num",
+            "public_grasp_pre_grasp_distance",
+            "generate_public_grasp_candidates",
+            "public_grasp_auto_approach_direction",
+            "public_grasp_try_approach_directions",
+            "public_grasp_approach_direction",
+            "public_grasp_approach_directions",
+            "public_grasp_lift_height",
+            "public_grasp_pose_offset_world",
+            "public_grasp_pose_offset_along_approach",
+            "validate_public_grasp_after_action",
+            "public_grasp_validation_min_object_lift",
+            "grasp_max_open_length",
+            "grasp_min_open_length",
+            "grasp_finger_length",
+            "grasp_x_thickness",
+            "grasp_y_thickness",
+            "grasp_root_z_width",
+            "grasp_open_check_margin",
+            "grasp_point_sample_dense",
+            "grasp_antipodal_n_sample",
+            "grasp_max_deviation_angle",
+            "use_public_place_action",
+            "public_place_upright",
+            "public_place_upright_eps",
+            "use_public_gripper_action",
+            "require_public_non_grasp_actions",
+            "allow_move_relative_orientation_fallback",
+            "force_valid",
+            "log_dir",
+            "runtime_llm_recovery",
+            "prefer_runtime_llm_recovery",
+            "runtime_recovery_use_llm",
+            "runtime_recovery_max_total_attempts",
+            "runtime_recovery_max_monitor_attempts",
+            "runtime_recovery_max_exception_attempts",
+        ):
+            if key in kwargs:
+                compile_kwargs[key] = kwargs[key]
+        if kwargs.get("runtime_llm_recovery", False):
+            compile_kwargs["runtime_recovery_agent"] = self.recovery_agent
         action_list = self.compile_agent.act(graph_file_path, **compile_kwargs)
         return action_list

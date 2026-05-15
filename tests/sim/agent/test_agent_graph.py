@@ -23,8 +23,11 @@ import sys
 import types
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -69,6 +72,11 @@ def _load_compile_agent_class():
             and node.name
             in {
                 "_canonicalize_recovery_spec_with_llm",
+                "_build_runtime_recovery_planner",
+                "_heuristic_runtime_recovery_edges",
+                "_infer_recovery_object_name",
+                "_default_recovery_robot_for_object",
+                "_collect_runtime_state",
                 "_empty_recovery_spec",
                 "_runtime_kwargs",
                 "_stable_json_hash",
@@ -81,6 +89,7 @@ def _load_compile_agent_class():
         "hashlib": hashlib,
         "json": json,
         "Path": Path,
+        "partial": partial,
         "database_agent_prompt_dir": Path("/tmp"),
         "extract_json_object": extract_json_object,
         "normalize_json_content": normalize_json_content,
@@ -178,6 +187,115 @@ def test_agent_graph_can_recover_multiple_nominal_edges(monkeypatch) -> None:
     assert actions.already_executed is True
     assert actions.actions == ["fail_1", "recover_1", "fail_2", "recover_2"]
     assert calls == ["fail_1", "recover_1", "fail_2", "recover_2"]
+
+
+def test_agent_graph_can_use_runtime_recovery_planner() -> None:
+    calls = []
+    triggered = {"value": False}
+
+    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        monitor_index = (
+            0
+            if right_arm_action == "fail_nominal"
+            and monitor_sequences
+            and not triggered["value"]
+            else None
+        )
+        if monitor_index is not None:
+            triggered["value"] = True
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": monitor_index,
+            "monitor_name": "monitor_object_fallen" if monitor_index is not None else None,
+            "step_index": 0 if monitor_index is not None else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+    agent_graph_edge = graph_namespace["AgentGraphEdge"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+
+    def runtime_planner(edge, monitor_index, monitor_name, **kwargs):
+        assert edge.id == "e01"
+        assert monitor_index == 0
+        assert monitor_name == "monitor_object_fallen"
+        return [
+            agent_graph_edge(
+                id="rt01",
+                source="v0_start",
+                target="v0_start",
+                right_arm_action="runtime_upright",
+                is_recovery=True,
+            )
+        ]
+
+    actions = graph.run(
+        env=object(),
+        runtime_recovery_planner=runtime_planner,
+    )
+
+    assert actions.actions == ["fail_nominal", "runtime_upright", "fail_nominal"]
+    assert calls == ["fail_nominal", "runtime_upright", "fail_nominal"]
+
+
+def test_agent_graph_limits_total_runtime_recovery_attempts() -> None:
+    calls = []
+
+    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": 0 if monitor_sequences else None,
+            "monitor_name": "monitor_object_fallen" if monitor_sequences else None,
+            "step_index": 0 if monitor_sequences else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+    agent_graph_edge = graph_namespace["AgentGraphEdge"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+
+    def runtime_planner(edge, **kwargs):
+        return [
+            agent_graph_edge(
+                id=f"rt_{edge.id}",
+                source=edge.source,
+                target=edge.source,
+                right_arm_action="runtime_upright",
+                monitor_sequences=[["monitor"]],
+                is_recovery=True,
+            )
+        ]
+
+    with pytest.raises(RuntimeError, match="Runtime recovery exceeded total retry"):
+        graph.run(
+            env=object(),
+            runtime_recovery_planner=runtime_planner,
+            runtime_recovery_max_total_attempts=1,
+        )
+
+    assert calls == ["fail_nominal", "runtime_upright"]
 
 
 def test_agent_graph_recovers_inside_recovery_path_and_resumes_continuation() -> None:

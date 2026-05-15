@@ -186,10 +186,13 @@ class AtomicActionEngine:
         self, actions_cfg_list: Optional[List[ActionCfg]] = None
     ) -> Dict[str, "AtomicAction"]:
         actions: Dict[str, AtomicAction] = {}
-        from .actions import MoveAction, PickUpAction, PlaceAction
+        from .actions import GripperAction, MoveAction, PickUpAction, PlaceAction
 
         builtin_action_map: Dict[str, Type[AtomicAction]] = {
             "move": MoveAction,
+            "gripper": GripperAction,
+            "open_gripper": GripperAction,
+            "close_gripper": GripperAction,
             "pick_up": PickUpAction,
             "place": PlaceAction,
         }

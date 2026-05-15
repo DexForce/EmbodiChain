@@ -1,0 +1,3010 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import math
+import os
+from typing import Any
+
+import numpy as np
+import torch
+
+from embodichain.lab.gym.utils.misc import get_rotation_replaced_pose
+from embodichain.lab.sim.atomic_actions import (
+    AntipodalAffordance,
+    AtomicActionEngine,
+    GripperActionCfg,
+    MoveActionCfg,
+    ObjectSemantics,
+    PickUpActionCfg,
+    PlaceActionCfg,
+)
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalSamplerCfg,
+    GraspGenerator,
+    GraspGeneratorCfg,
+    GripperCollisionCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    GRASP_ANNOTATOR_CACHE_DIR,
+)
+from embodichain.utils.logger import log_info, log_warning
+
+
+def _public_atomic_actions_enabled(kwargs: dict[str, Any]) -> bool:
+    return bool(kwargs.get("use_public_atomic_actions", True))
+
+
+def public_atomic_actions_enabled(kwargs: dict[str, Any]) -> bool:
+    return _public_atomic_actions_enabled(kwargs)
+
+
+def _public_grasp_strict(kwargs: dict[str, Any]) -> bool:
+    return bool(kwargs.get("require_public_grasp_action", False))
+
+
+def _public_grasp_requested(kwargs: dict[str, Any]) -> bool:
+    return bool(
+        kwargs.get("use_public_grasp_action", False) or _public_grasp_strict(kwargs)
+    )
+
+
+def _public_grasp_semantics_requested(kwargs: dict[str, Any]) -> bool:
+    return bool(
+        kwargs.get("use_public_grasp_semantics", False)
+        or kwargs.get("public_grasp_strategy") is not None
+    )
+
+
+def _public_non_grasp_strict(kwargs: dict[str, Any]) -> bool:
+    return bool(kwargs.get("require_public_non_grasp_actions", False))
+
+
+def _handle_public_non_grasp_unavailable(
+    message: str,
+    *,
+    strict: bool,
+    fallback_name: str,
+) -> None:
+    if strict:
+        raise RuntimeError(message)
+    log_warning(f"{message} Falling back to legacy agent {fallback_name}.")
+
+
+def _handle_public_grasp_unavailable(
+    message: str,
+    *,
+    strict: bool,
+) -> None:
+    if strict:
+        raise RuntimeError(message)
+    log_warning(f"{message} Falling back to legacy agent grasp.")
+
+
+def _select_arm(robot_name: str) -> tuple[bool, str, str]:
+    is_left = "right" not in robot_name
+    arm_part = "left_arm" if is_left else "right_arm"
+    hand_part = "left_eef" if is_left else "right_eef"
+    return is_left, arm_part, hand_part
+
+
+def _as_pose_tensor(
+    pose,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    if isinstance(pose, torch.Tensor):
+        pose_tensor = pose.detach().clone()
+    else:
+        pose_tensor = torch.as_tensor(pose)
+    return pose_tensor.to(device=device or pose_tensor.device, dtype=torch.float32)
+
+
+def _as_qpos_tensor(
+    qpos,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    qpos_tensor = torch.as_tensor(qpos, dtype=torch.float32, device=device).flatten()
+    return qpos_tensor.unsqueeze(0)
+
+
+def _state_to_hand_qpos(
+    state,
+    hand_dof: int,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device).flatten()
+    if state_tensor.numel() == hand_dof:
+        return state_tensor
+    if state_tensor.numel() == 1:
+        return state_tensor.repeat(hand_dof)
+    raise ValueError(
+        f"Cannot convert gripper state with shape {tuple(state_tensor.shape)} "
+        f"to hand_dof={hand_dof}."
+    )
+
+
+def _as_vector_tensor(
+    values,
+    length: int,
+    *,
+    name: str,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    vector = torch.as_tensor(values, dtype=torch.float32, device=device).flatten()
+    if vector.numel() != length:
+        raise ValueError(
+            f"{name} must contain {length} values, got shape {tuple(vector.shape)}."
+        )
+    return vector
+
+
+def _normalized_vector_tensor(
+    values,
+    length: int,
+    *,
+    name: str,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    vector = _as_vector_tensor(values, length, name=name, device=device)
+    norm = torch.linalg.norm(vector)
+    if norm <= 1e-6:
+        raise ValueError(f"{name} must be non-zero.")
+    return vector / norm
+
+
+def _format_vector(vector: torch.Tensor) -> str:
+    values = vector.detach().cpu().tolist()
+    return ",".join(f"{value:.4f}" for value in values)
+
+
+def _create_engine(env, cfg) -> AtomicActionEngine:
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+    )
+    return AtomicActionEngine(
+        motion_generator=motion_generator,
+        actions_cfg_list=[cfg],
+    )
+
+
+def _current_arm_qpos(env, is_left: bool):
+    return env.left_arm_current_qpos if is_left else env.right_arm_current_qpos
+
+
+def _current_gripper_state(env, is_left: bool):
+    return (
+        env.left_arm_current_gripper_state
+        if is_left
+        else env.right_arm_current_gripper_state
+    )
+
+
+def _extract_legacy_action(
+    env,
+    robot_name: str,
+    trajectory: torch.Tensor,
+    joint_ids: list[int],
+) -> np.ndarray:
+    is_left, _, _ = _select_arm(robot_name)
+    arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
+    hand_joints = env.left_eef_joints if is_left else env.right_eef_joints
+
+    if trajectory.ndim != 3 or trajectory.shape[0] != 1:
+        raise ValueError(
+            "Agent atomic action adapter currently supports trajectory shape "
+            f"(1, T, dof), got {tuple(trajectory.shape)}."
+        )
+
+    trajectory_np = trajectory.detach().cpu().numpy()
+    joint_id_to_col = {joint_id: idx for idx, joint_id in enumerate(joint_ids)}
+    current_hand_qpos = (
+        _state_to_hand_qpos(
+            _current_gripper_state(env, is_left),
+            len(hand_joints),
+        )
+        .detach()
+        .cpu()
+        .numpy()
+    )
+
+    columns = []
+    for joint_id in arm_joints:
+        if joint_id not in joint_id_to_col:
+            raise ValueError(
+                f"Public action trajectory does not include arm joint {joint_id}."
+            )
+        columns.append(trajectory_np[0, :, joint_id_to_col[joint_id]])
+
+    for hand_idx, joint_id in enumerate(hand_joints):
+        if joint_id in joint_id_to_col:
+            columns.append(trajectory_np[0, :, joint_id_to_col[joint_id]])
+        else:
+            columns.append(
+                np.full(
+                    trajectory_np.shape[1],
+                    current_hand_qpos[hand_idx],
+                    dtype=np.float32,
+                )
+            )
+
+    return np.stack(columns, axis=-1).astype(np.float32, copy=False)
+
+
+def _sync_agent_arm_state(env, robot_name: str, legacy_action: np.ndarray) -> None:
+    is_left, _, _ = _select_arm(robot_name)
+    arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
+    arm_dof = len(arm_joints)
+
+    arm_device = getattr(env.robot, "device", None)
+    gripper_device = getattr(getattr(env, "open_state", None), "device", None)
+    final_arm_qpos = torch.as_tensor(
+        legacy_action[-1, :arm_dof],
+        dtype=torch.float32,
+        device=arm_device,
+    )
+    final_gripper = torch.as_tensor(
+        [legacy_action[-1, arm_dof]],
+        dtype=torch.float32,
+        device=gripper_device,
+    )
+    final_pose = env.get_arm_fk(qpos=final_arm_qpos, is_left=is_left)
+
+    env.set_current_qpos_agent(final_arm_qpos, is_left=is_left)
+    env.set_current_xpos_agent(final_pose, is_left=is_left)
+    env.set_current_gripper_state_agent(final_gripper, is_left=is_left)
+
+
+def _extract_legacy_gripper_action(
+    env,
+    robot_name: str,
+    trajectory: torch.Tensor,
+    joint_ids: list[int],
+) -> np.ndarray:
+    is_left, _, _ = _select_arm(robot_name)
+    arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
+    hand_joints = env.left_eef_joints if is_left else env.right_eef_joints
+
+    if trajectory.ndim != 3 or trajectory.shape[0] != 1:
+        raise ValueError(
+            "Agent gripper action adapter currently supports trajectory shape "
+            f"(1, T, dof), got {tuple(trajectory.shape)}."
+        )
+
+    trajectory_np = trajectory.detach().cpu().numpy()
+    joint_id_to_col = {joint_id: idx for idx, joint_id in enumerate(joint_ids)}
+    n_waypoints = trajectory_np.shape[1]
+    current_arm_qpos = (
+        torch.as_tensor(_current_arm_qpos(env, is_left))
+        .detach()
+        .cpu()
+        .numpy()
+        .reshape(1, -1)
+    )
+    current_hand_qpos = (
+        _state_to_hand_qpos(
+            _current_gripper_state(env, is_left),
+            len(hand_joints),
+        )
+        .detach()
+        .cpu()
+        .numpy()
+    )
+
+    arm_action = np.repeat(current_arm_qpos, n_waypoints, axis=0)
+    hand_columns = []
+    for hand_idx, joint_id in enumerate(hand_joints):
+        if joint_id in joint_id_to_col:
+            hand_columns.append(trajectory_np[0, :, joint_id_to_col[joint_id]])
+        else:
+            hand_columns.append(
+                np.full(n_waypoints, current_hand_qpos[hand_idx], dtype=np.float32)
+            )
+    hand_action = np.stack(hand_columns, axis=-1)
+    return np.concatenate([arm_action, hand_action], axis=-1).astype(
+        np.float32, copy=False
+    )
+
+
+def _sync_agent_gripper_state(env, robot_name: str, legacy_action: np.ndarray) -> None:
+    is_left, _, _ = _select_arm(robot_name)
+    arm_dof = len(env.left_arm_joints if is_left else env.right_arm_joints)
+    gripper_device = getattr(getattr(env, "open_state", None), "device", None)
+    final_gripper = torch.as_tensor(
+        [legacy_action[-1, arm_dof]],
+        dtype=torch.float32,
+        device=gripper_device,
+    )
+    env.set_current_gripper_state_agent(final_gripper, is_left=is_left)
+
+
+def _object_pose(env, obj_name: str) -> torch.Tensor | None:
+    obj_uids = env.sim.get_rigid_object_uid_list()
+    if obj_name not in obj_uids:
+        return None
+    target_obj = env.sim.get_rigid_object(obj_name)
+    return target_obj.get_local_pose(to_matrix=True).squeeze(0).detach().clone()
+
+
+def _object_geometry_bounds(
+    env,
+    obj_name: str,
+    *,
+    device: torch.device | str | None = None,
+) -> dict[str, torch.Tensor] | None:
+    obj_uids = env.sim.get_rigid_object_uid_list()
+    if obj_name not in obj_uids:
+        return None
+    target_obj = env.sim.get_rigid_object(obj_name)
+    try:
+        vertices = target_obj.get_vertices(env_ids=[0], scale=True)[0]
+    except Exception:
+        return None
+    pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
+    pose = _as_pose_tensor(pose, device=device)
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=pose.device)
+    if vertices.numel() == 0:
+        return None
+
+    world_vertices = vertices @ pose[:3, :3].transpose(0, 1)
+    world_vertices = world_vertices + pose[:3, 3]
+    mins = world_vertices.min(dim=0).values
+    maxs = world_vertices.max(dim=0).values
+    extents = maxs - mins
+    return {
+        "center": ((mins + maxs) * 0.5).detach(),
+        "mins": mins.detach(),
+        "maxs": maxs.detach(),
+        "extents": extents.detach(),
+        "xy_radius": torch.clamp(extents[:2].max() * 0.5, min=1e-6).detach(),
+        "height": torch.clamp(extents[2], min=1e-6).detach(),
+    }
+
+
+def _semantic_grasp_geometry_metrics(
+    grasp_pose: torch.Tensor,
+    direction: torch.Tensor,
+    geometry_bounds: dict[str, torch.Tensor] | None,
+    kwargs: dict[str, Any],
+) -> tuple[float, float, float, float]:
+    if geometry_bounds is None:
+        return float(grasp_pose[2, 3].item()), 0.0, 0.0, 0.0
+
+    pose_device = grasp_pose.device
+    pose_dtype = grasp_pose.dtype
+    center = geometry_bounds["center"].to(device=pose_device, dtype=pose_dtype)
+    mins = geometry_bounds["mins"].to(device=pose_device, dtype=pose_dtype)
+    xy_radius = geometry_bounds["xy_radius"].to(
+        device=pose_device,
+        dtype=pose_dtype,
+    )
+    height = geometry_bounds["height"].to(device=pose_device, dtype=pose_dtype)
+    direction = direction.to(device=pose_device, dtype=pose_dtype)
+    direction = direction / torch.linalg.norm(direction).clamp_min(1e-6)
+
+    position = grasp_pose[:3, 3]
+    xy_distance = torch.linalg.norm(position[:2] - center[:2])
+    radial_ratio = float((xy_distance / xy_radius).item())
+    height_ratio = float(((position[2] - mins[2]) / height).clamp(0.0, 1.5).item())
+    grasp_height = float(position[2].item())
+
+    is_top_down = abs(float(direction[2].item())) >= 0.75
+    if is_top_down:
+        target_radial = float(
+            kwargs.get("public_grasp_top_down_target_radial_ratio", 0.65)
+        )
+        min_radial = float(kwargs.get("public_grasp_top_down_min_radial_ratio", 0.18))
+        min_height = float(kwargs.get("public_grasp_top_down_min_height_ratio", 0.30))
+        target_height = kwargs.get("public_grasp_top_down_target_height_ratio")
+        height_weight = float(
+            kwargs.get("public_grasp_top_down_target_height_weight", 0.0)
+        )
+    else:
+        target_radial = float(
+            kwargs.get("public_grasp_lateral_target_radial_ratio", 0.80)
+        )
+        min_radial = float(kwargs.get("public_grasp_lateral_min_radial_ratio", 0.35))
+        min_height = float(kwargs.get("public_grasp_lateral_min_height_ratio", 0.20))
+        target_height = kwargs.get("public_grasp_lateral_target_height_ratio")
+        height_weight = float(
+            kwargs.get("public_grasp_lateral_target_height_weight", 0.0)
+        )
+
+    max_radial = float(kwargs.get("public_grasp_max_radial_ratio", 1.80))
+    radial_penalty = abs(radial_ratio - target_radial)
+    center_penalty = max(0.0, min_radial - radial_ratio) * 4.0
+    low_height_penalty = max(0.0, min_height - height_ratio) * 3.0
+    overreach_penalty = max(0.0, radial_ratio - max_radial)
+    target_height_penalty = 0.0
+    if target_height is not None:
+        target_height_penalty = height_weight * abs(
+            height_ratio - float(target_height)
+        )
+    geometry_score = (
+        radial_penalty
+        + center_penalty
+        + low_height_penalty
+        + overreach_penalty
+        + target_height_penalty
+    )
+    return grasp_height, radial_ratio, height_ratio, geometry_score
+
+
+@dataclass
+class _SemanticGraspCandidatePlan:
+    label: str
+    direction: torch.Tensor
+    candidate_idx: int
+    roll_offset_rad: float
+    open_length: float
+    grasp_pose: torch.Tensor
+    trajectory: torch.Tensor
+    joint_ids: list[int]
+    qpos_score: float
+    grasp_height: float
+    radial_ratio: float
+    height_ratio: float
+    geometry_score: float
+    roll_score: float
+    legacy_pos_error: float | None
+    legacy_rot_error_rad: float | None
+    legacy_score: float | None
+
+
+def _rotation_error_rad(candidate_pose: torch.Tensor, reference_pose: torch.Tensor) -> float:
+    candidate_rot = candidate_pose[:3, :3]
+    reference_rot = reference_pose[:3, :3].to(
+        dtype=candidate_rot.dtype,
+        device=candidate_rot.device,
+    )
+    delta_rot = reference_rot.transpose(0, 1) @ candidate_rot
+    cos_angle = ((torch.trace(delta_rot) - 1.0) * 0.5).clamp(-1.0, 1.0)
+    return float(torch.acos(cos_angle).item())
+
+
+def _xy_distance(pose_a: torch.Tensor, pose_b: torch.Tensor) -> float:
+    return float(torch.linalg.norm(pose_a[:2, 3] - pose_b[:2, 3]).item())
+
+
+def _relative_pose(base_pose: torch.Tensor, target_pose: torch.Tensor) -> torch.Tensor:
+    return torch.linalg.inv(base_pose) @ target_pose
+
+
+def _public_grasp_relation_key(robot_name: str, obj_name: str) -> str:
+    return f"{robot_name}:{obj_name}"
+
+
+def _store_public_grasp_relation(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    grasp_pose: torch.Tensor,
+    source: str,
+) -> None:
+    obj_pose = _object_pose(env, obj_name)
+    if obj_pose is None:
+        log_warning(
+            f"Cannot store public grasp relation for '{obj_name}': object pose is unavailable."
+        )
+        return
+
+    grasp_pose = _as_pose_tensor(grasp_pose, device=obj_pose.device)
+    relation = torch.linalg.inv(obj_pose) @ grasp_pose
+    relations = getattr(env, "_public_grasp_object_eef_relations", None)
+    if not isinstance(relations, dict):
+        relations = {}
+    relations[_public_grasp_relation_key(robot_name, obj_name)] = {
+        "relation": relation.detach().clone(),
+        "source": source,
+    }
+    setattr(env, "_public_grasp_object_eef_relations", relations)
+
+
+def _get_public_grasp_relation(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    kwargs: dict[str, Any],
+) -> tuple[torch.Tensor | None, str | None]:
+    relations = getattr(env, "_public_grasp_object_eef_relations", None)
+    key = _public_grasp_relation_key(robot_name, obj_name)
+    if isinstance(relations, dict) and key in relations:
+        entry = relations[key]
+        relation = entry.get("relation") if isinstance(entry, dict) else entry
+        if relation is not None:
+            return _as_pose_tensor(relation), (
+                entry.get("source") if isinstance(entry, dict) else "stored"
+            )
+
+    if not bool(kwargs.get("public_place_upright_allow_legacy_grasp_pose", True)):
+        return None, None
+
+    grasp_pose_obj = getattr(env, "obj_info", {}).get(obj_name, {}).get(
+        "grasp_pose_obj"
+    )
+    if grasp_pose_obj is None:
+        return None, None
+    return _as_pose_tensor(grasp_pose_obj), "legacy_grasp_pose_obj"
+
+
+def _relation_error(
+    actual_relation: torch.Tensor,
+    expected_relation: torch.Tensor,
+) -> tuple[float, float]:
+    expected_relation = expected_relation.to(
+        dtype=actual_relation.dtype,
+        device=actual_relation.device,
+    )
+    pos_error = float(
+        torch.linalg.norm(
+            actual_relation[:3, 3] - expected_relation[:3, 3]
+        ).item()
+    )
+    rot_error = _rotation_error_rad(actual_relation, expected_relation)
+    return pos_error, rot_error
+
+
+def validate_public_place_preconditions(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    target_x: float | None,
+    target_y: float | None,
+    target_height,
+    kwargs: dict[str, Any],
+) -> None:
+    if not bool(kwargs.get("validate_place_preconditions", False)):
+        return
+    if env is None:
+        raise RuntimeError("place_on_table precondition failed: env is None.")
+    if target_height is None:
+        raise RuntimeError(
+            f"place_on_table precondition failed for {robot_name}/{obj_name}: "
+            "target height is unavailable."
+        )
+    if not np.isfinite(float(target_height)):
+        raise RuntimeError(
+            f"place_on_table precondition failed for {robot_name}/{obj_name}: "
+            f"target height is not finite ({target_height})."
+        )
+
+    obj_pose = _object_pose(env, obj_name)
+    if obj_pose is None:
+        raise RuntimeError(
+            f"place_on_table precondition failed: object '{obj_name}' is unavailable."
+        )
+
+    relation, relation_source = _get_public_grasp_relation(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        kwargs=kwargs,
+    )
+    if relation is None:
+        if bool(kwargs.get("public_place_require_grasp_relation", True)):
+            raise RuntimeError(
+                f"place_on_table precondition failed for {robot_name}/{obj_name}: "
+                "no object-to-EEF grasp relation is available."
+            )
+        return
+
+    eef_pose = _current_eef_pose(env, robot_name)
+    obj_pose = obj_pose.to(dtype=eef_pose.dtype, device=eef_pose.device)
+    actual_relation = torch.linalg.inv(obj_pose) @ eef_pose
+    pos_error, rot_error = _relation_error(actual_relation, relation)
+    max_pos_error = float(kwargs.get("public_place_max_grasp_relation_pos_error", 0.16))
+    max_rot_error = float(kwargs.get("public_place_max_grasp_relation_rot_error", 1.4))
+    refresh_relation = bool(kwargs.get("public_place_refresh_grasp_relation", True))
+    if pos_error > max_pos_error or (rot_error > max_rot_error and not refresh_relation):
+        raise RuntimeError(
+            f"place_on_table precondition failed for {robot_name}/{obj_name}: "
+            f"object does not appear to be held by the gripper "
+            f"(relation_source={relation_source}, pos_error={pos_error:.4f}m/"
+            f"{max_pos_error:.4f}m, rot_error={rot_error:.4f}rad/"
+            f"{max_rot_error:.4f}rad)."
+        )
+    if refresh_relation:
+        _store_public_grasp_relation(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            grasp_pose=eef_pose,
+            source=f"refreshed_before_place_from_{relation_source}",
+        )
+        if rot_error > max_rot_error:
+            log_warning(
+                f"Refreshing public place relation for {robot_name}/{obj_name}: "
+                f"object is still near the gripper but rotated "
+                f"(relation_source={relation_source}, pos_error={pos_error:.4f}m, "
+                f"rot_error={rot_error:.4f}rad>{max_rot_error:.4f}rad)."
+            )
+
+    min_object_lift = kwargs.get("public_place_precondition_min_object_lift")
+    if min_object_lift is not None:
+        initial_height = getattr(env, "obj_info", {}).get(obj_name, {}).get("height")
+        if initial_height is not None:
+            object_lift = float(obj_pose[2, 3].item() - float(initial_height))
+            if object_lift < float(min_object_lift):
+                raise RuntimeError(
+                    f"place_on_table precondition failed for {robot_name}/{obj_name}: "
+                    f"object_lift={object_lift:.4f}m < "
+                    f"{float(min_object_lift):.4f}m."
+                )
+
+
+def _upright_object_rotation(object_pose: torch.Tensor) -> torch.Tensor:
+    device = object_pose.device
+    dtype = object_pose.dtype
+    world_z = torch.tensor([0.0, 0.0, 1.0], dtype=dtype, device=device)
+
+    x_axis = object_pose[:3, 0].detach().clone()
+    x_axis[2] = 0.0
+    if torch.linalg.norm(x_axis) > 1e-6:
+        x_axis = x_axis / torch.linalg.norm(x_axis)
+        y_axis = torch.cross(world_z, x_axis, dim=0)
+        y_axis = y_axis / torch.linalg.norm(y_axis).clamp_min(1e-6)
+        return torch.stack([x_axis, y_axis, world_z], dim=1)
+
+    y_axis = object_pose[:3, 1].detach().clone()
+    y_axis[2] = 0.0
+    if torch.linalg.norm(y_axis) > 1e-6:
+        y_axis = y_axis / torch.linalg.norm(y_axis)
+        x_axis = torch.cross(y_axis, world_z, dim=0)
+        x_axis = x_axis / torch.linalg.norm(x_axis).clamp_min(1e-6)
+        return torch.stack([x_axis, y_axis, world_z], dim=1)
+
+    return torch.eye(3, dtype=dtype, device=device)
+
+
+def _z_rotation(
+    angle_rad: float,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    cos_value = math.cos(angle_rad)
+    sin_value = math.sin(angle_rad)
+    return torch.tensor(
+        [
+            [cos_value, -sin_value, 0.0],
+            [sin_value, cos_value, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=dtype,
+        device=device,
+    )
+
+
+def _public_place_upright_yaw_offsets(kwargs: dict[str, Any]) -> list[float]:
+    value = kwargs.get("public_place_upright_yaw_offsets_deg")
+    if value is None:
+        return [0.0, 90.0, -90.0, 180.0]
+    if isinstance(value, str):
+        values = [item.strip() for item in value.split(",") if item.strip()]
+    else:
+        values = value
+    return [float(item) for item in values]
+
+
+def build_public_upright_place_pose_candidates(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    target_pose,
+    x: float | None,
+    y: float | None,
+    object_height,
+    kwargs: dict[str, Any],
+) -> list[tuple[str, torch.Tensor]]:
+    if not bool(kwargs.get("public_place_upright", True)):
+        return []
+    if env is None or target_pose is None:
+        return []
+
+    obj_pose = _object_pose(env, obj_name)
+    if obj_pose is None:
+        log_warning(
+            f"Public upright place cannot build object target pose: "
+            f"object '{obj_name}' is unavailable."
+        )
+        return []
+
+    relation, relation_source = _get_public_grasp_relation(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        kwargs=kwargs,
+    )
+    if relation is None:
+        log_warning(
+            f"Public upright place has no object-to-EEF grasp relation for "
+            f"{robot_name}/{obj_name}; using current EEF orientation."
+        )
+        return []
+
+    target_pose = _as_pose_tensor(target_pose)
+    obj_pose = obj_pose.to(dtype=target_pose.dtype, device=target_pose.device)
+    relation = relation.to(dtype=target_pose.dtype, device=target_pose.device)
+
+    initial_pose = getattr(env, "obj_info", {}).get(obj_name, {}).get("initial_pose")
+    if (
+        bool(kwargs.get("public_place_upright_use_initial_pose", True))
+        and initial_pose is not None
+    ):
+        initial_pose = _as_pose_tensor(initial_pose, device=target_pose.device).to(
+            dtype=target_pose.dtype
+        )
+        base_object_rotation = initial_pose[:3, :3]
+        rotation_source = "initial_pose"
+    else:
+        base_object_rotation = _upright_object_rotation(obj_pose)
+        rotation_source = "current_pose_projection"
+    candidates: list[tuple[str, torch.Tensor]] = []
+    for yaw_deg in _public_place_upright_yaw_offsets(kwargs):
+        object_target_pose = obj_pose.detach().clone()
+        yaw_rot = _z_rotation(
+            math.radians(yaw_deg),
+            dtype=target_pose.dtype,
+            device=target_pose.device,
+        )
+        object_target_pose[:3, :3] = yaw_rot @ base_object_rotation
+        if x is not None:
+            object_target_pose[0, 3] = float(x)
+        if y is not None:
+            object_target_pose[1, 3] = float(y)
+        object_target_pose[2, 3] = torch.as_tensor(
+            object_height,
+            dtype=target_pose.dtype,
+            device=target_pose.device,
+        )
+
+        place_pose = object_target_pose @ relation
+        label = (
+            f"upright_yaw{yaw_deg:+.0f}_rot_{rotation_source}_"
+            f"from_{relation_source}"
+        )
+        candidates.append((label, place_pose))
+    return candidates
+
+
+def try_build_public_upright_place_pose(
+    **kwargs,
+) -> torch.Tensor | None:
+    candidates = build_public_upright_place_pose_candidates(**kwargs)
+    if not candidates:
+        return None
+    return candidates[0][1]
+
+
+def register_pending_public_place_validation(
+    *,
+    env,
+    kwargs: dict[str, Any],
+    robot_name: str,
+    obj_name: str,
+    target_x: float | None,
+    target_y: float | None,
+    target_height,
+    label: str,
+) -> None:
+    if not bool(kwargs.get("validate_public_place_after_action", False)):
+        return
+    pending = {
+        "robot_name": robot_name,
+        "obj_name": obj_name,
+        "target_x": None if target_x is None else float(target_x),
+        "target_y": None if target_y is None else float(target_y),
+        "target_height": None if target_height is None else float(target_height),
+        "label": label,
+        "max_xy_error": float(kwargs.get("public_place_validation_max_xy_error", 0.16)),
+        "min_upright_dot": float(
+            kwargs.get("public_place_validation_min_upright_dot", 0.65)
+        ),
+        "max_height_error": _optional_float(
+            kwargs,
+            "public_place_validation_max_height_error",
+        ),
+    }
+    pending_list = getattr(env, "_pending_public_place_validations", None)
+    if not isinstance(pending_list, list):
+        pending_list = []
+    pending_list.append(pending)
+    setattr(env, "_pending_public_place_validations", pending_list)
+
+
+def validate_pending_public_place_after_action(env, kwargs: dict[str, Any]) -> None:
+    pending_items = getattr(env, "_pending_public_place_validations", None)
+    if not isinstance(pending_items, list) or not pending_items:
+        return
+    setattr(env, "_pending_public_place_validations", [])
+
+    failures = []
+    for pending in pending_items:
+        obj_name = pending["obj_name"]
+        pose = _object_pose(env, obj_name)
+        if pose is None:
+            failures.append(f"object '{obj_name}' is unavailable")
+            continue
+
+        message_parts = [f"label={pending['label']}"]
+        target_x = pending.get("target_x")
+        target_y = pending.get("target_y")
+        if target_x is not None and target_y is not None:
+            xy_error = float(
+                torch.linalg.norm(
+                    pose[:2, 3]
+                    - torch.tensor(
+                        [target_x, target_y],
+                        dtype=pose.dtype,
+                        device=pose.device,
+                    )
+                ).item()
+            )
+            max_xy_error = float(pending["max_xy_error"])
+            message_parts.append(f"xy_error={xy_error:.4f}m")
+            if xy_error > max_xy_error:
+                failures.append(
+                    f"{obj_name} xy_error={xy_error:.4f}m>{max_xy_error:.4f}m"
+                )
+
+        upright_dot = float(
+            torch.dot(
+                pose[:3, 2],
+                torch.tensor([0.0, 0.0, 1.0], dtype=pose.dtype, device=pose.device),
+            ).item()
+        )
+        min_upright_dot = float(pending["min_upright_dot"])
+        message_parts.append(f"upright_dot={upright_dot:.4f}")
+        if upright_dot < min_upright_dot:
+            failures.append(
+                f"{obj_name} upright_dot={upright_dot:.4f}<{min_upright_dot:.4f}"
+            )
+
+        max_height_error = pending.get("max_height_error")
+        target_height = pending.get("target_height")
+        if max_height_error is not None and target_height is not None:
+            height_error = abs(float(pose[2, 3].item()) - float(target_height))
+            message_parts.append(f"height_error={height_error:.4f}m")
+            if height_error > float(max_height_error):
+                failures.append(
+                    f"{obj_name} height_error={height_error:.4f}m>"
+                    f"{float(max_height_error):.4f}m"
+                )
+
+        log_info(
+            f"Public place validation for '{obj_name}': "
+            + ", ".join(message_parts)
+            + "."
+        )
+
+    if failures:
+        raise RuntimeError(
+            "Public place validation failed: " + "; ".join(failures) + "."
+        )
+
+
+def _current_eef_pose(env, robot_name: str) -> torch.Tensor:
+    is_left, _, _ = _select_arm(robot_name)
+    arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
+    qpos = env.robot.get_qpos().squeeze(0)
+    arm_qpos = qpos[arm_joints]
+    return env.get_arm_fk(qpos=arm_qpos, is_left=is_left).detach().clone()
+
+
+def _optional_float(kwargs: dict[str, Any], name: str) -> float | None:
+    value = kwargs.get(name)
+    if value is None:
+        return None
+    return float(value)
+
+
+def _record_public_grasp_attempt(
+    *,
+    env,
+    kwargs: dict[str, Any],
+    obj_name: str,
+    label: str,
+    direction: torch.Tensor,
+    status: str,
+    message: str,
+) -> None:
+    record = {
+        "obj_name": obj_name,
+        "label": label,
+        "direction": _format_vector(direction),
+        "status": status,
+        "message": message.replace("\n", " "),
+    }
+
+    records = getattr(env, "public_grasp_attempt_log", None)
+    if records is None:
+        records = []
+        setattr(env, "public_grasp_attempt_log", records)
+    records.append(record)
+
+    log_dir = kwargs.get("log_dir")
+    if not log_dir:
+        return
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "public_grasp_attempts.tsv")
+    write_header = not os.path.exists(log_path)
+    with open(log_path, "a", encoding="utf-8") as f:
+        if write_header:
+            f.write("obj_name\tlabel\tdirection\tstatus\tmessage\n")
+        f.write(
+            "\t".join(
+                [
+                    record["obj_name"],
+                    record["label"],
+                    record["direction"],
+                    record["status"],
+                    record["message"],
+                ]
+            )
+            + "\n"
+        )
+
+
+def _register_public_grasp_physical_validation(
+    *,
+    env,
+    kwargs: dict[str, Any],
+    robot_name: str,
+    obj_name: str,
+    label: str,
+    direction: torch.Tensor,
+    lift_height: float,
+    legacy_reference_pose: torch.Tensor | None = None,
+) -> None:
+    if not bool(kwargs.get("validate_public_grasp_after_action", False)):
+        return
+
+    pose = _object_pose(env, obj_name)
+    if pose is None:
+        log_warning(
+            f"Cannot register public grasp physical validation: "
+            f"object '{obj_name}' is unavailable."
+        )
+        return
+
+    validate_relative = bool(
+        kwargs.get("public_grasp_validate_relative_to_legacy_pose", False)
+    )
+    reference_relative_pose = None
+    if validate_relative:
+        if legacy_reference_pose is None:
+            log_warning(
+                f"Cannot register public grasp relative-pose validation: "
+                f"legacy grasp reference is unavailable for '{obj_name}'."
+            )
+        else:
+            reference_relative_pose = _relative_pose(
+                legacy_reference_pose.to(dtype=pose.dtype, device=pose.device),
+                pose,
+            )
+
+    pending = {
+        "robot_name": robot_name,
+        "obj_name": obj_name,
+        "pose_before": pose,
+        "label": label,
+        "direction": direction.detach().clone(),
+        "min_lift": float(
+            kwargs.get("public_grasp_validation_min_object_lift", 0.05)
+        ),
+        "max_lift": _optional_float(
+            kwargs,
+            "public_grasp_validation_max_object_lift",
+        ),
+        "max_xy_displacement": _optional_float(
+            kwargs,
+            "public_grasp_validation_max_object_xy_displacement",
+        ),
+        "reference_relative_pose": reference_relative_pose,
+        "max_legacy_relative_pos_error": _optional_float(
+            kwargs,
+            "public_grasp_max_legacy_relative_pos_error",
+        ),
+        "max_legacy_relative_rot_error": _optional_float(
+            kwargs,
+            "public_grasp_max_legacy_relative_rot_error",
+        ),
+        "planned_lift": float(lift_height),
+    }
+    pending_list = getattr(env, "_pending_public_grasp_physical_validations", None)
+    if not isinstance(pending_list, list):
+        pending_list = []
+    pending_list.append(pending)
+    setattr(env, "_pending_public_grasp_physical_validations", pending_list)
+    setattr(env, "_pending_public_grasp_physical_validation", None)
+
+
+def validate_pending_public_grasp_after_action(env, kwargs: dict[str, Any]) -> None:
+    pending_items = getattr(env, "_pending_public_grasp_physical_validations", None)
+    if not isinstance(pending_items, list):
+        pending_items = []
+    legacy_pending = getattr(env, "_pending_public_grasp_physical_validation", None)
+    if legacy_pending:
+        pending_items.append(legacy_pending)
+    if not pending_items:
+        return
+    setattr(env, "_pending_public_grasp_physical_validations", [])
+    setattr(env, "_pending_public_grasp_physical_validation", None)
+
+    failures = []
+    for pending in pending_items:
+        try:
+            _validate_one_pending_public_grasp_after_action(env, kwargs, pending)
+        except RuntimeError as exc:
+            failures.append(str(exc))
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+
+def _validate_one_pending_public_grasp_after_action(
+    env,
+    kwargs: dict[str, Any],
+    pending: dict[str, Any],
+) -> None:
+    obj_name = pending["obj_name"]
+    pose_after = _object_pose(env, obj_name)
+    if pose_after is None:
+        raise RuntimeError(
+            f"Public grasp physical validation failed: object '{obj_name}' is unavailable."
+        )
+
+    pose_before = pending["pose_before"]
+    object_lift = float((pose_after[2, 3] - pose_before[2, 3]).item())
+    min_lift = float(pending["min_lift"])
+    label = pending["label"]
+    direction = pending["direction"]
+    failures = []
+    message_parts = [
+        f"object_lift={object_lift:.4f}m",
+        f"required>={min_lift:.4f}m",
+        f"planned_lift={pending['planned_lift']:.4f}m",
+    ]
+    if object_lift < min_lift:
+        failures.append(f"object_lift<{min_lift:.4f}m")
+
+    max_lift = pending.get("max_lift")
+    if max_lift is not None:
+        message_parts.append(f"max_lift={float(max_lift):.4f}m")
+        if object_lift > float(max_lift):
+            failures.append(f"object_lift>{float(max_lift):.4f}m")
+
+    max_xy_displacement = pending.get("max_xy_displacement")
+    if max_xy_displacement is not None:
+        object_xy_displacement = _xy_distance(pose_after, pose_before)
+        message_parts.append(
+            f"object_xy_displacement={object_xy_displacement:.4f}m"
+        )
+        message_parts.append(f"max_xy={float(max_xy_displacement):.4f}m")
+        if object_xy_displacement > float(max_xy_displacement):
+            failures.append(
+                f"object_xy_displacement>{float(max_xy_displacement):.4f}m"
+            )
+
+    reference_relative_pose = pending.get("reference_relative_pose")
+    if reference_relative_pose is not None:
+        eef_pose_after = _current_eef_pose(env, pending["robot_name"])
+        actual_relative_pose = _relative_pose(eef_pose_after, pose_after)
+        relative_pos_error = float(
+            torch.linalg.norm(
+                actual_relative_pose[:3, 3]
+                - reference_relative_pose[:3, 3].to(
+                    dtype=actual_relative_pose.dtype,
+                    device=actual_relative_pose.device,
+                )
+            ).item()
+        )
+        relative_rot_error = _rotation_error_rad(
+            actual_relative_pose,
+            reference_relative_pose,
+        )
+        message_parts.append(
+            f"legacy_relative_pos_error={relative_pos_error:.4f}m"
+        )
+        message_parts.append(
+            f"legacy_relative_rot_error={relative_rot_error:.4f}rad"
+        )
+
+        max_relative_pos = pending.get("max_legacy_relative_pos_error")
+        if max_relative_pos is not None:
+            message_parts.append(f"max_relative_pos={float(max_relative_pos):.4f}m")
+            if relative_pos_error > float(max_relative_pos):
+                failures.append(
+                    f"legacy_relative_pos_error>{float(max_relative_pos):.4f}m"
+                )
+        max_relative_rot = pending.get("max_legacy_relative_rot_error")
+        if max_relative_rot is not None:
+            message_parts.append(
+                f"max_relative_rot={float(max_relative_rot):.4f}rad"
+            )
+            if relative_rot_error > float(max_relative_rot):
+                failures.append(
+                    f"legacy_relative_rot_error>{float(max_relative_rot):.4f}rad"
+                )
+
+    message = ", ".join(message_parts)
+    if failures:
+        message = f"{message}; failures={';'.join(failures)}"
+        _record_public_grasp_attempt(
+            env=env,
+            kwargs=kwargs,
+            obj_name=obj_name,
+            label=label,
+            direction=direction,
+            status="physical_failed",
+            message=message,
+        )
+        raise RuntimeError(f"Public grasp physical validation failed: {message}.")
+
+    _record_public_grasp_attempt(
+        env=env,
+        kwargs=kwargs,
+        obj_name=obj_name,
+        label=label,
+        direction=direction,
+        status="physical_ok",
+        message=message,
+    )
+    log_info(f"Public grasp physical validation passed for '{obj_name}': {message}.")
+
+
+def _antipodal_cache_path(vertices: torch.Tensor, triangles: torch.Tensor) -> str:
+    vert_bytes = vertices.to("cpu").numpy().tobytes()
+    face_bytes = triangles.to("cpu").numpy().tobytes()
+    md5_hash = hashlib.md5(vert_bytes + face_bytes).hexdigest()
+    return os.path.join(GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{md5_hash}.npy")
+
+
+def _build_public_grasp_semantics(
+    env,
+    obj_name: str,
+    kwargs: dict[str, Any],
+    *,
+    strict: bool,
+) -> ObjectSemantics | None:
+    obj_uids = env.sim.get_rigid_object_uid_list()
+    if obj_name not in obj_uids:
+        _handle_public_grasp_unavailable(
+            f"Public semantic grasp cannot find rigid object '{obj_name}'.",
+            strict=strict,
+        )
+        return None
+
+    target_obj = env.sim.get_rigid_object(obj_name)
+    try:
+        vertices = target_obj.get_vertices(env_ids=[0], scale=True)[0]
+        triangles = target_obj.get_triangles(env_ids=[0])[0]
+    except Exception as exc:
+        _handle_public_grasp_unavailable(
+            f"Public semantic grasp cannot read mesh for '{obj_name}': {exc}.",
+            strict=strict,
+        )
+        return None
+
+    allow_annotation = bool(kwargs.get("allow_public_grasp_annotation", False))
+    force_reannotate = bool(kwargs.get("force_public_grasp_reannotate", False))
+    generate_candidates = bool(kwargs.get("generate_public_grasp_candidates", False))
+    cache_path = _antipodal_cache_path(vertices, triangles)
+    if force_reannotate and not allow_annotation:
+        _handle_public_grasp_unavailable(
+            "Public semantic grasp force_reannotate=True requires "
+            "allow_public_grasp_annotation=True.",
+            strict=strict,
+        )
+        return None
+    if (
+        not allow_annotation
+        and not generate_candidates
+        and not os.path.exists(cache_path)
+    ):
+        _handle_public_grasp_unavailable(
+            f"Public grasp annotation cache is missing for '{obj_name}' at "
+            f"{cache_path}; non-interactive mode will not open viser.",
+            strict=strict,
+        )
+        return None
+
+    max_open_length = float(kwargs.get("grasp_max_open_length", 0.088))
+    generator_cfg = GraspGeneratorCfg(
+        viser_port=int(kwargs.get("public_grasp_viser_port", 11801)),
+        use_largest_connected_component=bool(
+            kwargs.get("public_grasp_largest_component", False)
+        ),
+        max_deviation_angle=float(kwargs.get("grasp_max_deviation_angle", np.pi / 6)),
+        antipodal_sampler_cfg=AntipodalSamplerCfg(
+            n_sample=int(kwargs.get("grasp_antipodal_n_sample", 20000)),
+            max_angle=float(kwargs.get("grasp_antipodal_max_angle", np.pi / 12)),
+            max_length=max_open_length,
+            min_length=float(kwargs.get("grasp_min_open_length", 0.003)),
+        ),
+    )
+    gripper_collision_cfg = GripperCollisionCfg(
+        max_open_length=max_open_length,
+        finger_length=float(kwargs.get("grasp_finger_length", 0.078)),
+        y_thickness=float(kwargs.get("grasp_y_thickness", 0.03)),
+        x_thickness=float(kwargs.get("grasp_x_thickness", 0.01)),
+        root_z_width=float(kwargs.get("grasp_root_z_width", 0.08)),
+        point_sample_dense=float(kwargs.get("grasp_point_sample_dense", 0.012)),
+        max_decomposition_hulls=int(kwargs.get("grasp_max_decomposition_hulls", 16)),
+        open_check_margin=float(kwargs.get("grasp_open_check_margin", 0.01)),
+    )
+    affordance = AntipodalAffordance(
+        object_label=obj_name,
+        force_reannotate=force_reannotate,
+        is_draw_grasp_xpos=bool(kwargs.get("draw_public_grasp_xpos", False)),
+        custom_config={
+            "generator_cfg": generator_cfg,
+            "gripper_collision_cfg": gripper_collision_cfg,
+        },
+    )
+    if generate_candidates:
+        generator = GraspGenerator(
+            vertices=vertices,
+            triangles=triangles,
+            cfg=generator_cfg,
+            gripper_collision_cfg=gripper_collision_cfg,
+        )
+        generator._hit_point_pairs = generator._antipodal_sampler.sample(
+            vertices,
+            triangles,
+        )
+        affordance.generator = generator
+    return ObjectSemantics(
+        label=obj_name,
+        geometry={
+            "mesh_vertices": vertices,
+            "mesh_triangles": triangles,
+        },
+        affordance=affordance,
+        entity=target_obj,
+    )
+
+
+def _run_public_action(
+    env,
+    robot_name: str,
+    cfg,
+    target,
+    *,
+    log_name: str,
+    strict: bool = False,
+):
+    try:
+        engine = _create_engine(env, cfg)
+        if not isinstance(target, ObjectSemantics):
+            target = _as_pose_tensor(target, device=engine.device)
+        is_left, _, _ = _select_arm(robot_name)
+        start_qpos = _as_qpos_tensor(
+            _current_arm_qpos(env, is_left), device=engine.device
+        )
+
+        atom_action = engine._actions[cfg.name]
+        is_success, trajectory, joint_ids = atom_action.execute(
+            target=target,
+            start_qpos=start_qpos,
+        )
+        if not is_success or trajectory.numel() == 0:
+            if strict:
+                raise RuntimeError(
+                    f"Public atomic action adapter failed for {log_name}."
+                )
+            log_warning(
+                f"Public atomic action adapter failed for {log_name}; "
+                "falling back to legacy agent atomic action."
+            )
+            return None
+
+        legacy_action = _extract_legacy_action(env, robot_name, trajectory, joint_ids)
+        _sync_agent_arm_state(env, robot_name, legacy_action)
+        return legacy_action
+    except Exception as exc:
+        if strict:
+            raise RuntimeError(
+                f"Public atomic action adapter raised {type(exc).__name__} for "
+                f"{log_name}: {exc}."
+            ) from exc
+        log_warning(
+            f"Public atomic action adapter raised {type(exc).__name__} for "
+            f"{log_name}: {exc}. Falling back to legacy agent atomic action."
+        )
+        return None
+
+
+def try_public_move_action(
+    *,
+    env,
+    robot_name: str,
+    target_pose,
+    sample_num: int,
+    kwargs: dict[str, Any],
+    log_name: str,
+):
+    strict = _public_non_grasp_strict(kwargs)
+    if env is None:
+        _handle_public_non_grasp_unavailable(
+            f"Public move action cannot run for {log_name}: env is None.",
+            strict=strict,
+            fallback_name="move action",
+        )
+        return None
+    if target_pose is None:
+        _handle_public_non_grasp_unavailable(
+            f"Public move action cannot run for {log_name}: target_pose is None.",
+            strict=strict,
+            fallback_name="move action",
+        )
+        return None
+    if not _public_atomic_actions_enabled(kwargs):
+        _handle_public_non_grasp_unavailable(
+            f"Public move action is disabled for {log_name}.",
+            strict=strict,
+            fallback_name="move action",
+        )
+        return None
+
+    _, arm_part, _ = _select_arm(robot_name)
+    cfg = MoveActionCfg(
+        control_part=arm_part,
+        sample_interval=sample_num,
+    )
+    return _run_public_action(
+        env,
+        robot_name,
+        cfg,
+        target_pose,
+        log_name=log_name,
+        strict=strict,
+    )
+
+
+def try_public_gripper_action(
+    *,
+    env,
+    robot_name: str,
+    target_state,
+    sample_num: int,
+    kwargs: dict[str, Any],
+    log_name: str,
+):
+    strict = _public_non_grasp_strict(kwargs)
+    if env is None:
+        _handle_public_non_grasp_unavailable(
+            f"Public gripper action cannot run for {log_name}: env is None.",
+            strict=strict,
+            fallback_name="gripper action",
+        )
+        return None
+    if target_state is None:
+        _handle_public_non_grasp_unavailable(
+            f"Public gripper action cannot run for {log_name}: target_state is None.",
+            strict=strict,
+            fallback_name="gripper action",
+        )
+        return None
+    if not _public_atomic_actions_enabled(kwargs):
+        _handle_public_non_grasp_unavailable(
+            f"Public gripper action is disabled for {log_name}.",
+            strict=strict,
+            fallback_name="gripper action",
+        )
+        return None
+    if not kwargs.get("use_public_gripper_action", True):
+        _handle_public_non_grasp_unavailable(
+            f"Public gripper action is disabled for {log_name}.",
+            strict=strict,
+            fallback_name="gripper action",
+        )
+        return None
+
+    try:
+        engine = _create_engine(
+            env,
+            GripperActionCfg(
+                name=log_name,
+                control_part=_select_arm(robot_name)[2],
+                sample_interval=sample_num,
+            ),
+        )
+        is_left, _, _ = _select_arm(robot_name)
+        hand_joints = env.left_eef_joints if is_left else env.right_eef_joints
+        hand_dof = len(hand_joints)
+        start_qpos = _state_to_hand_qpos(
+            _current_gripper_state(env, is_left),
+            hand_dof,
+            device=engine.device,
+        ).unsqueeze(0)
+        target_qpos = _state_to_hand_qpos(
+            target_state,
+            hand_dof,
+            device=engine.device,
+        )
+
+        atom_action = engine._actions[log_name]
+        is_success, trajectory, joint_ids = atom_action.execute(
+            target=target_qpos,
+            start_qpos=start_qpos,
+        )
+        if not is_success or trajectory.numel() == 0:
+            if strict:
+                raise RuntimeError(
+                    f"Public atomic action adapter failed for {log_name}."
+                )
+            log_warning(
+                f"Public atomic action adapter failed for {log_name}; "
+                "falling back to legacy agent gripper action."
+            )
+            return None
+
+        legacy_action = _extract_legacy_gripper_action(
+            env, robot_name, trajectory, joint_ids
+        )
+        _sync_agent_gripper_state(env, robot_name, legacy_action)
+        return legacy_action
+    except Exception as exc:
+        if strict:
+            raise RuntimeError(
+                f"Public atomic action adapter raised {type(exc).__name__} for "
+                f"{log_name}: {exc}."
+            ) from exc
+        log_warning(
+            f"Public atomic action adapter raised {type(exc).__name__} for "
+            f"{log_name}: {exc}. Falling back to legacy agent gripper action."
+        )
+        return None
+
+
+def _build_legacy_grasp_pose(
+    env,
+    robot_name: str,
+    obj_name: str,
+    *,
+    preserve_object_rotation: bool = False,
+):
+    obj_uids = env.sim.get_rigid_object_uid_list()
+    if obj_name not in obj_uids:
+        return None
+
+    target_obj = env.sim.get_rigid_object(obj_name)
+    target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
+    target_obj_pose = _as_pose_tensor(target_obj_pose)
+    obj_info = getattr(env, "obj_info", {})
+    grasp_pose_object = obj_info.get(obj_name, {}).get("grasp_pose_obj")
+    if grasp_pose_object is None:
+        return None
+    grasp_pose_object = _as_pose_tensor(
+        grasp_pose_object, device=target_obj_pose.device
+    )
+
+    is_left, _, _ = _select_arm(robot_name)
+    select_arm_base_pose = (
+        env.left_arm_base_pose if is_left else env.right_arm_base_pose
+    )
+    delta_xy = target_obj_pose[:2, 3] - select_arm_base_pose[:2, 3]
+    aim_horizontal_angle = torch.atan2(delta_xy[1], delta_xy[0]).item()
+
+    if not preserve_object_rotation and grasp_pose_object[0, 2] > 0.5:
+        target_obj_pose = torch.as_tensor(
+            get_rotation_replaced_pose(
+                target_obj_pose.detach().cpu().numpy(),
+                float(aim_horizontal_angle),
+                "z",
+                "intrinsic",
+            ),
+            dtype=torch.float32,
+            device=target_obj_pose.device,
+        )
+
+    return target_obj_pose @ grasp_pose_object
+
+
+def _auto_horizontal_grasp_direction(
+    env,
+    robot_name: str,
+    obj_name: str,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor | None:
+    target_obj = env.sim.get_rigid_object(obj_name)
+    target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
+    target_obj_pose = _as_pose_tensor(target_obj_pose, device=device)
+    is_left, _, _ = _select_arm(robot_name)
+    arm_base_pose = env.left_arm_base_pose if is_left else env.right_arm_base_pose
+    arm_base_pose = _as_pose_tensor(arm_base_pose, device=target_obj_pose.device)
+    direction = torch.zeros(3, dtype=torch.float32, device=target_obj_pose.device)
+    direction[:2] = target_obj_pose[:2, 3] - arm_base_pose[:2, 3]
+    direction_norm = torch.linalg.norm(direction)
+    if direction_norm <= 1e-6:
+        return None
+    return direction / direction_norm
+
+
+def _object_geometry_axes(
+    env,
+    obj_name: str,
+    *,
+    device: torch.device | str | None = None,
+) -> tuple[dict[str, float], list[tuple[str, torch.Tensor]]]:
+    target_obj = env.sim.get_rigid_object(obj_name)
+    target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
+    target_obj_pose = _as_pose_tensor(target_obj_pose, device=device)
+    vertices = target_obj.get_vertices(env_ids=[0], scale=True)[0]
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=target_obj_pose.device)
+    if vertices.numel() == 0:
+        return {"height": 0.0, "xy_extent": 0.0, "slenderness": 0.0}, []
+
+    world_vertices = vertices @ target_obj_pose[:3, :3].transpose(0, 1)
+    world_vertices = world_vertices + target_obj_pose[:3, 3]
+    mins = world_vertices.min(dim=0).values
+    maxs = world_vertices.max(dim=0).values
+    extents = maxs - mins
+    xy_extent = float(torch.clamp(extents[:2].max(), min=1e-6).item())
+    height = float(extents[2].item())
+    stats = {
+        "height": height,
+        "xy_extent": xy_extent,
+        "slenderness": height / xy_extent,
+    }
+
+    centered_xy = world_vertices[:, :2] - world_vertices[:, :2].mean(dim=0)
+    axes: list[tuple[str, torch.Tensor]] = []
+    if centered_xy.shape[0] >= 3 and torch.linalg.norm(centered_xy) > 1e-6:
+        covariance = centered_xy.transpose(0, 1) @ centered_xy / centered_xy.shape[0]
+        _, eigvecs = torch.linalg.eigh(covariance)
+        for idx, axis_idx in enumerate((1, 0)):
+            axis_xy = eigvecs[:, axis_idx]
+            axis = torch.tensor(
+                [axis_xy[0], axis_xy[1], 0.0],
+                dtype=torch.float32,
+                device=target_obj_pose.device,
+            )
+            if torch.linalg.norm(axis) > 1e-6:
+                axes.append((f"object_pca_{idx}", axis))
+    return stats, axes
+
+
+def _public_grasp_strategy(kwargs: dict[str, Any]) -> str | None:
+    strategy = kwargs.get("public_grasp_strategy")
+    if strategy is None:
+        return None
+    strategy = str(strategy).strip().lower().replace("-", "_")
+    if not strategy or strategy in {"none", "default"}:
+        return None
+    return strategy
+
+
+def _with_public_grasp_strategy_defaults(kwargs: dict[str, Any]) -> dict[str, Any]:
+    strategy = _public_grasp_strategy(kwargs)
+    if strategy is None:
+        return kwargs
+
+    updated = dict(kwargs)
+    if strategy == "top_down":
+        _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
+        updated["public_grasp_candidate_num"] = max(
+            int(updated.get("public_grasp_candidate_num") or 0),
+            32,
+        )
+        return updated
+
+    if strategy in {"bottle_lateral", "lateral_down"}:
+        updated["public_grasp_use_candidate_selection"] = True
+        updated.setdefault("public_grasp_rank_mode", "planned_order")
+        updated["public_grasp_candidate_num"] = max(
+            int(updated.get("public_grasp_candidate_num") or 0),
+            32,
+        )
+        _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
+        _set_if_missing_or_none(updated, "public_grasp_lift_height", 0.15)
+        _set_if_missing_or_none(updated, "public_grasp_lateral_down_z", -0.34)
+        _set_if_missing_or_none(
+            updated,
+            "public_grasp_candidate_min_open_length",
+            0.055,
+        )
+        if _is_zero_vector_like(updated.get("public_grasp_pose_offset_world")):
+            updated["public_grasp_pose_offset_world"] = [0.0, 0.0, 0.011]
+        if not updated.get("public_grasp_pose_offset_along_approach"):
+            updated["public_grasp_pose_offset_along_approach"] = 0.025
+        return updated
+
+    if strategy == "legacy_guided":
+        updated["public_grasp_try_approach_directions"] = True
+        updated["public_grasp_rank_by_legacy_pose"] = True
+        updated["public_grasp_use_legacy_orientation"] = True
+        updated["public_grasp_candidate_num"] = max(
+            int(updated.get("public_grasp_candidate_num") or 0),
+            32,
+        )
+        _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
+        _set_if_missing_or_none(updated, "public_grasp_lift_height", 0.15)
+        return updated
+
+    if strategy in {"auto_try_all", "auto_general"}:
+        updated["public_grasp_try_approach_directions"] = True
+        updated["public_grasp_use_candidate_selection"] = True
+        updated.setdefault(
+            "public_grasp_rank_mode",
+            "",
+        )
+        updated["public_grasp_candidate_num"] = max(
+            int(updated.get("public_grasp_candidate_num") or 0),
+            64 if strategy == "auto_general" else 32,
+        )
+        _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
+        if strategy == "auto_general":
+            _set_if_missing_or_none(updated, "public_grasp_lift_height", 0.15)
+            _set_if_missing_or_none(updated, "public_grasp_auto_general_slenderness", 1.2)
+            _set_if_missing_or_none(updated, "public_grasp_auto_general_lateral_down_z", -0.28)
+            _set_if_missing_or_none(updated, "public_grasp_top_down_target_height_ratio", 0.75)
+            _set_if_missing_or_none(updated, "public_grasp_top_down_target_height_weight", 0.35)
+            _set_if_missing_or_none(updated, "public_grasp_validation_min_object_lift", 0.04)
+            _set_if_missing_or_none(updated, "public_grasp_validation_max_object_xy_displacement", 0.12)
+            updated["validate_public_grasp_after_action"] = True
+        return updated
+
+    raise ValueError(
+        "Unsupported public_grasp_strategy "
+        f"'{kwargs.get('public_grasp_strategy')}'. Expected one of "
+        "top_down, bottle_lateral, lateral_down, legacy_guided, auto_try_all, "
+        "auto_general."
+    )
+
+
+def _is_zero_vector_like(value) -> bool:
+    if value is None:
+        return True
+    try:
+        tensor = torch.as_tensor(value, dtype=torch.float32).flatten()
+    except Exception:
+        return False
+    return bool(tensor.numel() == 3 and torch.linalg.norm(tensor).item() <= 1e-8)
+
+
+def _set_if_missing_or_none(kwargs: dict[str, Any], name: str, value: Any) -> None:
+    if kwargs.get(name) is None:
+        kwargs[name] = value
+
+
+def _append_unique_grasp_direction(
+    candidates: list[tuple[str, torch.Tensor]],
+    label: str,
+    direction,
+    *,
+    device: torch.device | str | None = None,
+) -> None:
+    normalized = _normalized_vector_tensor(
+        direction,
+        3,
+        name=f"public grasp approach direction '{label}'",
+        device=device,
+    )
+    for _, existing in candidates:
+        if torch.allclose(existing, normalized, rtol=1e-4, atol=1e-4):
+            return
+    candidates.append((label, normalized))
+
+
+def _append_object_local_grasp_directions(
+    candidates: list[tuple[str, torch.Tensor]],
+    env,
+    obj_name: str,
+    *,
+    device: torch.device | str | None = None,
+) -> None:
+    target_obj = env.sim.get_rigid_object(obj_name)
+    target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
+    target_obj_pose = _as_pose_tensor(target_obj_pose, device=device)
+    object_x = target_obj_pose[:3, 0]
+    object_y = target_obj_pose[:3, 1]
+    for label, direction in (
+        ("object_x", object_x),
+        ("object_neg_x", -object_x),
+        ("object_y", object_y),
+        ("object_neg_y", -object_y),
+    ):
+        _append_unique_grasp_direction(
+            candidates,
+            label,
+            direction,
+            device=device,
+        )
+
+
+def _append_lateral_down_grasp_direction(
+    candidates: list[tuple[str, torch.Tensor]],
+    label: str,
+    direction: torch.Tensor,
+    kwargs: dict[str, Any],
+    *,
+    device: torch.device | str | None = None,
+) -> None:
+    lateral_down_z = float(kwargs.get("public_grasp_auto_general_lateral_down_z", -0.28))
+    lateral_direction = direction.clone()
+    lateral_direction[2] = lateral_down_z
+    _append_unique_grasp_direction(
+        candidates,
+        label,
+        lateral_direction,
+        device=device,
+    )
+
+
+def _append_auto_general_grasp_directions(
+    candidates: list[tuple[str, torch.Tensor]],
+    env,
+    robot_name: str,
+    obj_name: str,
+    kwargs: dict[str, Any],
+    *,
+    device: torch.device | str | None = None,
+) -> None:
+    auto_direction = _auto_horizontal_grasp_direction(
+        env,
+        robot_name,
+        obj_name,
+        device=device,
+    )
+    stats, geometry_axes = _object_geometry_axes(env, obj_name, device=device)
+    slenderness_threshold = float(
+        kwargs.get("public_grasp_auto_general_slenderness", 1.2)
+    )
+    prefer_lateral = stats["slenderness"] >= slenderness_threshold
+
+    if prefer_lateral and auto_direction is not None:
+        _append_lateral_down_grasp_direction(
+            candidates,
+            "auto_arm_lateral_down",
+            auto_direction,
+            kwargs,
+            device=device,
+        )
+    if prefer_lateral:
+        for label, axis in geometry_axes:
+            _append_lateral_down_grasp_direction(
+                candidates,
+                f"auto_{label}_down",
+                axis,
+                kwargs,
+                device=device,
+            )
+            _append_lateral_down_grasp_direction(
+                candidates,
+                f"auto_neg_{label}_down",
+                -axis,
+                kwargs,
+                device=device,
+            )
+
+    _append_unique_grasp_direction(
+        candidates,
+        "auto_top_down",
+        [0.0, 0.0, -1.0],
+        device=device,
+    )
+
+    if not prefer_lateral and auto_direction is not None:
+        _append_lateral_down_grasp_direction(
+            candidates,
+            "auto_arm_lateral_down",
+            auto_direction,
+            kwargs,
+            device=device,
+        )
+    if not prefer_lateral:
+        for label, axis in geometry_axes:
+            _append_lateral_down_grasp_direction(
+                candidates,
+                f"auto_{label}_down",
+                axis,
+                kwargs,
+                device=device,
+            )
+            _append_lateral_down_grasp_direction(
+                candidates,
+                f"auto_neg_{label}_down",
+                -axis,
+                kwargs,
+                device=device,
+            )
+
+    if auto_direction is not None:
+        _append_unique_grasp_direction(
+            candidates,
+            "auto_arm_to_object",
+            auto_direction,
+            device=device,
+        )
+        _append_unique_grasp_direction(
+            candidates,
+            "auto_object_to_arm",
+            -auto_direction,
+            device=device,
+        )
+    _append_object_local_grasp_directions(candidates, env, obj_name, device=device)
+
+
+def _public_grasp_approach_direction_candidates(
+    env,
+    robot_name: str,
+    obj_name: str,
+    kwargs: dict[str, Any],
+    *,
+    device: torch.device | str | None = None,
+) -> list[tuple[str, torch.Tensor]]:
+    configured_directions = kwargs.get("public_grasp_approach_directions")
+    candidates: list[tuple[str, torch.Tensor]] = []
+    if configured_directions:
+        for idx, direction in enumerate(configured_directions):
+            _append_unique_grasp_direction(
+                candidates,
+                f"configured_{idx}",
+                direction,
+                device=device,
+            )
+        return candidates
+
+    explicit_direction = kwargs.get("public_grasp_approach_direction")
+    if explicit_direction is not None:
+        _append_unique_grasp_direction(
+            candidates,
+            "explicit",
+            explicit_direction,
+            device=device,
+        )
+        return candidates
+
+    strategy = _public_grasp_strategy(kwargs)
+    auto_direction = _auto_horizontal_grasp_direction(
+        env,
+        robot_name,
+        obj_name,
+        device=device,
+    )
+    if strategy == "top_down":
+        _append_unique_grasp_direction(
+            candidates,
+            "top_down",
+            [0.0, 0.0, -1.0],
+            device=device,
+        )
+        return candidates
+
+    if strategy in {"bottle_lateral", "lateral_down"}:
+        if auto_direction is None:
+            raise ValueError(
+                f"Cannot build {strategy} approach direction for '{obj_name}'."
+            )
+        lateral_down_z = float(kwargs.get("public_grasp_lateral_down_z", -0.34))
+        direction = auto_direction.clone()
+        direction[2] = lateral_down_z
+        _append_unique_grasp_direction(
+            candidates,
+            strategy,
+            direction,
+            device=device,
+        )
+        return candidates
+
+    if strategy == "auto_general":
+        _append_auto_general_grasp_directions(
+            candidates,
+            env,
+            robot_name,
+            obj_name,
+            kwargs,
+            device=device,
+        )
+        return candidates
+
+    if bool(kwargs.get("public_grasp_try_approach_directions", False)):
+        _append_unique_grasp_direction(
+            candidates,
+            "top_down",
+            [0.0, 0.0, -1.0],
+            device=device,
+        )
+        if auto_direction is not None:
+            _append_unique_grasp_direction(
+                candidates,
+                "arm_to_object",
+                auto_direction,
+                device=device,
+            )
+            _append_unique_grasp_direction(
+                candidates,
+                "object_to_arm",
+                -auto_direction,
+                device=device,
+            )
+            side_left = torch.stack(
+                [-auto_direction[1], auto_direction[0], auto_direction[2]]
+            )
+            _append_unique_grasp_direction(
+                candidates,
+                "arm_side_left",
+                side_left,
+                device=device,
+            )
+            _append_unique_grasp_direction(
+                candidates,
+                "arm_side_right",
+                -side_left,
+                device=device,
+            )
+        _append_object_local_grasp_directions(
+            candidates,
+            env,
+            obj_name,
+            device=device,
+        )
+        return candidates
+
+    if bool(kwargs.get("public_grasp_auto_approach_direction", False)):
+        if auto_direction is not None:
+            _append_unique_grasp_direction(
+                candidates,
+                "arm_to_object",
+                auto_direction,
+                device=device,
+            )
+            return candidates
+
+    _append_unique_grasp_direction(
+        candidates,
+        "top_down",
+        [0.0, 0.0, -1.0],
+        device=device,
+    )
+    return candidates
+
+
+def _public_grasp_approach_direction(
+    env,
+    robot_name: str,
+    obj_name: str,
+    kwargs: dict[str, Any],
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    return _public_grasp_approach_direction_candidates(
+        env,
+        robot_name,
+        obj_name,
+        kwargs,
+        device=device,
+    )[0][1]
+
+
+def _build_pickup_cfg(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    kwargs: dict[str, Any],
+    approach_direction: torch.Tensor,
+) -> PickUpActionCfg:
+    is_left, arm_part, hand_part = _select_arm(robot_name)
+    hand_joints = env.left_eef_joints if is_left else env.right_eef_joints
+    hand_dof = len(hand_joints)
+    device = getattr(env.robot, "device", None)
+    lift_height = _public_grasp_lift_height(kwargs)
+    offset_world, offset_along_approach = _public_grasp_pose_offsets(
+        kwargs,
+        approach_direction=approach_direction,
+    )
+    grasp_pose_offset_world = _as_vector_tensor(
+        offset_world,
+        3,
+        name="public_grasp_pose_offset_world",
+        device=device,
+    )
+    public_pre_grasp_distance = kwargs.get("public_grasp_pre_grasp_distance")
+    if public_pre_grasp_distance is None:
+        public_pre_grasp_distance = pre_grasp_dis
+    public_pre_grasp_distance = float(public_pre_grasp_distance)
+    return PickUpActionCfg(
+        control_part=arm_part,
+        hand_control_part=hand_part,
+        hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device=device),
+        hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device=device),
+        pre_grasp_distance=public_pre_grasp_distance,
+        approach_direction=approach_direction.to(device=device),
+        grasp_candidate_num=int(kwargs.get("public_grasp_candidate_num", 8)),
+        grasp_pose_offset_world=grasp_pose_offset_world,
+        grasp_pose_offset_along_approach=float(offset_along_approach),
+        lift_height=lift_height,
+        sample_interval=kwargs.get("sample_interval", kwargs.get("sample_num", 75)),
+        hand_interp_steps=kwargs.get("hand_interp_steps", 15),
+    )
+
+
+def _public_grasp_pose_offsets(
+    kwargs: dict[str, Any],
+    *,
+    approach_direction: torch.Tensor,
+) -> tuple[Any, float]:
+    offset_world = kwargs.get("public_grasp_pose_offset_world", [0.0, 0.0, 0.0])
+    offset_along_approach = float(
+        kwargs.get("public_grasp_pose_offset_along_approach", 0.0) or 0.0
+    )
+    if _public_grasp_strategy(kwargs) != "auto_general":
+        return offset_world, offset_along_approach
+
+    direction = approach_direction.detach().to(dtype=torch.float32)
+    direction = direction / torch.linalg.norm(direction).clamp_min(1e-6)
+    is_lateral = abs(float(direction[2].item())) < 0.75
+    if _is_zero_vector_like(offset_world):
+        offset_world = [0.0, 0.0, 0.011 if is_lateral else 0.006]
+    if offset_along_approach == 0.0:
+        offset_along_approach = 0.025 if is_lateral else 0.015
+    return offset_world, offset_along_approach
+
+
+def _public_grasp_lift_height(kwargs: dict[str, Any]) -> float:
+    lift_height = kwargs.get("public_grasp_lift_height")
+    if lift_height is None:
+        lift_height = kwargs.get("lift_height", 0.0)
+    if lift_height is None:
+        lift_height = 0.0
+    return float(lift_height)
+
+
+def _public_grasp_candidate_selection_enabled(kwargs: dict[str, Any]) -> bool:
+    return bool(
+        kwargs.get("public_grasp_use_candidate_selection", False)
+        or kwargs.get("public_grasp_rank_by_legacy_pose", False)
+        or kwargs.get("public_grasp_use_legacy_orientation", False)
+        or kwargs.get("public_grasp_legacy_pose_max_position_error") is not None
+        or kwargs.get("public_grasp_legacy_pose_max_rotation_error") is not None
+    )
+
+
+def _public_grasp_legacy_reference_required(kwargs: dict[str, Any]) -> bool:
+    return bool(
+        kwargs.get("public_grasp_rank_by_legacy_pose", False)
+        or kwargs.get("public_grasp_use_legacy_orientation", False)
+        or kwargs.get("public_grasp_legacy_pose_max_position_error") is not None
+        or kwargs.get("public_grasp_legacy_pose_max_rotation_error") is not None
+        or kwargs.get("public_grasp_validate_relative_to_legacy_pose", False)
+    )
+
+
+def _legacy_pose_errors(
+    candidate_pose: torch.Tensor,
+    reference_pose: torch.Tensor | None,
+    kwargs: dict[str, Any],
+) -> tuple[float | None, float | None, float | None]:
+    if reference_pose is None:
+        return None, None, None
+    reference_pose = reference_pose.to(
+        dtype=candidate_pose.dtype,
+        device=candidate_pose.device,
+    )
+    pos_error = float(
+        torch.linalg.norm(candidate_pose[:3, 3] - reference_pose[:3, 3]).item()
+    )
+    rot_error = _rotation_error_rad(candidate_pose, reference_pose)
+    score = (
+        float(kwargs.get("public_grasp_legacy_pose_position_weight", 1.0)) * pos_error
+        + float(kwargs.get("public_grasp_legacy_pose_rotation_weight", 0.05))
+        * rot_error
+    )
+    return pos_error, rot_error, score
+
+
+def _apply_public_grasp_legacy_orientation(
+    pose: torch.Tensor,
+    legacy_reference_pose: torch.Tensor,
+) -> torch.Tensor:
+    reference_rot = legacy_reference_pose[:3, :3].to(
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    oriented_pose = pose.clone()
+    oriented_pose[:, :3, :3] = reference_rot
+    return oriented_pose
+
+
+def _is_cobotmagic_env(env) -> bool:
+    robot = getattr(env, "robot", None)
+    robot_text = " ".join(
+        str(value)
+        for value in (
+            getattr(robot, "uid", ""),
+            getattr(robot, "name", ""),
+            robot.__class__.__name__ if robot is not None else "",
+        )
+    )
+    return "cobotmagic" in robot_text.lower()
+
+
+def _public_grasp_roll_offsets(env, kwargs: dict[str, Any]) -> list[float]:
+    configured = kwargs.get("public_grasp_roll_offsets")
+    if configured is not None:
+        if isinstance(configured, str):
+            configured_values = [
+                value.strip()
+                for value in configured.replace(";", ",").split(",")
+                if value.strip()
+            ]
+        else:
+            configured_values = list(configured)
+        roll_offsets = [float(value) for value in configured_values]
+        return roll_offsets or [0.0]
+
+    if not bool(kwargs.get("public_grasp_try_eef_roll_offsets", True)):
+        return [0.0]
+    if _public_grasp_strategy(kwargs) == "auto_general" and _is_cobotmagic_env(env):
+        return [0.0, math.pi / 2.0, -math.pi / 2.0, math.pi]
+    return [0.0]
+
+
+def _apply_public_grasp_roll_offset(
+    pose: torch.Tensor,
+    roll_offset_rad: float,
+) -> torch.Tensor:
+    if abs(float(roll_offset_rad)) <= 1e-6:
+        return pose
+    cos_roll = math.cos(float(roll_offset_rad))
+    sin_roll = math.sin(float(roll_offset_rad))
+    roll = torch.tensor(
+        [
+            [cos_roll, -sin_roll, 0.0],
+            [sin_roll, cos_roll, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    shifted_pose = pose.clone()
+    shifted_pose[..., :3, :3] = shifted_pose[..., :3, :3] @ roll
+    return shifted_pose
+
+
+def _angular_distance_rad(angle_a: float, angle_b: float) -> float:
+    return abs((angle_a - angle_b + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def _public_grasp_roll_score(
+    env,
+    roll_offset_rad: float,
+    kwargs: dict[str, Any],
+) -> float:
+    preferred = kwargs.get("public_grasp_preferred_roll_offset")
+    if preferred is None and _public_grasp_strategy(kwargs) == "auto_general":
+        if _is_cobotmagic_env(env):
+            preferred = math.pi / 2.0
+    if preferred is None:
+        return 0.0
+    weight = float(kwargs.get("public_grasp_roll_preference_weight", 0.04))
+    return _angular_distance_rad(float(roll_offset_rad), float(preferred)) * weight
+
+
+def _format_optional_metric(value: float | None) -> str:
+    return "" if value is None else f"{value:.5f}"
+
+
+def _semantic_candidate_message(candidate: _SemanticGraspCandidatePlan) -> str:
+    return (
+        f"candidate_idx={candidate.candidate_idx}, "
+        f"roll_offset_rad={candidate.roll_offset_rad:.5f}, "
+        f"open_length={candidate.open_length:.5f}, "
+        f"qpos_score={candidate.qpos_score:.5f}, "
+        f"geometry_score={candidate.geometry_score:.5f}, "
+        f"grasp_height={candidate.grasp_height:.5f}, "
+        f"radial_ratio={candidate.radial_ratio:.5f}, "
+        f"height_ratio={candidate.height_ratio:.5f}, "
+        f"roll_score={candidate.roll_score:.5f}, "
+        f"legacy_pos_error={_format_optional_metric(candidate.legacy_pos_error)}, "
+        f"legacy_rot_error={_format_optional_metric(candidate.legacy_rot_error_rad)}, "
+        f"legacy_score={_format_optional_metric(candidate.legacy_score)}"
+    )
+
+
+def _semantic_candidate_record_label(candidate: _SemanticGraspCandidatePlan) -> str:
+    label = f"{candidate.label}:{candidate.candidate_idx}"
+    if abs(candidate.roll_offset_rad) <= 1e-6:
+        return label
+    roll_deg = math.degrees(candidate.roll_offset_rad)
+    return f"{label}:roll{roll_deg:+.0f}"
+
+
+def _rank_public_semantic_grasp_candidates(
+    candidates: list[_SemanticGraspCandidatePlan],
+    kwargs: dict[str, Any],
+) -> list[_SemanticGraspCandidatePlan]:
+    candidates = _filter_auto_general_lateral_height_candidates(candidates, kwargs)
+    candidates = _filter_auto_general_geometry_candidates(candidates, kwargs)
+    rank_mode = str(kwargs.get("public_grasp_rank_mode", "")).strip().lower()
+    if rank_mode == "planned_order":
+        return candidates
+
+    rank_by_legacy = bool(kwargs.get("public_grasp_rank_by_legacy_pose", False))
+    strategy = _public_grasp_strategy(kwargs)
+    direction_order: dict[str, int] = {}
+    if strategy == "auto_general":
+        for candidate in candidates:
+            direction_order.setdefault(candidate.label, len(direction_order))
+
+    def sort_key(candidate: _SemanticGraspCandidatePlan):
+        primary = candidate.qpos_score
+        if rank_by_legacy and candidate.legacy_score is not None:
+            primary = candidate.legacy_score
+        elif strategy == "auto_general":
+            primary = candidate.geometry_score + candidate.roll_score
+        return (
+            direction_order.get(candidate.label, 0),
+            primary,
+            candidate.geometry_score,
+            candidate.roll_score,
+            candidate.qpos_score,
+            candidate.label,
+            candidate.candidate_idx,
+        )
+
+    return sorted(candidates, key=sort_key)
+
+
+def _filter_auto_general_lateral_height_candidates(
+    candidates: list[_SemanticGraspCandidatePlan],
+    kwargs: dict[str, Any],
+) -> list[_SemanticGraspCandidatePlan]:
+    if _public_grasp_strategy(kwargs) != "auto_general":
+        return candidates
+    if not bool(kwargs.get("public_grasp_filter_lateral_low_height", True)):
+        return candidates
+
+    filtered: list[_SemanticGraspCandidatePlan] = []
+    lateral_groups: dict[str, list[_SemanticGraspCandidatePlan]] = {}
+    for candidate in candidates:
+        direction = candidate.direction.detach().to(dtype=torch.float32)
+        direction = direction / torch.linalg.norm(direction).clamp_min(1e-6)
+        if abs(float(direction[2].item())) < 0.75:
+            lateral_groups.setdefault(candidate.label, []).append(candidate)
+        else:
+            filtered.append(candidate)
+
+    quantile = float(kwargs.get("public_grasp_lateral_min_height_quantile", 0.25))
+    quantile = min(max(quantile, 0.0), 1.0)
+    for group in lateral_groups.values():
+        if len(group) < 4:
+            filtered.extend(group)
+            continue
+        z_values = [float(candidate.grasp_pose[2, 3].item()) for candidate in group]
+        min_z = float(np.quantile(np.asarray(z_values, dtype=np.float32), quantile))
+        kept = [
+            candidate
+            for candidate in group
+            if float(candidate.grasp_pose[2, 3].item()) >= min_z - 1e-6
+        ]
+        filtered.extend(kept or group)
+
+    return filtered or candidates
+
+
+def _filter_auto_general_geometry_candidates(
+    candidates: list[_SemanticGraspCandidatePlan],
+    kwargs: dict[str, Any],
+) -> list[_SemanticGraspCandidatePlan]:
+    if _public_grasp_strategy(kwargs) != "auto_general":
+        return candidates
+    if not bool(kwargs.get("public_grasp_filter_geometry_outliers", True)):
+        return candidates
+
+    grouped: dict[str, list[_SemanticGraspCandidatePlan]] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate.label, []).append(candidate)
+
+    filtered: list[_SemanticGraspCandidatePlan] = []
+    min_group_size = int(kwargs.get("public_grasp_geometry_filter_min_group_size", 4))
+    for group in grouped.values():
+        if len(group) < min_group_size:
+            filtered.extend(group)
+            continue
+
+        direction = group[0].direction.detach().to(dtype=torch.float32)
+        direction = direction / torch.linalg.norm(direction).clamp_min(1e-6)
+        is_top_down = abs(float(direction[2].item())) >= 0.75
+        if is_top_down:
+            min_radial = float(
+                kwargs.get("public_grasp_top_down_min_radial_ratio", 0.18)
+            )
+            min_height = float(
+                kwargs.get("public_grasp_top_down_min_height_ratio", 0.30)
+            )
+        else:
+            min_radial = float(kwargs.get("public_grasp_lateral_min_radial_ratio", 0.35))
+            min_height = float(kwargs.get("public_grasp_lateral_min_height_ratio", 0.20))
+
+        kept = [
+            candidate
+            for candidate in group
+            if candidate.radial_ratio >= min_radial
+            and candidate.height_ratio >= min_height
+        ]
+        filtered.extend(kept or group)
+
+    return filtered or candidates
+
+
+def _plan_public_semantic_grasp_candidates(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    kwargs: dict[str, Any],
+    target: ObjectSemantics,
+    directions: list[tuple[str, torch.Tensor]],
+    legacy_reference_pose: torch.Tensor | None,
+) -> tuple[list[_SemanticGraspCandidatePlan], list[str]]:
+    planned_candidates: list[_SemanticGraspCandidatePlan] = []
+    failures: list[str] = []
+    use_legacy_orientation = bool(
+        kwargs.get("public_grasp_use_legacy_orientation", False)
+    )
+    max_legacy_pos_error = _optional_float(
+        kwargs,
+        "public_grasp_legacy_pose_max_position_error",
+    )
+    max_legacy_rot_error = _optional_float(
+        kwargs,
+        "public_grasp_legacy_pose_max_rotation_error",
+    )
+    min_open_length = _optional_float(
+        kwargs,
+        "public_grasp_candidate_min_open_length",
+    )
+    max_open_length = _optional_float(
+        kwargs,
+        "public_grasp_candidate_max_open_length",
+    )
+    is_left, _, _ = _select_arm(robot_name)
+    geometry_bounds = _object_geometry_bounds(
+        env,
+        obj_name,
+        device=getattr(env.robot, "device", None),
+    )
+    roll_offsets = (
+        [0.0]
+        if use_legacy_orientation
+        else _public_grasp_roll_offsets(env, kwargs)
+    )
+
+    for label, direction in directions:
+        cfg = _build_pickup_cfg(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_dis,
+            kwargs=kwargs,
+            approach_direction=direction,
+        )
+        engine = _create_engine(env, cfg)
+        atom_action = engine._actions[cfg.name]
+        start_qpos = _as_qpos_tensor(
+            _current_arm_qpos(env, is_left),
+            device=engine.device,
+        )
+
+        try:
+            is_success, grasp_xpos, open_length = (
+                atom_action._resolve_grasp_pose_candidates(target)
+            )
+        except Exception as exc:
+            message = f"{label}: resolve_exception={type(exc).__name__}: {exc}"
+            failures.append(message)
+            _record_public_grasp_attempt(
+                env=env,
+                kwargs=kwargs,
+                obj_name=obj_name,
+                label=label,
+                direction=direction,
+                status="resolve_failed",
+                message=message,
+            )
+            continue
+
+        if not bool(torch.as_tensor(is_success).all().item()) or grasp_xpos.numel() == 0:
+            message = f"{label}: no semantic grasp candidates survived affordance filtering"
+            failures.append(message)
+            _record_public_grasp_attempt(
+                env=env,
+                kwargs=kwargs,
+                obj_name=obj_name,
+                label=label,
+                direction=direction,
+                status="no_candidate",
+                message=message,
+            )
+            continue
+
+        candidate_num = grasp_xpos.shape[1]
+        for candidate_idx in range(candidate_num):
+            base_candidate_label = f"{label}:{candidate_idx}"
+            candidate_open_length = float(open_length[:, candidate_idx].mean().item())
+            if not torch.all(open_length[:, candidate_idx] > 0):
+                _record_public_grasp_attempt(
+                    env=env,
+                    kwargs=kwargs,
+                    obj_name=obj_name,
+                    label=base_candidate_label,
+                    direction=direction,
+                    status="filtered",
+                    message=f"open_length={candidate_open_length:.5f} <= 0",
+                )
+                continue
+            if min_open_length is not None and candidate_open_length < min_open_length:
+                _record_public_grasp_attempt(
+                    env=env,
+                    kwargs=kwargs,
+                    obj_name=obj_name,
+                    label=base_candidate_label,
+                    direction=direction,
+                    status="filtered",
+                    message=(
+                        f"open_length={candidate_open_length:.5f}"
+                        f"<{min_open_length:.5f}"
+                    ),
+                )
+                continue
+            if max_open_length is not None and candidate_open_length > max_open_length:
+                _record_public_grasp_attempt(
+                    env=env,
+                    kwargs=kwargs,
+                    obj_name=obj_name,
+                    label=base_candidate_label,
+                    direction=direction,
+                    status="filtered",
+                    message=(
+                        f"open_length={candidate_open_length:.5f}"
+                        f">{max_open_length:.5f}"
+                    ),
+                )
+                continue
+
+            base_candidate_pose = grasp_xpos[:, candidate_idx]
+            for roll_offset_rad in roll_offsets:
+                candidate_pose = base_candidate_pose
+                if use_legacy_orientation and legacy_reference_pose is not None:
+                    candidate_pose = _apply_public_grasp_legacy_orientation(
+                        candidate_pose,
+                        legacy_reference_pose,
+                    )
+                else:
+                    candidate_pose = _apply_public_grasp_roll_offset(
+                        candidate_pose,
+                        roll_offset_rad,
+                    )
+                score_pose = atom_action._apply_grasp_pose_offset(candidate_pose)[0]
+                grasp_height, radial_ratio, height_ratio, geometry_score = (
+                    _semantic_grasp_geometry_metrics(
+                        score_pose,
+                        direction,
+                        geometry_bounds,
+                        kwargs,
+                    )
+                )
+                legacy_pos_error, legacy_rot_error, legacy_score = _legacy_pose_errors(
+                    score_pose,
+                    legacy_reference_pose,
+                    kwargs,
+                )
+
+                candidate_label = base_candidate_label
+                if abs(roll_offset_rad) > 1e-6:
+                    candidate_label = (
+                        f"{candidate_label}:roll{math.degrees(roll_offset_rad):+.0f}"
+                    )
+
+                filter_reasons = []
+                if (
+                    max_legacy_pos_error is not None
+                    and legacy_pos_error is not None
+                    and legacy_pos_error > max_legacy_pos_error
+                ):
+                    filter_reasons.append(
+                        f"legacy_pos_error>{max_legacy_pos_error:.5f}"
+                    )
+                if (
+                    max_legacy_rot_error is not None
+                    and legacy_rot_error is not None
+                    and legacy_rot_error > max_legacy_rot_error
+                ):
+                    filter_reasons.append(
+                        f"legacy_rot_error>{max_legacy_rot_error:.5f}"
+                    )
+                if filter_reasons:
+                    _record_public_grasp_attempt(
+                        env=env,
+                        kwargs=kwargs,
+                        obj_name=obj_name,
+                        label=candidate_label,
+                        direction=direction,
+                        status="filtered",
+                        message=(
+                            ";".join(filter_reasons)
+                            + f"; open_length={candidate_open_length:.5f}, "
+                            f"legacy_pos_error={_format_optional_metric(legacy_pos_error)}, "
+                            f"legacy_rot_error={_format_optional_metric(legacy_rot_error)}"
+                        ),
+                    )
+                    continue
+
+                is_plan_success, trajectory = atom_action._plan_candidate_pickup(
+                    candidate_pose,
+                    start_qpos,
+                    candidate_idx=candidate_idx,
+                )
+                if not is_plan_success:
+                    message = f"{candidate_label}: plan_failed"
+                    failures.append(message)
+                    _record_public_grasp_attempt(
+                        env=env,
+                        kwargs=kwargs,
+                        obj_name=obj_name,
+                        label=candidate_label,
+                        direction=direction,
+                        status="plan_failed",
+                        message=message,
+                    )
+                    continue
+
+                final_arm_qpos = trajectory[:, -1, : start_qpos.shape[-1]]
+                qpos_distance = torch.linalg.norm(final_arm_qpos - start_qpos, dim=-1)
+                qpos_score = (
+                    float(qpos_distance.mean().item())
+                    + 0.01 * candidate_idx
+                    + 0.001 * abs(roll_offset_rad)
+                )
+                planned_candidate = _SemanticGraspCandidatePlan(
+                    label=label,
+                    direction=direction.detach().clone(),
+                    candidate_idx=candidate_idx,
+                    roll_offset_rad=float(roll_offset_rad),
+                    open_length=candidate_open_length,
+                    grasp_pose=score_pose.detach().clone(),
+                    trajectory=trajectory.detach().clone(),
+                    joint_ids=list(atom_action.joint_ids),
+                    qpos_score=qpos_score,
+                    grasp_height=grasp_height,
+                    radial_ratio=radial_ratio,
+                    height_ratio=height_ratio,
+                    geometry_score=geometry_score,
+                    roll_score=_public_grasp_roll_score(
+                        env,
+                        float(roll_offset_rad),
+                        kwargs,
+                    ),
+                    legacy_pos_error=legacy_pos_error,
+                    legacy_rot_error_rad=legacy_rot_error,
+                    legacy_score=legacy_score,
+                )
+                planned_candidates.append(planned_candidate)
+                _record_public_grasp_attempt(
+                    env=env,
+                    kwargs=kwargs,
+                    obj_name=obj_name,
+                    label=candidate_label,
+                    direction=direction,
+                    status="planned",
+                    message=_semantic_candidate_message(planned_candidate),
+                )
+
+    return planned_candidates, failures
+
+
+def _run_ranked_public_semantic_grasp_action(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    kwargs: dict[str, Any],
+    target: ObjectSemantics,
+    directions: list[tuple[str, torch.Tensor]],
+    strict: bool,
+) -> np.ndarray | None:
+    legacy_reference_pose = (
+        _build_legacy_grasp_pose(env, robot_name, obj_name)
+        if _public_grasp_legacy_reference_required(kwargs)
+        else None
+    )
+    if _public_grasp_legacy_reference_required(kwargs) and legacy_reference_pose is None:
+        _handle_public_grasp_unavailable(
+            f"Public semantic grasp candidate selection requires legacy "
+            f"grasp_pose_obj reference for '{obj_name}'.",
+            strict=strict,
+        )
+        return None
+
+    try:
+        planned_candidates, failures = _plan_public_semantic_grasp_candidates(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_dis,
+            kwargs=kwargs,
+            target=target,
+            directions=directions,
+            legacy_reference_pose=legacy_reference_pose,
+        )
+    except Exception as exc:
+        _handle_public_grasp_unavailable(
+            f"Public semantic grasp candidate selection raised "
+            f"{type(exc).__name__} for '{obj_name}': {exc}.",
+            strict=strict,
+        )
+        return None
+
+    planned_candidates = _rank_public_semantic_grasp_candidates(
+        planned_candidates,
+        kwargs,
+    )
+    if not planned_candidates:
+        failure_text = "; ".join(failures) if failures else "no planned candidates"
+        _handle_public_grasp_unavailable(
+            f"Public semantic grasp candidate selection failed for "
+            f"'{obj_name}': {failure_text}.",
+            strict=strict,
+        )
+        return None
+
+    selected = planned_candidates[0]
+    legacy_action = _extract_legacy_action(
+        env,
+        robot_name,
+        selected.trajectory,
+        selected.joint_ids,
+    )
+    _sync_agent_arm_state(env, robot_name, legacy_action)
+    _store_public_grasp_relation(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        grasp_pose=selected.grasp_pose,
+        source=f"semantic:{_semantic_candidate_record_label(selected)}",
+    )
+    _record_public_grasp_attempt(
+        env=env,
+        kwargs=kwargs,
+        obj_name=obj_name,
+        label=_semantic_candidate_record_label(selected),
+        direction=selected.direction,
+        status="selected",
+        message=_semantic_candidate_message(selected),
+    )
+    _register_public_grasp_physical_validation(
+        env=env,
+        kwargs=kwargs,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        label=_semantic_candidate_record_label(selected),
+        direction=selected.direction,
+        lift_height=_public_grasp_lift_height(kwargs),
+        legacy_reference_pose=legacy_reference_pose,
+    )
+    log_info(
+        f"Selected ranked public semantic grasp {selected.label}:"
+        f"{selected.candidate_idx} for '{obj_name}' "
+        f"({_semantic_candidate_message(selected)}).",
+        color="green",
+    )
+    return legacy_action
+
+
+def _run_public_semantic_grasp_action(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    kwargs: dict[str, Any],
+    target: ObjectSemantics,
+    strict: bool,
+) -> np.ndarray | None:
+    device = getattr(env.robot, "device", None)
+    try:
+        directions = _public_grasp_approach_direction_candidates(
+            env,
+            robot_name,
+            obj_name,
+            kwargs,
+            device=device,
+        )
+    except Exception as exc:
+        _handle_public_grasp_unavailable(
+            f"Public semantic grasp cannot build approach directions for "
+            f"'{obj_name}': {exc}.",
+            strict=strict,
+        )
+        return None
+
+    if _public_grasp_candidate_selection_enabled(kwargs):
+        return _run_ranked_public_semantic_grasp_action(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_dis,
+            kwargs=kwargs,
+            target=target,
+            directions=directions,
+            strict=strict,
+        )
+
+    legacy_reference_pose = (
+        _build_legacy_grasp_pose(env, robot_name, obj_name)
+        if _public_grasp_legacy_reference_required(kwargs)
+        else None
+    )
+    failures: list[str] = []
+    for label, direction in directions:
+        log_name = f"semantic_grasp:{obj_name}:{label}"
+        log_info(
+            f"Trying public semantic grasp direction {label}="
+            f"{_format_vector(direction)} for '{obj_name}'.",
+            color="cyan",
+        )
+        cfg = _build_pickup_cfg(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_dis,
+            kwargs=kwargs,
+            approach_direction=direction,
+        )
+        try:
+            action = _run_public_action(
+                env,
+                robot_name,
+                cfg,
+                target,
+                log_name=log_name,
+                strict=True,
+            )
+        except Exception as exc:
+            message = str(exc)
+            failures.append(f"{label}={_format_vector(direction)}: {message}")
+            _record_public_grasp_attempt(
+                env=env,
+                kwargs=kwargs,
+                obj_name=obj_name,
+                label=label,
+                direction=direction,
+                status="failed",
+                message=message,
+            )
+            log_warning(
+                f"Public semantic grasp direction {label} failed for "
+                f"'{obj_name}': {message}"
+            )
+            continue
+
+        if action is not None:
+            _record_public_grasp_attempt(
+                env=env,
+                kwargs=kwargs,
+                obj_name=obj_name,
+                label=label,
+                direction=direction,
+                status="selected",
+                message="planned",
+            )
+            _register_public_grasp_physical_validation(
+                env=env,
+                kwargs=kwargs,
+                robot_name=robot_name,
+                obj_name=obj_name,
+                label=label,
+                direction=direction,
+                lift_height=float(cfg.lift_height),
+                legacy_reference_pose=legacy_reference_pose,
+            )
+            log_info(
+                f"Selected public semantic grasp direction {label}="
+                f"{_format_vector(direction)} for '{obj_name}'.",
+                color="green",
+            )
+            return action
+
+    failure_text = "; ".join(failures) if failures else "no directions were attempted"
+    message = (
+        f"Public semantic grasp failed for '{obj_name}' across "
+        f"{len(directions)} approach directions: {failure_text}."
+    )
+    _handle_public_grasp_unavailable(message, strict=strict)
+    return None
+
+
+def try_public_grasp_action(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    kwargs: dict[str, Any],
+):
+    strict = _public_grasp_strict(kwargs)
+    if (
+        env is None
+        or not _public_atomic_actions_enabled(kwargs)
+        or not _public_grasp_requested(kwargs)
+    ):
+        return None
+    kwargs = _with_public_grasp_strategy_defaults(kwargs)
+
+    if _public_grasp_semantics_requested(kwargs):
+        target = _build_public_grasp_semantics(
+            env,
+            obj_name,
+            kwargs,
+            strict=strict,
+        )
+        if target is None:
+            return None
+        return _run_public_semantic_grasp_action(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_dis,
+            kwargs=kwargs,
+            target=target,
+            strict=strict,
+        )
+    else:
+        target = _build_legacy_grasp_pose(
+            env,
+            robot_name,
+            obj_name,
+            preserve_object_rotation=bool(
+                kwargs.get("public_grasp_preserve_object_rotation", False)
+            ),
+        )
+        log_name = f"grasp:{obj_name}"
+        if target is None:
+            _handle_public_grasp_unavailable(
+                f"Public grasp cannot build a grasp pose for '{obj_name}' from obj_info.",
+                strict=strict,
+            )
+            return None
+    if target is None:
+        return None
+
+    device = getattr(env.robot, "device", None)
+    approach_direction = _public_grasp_approach_direction(
+        env,
+        robot_name,
+        obj_name,
+        kwargs,
+        device=device,
+    )
+    cfg = _build_pickup_cfg(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        pre_grasp_dis=pre_grasp_dis,
+        kwargs=kwargs,
+        approach_direction=approach_direction,
+    )
+    action = _run_public_action(
+        env,
+        robot_name,
+        cfg,
+        target,
+        log_name=log_name,
+        strict=strict,
+    )
+    if action is not None:
+        _store_public_grasp_relation(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            grasp_pose=target,
+            source="legacy_grasp_pose",
+        )
+        legacy_reference_pose = (
+            _build_legacy_grasp_pose(env, robot_name, obj_name)
+            if _public_grasp_legacy_reference_required(kwargs)
+            else None
+        )
+        _register_public_grasp_physical_validation(
+            env=env,
+            kwargs=kwargs,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            label="legacy_pose",
+            direction=approach_direction,
+            lift_height=float(cfg.lift_height),
+            legacy_reference_pose=legacy_reference_pose,
+        )
+    return action
+
+
+def try_public_place_action(
+    *,
+    env,
+    robot_name: str,
+    target_pose,
+    pre_place_dis: float,
+    kwargs: dict[str, Any],
+):
+    strict = _public_non_grasp_strict(kwargs)
+    if env is None:
+        _handle_public_non_grasp_unavailable(
+            "Public place action cannot run: env is None.",
+            strict=strict,
+            fallback_name="place action",
+        )
+        return None
+    if target_pose is None:
+        _handle_public_non_grasp_unavailable(
+            "Public place action cannot run: target_pose is None.",
+            strict=strict,
+            fallback_name="place action",
+        )
+        return None
+    if not _public_atomic_actions_enabled(kwargs):
+        _handle_public_non_grasp_unavailable(
+            "Public place action is disabled.",
+            strict=strict,
+            fallback_name="place action",
+        )
+        return None
+    if not kwargs.get("use_public_place_action", False):
+        _handle_public_non_grasp_unavailable(
+            "Public place action is disabled.",
+            strict=strict,
+            fallback_name="place action",
+        )
+        return None
+
+    is_left, arm_part, hand_part = _select_arm(robot_name)
+    hand_joints = env.left_eef_joints if is_left else env.right_eef_joints
+    hand_dof = len(hand_joints)
+    device = getattr(env.robot, "device", None)
+    cfg = PlaceActionCfg(
+        control_part=arm_part,
+        hand_control_part=hand_part,
+        hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device=device),
+        hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device=device),
+        lift_height=pre_place_dis,
+        sample_interval=kwargs.get("sample_interval", kwargs.get("sample_num", 45)),
+        hand_interp_steps=kwargs.get("hand_interp_steps", 15),
+        post_open_wait_steps=kwargs.get("public_place_post_open_wait_steps", 20),
+    )
+    return _run_public_action(
+        env,
+        robot_name,
+        cfg,
+        target_pose,
+        log_name="place",
+        strict=strict,
+    )

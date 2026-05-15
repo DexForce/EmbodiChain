@@ -168,7 +168,7 @@ class CobotMagicCfg(RobotCfg):
         )
 
         urdf_path = get_data_path("CobotMagicArm/CobotMagicNoGripper.urdf")
-        chain = create_pk_chain(urdf_path, device)
+        chain = create_pk_chain(urdf_path, torch.device("cpu"))
 
         left_arm_chain = create_pk_serial_chain(
             chain=chain, end_link_name="link6", root_link_name="base_link"

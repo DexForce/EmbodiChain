@@ -34,6 +34,7 @@ from embodichain.lab.sim.atomic_actions.engine import (
     register_action,
     unregister_action,
 )
+from embodichain.lab.sim.atomic_actions.actions import GripperActionCfg
 
 # ---------------------------------------------------------------------------
 # Global Action Registry
@@ -183,6 +184,45 @@ class TestResolveTarget:
     def test_unsupported_type_raises(self):
         with pytest.raises(TypeError, match="target must be"):
             self.engine._resolve_target(42)
+
+
+# ---------------------------------------------------------------------------
+# Built-in actions
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinActions:
+    """Tests for built-in action aliases registered by AtomicActionEngine."""
+
+    def test_execute_static_supports_gripper_alias(self):
+        robot = Mock()
+        robot.device = torch.device("cpu")
+        robot.dof = 8
+        robot.get_qpos.return_value = torch.zeros(1, 8)
+        robot.get_joint_ids.side_effect = (
+            lambda name=None: [6, 7] if name == "hand" else list(range(8))
+        )
+
+        mg = Mock()
+        mg.robot = robot
+        mg.device = torch.device("cpu")
+
+        engine = AtomicActionEngine(
+            mg,
+            actions_cfg_list=[
+                GripperActionCfg(name="open_gripper", control_part="hand"),
+            ],
+        )
+        is_success, trajectory = engine.execute_static(
+            [torch.tensor([0.04, 0.04], dtype=torch.float32)]
+        )
+
+        assert is_success is True
+        assert trajectory.shape == (1, 15, 8)
+        torch.testing.assert_close(
+            trajectory[:, -1, [6, 7]],
+            torch.tensor([[0.04, 0.04]], dtype=torch.float32),
+        )
 
 
 if __name__ == "__main__":

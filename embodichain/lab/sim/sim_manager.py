@@ -68,6 +68,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
@@ -106,13 +107,16 @@ class SimulationManagerCfg:
     """Whether to run the simulation in headless mode (no Window)."""
 
     enable_rt: bool = False
-    """Whether to enable ray tracing rendering."""
+    """Deprecated compatibility flag. Prefer ``render_cfg`` for dexsim 0.4+."""
 
     enable_denoiser: bool = True
     """Whether to enable denoising for ray tracing rendering."""
 
     spp: int = 64
     """Samples per pixel for ray tracing rendering. This parameter is only valid when ray tracing is enabled and enable_denoiser is False."""
+
+    render_cfg: RenderCfg = field(default_factory=RenderCfg)
+    """The renderer configuration. ``enable_rt=True`` overrides this to fast-rt."""
 
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
@@ -352,7 +356,23 @@ class SimulationManager:
     @property
     def is_rt_enabled(self) -> bool:
         """Check if Ray Tracing rendering backend is enabled."""
-        return self.sim_config.enable_rt
+        if self.sim_config.enable_rt:
+            return True
+        renderer = self.sim_config.render_cfg.renderer
+        if renderer == "hybrid":
+            import dexsim
+
+            version = getattr(dexsim, "__version__", "0.0.0")
+            version_parts = []
+            for part in version.split(".")[:2]:
+                try:
+                    version_parts.append(int(part))
+                except ValueError:
+                    version_parts.append(0)
+            while len(version_parts) < 2:
+                version_parts.append(0)
+            return tuple(version_parts) >= (0, 4)
+        return renderer in {"fast-rt", "rt"}
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -399,6 +419,11 @@ class SimulationManager:
             world_config.renderer = dexsim.types.Renderer.FASTRT
             if sim_config.enable_denoiser is False:
                 world_config.raytrace_config.spp = sim_config.spp
+                world_config.raytrace_config.open_denoise = False
+        else:
+            world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+            if sim_config.render_cfg.enable_denoiser is False:
+                world_config.raytrace_config.spp = sim_config.render_cfg.spp
                 world_config.raytrace_config.open_denoise = False
 
         if type(sim_config.sim_device) is str:

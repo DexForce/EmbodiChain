@@ -16,6 +16,8 @@ Binding rules:
 - `monitors` is a list of monitor templates. Supported types are:
   - `object_moved`: fields `objects` or `obj_name`, optional `threshold`
   - `hold_lost`: fields `robot_name`, `obj_name`, optional `threshold`
+  - `object_fallen`: fields `objects` or `obj_name`, optional
+    `upright_threshold`
 - The compiler canonicalizes common aliases and can infer simple fields from
   the nominal edge: grasped object names for `object_moved`, both grasp arms for
   `regrasp_both`, and single-object grasp targets when unambiguous.
@@ -23,6 +25,10 @@ Binding rules:
   - `regrasp`: fields `robot_name`, `obj_name`, optional `pre_grasp_dis`
   - `regrasp_both`: field `arms`, mapping robot names to object names, optional
     `pre_grasp_dis`
+  - `upright_object`: fields `robot_name`, `obj_name`, optional
+    `pre_grasp_dis`, optional `pre_place_dis`. Use this when a cup, bottle, or
+    container is fallen and should be stood upright before normal re-grasp or
+    placement policies continue.
   - `retry_failed_edge`
   - `replay_edge`: field `edge_id`
   - `action`: optional `left_arm_action`, optional `right_arm_action`
@@ -38,6 +44,8 @@ Monitor guidance:
 - Use `object_moved` when an object is expected to remain still, such as before
   or during grasping.
 - Use `hold_lost` only when the object should already be held by an arm.
+- Use `object_fallen` when the object orientation matters and a moved-object
+  monitor would not distinguish a shifted object from a toppled one.
 - If different failures need different recovery policies, create separate
   bindings instead of mixing them in one binding.
 
@@ -46,6 +54,11 @@ Recovery guidance:
   precondition.
 - Use `regrasp_both` when two arms can re-grasp independently and
   simultaneously.
+- Prefer `upright_object` before `regrasp` when a fallen object must be restored
+  to an upright tabletop pose before the nominal task can continue.
+- After `upright_object`, insert an `action` step that returns the same arm with
+  `back_to_initial_pose` before `regrasp`; this avoids starting a new grasp from
+  a constrained recovery pose.
 - If one recovery step depends on the physical result of a previous step, put
   them as separate ordered policy steps.
 - If an object is lost during a step whose source precondition required the
