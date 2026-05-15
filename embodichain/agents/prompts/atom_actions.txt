@@ -36,6 +36,18 @@ Use the following functions exactly as defined. Do not invent new APIs or parame
     Example:
         place_on_table(robot_name='right_arm', obj_name='bottle', x=0.1, y=0.5, pre_place_dis=0.08)  #  Moves the right arm to a pre-place position 8 cm from the table, then places the bottle at the specified [0.1, 0.5] location on the table and opens the gripper.
 
+"upright_object":
+    def upright_object(robot_name: str, obj_name: str, x: float = None, y: float = None, pre_grasp_dis: float = 0.08, pre_place_dis: float = 0.08, **kwargs) -> list[np.ndarray]
+
+    Recovery-only skill for a cup, bottle, or container that has fallen over.
+    The arm re-grasps the object and places it back upright on the table. If x
+    and y are omitted, the object is stood up near its current xy position.
+    Use this before regrasping or retrying a nominal edge when a fallen object
+    must become upright again.
+
+    Example:
+        upright_object(robot_name='right_arm', obj_name='bottle')  # Re-grasps the fallen bottle and places it upright near its current table position.
+
 "move_relative_to_object":
     def move_relative_to_object(robot_name: str, obj_name: str,
                                 x_offset=0, y_offset=0, z_offset=0,

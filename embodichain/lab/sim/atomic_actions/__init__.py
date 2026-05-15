@@ -31,11 +31,20 @@ from .core import (
 )
 from .actions import (
     MoveAction,
+    GripperAction,
     PickUpAction,
     PlaceAction,
     MoveActionCfg,
+    GripperActionCfg,
     PickUpActionCfg,
     PlaceActionCfg,
+)
+from .functional import (
+    move,
+    pick_up,
+    place,
+    gripper_open,
+    gripper_close,
 )
 from .engine import (
     AtomicActionEngine,
@@ -54,11 +63,19 @@ __all__ = [
     "AtomicAction",
     # Action implementations
     "MoveAction",
+    "GripperAction",
     "PickUpAction",
     "PlaceAction",
     "MoveActionCfg",
+    "GripperActionCfg",
     "PickUpActionCfg",
     "PlaceActionCfg",
+    # Functional public API
+    "move",
+    "pick_up",
+    "place",
+    "gripper_open",
+    "gripper_close",
     # Engine
     "AtomicActionEngine",
     "register_action",

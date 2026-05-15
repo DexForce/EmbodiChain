@@ -65,6 +65,21 @@ class GraspActionCfg(MoveActionCfg):
     """Number of waypoints for the gripper open/close interpolation phase."""
 
 
+@configclass
+class GripperActionCfg(ActionCfg):
+    name: str = "gripper"
+    """Name of the action, used for identification and logging."""
+
+    control_part: str = "hand"
+    """Name of the robot part that controls the hand joints."""
+
+    target_qpos: torch.Tensor | None = None
+    """Optional target hand joint positions. If omitted, execute() target is used."""
+
+    sample_interval: int = 15
+    """Number of waypoints for the hand interpolation trajectory."""
+
+
 class MoveAction(AtomicAction):
     def __init__(
         self,
@@ -283,6 +298,95 @@ class MoveAction(AtomicAction):
         return True
 
 
+class GripperAction(AtomicAction):
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: GripperActionCfg | None = None,
+    ):
+        """
+        Initialize the gripper-only action.
+        Args:
+            motion_generator: The motion generator instance to use for robot access.
+            cfg: Configuration for the action.
+        """
+        super().__init__(
+            motion_generator, cfg=cfg if cfg is not None else GripperActionCfg()
+        )
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.dof = len(self.hand_joint_ids)
+
+    def _resolve_hand_qpos(
+        self,
+        qpos: torch.Tensor | None,
+        *,
+        name: str,
+    ) -> torch.Tensor:
+        if qpos is None:
+            logger.log_error(f"{name} must be provided.", ValueError)
+
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        if qpos.shape == (self.dof,):
+            qpos = qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if qpos.shape != (self.n_envs, self.dof):
+            logger.log_error(
+                f"{name} must have shape ({self.dof},) or "
+                f"({self.n_envs}, {self.dof}), but got {qpos.shape}",
+                ValueError,
+            )
+        return qpos
+
+    def execute(
+        self,
+        target: torch.Tensor | None = None,
+        start_qpos: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        """Execute a gripper-only interpolation action.
+
+        Args:
+            target: Target hand qpos with shape ``(hand_dof,)`` or
+                ``(n_envs, hand_dof)``. If omitted, ``cfg.target_qpos`` is used.
+            start_qpos: Optional start hand qpos. Defaults to current robot hand qpos.
+
+        Returns:
+            tuple[bool, torch.Tensor, list[float]]:
+            success flag, trajectory ``(n_envs, n_waypoints, hand_dof)``, and hand
+            joint ids corresponding to the trajectory columns.
+        """
+        target_qpos = self._resolve_hand_qpos(
+            target if target is not None else self.cfg.target_qpos,
+            name="target_qpos",
+        )
+        if start_qpos is None:
+            start_qpos = self.robot.get_qpos(name=self.cfg.control_part)
+        start_qpos = self._resolve_hand_qpos(start_qpos, name="start_qpos")
+
+        n_waypoints = int(self.cfg.sample_interval)
+        if n_waypoints < 1:
+            logger.log_error("sample_interval must be >= 1.", ValueError)
+
+        weights = torch.linspace(0, 1, steps=n_waypoints, device=self.device)
+        trajectory = torch.stack(
+            [torch.lerp(start_qpos, target_qpos, weight) for weight in weights],
+            dim=1,
+        )
+        return True, trajectory, self.hand_joint_ids
+
+    def validate(self, target=None, start_qpos=None, **kwargs):
+        try:
+            self._resolve_hand_qpos(
+                target if target is not None else self.cfg.target_qpos,
+                name="target_qpos",
+            )
+            if start_qpos is not None:
+                self._resolve_hand_qpos(start_qpos, name="start_qpos")
+        except Exception:
+            return False
+        return True
+
+
 @configclass
 class PickUpActionCfg(GraspActionCfg):
     name: str = "pick_up"
@@ -294,7 +398,18 @@ class PickUpActionCfg(GraspActionCfg):
 
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
     """Direction from which the gripper approaches the object for grasping, expressed
-    in the object local frame. Default [0, 0, -1] means approaching from above."""
+    in the world frame. Default [0, 0, -1] means approaching from above."""
+
+    grasp_candidate_num: int = 8
+    """Number of semantic grasp candidates to retry before reporting failure."""
+
+    grasp_pose_offset_world: torch.Tensor = torch.tensor(
+        [0, 0, 0], dtype=torch.float32
+    )
+    """Optional world-frame xyz offset applied to resolved grasp poses before planning."""
+
+    grasp_pose_offset_along_approach: float = 0.0
+    """Optional scalar offset along approach_direction before planning."""
 
 
 class PickUpAction(MoveAction):
@@ -309,9 +424,8 @@ class PickUpAction(MoveAction):
             motion_generator: The motion generator instance to use for planning.
             cfg: Configuration for the action.
         """
-        super().__init__(
-            motion_generator, cfg=cfg if cfg is not None else PickUpActionCfg()
-        )
+        cfg = cfg if cfg is not None else PickUpActionCfg()
+        super().__init__(motion_generator, cfg=cfg)
         self.cfg = cfg
         self.approach_direction = self.cfg.approach_direction.to(self.device)
         if self.cfg.hand_open_qpos is None:
@@ -320,6 +434,9 @@ class PickUpAction(MoveAction):
             logger.log_error("hand_close_qpos must be specified in PickUpActionCfg")
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+        self.grasp_pose_offset_world = self.cfg.grasp_pose_offset_world.to(
+            self.device
+        )
 
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
@@ -347,28 +464,75 @@ class PickUpAction(MoveAction):
 
         # Resolve grasp pose
         if isinstance(target, ObjectSemantics):
-            is_success, grasp_xpos, open_length = self._resolve_grasp_pose(target)
+            is_success, grasp_xpos, open_length = self._resolve_grasp_pose_candidates(
+                target
+            )
         else:
             is_success, grasp_xpos = self._resolve_pose_target(
                 target, action_name=self.__class__.__name__
             )
+            grasp_xpos = grasp_xpos.unsqueeze(1)
+            open_length = torch.ones(
+                self.n_envs, 1, dtype=torch.float32, device=self.device
+            )
 
         # TODO: warning and fallback if no valid grasp pose found
-        if not is_success:
+        if not bool(torch.as_tensor(is_success, device=self.device).all().item()):
             logger.log_warning(
                 "Failed to resolve grasp pose, using default approach pose"
             )
             return False, torch.empty(0), self.joint_ids
 
-        # Compute pre-grasp pose
+        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
+        candidate_num = grasp_xpos.shape[1]
+        last_failed_trajectory = torch.empty(0, device=self.device)
+        successful_candidates: list[tuple[float, int, torch.Tensor]] = []
+        for candidate_idx in range(candidate_num):
+            if not torch.all(open_length[:, candidate_idx] > 0):
+                continue
+            candidate_grasp_xpos = grasp_xpos[:, candidate_idx]
+            is_plan_success, trajectory = self._plan_candidate_pickup(
+                candidate_grasp_xpos,
+                start_qpos,
+                candidate_idx=candidate_idx,
+            )
+            if is_plan_success:
+                final_arm_qpos = trajectory[:, -1, : self.arm_dof]
+                qpos_distance = torch.linalg.norm(final_arm_qpos - start_qpos, dim=-1)
+                score = float(qpos_distance.mean().item()) + 0.01 * candidate_idx
+                successful_candidates.append((score, candidate_idx, trajectory))
+            last_failed_trajectory = trajectory
+
+        if successful_candidates:
+            _, selected_idx, selected_trajectory = min(
+                successful_candidates, key=lambda item: item[0]
+            )
+            logger.log_info(
+                f"Selected grasp candidate {selected_idx} from "
+                f"{len(successful_candidates)} planned candidates."
+            )
+            return True, selected_trajectory, self.joint_ids
+
+        logger.log_warning(
+            f"Failed to plan pickup with {candidate_num} grasp candidates."
+        )
+        return False, last_failed_trajectory, self.joint_ids
+
+    def _plan_candidate_pickup(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        *,
+        candidate_idx: int,
+    ) -> tuple[bool, torch.Tensor]:
+        """Plan pickup for one resolved grasp pose candidate."""
+        grasp_xpos = self._apply_grasp_pose_offset(grasp_xpos)
         # TODO: only for parallel gripper, approach in negative grasp z direction
         grasp_z = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = self._apply_offset(
             pose=grasp_xpos,
             offset=-grasp_z * self.cfg.pre_grasp_distance,
         )
-        # Compute lift pose
-        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
         # compute waypoint number for each phase
         n_approach_waypoint, n_close_waypoint, n_lift_waypoint = (
@@ -399,8 +563,10 @@ class PickUpAction(MoveAction):
             self.arm_dof,
         )
         if not is_success:
-            logger.log_warning("Failed to plan approach trajectory.")
-            return False, pick_trajectory, self.joint_ids
+            logger.log_warning(
+                f"Failed to plan approach trajectory for grasp candidate {candidate_idx}."
+            )
+            return False, pick_trajectory
         pick_trajectory[:, :, : self.arm_dof] = plan_traj
         # Padding hand open qpos to pick trajectory
         pick_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
@@ -445,8 +611,10 @@ class PickUpAction(MoveAction):
             self.arm_dof,
         )
         if not is_success:
-            logger.log_warning("Failed to plan lift trajectory.")
-            return False, lift_trajectory, self.joint_ids
+            logger.log_warning(
+                f"Failed to plan lift trajectory for grasp candidate {candidate_idx}."
+            )
+            return False, lift_trajectory
         lift_trajectory[:, :, : self.arm_dof] = plan_traj
         # padding hand close qpos to lift trajectory
         lift_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
@@ -455,9 +623,32 @@ class PickUpAction(MoveAction):
         trajectory = torch.cat(
             [pick_trajectory, hand_close_trajectory, lift_trajectory], dim=1
         )
-        return True, trajectory, self.joint_ids
+        return True, trajectory
 
-    def _resolve_grasp_pose(
+    def _apply_grasp_pose_offset(self, grasp_xpos: torch.Tensor) -> torch.Tensor:
+        offset = self.grasp_pose_offset_world.to(
+            dtype=grasp_xpos.dtype,
+            device=grasp_xpos.device,
+        )
+        if self.cfg.grasp_pose_offset_along_approach:
+            approach_direction = self.approach_direction.to(
+                dtype=grasp_xpos.dtype,
+                device=grasp_xpos.device,
+            )
+            approach_direction = approach_direction / torch.linalg.norm(
+                approach_direction
+            ).clamp_min(1e-6)
+            offset = (
+                offset
+                + approach_direction * float(self.cfg.grasp_pose_offset_along_approach)
+            )
+        if torch.linalg.norm(offset).item() == 0.0:
+            return grasp_xpos
+        shifted_grasp_xpos = grasp_xpos.clone()
+        shifted_grasp_xpos[:, :3, 3] = shifted_grasp_xpos[:, :3, 3] + offset
+        return shifted_grasp_xpos
+
+    def _resolve_grasp_pose_candidates(
         self, semantics: ObjectSemantics
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if not isinstance(semantics.affordance, AntipodalAffordance):
@@ -470,8 +661,12 @@ class PickUpAction(MoveAction):
             )
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
 
-        is_success, grasp_xpos, open_length = semantics.affordance.get_best_grasp_poses(
-            obj_poses=obj_poses, approach_direction=self.approach_direction
+        is_success, grasp_xpos, open_length = (
+            semantics.affordance.get_grasp_pose_candidates(
+                obj_poses=obj_poses,
+                approach_direction=self.approach_direction,
+                top_k=self.cfg.grasp_candidate_num,
+            )
         )
         return is_success, grasp_xpos, open_length
 
@@ -484,6 +679,13 @@ class PickUpAction(MoveAction):
 class PlaceActionCfg(GraspActionCfg):
     name: str = "place"
     """Name of the action, used for identification and logging."""
+
+    post_open_wait_steps: int = 0
+    """Number of waypoints to hold the arm still after opening the gripper.
+
+    Keeping the end-effector stationary for a short period after release avoids
+    immediately dragging or knocking an object over during the retreat phase.
+    """
 
 
 class PlaceAction(MoveAction):
@@ -598,6 +800,21 @@ class PlaceAction(MoveAction):
         hand_open_trajectory[:, :, : self.arm_dof] = reach_qpos
         hand_open_trajectory[:, :, self.arm_dof :] = hand_open_path
 
+        post_open_wait_steps = max(0, int(self.cfg.post_open_wait_steps))
+        post_open_wait_trajectory = torch.empty(
+            size=(self.n_envs, 0, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if post_open_wait_steps > 0:
+            post_open_wait_trajectory = torch.zeros(
+                size=(self.n_envs, post_open_wait_steps, self.dof),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            post_open_wait_trajectory[:, :, : self.arm_dof] = reach_qpos
+            post_open_wait_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
+
         # get lift trajectory
         back_trajectory = torch.zeros(
             size=(self.n_envs, n_lift_waypoint, self.dof),
@@ -625,7 +842,13 @@ class PlaceAction(MoveAction):
 
         # concatenate trajectories
         trajectory = torch.cat(
-            [down_trajectory, hand_open_trajectory, back_trajectory], dim=1
+            [
+                down_trajectory,
+                hand_open_trajectory,
+                post_open_wait_trajectory,
+                back_trajectory,
+            ],
+            dim=1,
         )
         return True, trajectory, self.joint_ids
 

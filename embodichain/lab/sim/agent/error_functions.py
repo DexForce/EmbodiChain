@@ -42,6 +42,7 @@ __all__ = [
     "restore_interactive_error_input",
     "interactive_error_requested",
     "inject_interactive_error",
+    "inject_forced_recovery_error",
     "wrong_affordance",
 ]
 
@@ -253,6 +254,70 @@ def inject_interactive_error(env) -> None:
     log_warning(
         f"Injected interactive error {error_choice} on {error_obj} with relative_error_xyz={relative_error_xyz}."
     )
+
+
+def _monitor_function_name(monitor) -> str:
+    function = getattr(monitor, "func", monitor)
+    return getattr(function, "__name__", monitor.__class__.__name__)
+
+
+def _monitor_keywords(monitor) -> dict:
+    return dict(getattr(monitor, "keywords", {}) or {})
+
+
+def inject_forced_recovery_error(
+    env,
+    monitor_sequences,
+    relative_error_xyz: list[float] | tuple[float, float, float] | None = None,
+    error_type: str = "misplaced_object",
+) -> str | None:
+    """Inject a deterministic failure compatible with the first available monitor."""
+    relative_error_xyz = list(relative_error_xyz or [0.12, 0.0, 0.0])
+
+    for monitor_sequence in monitor_sequences or []:
+        for monitor in monitor_sequence:
+            function_name = _monitor_function_name(monitor)
+            keywords = _monitor_keywords(monitor)
+            obj_name = keywords.get("obj_name")
+            if obj_name is None:
+                continue
+
+            if function_name in {"monitor_object_moved", "monitor_object_held"}:
+                _inject_object_error(env, obj_name, relative_error_xyz, error_type)
+                log_warning(
+                    f"Injected forced recovery error for {function_name} on {obj_name} "
+                    f"with error_type={error_type} "
+                    f"relative_error_xyz={relative_error_xyz}."
+                )
+                return f"{function_name}:{obj_name}"
+
+    log_warning("No compatible monitor found for forced recovery injection.")
+    return None
+
+
+def _inject_object_error(
+    env,
+    obj_name: str,
+    relative_error_xyz: list[float],
+    error_type: str,
+) -> None:
+    if error_type == "misplaced_object":
+        misplaced_object(
+            env,
+            error_obj=obj_name,
+            error_pose=None,
+            relative_error_xyz=relative_error_xyz,
+        )
+        return
+    if error_type == "fallen_object":
+        fallen_object(
+            env,
+            error_obj=obj_name,
+            error_pose=None,
+            relative_error_xyz=relative_error_xyz,
+        )
+        return
+    raise ValueError(f"Unsupported forced recovery error_type: {error_type}.")
 
 
 def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):

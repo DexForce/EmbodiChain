@@ -116,6 +116,15 @@ class SimulationManagerCfg:
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
     """The rendering configuration parameters."""
 
+    enable_rt: bool = False
+    """Deprecated compatibility flag. Prefer ``render_cfg`` for dexsim 0.4+."""
+
+    enable_denoiser: bool = True
+    """Whether to enable denoising for ray tracing rendering."""
+
+    spp: int = 64
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when ray tracing is enabled and enable_denoiser is False."""
+
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
     
@@ -369,7 +378,15 @@ class SimulationManager:
     @property
     def is_use_gpu_physics(self) -> bool:
         """Check if the physics simulation is using GPU."""
-        return self.device.type == "cuda"
+        world_config = dexsim.get_world_config()
+        return self.device.type == "cuda" and world_config.enable_gpu_sim
+
+    @property
+    def is_rt_enabled(self) -> bool:
+        """Check if Ray Tracing rendering backend is enabled."""
+        if self.sim_config.enable_rt:
+            return True
+        return self.sim_config.render_cfg.renderer in {"hybrid", "fast-rt", "rt"}
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -412,10 +429,16 @@ class SimulationManager:
         world_config.length_tolerance = sim_config.physics_config.length_tolerance
         world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
 
-        world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
-        if sim_config.render_cfg.enable_denoiser is False:
-            world_config.raytrace_config.spp = sim_config.render_cfg.spp
-            world_config.raytrace_config.open_denoise = False
+        if sim_config.enable_rt:
+            world_config.renderer = RenderCfg(renderer="fast-rt").to_dexsim_flags()
+            if sim_config.enable_denoiser is False:
+                world_config.raytrace_config.spp = sim_config.spp
+                world_config.raytrace_config.open_denoise = False
+        else:
+            world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+            if sim_config.render_cfg.enable_denoiser is False:
+                world_config.raytrace_config.spp = sim_config.render_cfg.spp
+                world_config.raytrace_config.open_denoise = False
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)

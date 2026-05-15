@@ -39,10 +39,22 @@ class RecoveryPrompt:
       ],
       "recovery": [
         {
-          "type": "regrasp",
+          "type": "upright_object",
           "robot_name": "<left_arm or right_arm>",
           "obj_name": "<object name>",
-          "pre_grasp_dis": 0.1
+          "pre_grasp_dis": 0.08,
+          "pre_place_dis": 0.08
+        },
+        {
+          "type": "action",
+          "name": "return_arm_home",
+          "left_arm_action": null,
+          "right_arm_action": {
+            "fn": "back_to_initial_pose",
+            "kwargs": {
+              "robot_name": "<same arm as upright_object>"
+            }
+          }
         }
       ],
       "merge": "target",
@@ -91,6 +103,93 @@ class RecoveryPrompt:
                                 "`{empty_recovery_schema}`.\n\n"
                                 "Follow these recovery rules:\n"
                                 "{recovery_rules}"
+                            ),
+                        },
+                    ]
+                ),
+            ]
+        )
+
+        return prompt.invoke(kwargs)
+
+    @staticmethod
+    def runtime_recovery_binding(**kwargs):
+        schema = """{
+  "task": "<same task name>",
+  "recovery_bindings": [
+    {
+      "edge_id": "<current edge id>",
+      "failure_name": "<short failure label>",
+      "monitors": [
+        {"type": "object_fallen", "objects": ["<object name>"], "upright_threshold": 0.65}
+      ],
+      "recovery": [
+        {
+          "type": "upright_object",
+          "robot_name": "<left_arm or right_arm>",
+          "obj_name": "<object name>",
+          "pre_grasp_dis": 0.08,
+          "pre_place_dis": 0.08
+        },
+        {
+          "type": "action",
+          "name": "return_arm_home",
+          "left_arm_action": null,
+          "right_arm_action": {
+            "fn": "back_to_initial_pose",
+            "kwargs": {
+              "robot_name": "<same arm as upright_object>"
+            }
+          }
+        },
+        {
+          "type": "regrasp",
+          "robot_name": "<left_arm or right_arm>",
+          "obj_name": "<object name>",
+          "pre_grasp_dis": 0.1
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    }
+  ]
+}"""
+        empty_schema = '{"task": "<same task name>", "recovery_bindings": []}'
+        kwargs.update(
+            {
+                "empty_recovery_schema": empty_schema,
+                "recovery_schema": schema,
+            }
+        )
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a runtime robotic manipulation recovery planner. "
+                        "Given the edge that just failed and the current simulator "
+                        "state summary, output one compact recovery binding for the "
+                        "current edge only. Output only JSON."
+                    )
+                ),
+                HumanMessagePromptTemplate.from_template(
+                    [
+                        {
+                            "type": "text",
+                            "text": (
+                                "**Environment background:**\n{basic_background}\n\n"
+                                '**Task goal:**\n"{task_prompt}"\n\n'
+                                "**Available atomic actions:**\n{atom_actions}\n\n"
+                                "**Available monitor functions:**\n{monitor_functions}\n\n"
+                                "**Recovery rules:**\n{recovery_rules}\n\n"
+                                "**Current failed edge:**\n{current_edge}\n\n"
+                                "**Triggered monitor:**\n{triggered_monitor}\n\n"
+                                "**Runtime state summary:**\n{runtime_state}\n\n"
+                                "**Nominal task graph JSON:**\n{task_graph}\n\n"
+                                "**Required JSON schema:**\n{recovery_schema}\n\n"
+                                "Output exactly one JSON object. If the failure is "
+                                "not recoverable using supported steps, output "
+                                "`{empty_recovery_schema}`."
                             ),
                         },
                     ]

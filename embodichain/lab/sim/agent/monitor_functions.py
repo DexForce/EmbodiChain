@@ -82,6 +82,19 @@ def monitor_object_held(
     return arm_object_distance > threshold
 
 
+def monitor_object_fallen(
+    env,
+    obj_name: str,
+    upright_threshold: float = 0.65,
+    **kwargs,
+) -> bool:
+    """Trigger when an object's local z axis is no longer close to world up."""
+
+    current_pose = _get_object_pose(env, obj_name)
+    vertical_alignment = float(torch.abs(current_pose[:3, 2][2]).item())
+    return vertical_alignment < upright_threshold
+
+
 # TODO: not used currently
 def monitor_gripper_distance(
     env,

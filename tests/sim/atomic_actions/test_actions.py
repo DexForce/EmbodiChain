@@ -28,6 +28,8 @@ from embodichain.lab.sim.atomic_actions.core import (
     ObjectSemantics,
 )
 from embodichain.lab.sim.atomic_actions.actions import (
+    GripperAction,
+    GripperActionCfg,
     MoveAction,
     MoveActionCfg,
     PickUpAction,
@@ -185,6 +187,52 @@ class TestMoveActionHelpers:
         result = self.action._interpolate_hand_qpos(start, end, n_waypoints)
         expected_mid = torch.tensor([0.5, 0.5])
         assert torch.allclose(result[1], expected_mid, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# GripperAction
+# ---------------------------------------------------------------------------
+
+
+class TestGripperAction:
+    """Tests for gripper-only action interpolation."""
+
+    def setup_method(self):
+        self.robot = _make_mock_robot()
+        self.mg = _make_mock_motion_generator(self.robot)
+
+    def test_init_sets_hand_joint_ids(self):
+        cfg = GripperActionCfg(control_part="hand", sample_interval=4)
+        action = GripperAction(self.mg, cfg=cfg)
+        assert action.hand_joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
+        assert action.dof == HAND_DOF
+
+    def test_execute_interpolates_to_target(self):
+        cfg = GripperActionCfg(control_part="hand", sample_interval=4)
+        action = GripperAction(self.mg, cfg=cfg)
+        target = torch.tensor([0.025, 0.025])
+
+        is_success, trajectory, joint_ids = action.execute(target=target)
+
+        assert is_success is True
+        assert joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
+        assert trajectory.shape == (NUM_ENVS, 4, HAND_DOF)
+        torch.testing.assert_close(trajectory[:, 0], torch.zeros(NUM_ENVS, HAND_DOF))
+        torch.testing.assert_close(trajectory[:, -1], target.repeat(NUM_ENVS, 1))
+
+    def test_execute_uses_cfg_target_qpos(self):
+        target = torch.tensor([0.01, 0.02])
+        cfg = GripperActionCfg(
+            control_part="hand",
+            target_qpos=target,
+            sample_interval=3,
+        )
+        action = GripperAction(self.mg, cfg=cfg)
+
+        is_success, trajectory, _ = action.execute()
+
+        assert is_success is True
+        torch.testing.assert_close(trajectory[:, -1], target.repeat(NUM_ENVS, 1))
 
 
 # ---------------------------------------------------------------------------

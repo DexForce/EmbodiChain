@@ -136,10 +136,15 @@ class AgentTaskGraph:
 
     def run(self, env=None, **kwargs) -> ExecutedActionList:
         current = self.start
-        pending_edges: list[str] = []
-        continuation_stack: list[list[str]] = []
+        pending_edges: list[Any] = []
+        continuation_stack: list[list[Any]] = []
         executed_actions: list[Any] = []
         transitions = 0
+        disable_recovery_branches = bool(
+            kwargs.get("disable_recovery_branches", False)
+        )
+        runtime_recovery_planner = kwargs.get("runtime_recovery_planner")
+        prefer_runtime_recovery = bool(kwargs.get("prefer_runtime_llm_recovery", False))
 
         while current != self.goal or pending_edges or continuation_stack:
             transitions += 1
@@ -149,31 +154,108 @@ class AgentTaskGraph:
             if not pending_edges and continuation_stack:
                 pending_edges = continuation_stack.pop()
 
-            edge_id = (
+            edge_ref = (
                 pending_edges.pop(0) if pending_edges else self._next_edge(current)
             )
-            edge = self.edges[edge_id]
-            result = drive(
-                left_arm_action=edge.left_arm_action,
-                right_arm_action=edge.right_arm_action,
-                monitor_sequences=edge.monitor_sequences,
-                env=env,
-                return_result=True,
-                **kwargs,
-            )
+            edge = self._resolve_edge(edge_ref)
+            edge_id = edge.id
+            try:
+                result = drive(
+                    left_arm_action=edge.left_arm_action,
+                    right_arm_action=edge.right_arm_action,
+                    monitor_sequences=edge.monitor_sequences,
+                    env=env,
+                    return_result=True,
+                    **kwargs,
+                )
+            except Exception as exc:
+                runtime_edges = None
+                if callable(runtime_recovery_planner) and not disable_recovery_branches:
+                    attempts = kwargs.setdefault("_runtime_recovery_exception_attempts", {})
+                    attempt_key = edge.id
+                    attempts[attempt_key] = int(attempts.get(attempt_key, 0)) + 1
+                    if attempts[attempt_key] <= int(
+                        kwargs.get("runtime_recovery_max_exception_attempts", 1)
+                    ):
+                        runtime_edges = self._plan_runtime_recovery(
+                            runtime_recovery_planner,
+                            edge=edge,
+                            monitor_index=-1,
+                            result={
+                                "monitor_name": "edge_exception",
+                                "step_index": None,
+                                "exception": exc,
+                            },
+                            env=env,
+                            kwargs=kwargs,
+                        )
+                if runtime_edges is not None:
+                    branch_final_target = runtime_edges[-1].target
+                    continuation_edges = list(pending_edges)
+                    if branch_final_target == edge.source and edge.source != edge.target:
+                        continuation_edges = [edge_ref, *continuation_edges]
+                    elif branch_final_target != edge.target:
+                        raise RuntimeError(
+                            f"Runtime recovery branch for failed edge '{edge.id}' "
+                            "must merge to its source or target."
+                        ) from exc
+                    if continuation_edges:
+                        continuation_stack.append(continuation_edges)
+                    pending_edges = list(runtime_edges)
+                    current = edge.source
+                    continue
+                raise RuntimeError(
+                    f"Agent task graph edge '{edge.id}' "
+                    f"({edge.source}->{edge.target}) failed: {exc}"
+                ) from exc
             executed_actions.extend(result["actions"])
 
             monitor_index = result["monitor_index"]
             if monitor_index is not None:
-                branch = self.recovery_branches.get((edge.id, monitor_index))
-                if branch is None:
+                if disable_recovery_branches:
                     raise RuntimeError(
-                        f"No recovery branch for edge '{edge.id}' monitor {monitor_index}."
+                        f"Monitor '{result['monitor_name']}' triggered on edge "
+                        f"'{edge.id}', but recovery branch execution is disabled."
                     )
-                branch_final_target = self.edges[branch.recovery_edges[-1]].target
+                branch = None
+                runtime_edges = None
+                if callable(runtime_recovery_planner) and prefer_runtime_recovery:
+                    runtime_edges = self._plan_runtime_recovery_if_allowed(
+                        runtime_recovery_planner,
+                        edge=edge,
+                        monitor_index=monitor_index,
+                        result=result,
+                        env=env,
+                        kwargs=kwargs,
+                    )
+                if runtime_edges is None:
+                    branch = self.recovery_branches.get((edge.id, monitor_index))
+                if (
+                    branch is None
+                    and runtime_edges is None
+                    and callable(runtime_recovery_planner)
+                ):
+                    runtime_edges = self._plan_runtime_recovery_if_allowed(
+                        runtime_recovery_planner,
+                        edge=edge,
+                        monitor_index=monitor_index,
+                        result=result,
+                        env=env,
+                        kwargs=kwargs,
+                    )
+                if branch is None:
+                    if runtime_edges is None:
+                        raise RuntimeError(
+                            f"No recovery branch for edge '{edge.id}' monitor {monitor_index}."
+                        )
+                    recovery_edges = list(runtime_edges)
+                    branch_final_target = recovery_edges[-1].target
+                else:
+                    recovery_edges = list(branch.recovery_edges)
+                    branch_final_target = self._resolve_edge(recovery_edges[-1]).target
                 continuation_edges = list(pending_edges)
                 if branch_final_target == edge.source and edge.source != edge.target:
-                    continuation_edges = [edge.id, *continuation_edges]
+                    continuation_edges = [edge_ref, *continuation_edges]
                 elif branch_final_target != edge.target:
                     raise RuntimeError(
                         f"Recovery branch for edge '{edge.id}' must merge to its source or target."
@@ -181,7 +263,7 @@ class AgentTaskGraph:
 
                 if continuation_edges:
                     continuation_stack.append(continuation_edges)
-                pending_edges = list(branch.recovery_edges)
+                pending_edges = recovery_edges
                 current = edge.source
                 continue
 
@@ -194,3 +276,71 @@ class AgentTaskGraph:
             if not self.edges[edge_id].is_recovery:
                 return edge_id
         raise RuntimeError(f"No nominal outgoing edge from node '{node_id}'.")
+
+    def _resolve_edge(self, edge_ref: Any) -> AgentGraphEdge:
+        if isinstance(edge_ref, AgentGraphEdge):
+            return edge_ref
+        if isinstance(edge_ref, dict):
+            return AgentGraphEdge(**edge_ref)
+        return self.edges[edge_ref]
+
+    def _plan_runtime_recovery(
+        self,
+        planner,
+        *,
+        edge: AgentGraphEdge,
+        monitor_index: int,
+        result: dict[str, Any],
+        env,
+        kwargs: dict[str, Any],
+    ) -> list[AgentGraphEdge] | None:
+        total_attempts = int(kwargs.get("_runtime_recovery_total_attempts", 0)) + 1
+        kwargs["_runtime_recovery_total_attempts"] = total_attempts
+        max_total_attempts = int(kwargs.get("runtime_recovery_max_total_attempts", 4))
+        if total_attempts > max_total_attempts:
+            raise RuntimeError(
+                "Runtime recovery exceeded total retry limit "
+                f"({max_total_attempts}). Last edge='{edge.id}', "
+                f"monitor_index={monitor_index}."
+            )
+        recovery_edges = planner(
+            graph=self,
+            edge=edge,
+            monitor_index=monitor_index,
+            monitor_name=result.get("monitor_name"),
+            step_index=result.get("step_index"),
+            env=env,
+            runtime_kwargs=kwargs,
+        )
+        if not recovery_edges:
+            return None
+        return [self._resolve_edge(edge_ref) for edge_ref in recovery_edges]
+
+    def _plan_runtime_recovery_if_allowed(
+        self,
+        planner,
+        *,
+        edge: AgentGraphEdge,
+        monitor_index: int,
+        result: dict[str, Any],
+        env,
+        kwargs: dict[str, Any],
+    ) -> list[AgentGraphEdge] | None:
+        attempts = kwargs.setdefault("_runtime_recovery_monitor_attempts", {})
+        attempt_key = f"{edge.id}:{monitor_index}"
+        attempts[attempt_key] = int(attempts.get(attempt_key, 0)) + 1
+        if attempts[attempt_key] > int(
+            kwargs.get("runtime_recovery_max_monitor_attempts", 2)
+        ):
+            raise RuntimeError(
+                f"Runtime recovery exceeded monitor retry limit for "
+                f"edge '{edge.id}' monitor {monitor_index}."
+            )
+        return self._plan_runtime_recovery(
+            planner,
+            edge=edge,
+            monitor_index=monitor_index,
+            result=result,
+            env=env,
+            kwargs=kwargs,
+        )

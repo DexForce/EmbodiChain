@@ -59,3 +59,25 @@ Important note:
 Recommended use:
 - use when the object is already grasped in the arm
 - do not use this function when grasping or placing an object, as the object is not yet securely held during the grasping phase
+
+3. `monitor_object_fallen`
+Purpose:
+- Detect whether a rigid object is tilted or fallen over.
+
+Typical failure meanings:
+- cup or bottle has toppled
+- nominal grasp/place affordance is no longer valid because the object is not upright
+
+Signature:
+- `monitor_object_fallen(env, obj_name, upright_threshold=0.65, **kwargs)`
+
+Key arguments:
+- `obj_name`: target rigid object name
+- `upright_threshold`: minimum absolute alignment between the object's local z axis and world z axis
+
+Returns `True` when:
+- the object local z axis is less aligned with world up than `upright_threshold`
+
+Recommended use:
+- use when orientation matters, especially before retrying a grasp or place action
+- pair it with the `upright_object` recovery skill when a fallen object should be stood up first

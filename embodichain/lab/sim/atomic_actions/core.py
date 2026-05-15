@@ -183,6 +183,64 @@ class AntipodalAffordance(Affordance):
             self._draw_grasp_xpos(grasp_xpos, open_length)
         return is_success, grasp_xpos, open_length
 
+    def get_grasp_pose_candidates(
+        self,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+        top_k: int = 1,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return ranked grasp pose candidates for each object pose.
+
+        The result is padded to ``top_k`` candidates per environment so callers
+        can retry candidates without reopening the interactive annotator.
+        """
+        if self.generator is None:
+            self._init_generator()
+
+        top_k = max(1, int(top_k))
+        grasp_xpos_list = []
+        is_success_list = []
+        open_length_list = []
+        identity_candidates = (
+            torch.eye(4, dtype=torch.float32, device=self.generator.device)
+            .unsqueeze(0)
+            .repeat(top_k, 1, 1)
+        )
+        zero_lengths = torch.zeros(
+            top_k, dtype=torch.float32, device=self.generator.device
+        )
+
+        for i, obj_pose in enumerate(obj_poses):
+            is_success, grasp_xpos, open_length = (
+                self.generator.get_grasp_pose_candidates(
+                    obj_pose,
+                    approach_direction,
+                    top_k=top_k,
+                )
+            )
+            padded_grasp_xpos = identity_candidates.clone()
+            padded_open_length = zero_lengths.clone()
+            if is_success:
+                candidate_count = min(top_k, grasp_xpos.shape[0])
+                padded_grasp_xpos[:candidate_count] = grasp_xpos[:candidate_count]
+                padded_open_length[:candidate_count] = open_length[:candidate_count]
+            else:
+                logger.log_warning(f"No valid grasp pose found for {i}-th object.")
+            grasp_xpos_list.append(padded_grasp_xpos.unsqueeze(0))
+            open_length_list.append(padded_open_length.unsqueeze(0))
+            is_success_list.append(bool(is_success))
+
+        is_success = torch.tensor(
+            is_success_list, dtype=torch.bool, device=self.generator.device
+        )
+        grasp_xpos = torch.concatenate(grasp_xpos_list, dim=0)
+        open_length = torch.concatenate(open_length_list, dim=0)
+        if self.is_draw_grasp_xpos:
+            self._draw_grasp_xpos(grasp_xpos[:, 0], open_length[:, 0])
+        return is_success, grasp_xpos, open_length
+
     def _draw_grasp_xpos(self, grasp_xpos: torch.Tensor, open_length: torch.Tensor):
         sim = SimulationManager.get_instance()
         axis_xpos = []

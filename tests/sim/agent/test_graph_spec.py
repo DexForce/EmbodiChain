@@ -259,6 +259,124 @@ def test_normalize_recovery_spec_infers_simple_aliases() -> None:
     }
 
 
+def test_expand_recovery_spec_supports_upright_object_step() -> None:
+    recovery_graph = expand_recovery_spec(
+        _nominal_task_graph(),
+        {
+            "task": "grasp cup",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e01_grasp",
+                    "failure_name": "cup_fallen",
+                    "monitors": [
+                        {
+                            "type": "object_fallen",
+                            "objects": ["cup"],
+                            "upright_threshold": 0.7,
+                        }
+                    ],
+                    "recovery": [
+                        {
+                            "type": "upright_object",
+                            "robot_name": "left_arm",
+                            "obj_name": "cup",
+                            "pre_grasp_dis": 0.08,
+                            "pre_place_dis": 0.09,
+                        }
+                    ],
+                    "merge": "source",
+                    "repeat_until_success": False,
+                }
+            ],
+        },
+    )
+
+    assert recovery_graph["recovery_edges"] == [
+        {
+            "id": "re_e01_grasp_1_upright_cup",
+            "source": "v0_start",
+            "target": "v0_start",
+            "left_arm_action": {
+                "fn": "upright_object",
+                "kwargs": {
+                    "robot_name": "left_arm",
+                    "obj_name": "cup",
+                    "pre_grasp_dis": 0.08,
+                    "pre_place_dis": 0.09,
+                    "force_valid": True,
+                },
+            },
+            "right_arm_action": None,
+        }
+    ]
+    assert recovery_graph["recovery_branches"][0]["monitor_sequence"] == [
+        {
+            "fn": "monitor_object_fallen",
+            "kwargs": {"obj_name": "cup", "upright_threshold": 0.7},
+        }
+    ]
+
+
+def test_expand_recovery_spec_does_not_self_monitor_upright_object_step() -> None:
+    recovery_graph = expand_recovery_spec(
+        _nominal_task_graph(),
+        {
+            "task": "grasp cup",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e01_grasp",
+                    "failure_name": "cup_fallen",
+                    "monitors": [
+                        {
+                            "type": "object_fallen",
+                            "objects": ["cup"],
+                            "upright_threshold": 0.7,
+                        }
+                    ],
+                    "recovery": [
+                        {
+                            "type": "upright_object",
+                            "robot_name": "left_arm",
+                            "obj_name": "cup",
+                        },
+                        {
+                            "type": "action",
+                            "name": "return_arm_home",
+                            "left_arm_action": {
+                                "fn": "back_to_initial_pose",
+                                "kwargs": {"robot_name": "left_arm"},
+                            },
+                            "right_arm_action": None,
+                        },
+                        {
+                            "type": "regrasp",
+                            "robot_name": "left_arm",
+                            "obj_name": "cup",
+                        },
+                    ],
+                    "merge": "source",
+                    "repeat_until_success": True,
+                }
+            ],
+        },
+    )
+
+    branch_ids = [
+        branch["edge_id"] for branch in recovery_graph["recovery_branches"]
+    ]
+
+    assert "re_e01_grasp_1_upright_cup" not in branch_ids
+    assert "re_e01_grasp_2_return_arm_home" in branch_ids
+    assert "re_e01_grasp_3_regrasp_cup" in branch_ids
+    assert [
+        edge["id"] for edge in recovery_graph["recovery_edges"]
+    ] == [
+        "re_e01_grasp_1_upright_cup",
+        "re_e01_grasp_2_return_arm_home",
+        "re_e01_grasp_3_regrasp_cup",
+    ]
+
+
 def test_expand_recovery_spec_accepts_canonicalized_direct_monitor() -> None:
     recovery_graph = expand_recovery_spec(
         _nominal_task_graph(),

@@ -160,25 +160,67 @@ def get_qpos(env, is_left, select_arm, pose, qpos_seed, force_valid=False, name=
     """
     solved_pose = pose
 
+    target_xyz = (
+        torch.as_tensor(solved_pose[:3, 3]).detach().cpu().numpy().round(4).tolist()
+    )
+    seed_qpos = (
+        None
+        if qpos_seed is None
+        else torch.as_tensor(qpos_seed)
+        .detach()
+        .cpu()
+        .flatten()
+        .numpy()
+        .round(4)
+        .tolist()
+    )
+
     if force_valid:
         try:
             ret, qpos = env.get_arm_ik(
                 solved_pose, is_left=is_left, qpos_seed=qpos_seed
             )
-            if not ret:
-                log_error(f"Generate {name} qpos failed.\n")
         except Exception as e:
             log_warning(
                 f"Original {name} pose invalid, using nearest valid pose. ({e})\n"
             )
-            solved_pose = find_nearest_valid_pose(env, select_arm, solved_pose)
+        else:
+            if ret:
+                return solved_pose, qpos
+            log_warning(f"Original {name} pose IK failed, using nearest valid pose.\n")
 
-            ret, qpos = env.get_arm_ik(
-                solved_pose, is_left=is_left, qpos_seed=qpos_seed
+        try:
+            solved_pose = find_nearest_valid_pose(env, select_arm, solved_pose)
+        except Exception as e:
+            log_warning(f"Failed to find nearest valid {name} pose. ({e})\n")
+            log_warning(
+                f"{name} IK diagnostics: arm={select_arm}, "
+                f"target_xyz={target_xyz}, qpos_seed={seed_qpos}."
             )
+            log_error(f"Generate {name} qpos failed.\n")
+        ret, qpos = env.get_arm_ik(solved_pose, is_left=is_left, qpos_seed=qpos_seed)
+        if not ret:
+            corrected_xyz = (
+                torch.as_tensor(solved_pose[:3, 3])
+                .detach()
+                .cpu()
+                .numpy()
+                .round(4)
+                .tolist()
+            )
+            log_warning(
+                f"{name} IK diagnostics: arm={select_arm}, "
+                f"target_xyz={target_xyz}, corrected_xyz={corrected_xyz}, "
+                f"qpos_seed={seed_qpos}."
+            )
+            log_error(f"Generate {name} qpos failed.\n")
     else:
         ret, qpos = env.get_arm_ik(solved_pose, is_left=is_left, qpos_seed=qpos_seed)
         if not ret:
+            log_warning(
+                f"{name} IK diagnostics: arm={select_arm}, "
+                f"target_xyz={target_xyz}, qpos_seed={seed_qpos}."
+            )
             log_error(f"Generate {name} qpos failed.\n")
 
     return solved_pose, qpos
@@ -209,7 +251,10 @@ def plan_trajectory(
     )
 
     plan_state = [
-        PlanState(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
+        PlanState(
+            qpos=torch.as_tensor(qpos, dtype=torch.float32).detach().cpu(),
+            move_type=MoveType.JOINT_MOVE,
+        )
         for qpos in qpos_list
     ]
 
@@ -223,7 +268,7 @@ def plan_trajectory(
         ),
     )
 
-    select_qpos_traj.extend(ret.positions.numpy())
+    select_qpos_traj.extend(ret.positions.detach().cpu().numpy())
     ee_state_list_select.extend([select_arm_current_gripper_state] * len(ret.positions))
 
 
@@ -273,12 +318,18 @@ def finalize_actions(select_qpos_traj, ee_state_list_select):
     Returns:
         np.ndarray: Formatted actions array with joint positions and gripper states.
     """
+
+    def _to_numpy(value):
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().numpy()
+        return np.asarray(value)
+
     # mimic eef state
     actions = np.concatenate(
         [
-            np.array(select_qpos_traj),
-            np.array(ee_state_list_select),
-            np.array(ee_state_list_select),
+            np.asarray([_to_numpy(v) for v in select_qpos_traj]),
+            np.asarray([_to_numpy(v) for v in ee_state_list_select]),
+            np.asarray([_to_numpy(v) for v in ee_state_list_select]),
         ],
         axis=-1,
     )
@@ -328,16 +379,24 @@ def resolve_action(action, env, kwargs):
         return action(env=env, **kwargs)
     return action
 
+
 def sync_agent_state_from_robot(env) -> None:
     """Synchronize cached agent arm states from the physical robot state."""
     action = env.robot.get_qpos().squeeze(0)
+    gripper_dtype = getattr(env.open_state, "dtype", action.dtype)
+    gripper_device = getattr(env.open_state, "device", action.device)
+
     env.left_arm_current_qpos = action[env.left_arm_joints]
     env.left_arm_current_xpos = env.robot.compute_fk(
         qpos=env.left_arm_current_qpos,
         name="left_arm",
         to_matrix=True,
     ).squeeze(0)
-    env.left_arm_current_gripper_state = action[env.left_eef_joints][0].unsqueeze(0)
+    env.left_arm_current_gripper_state = (
+        action[env.left_eef_joints][0]
+        .to(dtype=gripper_dtype, device=gripper_device)
+        .unsqueeze(0)
+    )
 
     env.right_arm_current_qpos = action[env.right_arm_joints]
     env.right_arm_current_xpos = env.robot.compute_fk(
@@ -345,4 +404,8 @@ def sync_agent_state_from_robot(env) -> None:
         name="right_arm",
         to_matrix=True,
     ).squeeze(0)
-    env.right_arm_current_gripper_state = action[env.right_eef_joints][0].unsqueeze(0)
+    env.right_arm_current_gripper_state = (
+        action[env.right_eef_joints][0]
+        .to(dtype=gripper_dtype, device=gripper_device)
+        .unsqueeze(0)
+    )

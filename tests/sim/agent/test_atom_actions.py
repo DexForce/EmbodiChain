@@ -135,6 +135,7 @@ def _load_open_gripper_function():
         "np": np,
         "torch": torch,
         "get_arm_states": _stub_get_arm_states,
+        "try_public_gripper_action": lambda *args, **kwargs: None,
         "plan_gripper_trajectory": _stub_plan_gripper_trajectory,
         "finalize_actions": _finalize_actions,
         "log_info": lambda *args, **kwargs: None,

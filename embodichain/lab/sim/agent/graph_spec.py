@@ -47,6 +47,10 @@ MONITOR_TYPE_ALIASES = {
     "not_held": "hold_lost",
     "slip": "hold_lost",
     "slipped": "hold_lost",
+    "object_fallen": "object_fallen",
+    "fallen_object": "object_fallen",
+    "toppled_object": "object_fallen",
+    "object_tilted": "object_fallen",
 }
 
 RECOVERY_STEP_TYPE_ALIASES = {
@@ -63,6 +67,11 @@ RECOVERY_STEP_TYPE_ALIASES = {
     "dual_regrasp": "regrasp_both",
     "regrasp_objects": "regrasp_both",
     "regrasp_all": "regrasp_both",
+    "upright": "upright_object",
+    "upright_object": "upright_object",
+    "stand_object_up": "upright_object",
+    "restore_upright": "upright_object",
+    "set_object_upright": "upright_object",
     "action": "action",
     "atomic_action": "action",
 }
@@ -418,6 +427,23 @@ def _normalize_monitor(
             "threshold": monitor.get("threshold", 0.02),
         }, issues
 
+    if monitor_type == "object_fallen":
+        objects = monitor.get("objects", monitor.get("obj_name", monitor.get("object")))
+        if objects is None:
+            objects = _edge_action_objects(monitored_edge)
+        objects = [str(obj_name) for obj_name in _as_list(objects) if obj_name]
+        if not objects:
+            return None, [
+                f"monitor {monitor_index} object_fallen needs objects or obj_name"
+            ]
+        return {
+            "type": "object_fallen",
+            "objects": objects,
+            "upright_threshold": monitor.get(
+                "upright_threshold", monitor.get("threshold", 0.65)
+            ),
+        }, issues
+
     robot_name = monitor.get("robot_name", monitor.get("arm"))
     obj_name = monitor.get("obj_name", monitor.get("object"))
     if robot_name is None or obj_name is None:
@@ -532,6 +558,33 @@ def _normalize_recovery_step(
                 "force_valid": step.get("force_valid", False),
             }
         )
+        return base, []
+
+    if step_type == "upright_object":
+        robot_name = step.get("robot_name", step.get("arm"))
+        obj_name = step.get("obj_name", step.get("object"))
+        if robot_name is None or obj_name is None:
+            inferred = _infer_regrasp_target(monitored_edge, monitors)
+            if inferred is not None:
+                robot_name = robot_name or inferred[0]
+                obj_name = obj_name or inferred[1]
+        if robot_name is None or obj_name is None:
+            return None, [
+                f"recovery step {step_index} upright_object needs robot_name and obj_name"
+            ]
+        base.update(
+            {
+                "robot_name": str(robot_name),
+                "obj_name": str(obj_name),
+                "pre_grasp_dis": step.get("pre_grasp_dis", 0.08),
+                "pre_place_dis": step.get("pre_place_dis", 0.08),
+                "force_valid": step.get("force_valid", True),
+            }
+        )
+        if "x" in step:
+            base["x"] = step["x"]
+        if "y" in step:
+            base["y"] = step["y"]
         return base, []
 
     robot_name = step.get("robot_name", step.get("arm"))
@@ -727,6 +780,8 @@ def _expand_recovery_binding(
 
     if binding.get("repeat_until_success", True):
         for recovery_edge, step in generated_edges:
+            if _step_type(step) == "upright_object":
+                continue
             recovery_monitor_sequence = _recovery_step_monitor_sequence(
                 step,
                 fallback_monitor_sequence=monitor_sequence,
@@ -824,6 +879,18 @@ def _expand_monitor_sequence(binding: Mapping[str, Any]) -> list[dict[str, Any]]
                     },
                 }
             )
+        elif monitor_type == "object_fallen":
+            objects = monitor.get("objects")
+            if objects is None:
+                objects = [monitor["obj_name"]]
+            monitor_sequence.extend(
+                _object_fallen_monitors(
+                    _as_list(objects),
+                    threshold=monitor.get(
+                        "upright_threshold", monitor.get("threshold", 0.65)
+                    ),
+                )
+            )
         else:
             raise ValueError(f"Unsupported recovery monitor type '{monitor_type}'.")
 
@@ -852,6 +919,20 @@ def _object_moved_monitors(
         {
             "fn": "monitor_object_moved",
             "kwargs": {"obj_name": obj_name, "threshold": threshold},
+        }
+        for obj_name in objects
+    ]
+
+
+def _object_fallen_monitors(
+    objects: list[str],
+    *,
+    threshold: float = 0.65,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "fn": "monitor_object_fallen",
+            "kwargs": {"obj_name": obj_name, "upright_threshold": threshold},
         }
         for obj_name in objects
     ]
@@ -892,6 +973,17 @@ def _expand_recovery_step_actions(
             obj_name=step["obj_name"],
             pre_grasp_dis=float(step.get("pre_grasp_dis", 0.1)),
             force_valid=bool(step.get("force_valid", False)),
+        )
+
+    if step_type == "upright_object":
+        return _upright_object_actions(
+            robot_name=step["robot_name"],
+            obj_name=step["obj_name"],
+            pre_grasp_dis=float(step.get("pre_grasp_dis", 0.08)),
+            pre_place_dis=float(step.get("pre_place_dis", 0.08)),
+            force_valid=bool(step.get("force_valid", True)),
+            x=step.get("x"),
+            y=step.get("y"),
         )
 
     if step_type == "action" or "left_arm_action" in step or "right_arm_action" in step:
@@ -964,6 +1056,36 @@ def _multi_regrasp_actions(
     return actions
 
 
+def _upright_object_actions(
+    *,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    pre_place_dis: float,
+    force_valid: bool,
+    x: Any = None,
+    y: Any = None,
+) -> dict[str, Any]:
+    kwargs = {
+        "robot_name": robot_name,
+        "obj_name": obj_name,
+        "pre_grasp_dis": pre_grasp_dis,
+        "pre_place_dis": pre_place_dis,
+        "force_valid": force_valid,
+    }
+    if x is not None:
+        kwargs["x"] = x
+    if y is not None:
+        kwargs["y"] = y
+    action = {
+        "fn": "upright_object",
+        "kwargs": kwargs,
+    }
+    if "left" in robot_name:
+        return {"left_arm_action": action, "right_arm_action": None}
+    return {"left_arm_action": None, "right_arm_action": action}
+
+
 def _regrasp_step_objects(step: Mapping[str, Any]) -> list[str]:
     arms = step.get("arms")
     if arms:
@@ -1001,6 +1123,8 @@ def _recovery_step_label(
         if step.get("arms"):
             return "regrasp_objects"
         return f"regrasp_{_sanitize_id(step['obj_name'])}"
+    if step_type == "upright_object":
+        return f"upright_{_sanitize_id(step['obj_name'])}"
     return _sanitize_id(step.get("name", step_type))
 
 
@@ -1082,6 +1206,7 @@ def _validate_recovery_authoring_spec(recovery_spec: Mapping[str, Any]) -> None:
         "obj_name",
         "robot_name",
         "threshold",
+        "upright_threshold",
         "fn",
         "kwargs",
     }
@@ -1091,8 +1216,11 @@ def _validate_recovery_authoring_spec(recovery_spec: Mapping[str, Any]) -> None:
         "obj_name",
         "arms",
         "pre_grasp_dis",
+        "pre_place_dis",
         "force_valid",
         "edge_id",
+        "x",
+        "y",
         "left_arm_action",
         "right_arm_action",
         "name",
@@ -1320,6 +1448,9 @@ def _add_recovery_branches(
             raise ValueError(f"Recovery branch references unknown edge_id '{edge_id}'.")
 
         edge = graph.edges[edge_id]
+        if _is_place_hold_monitor_branch(edge, branch):
+            continue
+
         monitor_sequence = [
             _compile_monitor(monitor, monitor_module, env=env)
             for monitor in branch.get("monitor_sequence", [])
@@ -1349,6 +1480,30 @@ def _add_recovery_branches(
             monitor_index=monitor_index,
             recovery_edges=branch_recovery_edges,
         )
+
+
+def _is_place_hold_monitor_branch(edge: Any, branch: Mapping[str, Any]) -> bool:
+    """Place actions intentionally release objects, so hold monitors are false positives."""
+    if not (
+        _compiled_action_name(edge.left_arm_action) == "place_on_table"
+        or _compiled_action_name(edge.right_arm_action) == "place_on_table"
+    ):
+        return False
+
+    monitor_sequence = branch.get("monitor_sequence", [])
+    if not monitor_sequence:
+        return False
+    return all(
+        isinstance(monitor, Mapping) and monitor.get("fn") == "monitor_object_held"
+        for monitor in monitor_sequence
+    )
+
+
+def _compiled_action_name(action: Any) -> str | None:
+    if action is None:
+        return None
+    func = getattr(action, "func", action)
+    return getattr(func, "__name__", None)
 
 
 def _validate_recovery_branch_path(
