@@ -1,45 +1,84 @@
 # DexSim 0.3.11 Agent 原子动作迁移复现指南
 
 这份指南用于在本地 DexSim 0.3.11 运行时复现当前 Agent 原子动作迁移验证结果。
-当前分支已经为 DexSim 0.4.0 兼容迁移做了准备，但下面记录的验证结果是在
-DexSim 0.3.11 上得到的。请先使用这份指南验证公共原子动作接口、Agent adapter
-路径、graph recovery runtime、视频录制和输出 artifacts，再判断哪些部分还需要针对
-DexSim 0.4.0 继续修改。
+当前分支已经为 DexSim 0.4.0 兼容迁移做了准备，但本文记录的验证基线是在
+DexSim 0.3.11 上得到的。请先用这份指南确认公共原子动作接口、Agent adapter
+路径、graph recovery runtime、视频录制和输出 artifacts 是否正常，再判断哪些部分需要继续针对
+DexSim 0.4.0 修改。
 
-## 范围
+## 复现结论
 
-已验证分支：
+这套复现流程在本地已经实际跑通过，前提条件如下：
 
-```bash
-git switch ljd/agentchoard_dexsim040_migration
+- 本地 conda 环境：`embodichain`
+- 实际 DexSim 版本：`0.3.11`
+- 工作目录：`/home/dex/桌面/EmbodiChain/dexsim040/agentchoard`
+- 运行方式：全部使用 `conda run --no-capture-output -n embodichain ...`
+- `pour_water_recovery_compare.py` 使用离线 cached artifacts，不实时调用 LLM
+- 默认错误注入是 bottle 水平平移，不主动把 bottle 弄倒
+
+本地已验证结果：
+
+- `tests/sim/agent`、`tests/sim/atomic_actions`、
+  `tests/sim/utility/test_solver_utils.py`：`103 passed`
+- `grasp_cup.py`：生成正常视角视频，Agent skill pick-place 路径可跑
+- `pour_water_recovery_compare.py --case all --continue_on_case_failure`：
+  10 个 case 全部完成，`summary.tsv` 中 `expectation_matched=True`
+
+本地验证输出示例：
+
+```text
+outputs/grasp_cup_dexsim040_migration_candidates_20260515_1502
+outputs/pour_water_recovery_compare_20260515_1532_translation_error_full_matrix
 ```
 
-这次复现覆盖的主要改动：
+这些输出目录只是验证记录示例，不要求复现者必须使用相同目录名。
+
+## 覆盖范围
+
+这次复现覆盖以下改动：
 
 - 公共原子动作函数式 API：
-  `move`, `pick_up`, `place`, `gripper_open` 和 `gripper_close`。
-- Agent 原子技能 adapter 路径，用于通过 public move、place、gripper 和 grasp 执行。
-- 支持 monitor 触发 recovery branch 的 graph recovery runtime。
-- DexSim renderer 兼容层：在 DexSim 0.3.11 下保持 raster 渲染，同时为
-  DexSim 0.4.0 的 `hybrid` 配置做准备。
+  `move`, `pick_up`, `place`, `gripper_open` 和 `gripper_close`
+- Agent 原子技能 adapter 路径：
+  public move、place、gripper、grasp 的接入和 fallback 逻辑
+- `embodichain.lab.sim.atom_actions` 旧 import path 兼容 shim
+- 支持 monitor 触发 recovery branch 的 graph recovery runtime
+- task-state validation，用于避免只看脚本退出码而忽略视频/物理状态
+- DexSim renderer 兼容层：
+  在 DexSim 0.3.11 下保持 raster 渲染，同时为 DexSim 0.4.0 的 `hybrid`
+  配置做准备
 - 两个 gym 验证 demo：
-  `grasp_cup.py` 和 `pour_water_recovery_compare.py`。
+  `grasp_cup.py` 和 `pour_water_recovery_compare.py`
 
-## 环境
+当前复现不覆盖：
+
+- 真正 DexSim 0.4.0 环境下的完整视频和物理结果
+- 无缓存 artifacts 时的实时 LLM graph 生成质量
+- strict semantic grasp 在所有物体和所有场景下的稳定性
+
+## 环境检查
 
 所有命令都在仓库根目录下运行：
-
-```bash
-cd "/home/dex/desktop/EmbodiChain/dexsim040/agentchoard"
-```
-
-如果本地路径包含中文字符，请使用实际路径：
 
 ```bash
 cd "/home/dex/桌面/EmbodiChain/dexsim040/agentchoard"
 ```
 
-使用已有 conda 环境：
+确认当前分支：
+
+```bash
+git branch --show-current
+git status --short --branch
+```
+
+预期分支：
+
+```text
+ljd/agentchoard_dexsim040_migration
+```
+
+确认 DexSim 版本：
 
 ```bash
 conda run --no-capture-output -n embodichain python - <<'PY'
@@ -58,10 +97,64 @@ PY
 
 - 迁移分支中的项目元数据当前指向 `dexsim_engine==0.4.0`。如果目标是严格复现当前
   0.3.11 验证结果，不要直接从头重建环境。
-- 在 0.3.11 下保持默认 raster 渲染路径。除非明确要测试 renderer 改动，否则不要传入
+- 在 0.3.11 下保持默认 raster 渲染路径。除非明确测试 renderer 改动，否则不要传入
   `--enable_rt`。
-- 使用 `conda run --no-capture-output -n embodichain ...`；直接运行裸 `python`
-  可能因为缺少 `gymnasium` 等包而失败。
+- 不要直接运行裸 `python`。裸 `python` 可能不在 `embodichain` 环境里，常见错误是
+  `ModuleNotFoundError: No module named 'gymnasium'`。
+
+## 必需资源
+
+### Python / Conda 环境
+
+必须能在 `embodichain` 环境中 import 这些依赖：
+
+```bash
+conda run --no-capture-output -n embodichain python - <<'PY'
+import dexsim
+import gymnasium
+import torch
+import cv2
+print("dexsim", dexsim.__version__)
+print("torch", torch.__version__)
+print("ok")
+PY
+```
+
+### DexSim / GPU / 渲染
+
+本地验证使用 GPU + Vulkan + Raster renderer。运行 demo 时日志里应看到类似信息：
+
+```text
+Renderer: Raster
+Using CUDA device: NVIDIA ...
+Vulkan device driver: ...
+```
+
+如果视频黑屏、视角异常或窗口无法创建，优先排查 renderer/camera/GPU，而不是先改
+Agent 原子动作逻辑。
+
+### Agent artifacts 缓存
+
+`scripts/tutorials/gym/pour_water_recovery_compare.py` 默认按离线方式运行，会从下面目录复制预生成的 graph artifacts：
+
+```text
+outputs/agent_repro_compare
+```
+
+这样评审或测试人员在做确定性 demo 验证时，不需要实时调用 LLM。
+
+运行 pour-water matrix 前，先检查这些文件是否存在：
+
+```bash
+test -f "outputs/agent_repro_compare/single_normal/artifacts/agent_task_graph.json"
+test -f "outputs/agent_repro_compare/single_recovery/artifacts/agent_recovery_spec.json"
+test -f "outputs/agent_repro_compare/dual_normal/artifacts/agent_task_graph.json"
+test -f "outputs/agent_repro_compare/dual_recovery/artifacts/agent_recovery_spec.json"
+```
+
+如果这些文件不存在，`pour_water_recovery_compare.py` 可能会尝试进入 graph 生成流程，
+但默认离线 LLM stub 会阻止实时 LLM 调用，最终报错。此时应先从验证机器复制
+`outputs/agent_repro_compare`，或者配置真实 LLM 后显式重新生成 artifacts。
 
 ## 静态检查和单元测试
 
@@ -82,30 +175,13 @@ conda run --no-capture-output -n embodichain pytest -q \
 103 passed
 ```
 
-如果测试通过，第三方包产生的 warnings 可以接受。
+第三方 warnings 可以接受，但以下情况需要处理：
 
-## 必需的 Agent Artifacts 缓存
-
-`scripts/tutorials/gym/pour_water_recovery_compare.py` 默认按离线方式运行，会从下面目录复制预生成的 graph artifacts：
-
-```text
-outputs/agent_repro_compare
-```
-
-这样评审或测试人员在做确定性 demo 验证时，不需要实时调用 LLM。
-
-运行 pour-water matrix 前，先检查这些文件是否存在：
-
-```bash
-test -f "outputs/agent_repro_compare/single_normal/artifacts/agent_task_graph.json"
-test -f "outputs/agent_repro_compare/single_recovery/artifacts/agent_recovery_spec.json"
-test -f "outputs/agent_repro_compare/dual_normal/artifacts/agent_task_graph.json"
-test -f "outputs/agent_repro_compare/dual_recovery/artifacts/agent_recovery_spec.json"
-```
-
-如果缓存缺失，请从验证机器复制 `outputs/agent_repro_compare` artifact bundle，
-或者在已配置 LLM 的环境中重新生成 artifacts。默认 compare runner 会安装离线 LLM stub，
-正常复现时预期使用 cached artifacts。
+- test collection 失败：通常是环境或 import path 问题
+- `solver_utils` 失败：优先检查 CobotMagic chain 的 CPU/GPU device 处理
+- atomic actions 测试失败：优先检查 `MoveActionCfg`、`PickUpActionCfg`、
+  `PlaceActionCfg`、`GripperActionCfg` 的接口是否被改动
+- agent 测试失败：优先检查 graph spec、monitor/recovery binding、task-state validation
 
 ## Demo 1：Agent Skill Pick-Place
 
@@ -134,9 +210,16 @@ ${OUT}.runner.log
 - 相机视角应清楚显示桌面、机械臂和 mug。
 - Agent skill 序列应完成 pick、lift、move、place 和 return 步骤。
 - `summary.tsv` 应标记运行成功。
+- 视频长度应足够观察完整动作，不应只有很短一段。
 
-如果视频是黑屏、画面裁切异常，或者视角不符合预期，请优先调试 DexSim
-renderer/camera 路径，再调试 Agent action 逻辑。
+如果 `grasp_cup.py` 失败，优先按这个顺序判断：
+
+1. 视频是否正常：黑屏/裁切/奇怪视角通常是 renderer/camera 问题。
+2. mug 是否可见且在桌面上：如果场景初始化异常，先排查 assets/cache。
+3. 是否是 grasp 失败：semantic grasp 对 cache、approach direction、candidate ranking
+   比较敏感。
+4. 是否是 place 失败：重点看 public place 的 upright pose、释放高度和 gripper open。
+5. 是否是回初始位姿失败：重点看 `back_to_initial_pose` 的 public move 规划。
 
 ## Demo 2：Pour-Water Recovery Matrix
 
@@ -195,10 +278,13 @@ dual_error_with_recovery
 --error_injection_offset 0.12,0.0,0.0
 ```
 
-它不应主动将 bottle 弄倒。只有在需要做 fallen-object 压力测试时，才使用
-`--error_injection_type fallen_object`。
+它不应主动将 bottle 弄倒。只有在需要做 fallen-object 压力测试时，才使用：
 
-## 可选关键帧检查
+```bash
+--error_injection_type fallen_object
+```
+
+## 关键帧检查
 
 可以使用下面的辅助脚本抽取代表性视频帧：
 
@@ -241,52 +327,186 @@ PY
 - 默认错误注入应表现为 bottle 平移，而不是将 bottle 弄倒。
 - recovery case 应能恢复并完成 pour-water 序列。
 - no-recovery error case 应记录足够长的失败状态视频，便于检查。
+- 如果脚本返回成功但视频里物体明显飞出、倒下或被夹偏拖动，应按失败处理。
 
-## 常见失败
+## 常见失败和排查建议
 
-`ModuleNotFoundError: No module named 'gymnasium'`
-: 使用 `conda run --no-capture-output -n embodichain ...`，不要使用裸
-  `python`。
+### 1. 缺少 `gymnasium`
 
-缺少 cached artifacts
-: 从验证机器复制 `outputs/agent_repro_compare`，或者配置 LLM 环境并显式重新生成
-  artifacts。
-
-视频视角异常或黑屏
-: 优先检查 DexSim renderer/camera 兼容性。在 DexSim 0.3.11 下保持默认 raster
-  renderer。不要在这份复现流程中使用 DexSim 0.4.0 的 hybrid renderer 路径。
-
-DexSim 0.4.0 下物理结果不同
-: 将其视为 DexSim 0.4.0 迁移问题，而不是 0.3.11 baseline 复现失败。安装
-  DexSim 0.4.0 后重新运行相同命令，并对比视频、`summary.tsv` 和
-  `case_result.json`。
-
-## PR Commit Message 格式
-
-标题使用下面任一前缀：
+现象：
 
 ```text
-NEW:
-ENH:
-FIX:
-OTH:
+ModuleNotFoundError: No module named 'gymnasium'
 ```
 
-commit 正文应使用下面格式：
+可能原因：
+
+- 使用了裸 `python`，没有进入 `embodichain` conda 环境。
+
+处理：
+
+```bash
+conda run --no-capture-output -n embodichain python ...
+```
+
+### 2. 缺少 cached artifacts
+
+现象：
+
+- `pour_water_recovery_compare.py` 报 offline LLM stub 错误。
+- 日志中出现类似“expected cached agent artifacts and should not call the LLM”。
+- case 的 `artifacts/agent_task_graph.json` 或 `agent_recovery_spec.json` 缺失。
+
+可能原因：
+
+- 从 GitHub 新 clone 后没有 `outputs/agent_repro_compare`。
+- `outputs/` 通常不适合作为源码提交内容，因此 artifacts 需要单独提供。
+
+处理：
+
+- 从验证机器复制 `outputs/agent_repro_compare`。
+- 或者配置真实 LLM，使用 `--regenerate` 重新生成 artifacts。
+- 如果目的是验证 runtime/action 迁移，优先使用缓存 artifacts，避免把 LLM 输出不稳定性混入复现。
+
+### 3. 视频黑屏、视角异常或画面被裁切
+
+可能原因：
+
+- DexSim renderer/camera 兼容问题。
+- 在 DexSim 0.3.11 下误用了 0.4.0 的 `hybrid` 或 RT 路径。
+- GPU/Vulkan 初始化异常。
+- `--enable_rt` 改变了渲染路径。
+
+处理：
+
+- 不传 `--enable_rt`，保持默认 raster。
+- 检查日志中 renderer 是否为 `Raster`。
+- 优先确认 `grasp_cup.py` 的单 demo 视频正常，再跑完整 matrix。
+
+### 4. 单测通过但 demo 失败
+
+可能原因：
+
+- 单测主要覆盖接口、配置传递和 graph spec，不等价于真实物理和相机验证。
+- 真实 demo 还依赖 assets、DexSim 物理、GPU、camera recorder、cached artifacts。
+
+处理：
+
+- 先看 `${OUT}.runner.log`。
+- 再看 `summary.tsv` 和 `case_result.json`。
+- 最后抽帧看视频，不能只看退出码。
+
+### 5. `grasp_cup.py` 抓取失败
+
+可能原因：
+
+- semantic grasp cache 或候选方向不适配当前 mug。
+- 夹爪接触几何和 candidate ranking 没有选中稳定抓取。
+- place 时释放高度或 upright pose 不合适。
+- DexSim 版本变化导致接触物理结果漂移。
+
+处理：
+
+- 先确认默认参数下是否失败，不要一开始开启 strict semantic grasp。
+- 检查 `summary.tsv` 和 public grasp attempt 日志。
+- 对比视频中失败发生在 grasp、lift、move 还是 place 阶段。
+
+### 6. `pour_water_recovery_compare.py` clean case 失败
+
+可能原因：
+
+- cached artifacts 与当前代码或场景配置不匹配。
+- public place / public move fallback 行为变化。
+- CobotMagic solver device 处理异常。
+- 初始物体位置或 assets 不一致。
+
+处理：
+
+- 先单独跑 `single_clean_no_recovery`。
+- 再跑 `dual_clean_no_recovery`。
+- clean case 未通过前，不建议继续分析 recovery case。
+
+### 7. error no-recovery case 没有失败
+
+可能原因：
+
+- 错误注入 offset 太小，没有触发 monitor。
+- error injection edge 或 step 配置不对。
+- cached graph 中 monitor binding 与当前 case 不匹配。
+
+处理：
+
+- 检查 runner log 是否出现 `Injected forced recovery error`。
+- 检查是否出现 `Monitor function monitor_object_moved triggered`。
+- 必要时显式设置：
+
+```bash
+--error_injection_offset 0.12,0.0,0.0
+--error_injection_type misplaced_object
+```
+
+### 8. error with-recovery case 失败
+
+可能原因：
+
+- monitor 已触发，但 recovery branch 没有正确执行。
+- recovery artifacts 不是当前 case 对应的版本。
+- public action 规划失败，例如 grasp、place 或 back_to_initial_pose 失败。
+- task-state validation 判定视频/物理状态不合格。
+
+处理：
+
+- 检查 `${OUT}/<case>/artifacts/agent_compiled_graph.json`。
+- 检查 `${OUT}/<case>/artifacts/case_result.json`。
+- 看视频确认失败发生在 regrasp、move、place 还是 final validation。
+
+### 9. 默认错误注入把 bottle 弄倒
+
+正常情况下不应该发生。当前默认应是：
 
 ```text
-WHY: <为什么需要这次修改>
-
-URL: <需求链接、bug 链接或 N/A>
-
-TEST: <本次影响范围和已执行的测试；内容应具体，不能只写很短的占位说明>
+--error_injection_type misplaced_object
+--error_injection_offset 0.12,0.0,0.0
 ```
 
-对这次迁移，一个合适的 PR 标题是：
+如果 bottle 倒下，可能原因：
 
-```text
-ENH: Add dexsim040 agent atomic action migration
-```
+- 命令显式传入了 `--error_injection_type fallen_object`。
+- 使用了旧版本脚本，默认仍是 fallen-object。
+- 物体被机械臂碰撞后倒下，而不是 error injection 直接弄倒。
 
-PR 描述中需要明确说明：该分支为 DexSim 0.4.0 兼容迁移做了准备，但这份指南中的复现
-baseline 使用的是 DexSim 0.3.11。
+处理：
+
+- 先检查 runner log 中的 `error_type=`。
+- 如果 log 显示 `misplaced_object` 但视频中后续倒下，说明是动作/碰撞导致，需要继续分析具体帧。
+
+### 10. DexSim 0.4.0 下结果不同
+
+这是预期风险，不应直接视为 0.3.11 baseline 复现失败。
+
+可能差异包括：
+
+- renderer / camera / recorder 行为变化
+- contact physics 细节变化
+- articulation 或 object pose 同步时序变化
+- `WorldConfig` 或 `Renderer` enum 差异
+
+处理：
+
+- 先用 0.3.11 跑通本文 baseline。
+- 再在 0.4.0 环境下运行同样命令。
+- 对比 `summary.tsv`、`case_result.json`、runner log 和抽帧图片。
+- 如果只有视频视角异常，优先修 camera/renderer。
+- 如果视频正常但物理失败，优先分析 grasp/place/recovery 的动作轨迹。
+
+## 需要提交给评审或测试人员的材料
+
+建议同时提供：
+
+- 当前分支名和 commit hash
+- `docs/source/guides/dexsim0311_agent_atomic_action_repro.md`
+- `outputs/agent_repro_compare` artifact bundle
+- `grasp_cup.py` 的 runner log、`summary.tsv` 和视频
+- `pour_water_recovery_compare.py --case all` 的 runner log、`summary.tsv`、`report.md`
+  和关键视频
+- 如果 0.4.0 下失败，提供 0.3.11 与 0.4.0 的同 case 对比视频和日志
