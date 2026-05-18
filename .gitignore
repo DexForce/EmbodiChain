@@ -200,3 +200,18 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+# ---------------------------------------------------------------------------
+# Reproduction artifacts (override ignore rules above for reproducibility)
+# ---------------------------------------------------------------------------
+# Agent graph artifacts needed by pour_water_recovery_compare.py (offline mode)
+!outputs/agent_repro_compare/
+!outputs/agent_repro_compare/**/artifacts/
+!outputs/agent_repro_compare/**/artifacts/*.json
+
+# Grasp annotator cache needed by grasp_cup.py
+!cache/grasp_annotator_cache/
+!cache/grasp_annotator_cache/*.npy
+
+# One-click reproduction script
+!reproduce.sh

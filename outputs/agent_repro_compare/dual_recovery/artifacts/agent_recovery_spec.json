@@ -1,0 +1,189 @@
+{
+  "task": "pour_water",
+  "recovery_bindings": [
+    {
+      "edge_id": "e01_grasp_objects",
+      "failure_name": "objects_misplaced",
+      "monitors": [
+        {
+          "type": "object_moved",
+          "objects": [
+            "bottle",
+            "cup"
+          ],
+          "threshold": 0.02
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp_both",
+          "arms": {
+            "right_arm": "bottle",
+            "left_arm": "cup"
+          },
+          "pre_grasp_dis": 0.1
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e12_lift_cup",
+      "failure_name": "cup_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e23_move_cup_to_position",
+      "failure_name": "cup_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e34_move_bottle_to_offset",
+      "failure_name": "bottle_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e45_rotate_to_pour",
+      "failure_name": "bottle_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e56_rotate_back",
+      "failure_name": "bottle_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e67_place_objects",
+      "failure_name": "objects_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "threshold": 0.05
+        },
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp_both",
+          "arms": {
+            "right_arm": "bottle",
+            "left_arm": "cup"
+          },
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "source",
+      "repeat_until_success": true
+    }
+  ]
+}
