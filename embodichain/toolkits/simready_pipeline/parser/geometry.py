@@ -107,7 +107,6 @@ class GeometryParser(AssetParser):
                 "remove_non_manifold", True
             ),
             triangulate=GEOMETRY_CLEANUP_CONFIG.get("triangulate", False),
-            fill_hole_sides=GEOMETRY_CLEANUP_CONFIG.get("fill_hole_sides", 8),
         )
 
         try:

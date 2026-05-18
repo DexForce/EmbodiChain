@@ -43,7 +43,6 @@ def _load_ingest_config() -> dict:
 
 INGEST_CONFIG = _load_ingest_config()
 CANOCAIL_ASSET_NAME = INGEST_CONFIG.get("canonical_asset_name", "asset.obj")
-CANOCAIL_TEXTURE_NAME = INGEST_CONFIG.get("canonical_texture_name", "")
 UNPROCESSED_FORMATS = INGEST_CONFIG.get(
     "unprocessed_formats", [".urdf", ".usd"]
 )  # 当前先复制，后续可以考虑解析

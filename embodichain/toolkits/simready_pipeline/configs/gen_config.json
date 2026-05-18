@@ -1,7 +1,6 @@
 {
   "ingest": {
     "canonical_asset_name": "asset.obj",
-    "canonical_texture_name": "",
     "unprocessed_formats": [".urdf", ".usd"],
     "parseable_mesh_formats": [".glb", ".gltf", ".obj", ".ply", ".stl"],
     "blender_texture_size": 2048,
@@ -9,10 +8,10 @@
   },
   "geometry_cleanup": {
     "ratio": 0.5,
+    "weld_distance": 0.0001,
     "merge_dist": 0.00001,
     "remove_non_manifold": true,
-    "triangulate": false,
-    "fill_hole_sides": 8
+    "triangulate": false
   },
   "llm": {
     "azure_openai": {

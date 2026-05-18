@@ -169,7 +169,6 @@ def process_obj(
     merge_dist=1e-5,
     remove_non_manifold=True,
     triangulate=False,
-    fill_hole_sides=8,
 ):
     clear_scene()
     objs = load_obj(input_path)
@@ -188,7 +187,6 @@ def process_obj(
         triangulate=triangulate,
     )
     decimate_optimized(obj, ratio=ratio, weld_distance=weld_distance)
-    # fill_holes(obj, max_sides=fill_hole_sides)
 
     export_obj(obj, output_path)
     print("Clean mesh saved to:", output_path)
