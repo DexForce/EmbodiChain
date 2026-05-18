@@ -36,6 +36,16 @@ MATERIAL_CACHE_DIR = SIM_CACHE_DIR / "mat_cache"
 CONVEX_DECOMP_DIR = SIM_CACHE_DIR / "convex_decomposition"
 REACHABLE_XPOS_DIR = SIM_CACHE_DIR / "robot_reachable_xpos"
 
+
+def _dexsim_gte_040() -> bool:
+    """Return True if dexsim >= 0.4.0."""
+    version = getattr(dexsim, "__version__", "0.0.0")
+    parts = version.split(".")[:2]
+    try:
+        return (int(parts[0]), int(parts[1])) >= (0, 4)
+    except (ValueError, IndexError):
+        return False
+
 from dexsim.types import (
     Backend,
     ThreadMode,
@@ -225,10 +235,13 @@ class SimulationManager:
         self._window: Windows | None = None
         self._is_registered_window_control = False
 
-        fps = int(1.0 / sim_config.physics_dt)
-        self._world.set_physics_fps(fps)
+        # set_physics_fps and set_time_scale are removed in dexsim 0.4.0;
+        # physics timing is now controlled solely via set_delta_time.
+        if not _dexsim_gte_040():
+            fps = int(1.0 / sim_config.physics_dt)
+            self._world.set_physics_fps(fps)
+            self._world.set_time_scale(1.0)
 
-        self._world.set_time_scale(1.0)
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
@@ -243,9 +256,8 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        # set unique material path to accelerate material creation.
-        # TODO: This will be removed.
-        if self.sim_config.enable_rt is False:
+        # set_unique_mat_path is removed in dexsim 0.4.0.
+        if not _dexsim_gte_040() and self.sim_config.enable_rt is False:
             self._env.set_unique_mat_path(
                 os.path.join(self._material_cache_dir, "default_mat")
             )
