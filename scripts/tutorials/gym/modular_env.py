@@ -79,7 +79,7 @@ class ExampleEventCfg:
             ),
             "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
             "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
-            "intensity_range": [50.0, 100.0],
+            "intensity_range": [10.0, 30.0],
         },
     )
 
@@ -145,7 +145,7 @@ class ExampleCfg(EmbodiedEnvCfg):
                 uid="point",
                 light_type="point",
                 color=(1.0, 1.0, 1.0),
-                intensity=50.0,
+                intensity=20.0,
                 init_pos=(0, 0, 2),
             )
         ]
