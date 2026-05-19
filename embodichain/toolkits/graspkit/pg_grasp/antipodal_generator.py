@@ -79,7 +79,7 @@ class GraspGeneratorCfg:
     deviate more than this threshold from perpendicular to the approach are
     discarded during grasp pose computation."""
 
-    is_partial_annotate: bool = True
+    is_partial_annotate: bool = False
     """When ``True``, the annotator allows selecting a partial region of the 
     mesh for grasp sampling. If ``False``, the entire mesh is used."""
 
