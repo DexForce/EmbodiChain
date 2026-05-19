@@ -24,6 +24,7 @@ jobs:
         - "/usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d"
         - "/tmp/.X11-unix:/tmp/.X11-unix"
         - "/dev/shm/shared:/dev/shm/shared"
+        - "/usr/share/nvidia:/usr/share/nvidia"
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
