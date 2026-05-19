@@ -66,7 +66,7 @@ def initialize_simulation(args):
     sim = SimulationManager(config)
 
     light = sim.add_light(
-        cfg=LightCfg(uid="main_light", intensity=30.0, init_pos=(0, 0, 2.0))
+        cfg=LightCfg(uid="main_light", intensity=10.0, init_pos=(0, 0, 2.0))
     )
 
     return sim

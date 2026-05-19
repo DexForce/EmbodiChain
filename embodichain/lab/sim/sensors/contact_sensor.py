@@ -561,7 +561,7 @@ class ContactSensor(BaseSensor):
             self._visualizer.add_points(
                 points=contact_position_world.to("cpu").numpy(), color=rgba
             )
-            # self._visualizer.set_point_size(point_size)
+            self._visualizer.set_point_size(point_size)
         else:
             if isinstance(self._visualizer, dexsim.models.PointCloud):
                 self._visualizer.clear()
