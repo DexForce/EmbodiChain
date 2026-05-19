@@ -24,6 +24,7 @@ jobs:
         - "/usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d"
         - "/tmp/.X11-unix:/tmp/.X11-unix"
         - "/dev/shm/shared:/dev/shm/shared"
+        - "/usr/share/nvidia:/usr/share/nvidia"
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
@@ -135,12 +136,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests
         run: |
-          pip install -e .[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
-          pip uninstall pymeshlab -y
-          pip install pymeshlab==2023.12.post3
-          pip install numpy==1.26.4
           pytest tests
 
   publish:
