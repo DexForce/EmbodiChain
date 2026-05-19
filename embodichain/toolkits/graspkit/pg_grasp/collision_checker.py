@@ -192,7 +192,10 @@ class ConvexCollisionChecker:
             collision_threshold: Collision threshold in meters. A point is considered colliding if its signed distance to the hull interior is <= this threshold. This allows for a margin of error in collision checking, where a small positive threshold can be used to consider points near the surface as colliding, and a small negative threshold can be used to allow for slight penetration without considering it a collision.
             is_visual: Whether to visualize the collision checking results for debugging purposes. If set to True, the code will generate visualizations of the query points colored by their collision status (e.g., red for colliding points and green for non-colliding points) along with the original mesh. This can help in understanding and verifying the collision checking process, especially during development and testing.
         Returns:
-            is_pose_collide: [B, ] boolean tensor indicating whether each point cloud in the
+            is_point_collide: [B, n_point] boolean tensor indicating whether a point cloud is collided.
+            point_signed_distance: [B, n_point] of float. Signed distance from the point cloud to the object surface.
+                Negative means the point cloud is penetrating into the object,
+                positive means the point cloud is outside the object.
         """
         n_batch = batch_points.shape[0]
         point_signed_distance, is_point_collide = (
@@ -204,31 +207,7 @@ class ConvexCollisionChecker:
                 collision_threshold=collision_threshold,
             )
         )
-        is_pose_collide = is_point_collide.any(dim=-1)  # [B]
-        pose_surface_distance = point_signed_distance.min(dim=-1).values  # [B]
-        if is_visual:
-            # visualize result
-            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-            for i in range(n_batch):
-                query_points_o3d = o3d.geometry.PointCloud()
-                query_points_np = batch_points[i].cpu().numpy()
-                query_points_o3d.points = o3d.utility.Vector3dVector(query_points_np)
-                query_points_color = np.zeros_like(query_points_np)
-                query_points_color[is_point_collide[i].cpu().numpy()] = [
-                    1.0,
-                    0,
-                    0,
-                ]  # red for colliding points
-                query_points_color[~is_point_collide[i].cpu().numpy()] = [
-                    0,
-                    1.0,
-                    0,
-                ]  # green for non-colliding points
-                query_points_o3d.colors = o3d.utility.Vector3dVector(query_points_color)
-                o3d.visualization.draw_geometries(
-                    [self.mesh, query_points_o3d, frame], mesh_show_back_face=True
-                )
-        return is_pose_collide, pose_surface_distance
+        return is_point_collide, point_signed_distance
 
     def query(
         self,
