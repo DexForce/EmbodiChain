@@ -60,9 +60,11 @@ def batch_convex_collision_query(device=torch.device("cuda")):
     obj_faces = torch.tensor(obj_mesh.faces, dtype=torch.int32, device=device)
     test_pc = transform_points_mat(obj_verts, poses)
 
-    is_pose_collide, pose_surface_distance = collision_checker.query_batch_points(
+    is_point_collide, point_surface_distance = collision_checker.query_batch_points(
         test_pc, collision_threshold=0.003, is_visual=False
     )
+    is_pose_collide = is_point_collide.any(dim=1)
+    pose_surface_distance = point_surface_distance.min(dim=1).values
     assert is_pose_collide.sum().item() == 1
     assert abs(pose_surface_distance.max().item() - 0.8492) < 1e-2
 
