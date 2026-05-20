@@ -73,7 +73,7 @@ def ingest_one_asset(
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    asset_id = "assets"
+    asset_id = new_uuid()
     asset_root = output_root / asset_id
     asset_root.mkdir(parents=True, exist_ok=False)
 
@@ -97,7 +97,7 @@ def ingest_one_asset(
             candidates = sorted(p for p in files if p.suffix.lower() == suffix)
             if candidates:
                 return candidates[0]
-        return RuntimeError("No Vailed Mesh File")
+        raise RuntimeError("No Valid Mesh File")
 
     if has_unprocessed_format:
         source_file = None

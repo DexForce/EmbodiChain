@@ -1174,6 +1174,7 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
             if primary_view in [i[0] for i in cardinal_views]:
                 if primary_view == "view_from_front":
                     R = rot_y(-90)
+                    apply_rotations(mesh, R)
                 elif primary_view == "view_from_left":
                     R = rot_x(-90)
                     apply_rotations(mesh, R)
@@ -1231,6 +1232,7 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
             if primary_view in [i[0] for i in cardinal_views]:
                 if primary_view == "view_from_front":
                     R = rot_y(90)
+                    apply_rotations(mesh, R)
                 elif primary_view == "view_from_left":
                     R = rot_x(90)
                     apply_rotations(mesh, R)
