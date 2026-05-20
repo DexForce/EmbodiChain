@@ -828,7 +828,6 @@ class TestRandomizeArticulationMass:
             )
 
 
-
 class TestRandomizeIndirectLighting:
     """Tests for the randomize_indirect_lighting functor."""
 
