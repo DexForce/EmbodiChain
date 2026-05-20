@@ -7,7 +7,7 @@
     "blender_texture_name": "surface_texture.png",
     "blender_remesh_bake": {
       "voxel_size": 0.01,
-      "decimate_ratio": 0.5
+      "decimate_ratio": 0.9
     }
   },
   "geometry_cleanup": {
