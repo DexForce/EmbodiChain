@@ -658,6 +658,17 @@ class SimulationManager:
         self._default_plane.set_material(mat.get_instance("plane_mat").mat)
         self._visual_materials[mat_name] = mat
 
+    def set_ground_plane_visibility(self, visible: bool) -> None:
+        """_summary_
+
+        Args:
+            visible (bool): _description_
+        """
+        if visible:
+            self._default_plane.set_visible(True)
+        else:
+            self._default_plane.set_visible(False)
+
     def set_texture_cache(
         self, key: str, texture: Union[torch.Tensor, List[torch.Tensor]]
     ) -> None:
