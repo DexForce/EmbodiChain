@@ -21,6 +21,7 @@ import os
 import random
 import copy
 import numpy as np
+from pathlib import Path
 
 from typing import TYPE_CHECKING, Literal, Union, Dict
 
@@ -59,6 +60,7 @@ __all__ = [
     "set_rigid_object_visual_material",
     "set_rigid_object_group_visual_material",
     "randomize_visual_material",
+    "randomize_indirect_lighting",
 ]
 
 
@@ -742,3 +744,134 @@ class randomize_visual_material(Functor):
 
         env = self._env.sim.get_env()
         env.clean_materials()
+
+
+class randomize_indirect_lighting(Functor):
+    """Randomize the environment's indirect (IBL) lighting or emissive light.
+
+    This functor operates in one of two mutually exclusive modes:
+
+    * **HDR mode** — ``path`` is provided. A random ``.hdr`` file is chosen from
+      the folder on every call and applied via :meth:`set_indirect_lighting`.
+    * **Emissive mode** — ``emissive_color_range`` and/or
+      ``emissive_intensity_range`` are provided. The emissive light color and
+      intensity are sampled uniformly on every call and applied via
+      :meth:`set_emission_light`.
+
+    Providing both ``path`` and emissive parameters simultaneously is an error.
+
+    .. attention::
+        This functor applies the same lighting to all environments.
+
+    .. tip::
+        The ``path`` parameter is resolved via :func:`get_data_path`, so it
+        supports absolute paths, data-root-relative paths, and dataset-class
+        paths (e.g. ``"EnvMapHDR"``).
+
+        ``emissive_color_range`` is a pair of ``[r, g, b]`` lists representing
+        the lower and upper bounds for sampling the emissive color, e.g.
+        ``[[0.8, 0.8, 0.8], [1.0, 1.0, 1.0]]``.
+
+        ``emissive_intensity_range`` is a ``[min, max]`` pair for the emissive
+        intensity scalar, e.g. ``[80.0, 150.0]``.
+    """
+
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        """Initialize the functor.
+
+        Args:
+            cfg: The configuration of the functor.
+
+                * **HDR mode**: set ``params["path"]`` to a folder of ``.hdr`` files.
+                * **Emissive mode**: set ``params["emissive_color_range"]``
+                  (pair of RGB lists) and/or ``params["emissive_intensity_range"]``
+                  (pair of floats).
+
+            env: The environment instance.
+
+        Raises:
+            ValueError: If both HDR and emissive params are provided, or if
+                neither is provided.
+        """
+        super().__init__(cfg, env)
+
+        has_hdr = cfg.params.get("path", None) is not None
+        has_emissive = (
+            cfg.params.get("emissive_color_range", None) is not None
+            or cfg.params.get("emissive_intensity_range", None) is not None
+        )
+
+        if has_hdr and has_emissive:
+            raise ValueError(
+                "randomize_indirect_lighting: 'path' (HDR mode) and emissive "
+                "parameters ('emissive_color_range', 'emissive_intensity_range') "
+                "are mutually exclusive. Configure only one mode."
+            )
+        if not has_hdr and not has_emissive:
+            raise ValueError(
+                "randomize_indirect_lighting: provide either 'path' for HDR "
+                "mode, or 'emissive_color_range'/'emissive_intensity_range' for "
+                "emissive mode."
+            )
+
+        # HDR mode state
+        self._hdr_files: list[Path] = []
+        if has_hdr:
+            path = get_data_path(cfg.params["path"])
+            self._hdr_files = sorted(Path(path).glob("*.hdr"))
+            if not self._hdr_files:
+                logger.log_warning(
+                    f"No .hdr files found in '{path}'. "
+                    f"Indirect lighting randomization will be a no-op."
+                )
+
+        # Emissive mode state
+        self._emissive_color_range: tuple[list[float], list[float]] | None = (
+            cfg.params.get("emissive_color_range", None)
+        )
+        self._emissive_intensity_range: tuple[float, float] | None = (
+            cfg.params.get("emissive_intensity_range", None)
+        )
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: Union[torch.Tensor, None],
+        path: str | None = None,
+    ) -> None:
+        """Randomize lighting according to the configured mode.
+
+        In HDR mode a random ``.hdr`` file is selected and applied. In emissive
+        mode the emissive color and/or intensity are sampled and applied.
+
+        Args:
+            env: The environment instance.
+            env_ids: Target environment IDs (unused — lighting is global).
+            path: Ignored. Kept for interface compatibility with the event system.
+        """
+        if self._hdr_files:
+            # HDR mode
+            selected = random.choice(self._hdr_files)
+            env.sim.set_indirect_lighting(str(selected))
+            return
+
+        # Emissive mode
+        emissive_color: list[float] | None = None
+        if self._emissive_color_range is not None:
+            color_tensor = sample_uniform(
+                lower=torch.tensor(self._emissive_color_range[0]),
+                upper=torch.tensor(self._emissive_color_range[1]),
+                size=(1, 3),
+            )
+            emissive_color = color_tensor.squeeze(0).tolist()
+
+        emissive_intensity: float | None = None
+        if self._emissive_intensity_range is not None:
+            emissive_intensity = float(
+                np.random.uniform(
+                    self._emissive_intensity_range[0],
+                    self._emissive_intensity_range[1],
+                )
+            )
+
+        env.sim.set_emission_light(color=emissive_color, intensity=emissive_intensity)

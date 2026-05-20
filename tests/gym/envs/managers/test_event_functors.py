@@ -283,6 +283,13 @@ class MockSim:
     def update(self, step: int = 1):
         pass
 
+    def set_indirect_lighting(self, path: str) -> None:
+        self._last_indirect_lighting = path
+
+    def set_emission_light(self, color=None, intensity=None) -> None:
+        self._last_emission_color = color
+        self._last_emission_intensity = intensity
+
 
 class MockEnv:
     """Mock environment for event functor tests."""
@@ -324,6 +331,10 @@ from embodichain.lab.gym.envs.managers.randomization.physics import (
 from embodichain.lab.gym.envs.managers.randomization.spatial import (
     randomize_articulation_root_pose,
 )
+from embodichain.lab.gym.envs.managers.randomization.visual import (
+    randomize_indirect_lighting,
+)
+from embodichain.lab.gym.envs.managers import FunctorCfg
 
 
 class TestResolveUids:
@@ -815,3 +826,188 @@ class TestRandomizeArticulationMass:
                 mass_range=(0.5, 2.0),
                 link_names="nonexistent_link",
             )
+
+
+
+class TestRandomizeIndirectLighting:
+    """Tests for the randomize_indirect_lighting functor."""
+
+    def _make_cfg(self, params: dict) -> FunctorCfg:
+        cfg = FunctorCfg(func=randomize_indirect_lighting)
+        cfg.params = params
+        return cfg
+
+    # ------------------------------------------------------------------
+    # Init validation
+    # ------------------------------------------------------------------
+
+    def test_raises_when_no_params(self, tmp_path):
+        """Raises ValueError when neither HDR path nor emissive params given."""
+        env = MockEnv()
+        cfg = self._make_cfg({})
+        with pytest.raises(ValueError, match="provide either"):
+            randomize_indirect_lighting(cfg, env)
+
+    def test_raises_when_both_hdr_and_emissive(self, tmp_path):
+        """Raises ValueError when HDR path and emissive params are both set."""
+        hdr_dir = tmp_path / "hdr"
+        hdr_dir.mkdir()
+        (hdr_dir / "a.hdr").write_text("")
+        env = MockEnv()
+        cfg = self._make_cfg(
+            {
+                "path": str(hdr_dir),
+                "emissive_color_range": [[0.5, 0.5, 0.5], [1.0, 1.0, 1.0]],
+            }
+        )
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            randomize_indirect_lighting(cfg, env)
+
+    # ------------------------------------------------------------------
+    # HDR mode
+    # ------------------------------------------------------------------
+
+    def test_hdr_mode_calls_set_indirect_lighting(self, tmp_path):
+        """HDR mode calls set_indirect_lighting with one of the .hdr files."""
+        hdr_dir = tmp_path / "hdr"
+        hdr_dir.mkdir()
+        files = ["sky1.hdr", "sky2.hdr", "sky3.hdr"]
+        for f in files:
+            (hdr_dir / f).write_text("")
+        env = MockEnv()
+        cfg = self._make_cfg({"path": str(hdr_dir)})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        functor(env, None)
+
+        chosen = env.sim._last_indirect_lighting
+        assert chosen.endswith(".hdr")
+        assert any(chosen.endswith(f) for f in files)
+
+    def test_hdr_mode_does_not_call_set_emission_light(self, tmp_path):
+        """HDR mode must not touch emissive light."""
+        hdr_dir = tmp_path / "hdr"
+        hdr_dir.mkdir()
+        (hdr_dir / "sky.hdr").write_text("")
+        env = MockEnv()
+        cfg = self._make_cfg({"path": str(hdr_dir)})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        # Ensure attribute not set by HDR call
+        env.sim._last_emission_color = "sentinel"
+        env.sim._last_emission_intensity = "sentinel"
+
+        functor(env, None)
+
+        assert env.sim._last_emission_color == "sentinel"
+        assert env.sim._last_emission_intensity == "sentinel"
+
+    def test_hdr_mode_noop_when_no_hdr_files(self, tmp_path):
+        """HDR mode is a no-op (no crash) when the folder has no .hdr files."""
+        hdr_dir = tmp_path / "empty"
+        hdr_dir.mkdir()
+        env = MockEnv()
+        cfg = self._make_cfg({"path": str(hdr_dir)})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        functor(env, None)  # must not raise
+
+        assert not hasattr(env.sim, "_last_indirect_lighting")
+
+    def test_hdr_mode_selects_from_available_files(self, tmp_path):
+        """HDR mode always selects a file from the provided folder over many calls."""
+        hdr_dir = tmp_path / "hdr"
+        hdr_dir.mkdir()
+        names = [f"env{i}.hdr" for i in range(5)]
+        for n in names:
+            (hdr_dir / n).write_text("")
+        env = MockEnv()
+        cfg = self._make_cfg({"path": str(hdr_dir)})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        chosen_set = set()
+        for _ in range(50):
+            functor(env, None)
+            chosen_set.add(env.sim._last_indirect_lighting)
+
+        # All chosen paths must be valid HDR files from the folder
+        valid_paths = {str(hdr_dir / n) for n in names}
+        assert chosen_set.issubset(valid_paths)
+
+    # ------------------------------------------------------------------
+    # Emissive mode
+    # ------------------------------------------------------------------
+
+    def test_emissive_color_mode_calls_set_emission_light(self):
+        """Emissive mode calls set_emission_light with color in range."""
+        env = MockEnv()
+        cfg = self._make_cfg(
+            {"emissive_color_range": [[0.2, 0.3, 0.4], [0.6, 0.7, 0.8]]}
+        )
+        functor = randomize_indirect_lighting(cfg, env)
+
+        functor(env, None)
+
+        color = env.sim._last_emission_color
+        assert color is not None
+        assert len(color) == 3
+        assert 0.2 <= color[0] <= 0.6
+        assert 0.3 <= color[1] <= 0.7
+        assert 0.4 <= color[2] <= 0.8
+        assert env.sim._last_emission_intensity is None
+
+    def test_emissive_intensity_mode_calls_set_emission_light(self):
+        """Emissive mode calls set_emission_light with intensity in range."""
+        env = MockEnv()
+        cfg = self._make_cfg({"emissive_intensity_range": [50.0, 150.0]})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        functor(env, None)
+
+        assert env.sim._last_emission_color is None
+        intensity = env.sim._last_emission_intensity
+        assert intensity is not None
+        assert 50.0 <= intensity <= 150.0
+
+    def test_emissive_color_and_intensity_together(self):
+        """Both color and intensity can be set together in emissive mode."""
+        env = MockEnv()
+        cfg = self._make_cfg(
+            {
+                "emissive_color_range": [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+                "emissive_intensity_range": [80.0, 120.0],
+            }
+        )
+        functor = randomize_indirect_lighting(cfg, env)
+
+        functor(env, None)
+
+        color = env.sim._last_emission_color
+        intensity = env.sim._last_emission_intensity
+        assert color is not None and len(color) == 3
+        assert all(0.0 <= c <= 1.0 for c in color)
+        assert 80.0 <= intensity <= 120.0
+
+    def test_emissive_mode_does_not_call_set_indirect_lighting(self):
+        """Emissive mode must not touch indirect lighting (HDR)."""
+        env = MockEnv()
+        cfg = self._make_cfg({"emissive_intensity_range": [100.0, 100.0]})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        functor(env, None)
+
+        assert not hasattr(env.sim, "_last_indirect_lighting")
+
+    def test_emissive_values_vary_across_calls(self):
+        """Emissive intensity is sampled fresh on each call (not fixed)."""
+        env = MockEnv()
+        cfg = self._make_cfg({"emissive_intensity_range": [0.0, 1000.0]})
+        functor = randomize_indirect_lighting(cfg, env)
+
+        intensities = set()
+        for _ in range(20):
+            functor(env, None)
+            intensities.add(round(env.sim._last_emission_intensity, 4))
+
+        # Over 20 draws from [0, 1000] all values being identical is astronomically unlikely
+        assert len(intensities) > 1
