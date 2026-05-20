@@ -100,6 +100,46 @@ class SimResources(EmbodiChainDataset):
         ]
 
 
+class EnvMapHDR(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, material_assets, "EnvMapHDR.zip"),
+            "ea7abc8e955fe64069073d63834da60e",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+    def get_env_map_path(self, name: str) -> str:
+        """Get the path of an HDR environment map.
+
+        Args:
+            name (str): The name of the HDR environment map.
+
+        Returns:
+            str: The path to the HDR environment map file.
+        """
+        env_map_names = self.get_env_map_list()
+        if name not in env_map_names:
+            logger.log_error(
+                f"Invalid env map name: {name}. Available names are: {env_map_names}"
+            )
+        return str(Path(self.extract_dir) / "EnvMapHDR" / name)
+
+    def get_env_map_list(self) -> List[str]:
+        """Get the names of all HDR environment maps.
+
+        Returns:
+            List[str]: The names of all HDR environment map files.
+        """
+        return [
+            f.name
+            for f in Path(self.extract_dir).glob("EnvMapHDR/*.hdr")
+            if f.is_file()
+        ]
+
+
 class CocoBackground(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
