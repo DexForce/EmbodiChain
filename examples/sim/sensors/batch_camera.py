@@ -49,9 +49,6 @@ def main(args):
             init_pos=(0, 0, 0.2),
         )
     )
-    light: Light = sim.add_light(
-        cfg=LightCfg(light_type="point", init_pos=(0, 0, 2), intensity=50)
-    )
 
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
@@ -99,7 +96,7 @@ def main(args):
     # plot rgba into a grid of images
     grid_x = np.ceil(np.sqrt(args.num_envs)).astype(int)
     grid_y = np.ceil(args.num_envs / grid_x).astype(int)
-    fig, axs = plt.subplots(grid_x, grid_y, figsize=(12, 6))
+    fig, axs = plt.subplots(grid_x, grid_y, figsize=(12, 6), squeeze=False)
     axs = axs.flatten()
     for i in range(args.num_envs):
 

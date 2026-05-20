@@ -1219,9 +1219,9 @@ def transform_points_mat(
     Returns:
         transformed: [B, P, 3] transformed point cloud for each pose.
     """
-    R = poses[:, :3, :3]  # [B, 3, 3]
+    r = poses[:, :3, :3]  # [B, 3, 3]
     t = poses[:, :3, 3]  # [B, 3]
-    transformed = torch.einsum("bij, pj -> bpi", R, points) + t.unsqueeze(1)
+    transformed = torch.einsum("bij, pj -> bpi", r, points) + t.unsqueeze(1)
     return transformed
 
 

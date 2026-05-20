@@ -109,6 +109,12 @@ Configuring GraspGeneratorCfg
    * - ``max_deviation_angle``
      - ``π / 12``
      - Maximum allowed angle (in radians) between the specified approach direction and the axis connecting an antipodal point pair. Pairs that deviate more than this threshold are discarded.
+   * - ``is_partial_annotate``
+     - ``True``
+     - When ``True``, the annotator allows selecting a partial region of the mesh for grasp sampling. If ``False``, the entire mesh is used.
+   * - ``is_filter_ground_collision``
+     - ``True``
+     - Whether to filter out grasp poses that would cause the gripper to  collide.
 
 The ``antipodal_sampler_cfg`` field accepts an :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalSamplerCfg` instance, which controls how antipodal point pairs are sampled on the mesh surface.
 
