@@ -54,9 +54,7 @@ tex_size: int = int(INGEST_CONFIG.get("blender_texture_size", 2048))
 png_name: str = INGEST_CONFIG.get("blender_texture_name", "surface_texture.png")
 BLENDER_REMESH_BAKE_CONFIG = INGEST_CONFIG.get("blender_remesh_bake", {})
 voxel_size: float = float(BLENDER_REMESH_BAKE_CONFIG.get("voxel_size", 0.01))
-decimate_ratio: float = float(
-    BLENDER_REMESH_BAKE_CONFIG.get("decimate_ratio", 0.5)
-)
+decimate_ratio: float = float(BLENDER_REMESH_BAKE_CONFIG.get("decimate_ratio", 0.5))
 
 
 def ingest_one_asset(
