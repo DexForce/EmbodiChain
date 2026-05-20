@@ -172,9 +172,13 @@ class BaseSolver(metaclass=ABCMeta):
                 device=self.device,
             )
 
+            def _fk_end_matrix(th):
+                return self.pk_serial_chain.forward_kinematics(
+                    th, end_only=True
+                ).get_matrix()
+
             self.compiled_fk = torch.compile(
-                self.pk_serial_chain.forward_kinematics_tensor,
-                fullgraph=True,
+                _fk_end_matrix,
                 dynamic=True,
             )
 
@@ -433,7 +437,7 @@ class BaseSolver(metaclass=ABCMeta):
             logger.log_error("Kinematic chain is not initialized.")
             return torch.eye(4, device=self.device)
         # Compute forward kinematics
-        ee_link_xpos = self.compiled_fk(qpos)[-1, :, :, :]
+        ee_link_xpos = self.compiled_fk(qpos)
 
         # Ensure batch format for TCP
         batch_size = qpos.shape[0]
