@@ -143,6 +143,7 @@ def trimesh_parse_ingest(
     asset_source: Path,
     obj_name: str = "asset.obj",
     mtl_name: str = "asset.mtl",
+    write_files: bool = True,
 ):
     mesh = load_one_trimesh(source_file)
     if mesh is None:
@@ -216,27 +217,28 @@ def trimesh_parse_ingest(
     else:
         print("[WARN] Unknown visual type → export raw")
 
-    obj_str, tex_dict = trimesh.exchange.obj.export_obj(
-        mesh,
-        include_normals=True,
-        include_color=True,
-        include_texture=True,
-        return_texture=True,
-        write_texture=False,
-        mtl_name=mtl_name,
-    )
+    if write_files:
+        obj_str, tex_dict = trimesh.exchange.obj.export_obj(
+            mesh,
+            include_normals=True,
+            include_color=True,
+            include_texture=True,
+            return_texture=True,
+            write_texture=False,
+            mtl_name=mtl_name,
+        )
 
-    # ===== 写 OBJ =====
-    with open(obj_path, "w") as f:
-        f.write(obj_str)
+        # ===== 写 OBJ =====
+        with open(obj_path, "w") as f:
+            f.write(obj_str)
 
-    # ===== 写 texture / mtl =====
-    for name, data in tex_dict.items():
-        file_path = asset_source / name
+        # ===== 写 texture / mtl =====
+        for name, data in tex_dict.items():
+            file_path = asset_source / name
 
-        if not file_path.exists():
-            with open(file_path, "wb") as f:
-                f.write(data)
+            if not file_path.exists():
+                with open(file_path, "wb") as f:
+                    f.write(data)
 
     return {"visual_ingest": visual_ingest, "visual_source": visual}
 
@@ -244,204 +246,179 @@ def trimesh_parse_ingest(
 import bpy
 
 
-def clear_scene():
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.delete(use_global=False, confirm=False)
-    for block in (
-        bpy.data.meshes,
-        bpy.data.materials,
-        bpy.data.images,
-        bpy.data.collections,
-    ):
-        for item in list(block):
-            try:
-                block.remove(item)
-            except:
-                pass
+def modify_mtl_file(mtl_path: Path, diffuse_name: str, normal_name: str) -> None:
+    """Modify an exported OBJ .mtl to reference baked textures."""
+    mtl_path = Path(mtl_path)
+    if not mtl_path.exists():
+        return
+
+    lines = mtl_path.read_text(encoding="utf-8", errors="ignore").splitlines(True)
+
+    new_lines = []
+    for line in lines:
+        if line.startswith("Ns "):
+            new_lines.append("Ns 500.000000\n")
+        elif line.startswith("Ka "):
+            new_lines.append("Ka 1.000000 1.000000 1.000000\n")
+        elif line.startswith("Ks "):
+            new_lines.append("Ks 0.500000 0.500000 0.500000\n")
+        else:
+            new_lines.append(line)
+
+    new_lines.append(f"map_Kd {diffuse_name}\n")
+    new_lines.append(f"map_Bump {normal_name}\n")
+    new_lines.append(f"bump {normal_name} -bm 1.0\n")
+
+    mtl_path.write_text("".join(new_lines), encoding="utf-8")
 
 
-def import_model(path: Path):
-    ext = path.suffix.lower()
+def blender_remesh_bake(
+    source_file: Path,
+    asset_source: Path,
+    texture_size: int = 2048,
+    png_name: str = "surface_texture.png",
+    voxel_size: float = 0.01,
+    decimate_ratio: float = 0.5,
+    obj_name: str = "asset.obj",
+):
+    """Remesh a high-poly mesh into a low-poly one and bake textures via Blender."""
+    asset_source = Path(asset_source)
+    asset_source.mkdir(parents=True, exist_ok=True)
+    source_file = Path(source_file)
 
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+
+    ext = source_file.suffix.lower()
     if ext == ".obj":
-        bpy.ops.wm.obj_import(filepath=str(path))
-    elif ext in [".fbx"]:
-        bpy.ops.import_scene.fbx(filepath=str(path))
+        bpy.ops.wm.obj_import(filepath=str(source_file))
+    elif ext == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=str(source_file))
     elif ext in [".gltf", ".glb"]:
-        bpy.ops.import_scene.gltf(filepath=str(path))
-    elif ext in [".ply"]:
-        bpy.ops.wm.ply_import(filepath=str(path))
+        bpy.ops.import_scene.gltf(filepath=str(source_file))
+    elif ext == ".ply":
+        bpy.ops.wm.ply_import(filepath=str(source_file))
     else:
         raise RuntimeError(f"Unsupported extension: {ext}")
 
-    imported = [o for o in bpy.context.scene.objects if o.type == "MESH"]
-    return imported
-
-
-def setup_studio_lighting():
-    scene = bpy.context.scene
-    scene.render.engine = "CYCLES"
-    cycles = scene.cycles
-    cycles.samples = 128
-    cycles.use_adaptive_sampling = True
-
-    world = scene.world or bpy.data.worlds.new("World")
-    scene.world = world
-    world.use_nodes = True
-    nodes = world.node_tree.nodes
-    nodes.clear()
-
-    bg = nodes.new(type="ShaderNodeBackground")
-    bg.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1.0)
-    out = nodes.new(type="ShaderNodeOutputWorld")
-    world.node_tree.links.new(bg.outputs["Background"], out.inputs["Surface"])
-
-
-def duplicate_and_join(objs, name="BAKE_MESH"):
-    if not objs:
-        return None
-    bpy.ops.object.select_all(action="DESELECT")
-    for o in objs:
-        o.select_set(True)
-    bpy.context.view_layer.objects.active = objs[0]
-    bpy.ops.object.duplicate()
-    dupes = [o for o in bpy.context.selected_objects if o.type == "MESH"]
-    bpy.context.view_layer.objects.active = dupes[0]
-    bpy.ops.object.join()
-    joined = bpy.context.active_object
-    joined.name = name
-    return joined
-
-
-def ensure_uv(obj):
-    me = obj.data
-    if len(me.uv_layers) == 0:
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.uv.smart_project(angle_limit=66.0, island_margin=0.02)
+    if bpy.ops.object.mode_set.poll():
         bpy.ops.object.mode_set(mode="OBJECT")
 
+    imported_meshes = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+    if not imported_meshes:
+        raise RuntimeError("No mesh object after import")
 
-def get_vertex_color_layer(obj):
-    me = obj.data
-    if hasattr(me, "color_attributes") and len(me.color_attributes) > 0:
-        return me.color_attributes.active_color.name
-    return None
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in imported_meshes:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = imported_meshes[0]
 
+    if len(imported_meshes) > 1:
+        bpy.ops.object.join()
+    high_poly = bpy.context.view_layer.objects.active
+    if not high_poly or high_poly.type != "MESH":
+        raise RuntimeError("No active mesh object after import")
+    high_poly.name = "High_Poly"
 
-def inject_vertex_color_to_material(mat, vcol_name):
-    if not mat.use_nodes:
-        mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
+    auto_extrusion = max(high_poly.dimensions) * 0.05
 
-    pnode = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
-    if not pnode:
-        pnode = nodes.new(type="ShaderNodeBsdfPrincipled")
+    bpy.ops.object.select_all(action="DESELECT")
+    high_poly.select_set(True)
+    bpy.context.view_layer.objects.active = high_poly
+    bpy.ops.object.duplicate()
+    low_poly = bpy.context.active_object
+    if not low_poly:
+        raise RuntimeError("Failed to duplicate object")
+    low_poly.name = "Low_Poly_Target"
+    try:
+        low_poly.data.materials.clear()
+    except Exception:
+        pass
 
-    attr = nodes.new(type="ShaderNodeAttribute")
-    attr.attribute_name = vcol_name
-    links.new(attr.outputs["Color"], pnode.inputs["Base Color"])
+    rem = low_poly.modifiers.new(name="Remesh", type="REMESH")
+    rem.mode = "VOXEL"
+    rem.voxel_size = max(float(voxel_size), max(high_poly.dimensions) * 0.005)
+    rem.use_smooth_shade = True
+    bpy.ops.object.modifier_apply(modifier="Remesh")
 
+    dec = low_poly.modifiers.new(name="Decimate", type="DECIMATE")
+    dec.ratio = float(decimate_ratio)
+    bpy.ops.object.modifier_apply(modifier="Decimate")
 
-def add_bake_image_node(mat, image):
-    if not mat.use_nodes:
-        mat.use_nodes = True
-    nodes = mat.node_tree.nodes
+    bpy.context.view_layer.objects.active = low_poly
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=66.0, island_margin=0.02)
+    bpy.ops.object.mode_set(mode="OBJECT")
 
-    img_node = nodes.new(type="ShaderNodeTexImage")
-    img_node.image = image
-    img_node.name = "BAKE_TARGET"
-
-    nodes.active = img_node
-    img_node.select = True
-    return img_node
-
-
-def create_baked_material_assign(obj, image, mat_name="BAKED_SURFACE_MAT"):
-    mat = bpy.data.materials.new(name=mat_name)
+    mat = bpy.data.materials.new(name="BakeMat")
     mat.use_nodes = True
+    low_poly.data.materials.append(mat)
     nodes = mat.node_tree.nodes
     nodes.clear()
 
-    img_node = nodes.new(type="ShaderNodeTexImage")
-    img_node.image = image
-    bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
-    out = nodes.new(type="ShaderNodeOutputMaterial")
+    def setup_node(name: str, is_color: bool):
+        img = bpy.data.images.new(
+            name, width=int(texture_size), height=int(texture_size)
+        )
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = img
+        if not is_color:
+            img.colorspace_settings.name = "Non-Color"
+        return node, img
 
-    mat.node_tree.links.new(img_node.outputs["Color"], bsdf.inputs["Base Color"])
-    mat.node_tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+    diff_node, diff_img = setup_node("diffuse.png", True)
+    norm_node, norm_img = setup_node("normal.png", False)
 
-    if obj.data.materials:
-        obj.data.materials[0] = mat
-    else:
-        obj.data.materials.append(mat)
-    return mat
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.render.bake.use_selected_to_active = True
+    scene.render.bake.cage_extrusion = auto_extrusion
 
-
-# -------------------------
-# Main bake routine
-# -------------------------
-def blender_parser_ingest(
-    source_file: Path,
-    asset_source: Path,
-    texture_size=2048,
-    png_name="surface_texture.png",
-    obj_name="asset.obj",
-):
-    asset_source.mkdir(parents=True, exist_ok=True)
-    png_path = asset_source / png_name
-
-    clear_scene()
-    imported = import_model(source_file)
-    if not imported:
-        raise RuntimeError("No mesh objects found after import.")
-
-    setup_studio_lighting()
-    joined = duplicate_and_join(imported, name="BAKE_MESH")
-
-    bpy.context.view_layer.objects.active = joined
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    ensure_uv(joined)
-
-    vcol_name = get_vertex_color_layer(joined)
-
-    img_name = Path(png_name).stem
-    bake_image = bpy.data.images.new(
-        img_name, width=int(texture_size), height=int(texture_size)
-    )
-
-    if not joined.data.materials:
-        tmp_mat = bpy.data.materials.new(name="Bake_Temp_Material")
-        joined.data.materials.append(tmp_mat)
-
-    for slot in joined.material_slots:
-        if slot.material:
-            if vcol_name:
-                inject_vertex_color_to_material(slot.material, vcol_name)
-            add_bake_image_node(slot.material, bake_image)
-
-    bpy.context.scene.render.engine = "CYCLES"
     bpy.ops.object.select_all(action="DESELECT")
-    joined.select_set(True)
-    bpy.context.view_layer.objects.active = joined
+    high_poly.select_set(True)
+    low_poly.select_set(True)
+    bpy.context.view_layer.objects.active = low_poly
 
-    print("Baking...")
-    bpy.ops.object.bake(
-        type="DIFFUSE",
-        pass_filter={"COLOR"},
-        use_clear=True,
-        use_selected_to_active=False,
-        margin=16,
+    nodes.active = diff_node
+    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"})
+    diff_img.filepath_raw = str(asset_source / "diffuse.png")
+    diff_img.save()
+
+    nodes.active = norm_node
+    bpy.ops.object.bake(type="NORMAL")
+    norm_img.filepath_raw = str(asset_source / "normal.png")
+    norm_img.save()
+
+    export_path = asset_source / obj_name
+    bpy.ops.object.select_all(action="DESELECT")
+    low_poly.select_set(True)
+    bpy.ops.wm.obj_export(filepath=str(export_path), export_selected_objects=True)
+
+    mtl_path = asset_source / Path(obj_name).with_suffix(".mtl").name
+    modify_mtl_file(mtl_path, "diffuse.png", "normal.png")
+
+    return {
+        "png": str(asset_source / "diffuse.png"),
+        "obj": str(export_path),
+        "mtl": str(mtl_path.name),
+    }
+
+
+def blender_parse_ingest(source_file: Path, asset_source: Path, **kwargs):
+    res = blender_remesh_bake(
+        source_file=source_file,
+        asset_source=asset_source,
+        **kwargs,
     )
+    try:
+        asset_obj = Path(res["obj"])
+        vis = trimesh_parse_ingest(asset_obj, asset_source, write_files=False)
+        if isinstance(vis, dict):
+            res.update(vis)
+    except Exception:
+        pass
+    return res
 
-    bake_image.filepath_raw = str(png_path)
-    bake_image.save()
 
-    create_baked_material_assign(joined, bake_image)
-
-    out_obj = asset_source / obj_name
-    bpy.ops.wm.obj_export(filepath=str(out_obj), export_selected_objects=True)
-
-    return {"png": str(png_path), "obj": str(out_obj), "mtl": "asset.mtl"}
+def blender_parser_ingest(source_file: Path, asset_source: Path, **kwargs):
+    return blender_parse_ingest(source_file, asset_source, **kwargs)
