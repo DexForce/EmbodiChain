@@ -186,9 +186,7 @@ def trimesh_parse_ingest(
 
         mesh.visual = trimesh.visual.ColorVisuals(
             mesh,
-            face_colors=visual_config.get(
-                "default_face_color", [128, 128, 128, 255]
-            ),
+            face_colors=visual_config.get("default_face_color", [128, 128, 128, 255]),
         )
         visual_ingest = "no visual"
 

@@ -27,9 +27,7 @@ class Asset:
     identity: Dict[str, Any] = field(default_factory=dict)
     asset_data: Dict[str, Any] = field(default_factory=dict)
 
-    parsed: Dict[str, Any] = field(
-        default_factory=dict
-    )  # Visual, Geometry, Topology
+    parsed: Dict[str, Any] = field(default_factory=dict)  # Visual, Geometry, Topology
     semantics: Dict[str, Any] = field(default_factory=dict)
     physics: Dict[str, Any] = field(default_factory=dict)
     simulation: Dict[str, Any] = field(default_factory=dict)

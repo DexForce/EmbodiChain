@@ -126,9 +126,7 @@ class GeometryParser(AssetParser):
                     "triangulate",
                     GEOMETRY_CLEANUP_CONFIG.get("triangulate", False),
                 ),
-                collapse_triangulate=simplify_config.get(
-                    "collapse_triangulate", True
-                ),
+                collapse_triangulate=simplify_config.get("collapse_triangulate", True),
             )
 
         try:
