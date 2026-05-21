@@ -65,22 +65,14 @@ pip install -e ".[gensim]" \
     --extra-index-url https://download.blender.org/pypi/
 ```
 
-Set the OpenAI-compatible LLM credentials before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. Environment variables override the JSON config.
+Set the OpenAI-compatible LLM api(OpenAI, Gemini, Doubao, etc.) before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. Environment variables override the JSON config.
 
-OpenAI API example:
+OpenAI-compatible API example:
 
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"
 export OPENAI_MODEL="gpt-4o"
 export OPENAI_BASE_URL="https://api.openai.com/v1"
-```
-
-Gemini API example:
-
-```bash
-export OPENAI_API_KEY="your-gemini-api-key"
-export OPENAI_MODEL="gemini-3.5-flash"
-export OPENAI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
 ```
 
 ## Processing Flow
@@ -127,38 +119,12 @@ Use `asset_simready/asset_simready.obj` or `asset_usd/` for simulation preview a
 
 ## Configuration
 
-Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`.
-
-### Ingest
-
-```json
-"ingest": {
-  "canonical_asset_name": "asset.obj",
-  "unprocessed_formats": [".urdf", ".usd"],
-  "parseable_mesh_formats": [".glb", ".gltf", ".obj", ".ply", ".stl"]
-}
-```
-
-This section controls source file discovery and the canonical output mesh name.
+Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. The main hyperparameters are as follow:
 
 ### Mesh Processing
 
 ```json
 "mesh_processing": {
-  "trimesh_ingest": {
-    "scene_mesh_strategy": "first",
-    "mtl_name": "asset.mtl",
-    "visual": {
-      "default_face_color": [128, 128, 128, 255],
-      "pbr_base_color_only": true
-    },
-    "export": {
-      "include_normals": true,
-      "include_color": true,
-      "include_texture": true,
-      "write_texture": false
-    }
-  },
   "blender_remesh_bake": {
     "remesh": {
       "voxel_size": 0.01,
@@ -174,8 +140,6 @@ This section controls source file discovery and the canonical output mesh name.
     },
     "bake": {
       "texture_size": 2048,
-      "diffuse_texture_name": "diffuse.png",
-      "normal_texture_name": "normal.png",
       "cage_extrusion_ratio": 0.05
     }
   },
@@ -192,19 +156,13 @@ This section controls source file discovery and the canonical output mesh name.
       "collapse_triangulate": true
     }
   },
-  "simready_finalize": {
-    "render_resolution": 1024
-  }
 }
 ```
-
-`trimesh_ingest` controls the lightweight ingest path. It does not perform mesh decimation; it normalizes visual materials and exports OBJ/MTL files.
 
 `blender_remesh_bake` controls the default ingest path when `--simple` is not provided. It remeshes the raw mesh, decimates it, unwraps UVs, and bakes textures.
 
 `blender_cleanup_decimate` controls the later geometry parser stage. It uses Blender mesh operators and the Blender Decimate modifier to clean and simplify the canonical mesh.
 
-`simready_finalize` controls rendering used by the LLM-driven orientation and scale estimation stage.
 
 ### LLM
 
@@ -221,19 +179,6 @@ This section controls source file discovery and the canonical output mesh name.
 
 This section configures the multimodal LLM used for object classification, orientation selection, dimension inference, semantic annotation, and physics inference. Any provider that supports the OpenAI-compatible chat completions API can be used by changing `api_key`, `model`, `base_url`, and optional `default_query` parameters.
 
-For Gemini, use the same config shape:
-
-```json
-"llm": {
-  "openai_compatible": {
-    "api_key": "your-gemini-api-key",
-    "model": "gemini-3.5-flash",
-    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-    "default_query": {}
-  }
-}
-```
-
 For Azure-style OpenAI-compatible endpoints that require an API version query parameter, use `default_query`:
 
 ```json
@@ -241,7 +186,7 @@ For Azure-style OpenAI-compatible endpoints that require an API version query pa
   "openai_compatible": {
     "api_key": "your-api-key",
     "model": "gpt-4o",
-    "base_url": "https://dex-gpt4.openai.azure.com/openai/deployments/gpt-4o",
+    "base_url": "your_api",
     "default_query": {
       "api-version": "2025-01-01-preview"
     }
