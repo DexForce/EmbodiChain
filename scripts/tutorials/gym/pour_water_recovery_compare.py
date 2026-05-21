@@ -50,6 +50,15 @@ DEFAULT_GYM_CONFIG = (
     ROOT_DIR / "configs/gym/agent/pour_water_agent/fast_gym_config.json"
 )
 DEFAULT_ARTIFACT_CACHE_ROOT = ROOT_DIR / "outputs/agent_repro_compare"
+DEFAULT_DATABASE_ARTIFACT_ROOT = (
+    ROOT_DIR / "embodichain/database/agent_generated_content"
+)
+DATABASE_ARTIFACT_SOURCE_BY_CASE_SOURCE = {
+    "single_normal": "SinglePourWater",
+    "single_recovery": "SinglePourWater",
+    "dual_normal": "DualPourWater",
+    "dual_recovery": "DualPourWater",
+}
 
 
 @dataclass(frozen=True)
@@ -223,15 +232,15 @@ class _OfflineLLM:
         )
 
 
-def _ensure_offline_llms() -> None:
+def _ensure_offline_llms(*, force: bool = False) -> None:
     offline_llm = _OfflineLLM()
-    if agent_llm.task_llm is None:
+    if force or agent_llm.task_llm is None:
         agent_llm.task_llm = offline_llm
-    if agent_llm.recovery_llm is None:
+    if force or agent_llm.recovery_llm is None:
         agent_llm.recovery_llm = offline_llm
-    if agent_llm.compile_llm is None:
+    if force or agent_llm.compile_llm is None:
         agent_llm.compile_llm = offline_llm
-    if agent_llm.failure_anticipation_llm is None:
+    if force or agent_llm.failure_anticipation_llm is None:
         agent_llm.failure_anticipation_llm = agent_llm.recovery_llm
     if agent_llm.code_llm is None:
         agent_llm.code_llm = agent_llm.compile_llm
@@ -276,7 +285,7 @@ def _parse_csv_names(value: str) -> list[str]:
 
 def _timestamped_output_root() -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    return ROOT_DIR / "outputs" / f"pour_water_recovery_compare_{timestamp}"
+    return ROOT_DIR / "outputs" / f"{timestamp}_pour_water_recovery_compare"
 
 
 def _argv_without(args: list[str], names: set[str]) -> list[str]:
@@ -466,6 +475,16 @@ def _write_matrix_report(output_root: Path, summary_path: Path) -> None:
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _disable_video_events(env_cfg) -> None:
+    env_cfg.filter_dataset_saving = True
+    events = getattr(env_cfg, "events", None)
+    if events is None:
+        return
+    for event_name in ("record_camera", "validation_cameras"):
+        if hasattr(events, event_name):
+            setattr(events, event_name, None)
+
+
 def _build_forced_error_config(
     case: CaseSpec,
     args: argparse.Namespace,
@@ -537,7 +556,32 @@ def build_parser() -> argparse.Namespace:
         default=None,
         help=(
             "Root directory for compare outputs. Defaults to "
-            "outputs/pour_water_recovery_compare_YYYYMMDD_HHMM."
+            "outputs/YYYYMMDD_HHMM_pour_water_recovery_compare."
+        ),
+    )
+    parser.add_argument(
+        "--action_runtime",
+        choices=["atomic_engine", "legacy_agent", "legacy"],
+        default=None,
+        help=(
+            "Compatibility alias for selecting the recovery action executor. "
+            "'atomic_engine' enables compiled atomic graph actions; 'legacy_agent' "
+            "or 'legacy' disables them."
+        ),
+    )
+    parser.add_argument(
+        "--open_window",
+        action="store_true",
+        default=False,
+        help="Compatibility alias; keeps the simulator window enabled.",
+    )
+    parser.add_argument(
+        "--no_record_video",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable record/validation camera events and dataset video saving for "
+            "low-memory smoke runs."
         ),
     )
     parser.add_argument(
@@ -715,6 +759,23 @@ def build_parser() -> argparse.Namespace:
         help="Named semantic grasp strategy passed to the Agent adapter.",
     )
     parser.add_argument(
+        "--recovery_public_grasp_strategy",
+        choices=[
+            "none",
+            "top_down",
+            "bottle_lateral",
+            "lateral_down",
+            "legacy_guided",
+            "auto_try_all",
+            "auto_general",
+        ],
+        default=None,
+        help=(
+            "Recovery-only semantic grasp strategy for compiled atomic pick_up "
+            "actions. Does not switch the nominal task grasp path."
+        ),
+    )
+    parser.add_argument(
         "--require_public_grasp_action",
         action="store_true",
         default=False,
@@ -742,10 +803,22 @@ def build_parser() -> argparse.Namespace:
         help="Number of semantic grasp candidates to retry.",
     )
     parser.add_argument(
+        "--recovery_public_grasp_candidate_num",
+        type=int,
+        default=None,
+        help="Recovery-only semantic grasp candidate count override.",
+    )
+    parser.add_argument(
         "--public_grasp_pre_grasp_distance",
         type=float,
         default=None,
         help="Optional public PickUpActionCfg pre_grasp_distance override.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_pre_grasp_distance",
+        type=float,
+        default=None,
+        help="Recovery-only public PickUpActionCfg pre_grasp_distance override.",
     )
     parser.add_argument(
         "--generate_public_grasp_candidates",
@@ -760,6 +833,12 @@ def build_parser() -> argparse.Namespace:
         help="Use the horizontal arm-base-to-object direction for semantic grasp.",
     )
     parser.add_argument(
+        "--recovery_public_grasp_auto_approach_direction",
+        action="store_true",
+        default=None,
+        help="Recovery-only auto approach direction override for semantic grasp.",
+    )
+    parser.add_argument(
         "--public_grasp_try_approach_directions",
         action="store_true",
         default=False,
@@ -769,10 +848,22 @@ def build_parser() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--recovery_public_grasp_try_approach_directions",
+        action="store_true",
+        default=None,
+        help="Recovery-only multi-direction semantic grasp override.",
+    )
+    parser.add_argument(
         "--public_grasp_approach_direction",
         type=_parse_xyz,
         default=None,
         help="Explicit semantic grasp approach direction, e.g. 0,0,-1.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_approach_direction",
+        type=_parse_xyz,
+        default=None,
+        help="Recovery-only explicit semantic grasp approach direction.",
     )
     parser.add_argument(
         "--public_grasp_approach_directions",
@@ -784,10 +875,22 @@ def build_parser() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--recovery_public_grasp_approach_directions",
+        type=_parse_xyz_list,
+        default=None,
+        help="Recovery-only semantic grasp approach direction list.",
+    )
+    parser.add_argument(
         "--public_grasp_lift_height",
         type=float,
         default=None,
         help="Optional lift_height passed directly to PickUpActionCfg.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_lift_height",
+        type=float,
+        default=None,
+        help="Recovery-only lift_height passed to compiled atomic pick_up actions.",
     )
     parser.add_argument(
         "--public_grasp_pose_offset_world",
@@ -796,10 +899,22 @@ def build_parser() -> argparse.Namespace:
         help="Optional world-frame xyz offset applied to public semantic grasp poses.",
     )
     parser.add_argument(
+        "--recovery_public_grasp_pose_offset_world",
+        type=_parse_xyz,
+        default=None,
+        help="Recovery-only world-frame xyz offset for semantic grasp poses.",
+    )
+    parser.add_argument(
         "--public_grasp_pose_offset_along_approach",
         type=float,
         default=0.0,
         help="Optional offset along public semantic grasp approach direction.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_pose_offset_along_approach",
+        type=float,
+        default=None,
+        help="Recovery-only offset along semantic grasp approach direction.",
     )
     parser.add_argument(
         "--validate_public_grasp_after_action",
@@ -811,10 +926,22 @@ def build_parser() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--recovery_validate_public_grasp_after_action",
+        action="store_true",
+        default=None,
+        help="Enable recovery-only physical validation after atomic pick_up actions.",
+    )
+    parser.add_argument(
         "--public_grasp_validation_min_object_lift",
         type=float,
         default=0.05,
         help="Minimum object z displacement for adapter-level public grasp validation.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_validation_min_object_lift",
+        type=float,
+        default=None,
+        help="Recovery-only minimum object z displacement for public grasp validation.",
     )
     parser.add_argument(
         "--public_grasp_validation_max_object_lift",
@@ -823,10 +950,22 @@ def build_parser() -> argparse.Namespace:
         help="Optional maximum object z displacement for adapter-level validation.",
     )
     parser.add_argument(
+        "--recovery_public_grasp_validation_max_object_lift",
+        type=float,
+        default=None,
+        help="Recovery-only maximum object z displacement for public grasp validation.",
+    )
+    parser.add_argument(
         "--public_grasp_validation_max_object_xy_displacement",
         type=float,
         default=None,
         help="Optional maximum object xy displacement for adapter-level validation.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_validation_max_object_xy_displacement",
+        type=float,
+        default=None,
+        help="Recovery-only maximum object xy displacement for public grasp validation.",
     )
     parser.add_argument(
         "--public_grasp_rank_by_legacy_pose",
@@ -835,10 +974,22 @@ def build_parser() -> argparse.Namespace:
         help="Rank planned semantic grasp candidates by legacy grasp_pose_obj similarity.",
     )
     parser.add_argument(
+        "--recovery_public_grasp_rank_by_legacy_pose",
+        action="store_true",
+        default=None,
+        help="Recovery-only legacy-pose ranking override for semantic grasp candidates.",
+    )
+    parser.add_argument(
         "--public_grasp_use_legacy_orientation",
         action="store_true",
         default=False,
         help="Use semantic grasp centers with legacy grasp_pose_obj orientation.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_use_legacy_orientation",
+        action="store_true",
+        default=None,
+        help="Recovery-only legacy-orientation override for semantic grasp candidates.",
     )
     parser.add_argument(
         "--public_grasp_legacy_pose_position_weight",
@@ -952,6 +1103,24 @@ def build_parser() -> argparse.Namespace:
         help=(
             "Fail if non-grasp Agent skills cannot use public atomic actions "
             "instead of falling back to legacy planning."
+        ),
+    )
+    parser.add_argument(
+        "--disable_atomic_action_graph",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable compiled atomic_action/atomic_sequence graph execution and "
+            "use legacy Agent callable fallbacks."
+        ),
+    )
+    parser.add_argument(
+        "--require_atomic_action_graph",
+        action="store_true",
+        default=False,
+        help=(
+            "Fail if a compiled atomic_action/atomic_sequence cannot execute "
+            "through AtomicActionEngine."
         ),
     )
     parser.add_argument(
@@ -1075,8 +1244,22 @@ def build_parser() -> argparse.Namespace:
 def _copy_cached_artifacts(
     case: CaseSpec, artifact_dir: Path, regenerate: bool
 ) -> None:
-    if regenerate or any(artifact_dir.iterdir()):
+    if regenerate:
         return
+
+    database_source = DATABASE_ARTIFACT_SOURCE_BY_CASE_SOURCE.get(
+        case.artifact_source_dir
+    )
+    if database_source is not None:
+        source_dir = DEFAULT_DATABASE_ARTIFACT_ROOT / database_source
+        if source_dir.exists():
+            shutil.copytree(source_dir, artifact_dir, dirs_exist_ok=True)
+            logger.log_info(
+                f"Copied database agent artifacts from {source_dir} "
+                f"to {artifact_dir}.",
+                color="cyan",
+            )
+            return
 
     source_dir = DEFAULT_ARTIFACT_CACHE_ROOT / case.artifact_source_dir / "artifacts"
     if not source_dir.exists():
@@ -1210,7 +1393,24 @@ def _write_case_result(
         and not debug_only
         and physical_upright_success is not False
     )
-    if args.disable_task_state_validation:
+    if env is None:
+        result = {
+            "case": case.label,
+            "program_success": program_success,
+            "semantic_success": None,
+            "expected_success": case.expected_success,
+            "expectation_matched": False,
+            "failure_reasons": [
+                "environment initialization failed before task-state validation"
+            ],
+            "physical_upright_success": physical_upright_success,
+            "assisted_correction_used": assisted_correction_used,
+            "debug_only": debug_only,
+            "physical_task_success": False,
+            "upright_object_validations": upright_records,
+            "exception": _exception_summary(exception),
+        }
+    elif args.disable_task_state_validation:
         result = {
             "case": case.label,
             "program_success": program_success,
@@ -1316,8 +1516,10 @@ def _raise_if_strict_validation_failed(case: CaseSpec, result: dict) -> None:
 
 
 def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> None:
-    _ensure_offline_llms()
+    _ensure_offline_llms(force=not args.runtime_llm_recovery)
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+    if args.no_record_video:
+        _disable_video_events(env_cfg)
     if args.max_episode_steps is not None:
         env_cfg.max_episode_steps = int(args.max_episode_steps)
         gym_config["max_episode_steps"] = int(args.max_episode_steps)
@@ -1329,14 +1531,29 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
     artifact_dir.mkdir(parents=True, exist_ok=True)
     _copy_cached_artifacts(case, artifact_dir, args.regenerate)
 
-    env = gymnasium.make(
-        id=gym_config["id"],
-        cfg=env_cfg,
-        agent_config=agent_config,
-        agent_config_path=str(case.agent_config),
-        task_name=case.task_name,
-        **action_config,
-    )
+    try:
+        env = gymnasium.make(
+            id=gym_config["id"],
+            cfg=env_cfg,
+            agent_config=agent_config,
+            agent_config_path=str(case.agent_config),
+            task_name=case.task_name,
+            **action_config,
+        )
+    except Exception as exc:
+        _write_case_result(
+            case=case,
+            args=args,
+            env=None,
+            artifact_dir=artifact_dir,
+            program_success=False,
+            exception=exc,
+        )
+        logger.log_warning(
+            f"Case '{case.label}' failed during environment initialization: "
+            f"{type(exc).__name__}: {exc}. Result: {artifact_dir / 'case_result.json'}"
+        )
+        raise
 
     logger.log_info(
         f"Running case '{case.label}' into {case_dir} "
@@ -1344,9 +1561,11 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
         f"runtime_recovery={case.runtime_recovery}, "
         f"runtime_llm_recovery={args.runtime_llm_recovery}, "
         f"error_injection={case.error_injection or args.forced_error_injection}, "
+        f"no_record_video={args.no_record_video}, "
         f"use_public_grasp={_use_public_grasp_from_args(args)}, "
         f"use_public_grasp_semantics={_use_public_grasp_semantics_from_args(args)}, "
         f"public_grasp_strategy={args.public_grasp_strategy}, "
+        f"recovery_public_grasp_strategy={args.recovery_public_grasp_strategy}, "
         f"use_public_place={not args.disable_public_place_action}, "
         f"use_public_gripper={not args.disable_public_gripper_action}, "
         f"strict_public_non_grasp={args.require_public_non_grasp_actions}, "
@@ -1394,9 +1613,18 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     allow_public_grasp_annotation=args.allow_public_grasp_annotation,
                     force_public_grasp_reannotate=args.force_public_grasp_reannotate,
                     public_grasp_strategy=args.public_grasp_strategy,
+                    recovery_public_grasp_strategy=(
+                        args.recovery_public_grasp_strategy
+                    ),
                     public_grasp_candidate_num=args.public_grasp_candidate_num,
+                    recovery_public_grasp_candidate_num=(
+                        args.recovery_public_grasp_candidate_num
+                    ),
                     public_grasp_pre_grasp_distance=(
                         args.public_grasp_pre_grasp_distance
+                    ),
+                    recovery_public_grasp_pre_grasp_distance=(
+                        args.recovery_public_grasp_pre_grasp_distance
                     ),
                     generate_public_grasp_candidates=(
                         args.generate_public_grasp_candidates
@@ -1404,37 +1632,76 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     public_grasp_auto_approach_direction=(
                         args.public_grasp_auto_approach_direction
                     ),
+                    recovery_public_grasp_auto_approach_direction=(
+                        args.recovery_public_grasp_auto_approach_direction
+                    ),
                     public_grasp_try_approach_directions=(
                         args.public_grasp_try_approach_directions
                     ),
+                    recovery_public_grasp_try_approach_directions=(
+                        args.recovery_public_grasp_try_approach_directions
+                    ),
                     public_grasp_approach_direction=args.public_grasp_approach_direction,
+                    recovery_public_grasp_approach_direction=(
+                        args.recovery_public_grasp_approach_direction
+                    ),
                     public_grasp_approach_directions=(
                         args.public_grasp_approach_directions
                     ),
+                    recovery_public_grasp_approach_directions=(
+                        args.recovery_public_grasp_approach_directions
+                    ),
                     public_grasp_lift_height=args.public_grasp_lift_height,
+                    recovery_public_grasp_lift_height=(
+                        args.recovery_public_grasp_lift_height
+                    ),
                     public_grasp_pose_offset_world=(
                         args.public_grasp_pose_offset_world
+                    ),
+                    recovery_public_grasp_pose_offset_world=(
+                        args.recovery_public_grasp_pose_offset_world
                     ),
                     public_grasp_pose_offset_along_approach=(
                         args.public_grasp_pose_offset_along_approach
                     ),
+                    recovery_public_grasp_pose_offset_along_approach=(
+                        args.recovery_public_grasp_pose_offset_along_approach
+                    ),
                     validate_public_grasp_after_action=(
                         args.validate_public_grasp_after_action
+                    ),
+                    recovery_validate_public_grasp_after_action=(
+                        args.recovery_validate_public_grasp_after_action
                     ),
                     public_grasp_validation_min_object_lift=(
                         args.public_grasp_validation_min_object_lift
                     ),
+                    recovery_public_grasp_validation_min_object_lift=(
+                        args.recovery_public_grasp_validation_min_object_lift
+                    ),
                     public_grasp_validation_max_object_lift=(
                         args.public_grasp_validation_max_object_lift
+                    ),
+                    recovery_public_grasp_validation_max_object_lift=(
+                        args.recovery_public_grasp_validation_max_object_lift
                     ),
                     public_grasp_validation_max_object_xy_displacement=(
                         args.public_grasp_validation_max_object_xy_displacement
                     ),
+                    recovery_public_grasp_validation_max_object_xy_displacement=(
+                        args.recovery_public_grasp_validation_max_object_xy_displacement
+                    ),
                     public_grasp_rank_by_legacy_pose=(
                         args.public_grasp_rank_by_legacy_pose
                     ),
+                    recovery_public_grasp_rank_by_legacy_pose=(
+                        args.recovery_public_grasp_rank_by_legacy_pose
+                    ),
                     public_grasp_use_legacy_orientation=(
                         args.public_grasp_use_legacy_orientation
+                    ),
+                    recovery_public_grasp_use_legacy_orientation=(
+                        args.recovery_public_grasp_use_legacy_orientation
                     ),
                     public_grasp_legacy_pose_position_weight=(
                         args.public_grasp_legacy_pose_position_weight
@@ -1486,6 +1753,8 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     require_public_non_grasp_actions=(
                         args.require_public_non_grasp_actions
                     ),
+                    use_atomic_action_graph=not args.disable_atomic_action_graph,
+                    require_atomic_action_graph=args.require_atomic_action_graph,
                     validate_upright_object_after_action=(
                         not args.disable_upright_object_validation
                     ),
@@ -1523,10 +1792,7 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                 )
                 if args.strict_task_state_validation:
                     _raise_if_strict_validation_failed(case, result)
-                if (
-                    not case.expected_success
-                    and result.get("semantic_success") is True
-                ):
+                if not case.expected_success and result.get("semantic_success") is True:
                     logger.log_warning(
                         f"Case '{case.label}' completed semantically even though "
                         "it was intended to be a no-recovery failure. Treat this "
@@ -1545,63 +1811,99 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     exception=exc,
                 )
                 if case.expected_success:
-                    held_steps = _hold_current_video_until(
-                        env, args.min_video_seconds
-                    )
-                    flushed_videos = _flush_recorded_videos(env)
+                    if args.no_record_video:
+                        held_steps = 0
+                        flushed_videos = 0
+                        video_note = "Video recording disabled"
+                    else:
+                        held_steps = _hold_current_video_until(
+                            env, args.min_video_seconds
+                        )
+                        flushed_videos = _flush_recorded_videos(env)
+                        video_note = (
+                            f"Video directory: {case_dir / 'outputs' / 'videos'}"
+                        )
                     logger.log_warning(
                         f"Case '{case.label}' failed unexpectedly: "
                         f"{type(exc).__name__}: {exc}. "
-                        f"Video directory: {case_dir / 'outputs' / 'videos'} "
+                        f"{video_note} "
                         f"(held_steps={held_steps}, "
                         f"flushed_recorders={flushed_videos})"
                     )
                     raise
                 if not _forced_error_was_observed(forced_error_config):
                     raise
-                min_video_seconds = max(
-                    args.min_video_seconds,
-                    args.min_expected_failure_video_seconds,
-                )
-                current_frames = _recorded_video_frame_count(env)
-                min_hold_seconds = max(0.0, min_video_seconds - current_frames / 20.0)
-                held_steps = _hold_expected_failure_state(
-                    env,
-                    max(args.expected_failure_hold_seconds, min_hold_seconds),
-                )
-                flushed_videos = _flush_recorded_videos(env)
+                if args.no_record_video:
+                    held_steps = 0
+                    flushed_videos = 0
+                    video_note = "Video recording disabled"
+                else:
+                    min_video_seconds = max(
+                        args.min_video_seconds,
+                        args.min_expected_failure_video_seconds,
+                    )
+                    current_frames = _recorded_video_frame_count(env)
+                    min_hold_seconds = max(
+                        0.0, min_video_seconds - current_frames / 20.0
+                    )
+                    held_steps = _hold_expected_failure_state(
+                        env,
+                        max(args.expected_failure_hold_seconds, min_hold_seconds),
+                    )
+                    flushed_videos = _flush_recorded_videos(env)
+                    video_note = (
+                        f"Expected-failure video directory: "
+                        f"{case_dir / 'outputs' / 'videos'}"
+                    )
                 logger.log_info(
                     f"Case '{case.label}' failed as expected after deterministic "
                     f"error injection: {type(exc).__name__}: {exc}",
                     color="green",
                 )
                 logger.log_info(
-                    f"Case '{case.label}' expected-failure video directory: "
-                    f"{case_dir / 'outputs' / 'videos'} "
+                    f"Case '{case.label}' {video_note} "
                     f"(held_steps={held_steps}, flushed_recorders={flushed_videos})",
                     color="green",
                 )
                 return
 
-            held_steps = _hold_current_video_until(env, args.min_video_seconds)
+            held_steps = (
+                0
+                if args.no_record_video
+                else _hold_current_video_until(env, args.min_video_seconds)
+            )
             if held_steps > 0:
                 logger.log_info(
                     f"Case '{case.label}' padded active video with {held_steps} hold steps.",
                     color="green",
                 )
-            env.reset()
+            if not args.no_record_video:
+                env.reset()
     finally:
         env.close()
 
-    video_path = case_dir / "outputs" / "videos" / "episode_0_cam1.mp4"
-    logger.log_info(
-        f"Case '{case.label}' finished. Video: {video_path}",
-        color="green",
-    )
+    if args.no_record_video:
+        logger.log_info(
+            f"Case '{case.label}' finished. Video recording disabled. "
+            f"Artifacts: {artifact_dir}",
+            color="green",
+        )
+    else:
+        video_path = case_dir / "outputs" / "videos" / "episode_0_cam1.mp4"
+        logger.log_info(
+            f"Case '{case.label}' finished. Video: {video_path}",
+            color="green",
+        )
 
 
 def main() -> None:
     args = build_parser()
+    if args.action_runtime in {"legacy_agent", "legacy"}:
+        args.disable_atomic_action_graph = True
+    elif args.action_runtime == "atomic_engine":
+        args.disable_atomic_action_graph = False
+    if args.open_window:
+        args.headless = False
     output_root = (
         Path(args.output_root).resolve()
         if args.output_root

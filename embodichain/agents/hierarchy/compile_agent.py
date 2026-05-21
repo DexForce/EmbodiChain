@@ -27,7 +27,7 @@ from embodichain.utils.llm_json import extract_json_object, normalize_json_conte
 
 __all__ = ["CompileAgent"]
 
-COMPILED_GRAPH_SCHEMA_VERSION = "recovery_bindings_v1"
+COMPILED_GRAPH_SCHEMA_VERSION = "recovery_bindings_atomic_v3"
 
 
 class CompileAgent(AgentBase):

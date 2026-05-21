@@ -128,10 +128,17 @@ class BaseAgentEnv:
         obs = self.get_obs()
         rgb = obs["sensor"]["cam_high"]["color"].squeeze(0)
 
-        # Get validation camera data
-        camera_data = self.event_manager.get_functor("validation_cameras")(self, None)
         result = {"rgb": rgb}
-        result.update({k: v.squeeze(0) for k, v in camera_data.items()})
+        validation_event = (
+            getattr(self.event_manager.cfg, "validation_cameras", None)
+            if self.event_manager is not None
+            else None
+        )
+        if validation_event is not None:
+            validation_functor = self.event_manager.get_functor("validation_cameras")
+            if validation_functor is not None:
+                camera_data = validation_functor(self, None)
+                result.update({k: v.squeeze(0) for k, v in camera_data.items()})
         return result
 
     def get_current_qpos_agent(self):
@@ -238,23 +245,43 @@ class BaseAgentEnv:
             ]
         for key in (
             "use_public_atomic_actions",
+            "use_atomic_action_graph",
+            "require_atomic_action_graph",
             "use_public_grasp_action",
             "require_public_grasp_action",
             "use_public_grasp_semantics",
             "allow_public_grasp_annotation",
             "force_public_grasp_reannotate",
+            "recovery_public_grasp_strategy",
             "public_grasp_candidate_num",
+            "recovery_public_grasp_candidate_num",
             "public_grasp_pre_grasp_distance",
+            "recovery_public_grasp_pre_grasp_distance",
             "generate_public_grasp_candidates",
             "public_grasp_auto_approach_direction",
+            "recovery_public_grasp_auto_approach_direction",
             "public_grasp_try_approach_directions",
+            "recovery_public_grasp_try_approach_directions",
             "public_grasp_approach_direction",
+            "recovery_public_grasp_approach_direction",
             "public_grasp_approach_directions",
+            "recovery_public_grasp_approach_directions",
             "public_grasp_lift_height",
+            "recovery_public_grasp_lift_height",
             "public_grasp_pose_offset_world",
+            "recovery_public_grasp_pose_offset_world",
             "public_grasp_pose_offset_along_approach",
+            "recovery_public_grasp_pose_offset_along_approach",
             "validate_public_grasp_after_action",
+            "recovery_validate_public_grasp_after_action",
             "public_grasp_validation_min_object_lift",
+            "public_grasp_validation_max_object_lift",
+            "public_grasp_validation_max_object_xy_displacement",
+            "recovery_public_grasp_validation_min_object_lift",
+            "recovery_public_grasp_validation_max_object_lift",
+            "recovery_public_grasp_validation_max_object_xy_displacement",
+            "recovery_public_grasp_rank_by_legacy_pose",
+            "recovery_public_grasp_use_legacy_orientation",
             "grasp_max_open_length",
             "grasp_min_open_length",
             "grasp_finger_length",

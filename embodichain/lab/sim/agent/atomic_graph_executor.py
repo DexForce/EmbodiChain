@@ -1,0 +1,573 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+import torch
+
+from embodichain.lab.sim.agent.atomic_action_adapter import (
+    _as_pose_tensor,
+    _build_pickup_cfg,
+    _build_public_grasp_semantics,
+    _public_grasp_approach_direction,
+    _public_grasp_approach_direction_candidates,
+    _register_public_grasp_physical_validation,
+    _select_arm,
+    _state_to_hand_qpos,
+    _sync_agent_arm_state,
+    _with_public_grasp_strategy_defaults,
+)
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    MoveActionCfg,
+    PlaceActionCfg,
+)
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.utils.logger import log_warning
+
+__all__ = ["AtomicGraphAction"]
+
+
+@dataclass
+class AtomicGraphAction:
+    """Executable wrapper for compiled atomic-action graph payloads."""
+
+    spec: Mapping[str, Any]
+    fallback_action: Callable[..., Any] | None = None
+    func: Callable[..., Any] | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        self.spec = deepcopy(dict(self.spec))
+        self.func = getattr(self.fallback_action, "func", self.fallback_action)
+
+    def __call__(self, env=None, **kwargs):
+        if not kwargs.get("use_atomic_action_graph", True) or not kwargs.get(
+            "use_public_atomic_actions", True
+        ):
+            return self._run_fallback(env=env, kwargs=kwargs)
+
+        try:
+            return self._run_atomic_graph(env=env, kwargs=kwargs)
+        except Exception as exc:
+            if kwargs.get("require_atomic_action_graph", False):
+                raise RuntimeError(
+                    f"Atomic graph action '{self.action_name}' failed: {exc}"
+                ) from exc
+            if self.fallback_action is None:
+                raise
+            log_warning(
+                f"Atomic graph action '{self.action_name}' failed with "
+                f"{type(exc).__name__}: {exc}. Falling back to legacy action."
+            )
+            return self._run_fallback(env=env, kwargs=kwargs)
+
+    @property
+    def action_name(self) -> str:
+        return str(self.spec.get("name", self.spec.get("kind", "atomic_graph_action")))
+
+    @property
+    def legacy_action_name(self) -> str | None:
+        func = getattr(self.fallback_action, "func", self.fallback_action)
+        return getattr(func, "__name__", None)
+
+    def _run_fallback(self, *, env, kwargs: dict[str, Any]):
+        if self.fallback_action is None:
+            raise RuntimeError(
+                f"Atomic graph action '{self.action_name}' has no fallback action."
+            )
+        return self.fallback_action(env=env, **_fallback_kwargs(kwargs))
+
+    def _run_atomic_graph(self, *, env, kwargs: dict[str, Any]) -> np.ndarray:
+        if env is None:
+            raise RuntimeError("Atomic graph action execution requires env.")
+
+        action_specs = _flatten_action_specs(self.spec)
+        if not action_specs:
+            raise RuntimeError("Atomic graph action spec has no actions.")
+
+        robot_names = [_robot_name_from_action_spec(action) for action in action_specs]
+        robot_names = [
+            robot_name for robot_name in robot_names if robot_name is not None
+        ]
+        if not robot_names:
+            raise RuntimeError("Atomic graph action spec has no control_part.")
+        if len(set(robot_names)) != 1:
+            raise RuntimeError(
+                "Atomic graph action execution currently supports one arm per edge."
+            )
+        robot_name = robot_names[0]
+
+        if len(action_specs) == 1 and action_specs[0].get("name") == "pick_up":
+            return _run_single_pick_up(
+                action_specs[0],
+                env=env,
+                robot_name=robot_name,
+                kwargs=_action_runtime_kwargs(action_specs[0], kwargs),
+            )
+
+        action_kwargs_list = [
+            _action_runtime_kwargs(action, kwargs) for action in action_specs
+        ]
+        cfg_list = [
+            _build_action_cfg(
+                action,
+                env=env,
+                robot_name=robot_name,
+                kwargs=action_kwargs,
+            )
+            for action, action_kwargs in zip(action_specs, action_kwargs_list)
+        ]
+        target_list = [
+            _resolve_action_target(
+                action,
+                env=env,
+                robot_name=robot_name,
+                kwargs=action_kwargs,
+            )
+            for action, action_kwargs in zip(action_specs, action_kwargs_list)
+        ]
+
+        engine = _create_engine(env, cfg_list)
+        is_success, trajectory = engine.execute_static(target_list=target_list)
+        if not is_success or trajectory.numel() == 0:
+            raise RuntimeError("AtomicActionEngine failed to produce a trajectory.")
+
+        legacy_action = _extract_arm_action(env, robot_name, trajectory)
+        _sync_agent_arm_state(env, robot_name, legacy_action)
+        return legacy_action
+
+
+def _flatten_action_specs(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    kind = spec.get("kind")
+    if kind == "atomic_action":
+        return [spec]
+    if kind == "atomic_sequence":
+        parent_runtime_kwargs = dict(spec.get("runtime_kwargs", {}))
+        actions = []
+        for action in spec.get("actions", []):
+            if not isinstance(action, Mapping) or action.get("kind") != "atomic_action":
+                continue
+            if parent_runtime_kwargs:
+                action = deepcopy(dict(action))
+                runtime_kwargs = dict(parent_runtime_kwargs)
+                runtime_kwargs.update(dict(action.get("runtime_kwargs", {})))
+                action["runtime_kwargs"] = runtime_kwargs
+            actions.append(action)
+        return actions
+    return []
+
+
+def _fallback_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    filtered = dict(kwargs)
+    filtered.pop("use_atomic_action_graph", None)
+    filtered.pop("require_atomic_action_graph", None)
+    return filtered
+
+
+def _action_runtime_kwargs(
+    action: Mapping[str, Any],
+    runtime_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(runtime_kwargs)
+    action_kwargs = action.get("runtime_kwargs")
+    if isinstance(action_kwargs, Mapping):
+        merged.update(dict(action_kwargs))
+    _apply_recovery_public_grasp_overrides(merged, runtime_kwargs)
+    return merged
+
+
+_RECOVERY_PUBLIC_GRASP_OVERRIDE_KEYS = {
+    "recovery_public_grasp_strategy": "public_grasp_strategy",
+    "recovery_public_grasp_candidate_num": "public_grasp_candidate_num",
+    "recovery_public_grasp_pre_grasp_distance": "public_grasp_pre_grasp_distance",
+    "recovery_public_grasp_lift_height": "public_grasp_lift_height",
+    "recovery_public_grasp_pose_offset_world": "public_grasp_pose_offset_world",
+    "recovery_public_grasp_pose_offset_along_approach": (
+        "public_grasp_pose_offset_along_approach"
+    ),
+    "recovery_validate_public_grasp_after_action": (
+        "validate_public_grasp_after_action"
+    ),
+    "recovery_public_grasp_validation_min_object_lift": (
+        "public_grasp_validation_min_object_lift"
+    ),
+    "recovery_public_grasp_validation_max_object_lift": (
+        "public_grasp_validation_max_object_lift"
+    ),
+    "recovery_public_grasp_validation_max_object_xy_displacement": (
+        "public_grasp_validation_max_object_xy_displacement"
+    ),
+    "recovery_public_grasp_rank_by_legacy_pose": ("public_grasp_rank_by_legacy_pose"),
+    "recovery_public_grasp_use_legacy_orientation": (
+        "public_grasp_use_legacy_orientation"
+    ),
+    "recovery_public_grasp_auto_approach_direction": (
+        "public_grasp_auto_approach_direction"
+    ),
+    "recovery_public_grasp_try_approach_directions": (
+        "public_grasp_try_approach_directions"
+    ),
+    "recovery_public_grasp_approach_direction": "public_grasp_approach_direction",
+    "recovery_public_grasp_approach_directions": "public_grasp_approach_directions",
+}
+
+
+def _apply_recovery_public_grasp_overrides(
+    merged: dict[str, Any],
+    runtime_kwargs: dict[str, Any],
+) -> None:
+    for recovery_key, public_key in _RECOVERY_PUBLIC_GRASP_OVERRIDE_KEYS.items():
+        value = runtime_kwargs.get(recovery_key)
+        if value is not None:
+            merged[public_key] = value
+
+
+def _robot_name_from_action_spec(action: Mapping[str, Any]) -> str | None:
+    cfg = dict(action.get("cfg", {}))
+    robot_name = cfg.get("control_part")
+    if robot_name is not None:
+        return str(robot_name)
+    fallback = action.get("fallback", action.get("legacy_call"))
+    if isinstance(fallback, Mapping):
+        kwargs = dict(fallback.get("kwargs", {}))
+        if kwargs.get("robot_name") is not None:
+            return str(kwargs["robot_name"])
+    return None
+
+
+def _build_action_cfg(
+    action: Mapping[str, Any],
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+):
+    action_name = action.get("name")
+    cfg_payload = dict(action.get("cfg", {}))
+    is_left, default_arm_part, default_hand_part = _select_arm(robot_name)
+    arm_part = str(cfg_payload.get("control_part", default_arm_part))
+    hand_part = str(cfg_payload.get("hand_control_part", default_hand_part))
+    hand_joints = env.left_eef_joints if is_left else env.right_eef_joints
+    hand_dof = len(hand_joints)
+    device = getattr(env.robot, "device", None)
+
+    if action_name == "pick_up":
+        obj_name = _target_object_name(action.get("target", {}))
+        if obj_name is None:
+            raise RuntimeError("pick_up target requires obj_name.")
+        graph_kwargs = _with_public_grasp_strategy_defaults(kwargs)
+        approach_direction = cfg_payload.get("approach_direction")
+        if approach_direction is None:
+            approach_direction = _public_grasp_approach_direction(
+                env,
+                robot_name,
+                obj_name,
+                graph_kwargs,
+                device=device,
+            )
+        else:
+            approach_direction = torch.as_tensor(
+                approach_direction,
+                dtype=torch.float32,
+                device=device,
+            )
+        pre_grasp_distance = _float_option(
+            cfg_payload.get(
+                "pre_grasp_distance",
+                cfg_payload.get("pre_grasp_dis"),
+            ),
+            default=0.1,
+        )
+        return _build_pickup_cfg(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_distance,
+            kwargs=graph_kwargs,
+            approach_direction=approach_direction,
+        )
+
+    if action_name == "place":
+        return PlaceActionCfg(
+            control_part=arm_part,
+            hand_control_part=hand_part,
+            hand_open_qpos=_state_to_hand_qpos(
+                env.open_state,
+                hand_dof,
+                device=device,
+            ),
+            hand_close_qpos=_state_to_hand_qpos(
+                env.close_state,
+                hand_dof,
+                device=device,
+            ),
+            lift_height=_float_option(
+                cfg_payload.get("lift_height", cfg_payload.get("pre_place_distance")),
+                default=0.08,
+            ),
+            sample_interval=_int_option(
+                cfg_payload.get(
+                    "sample_interval",
+                    kwargs.get("sample_interval", kwargs.get("sample_num")),
+                ),
+                default=45,
+            ),
+            hand_interp_steps=_int_option(
+                cfg_payload.get("hand_interp_steps", kwargs.get("hand_interp_steps")),
+                default=15,
+            ),
+            post_open_wait_steps=_int_option(
+                cfg_payload.get(
+                    "post_open_wait_steps",
+                    kwargs.get("public_place_post_open_wait_steps"),
+                ),
+                default=20,
+            ),
+        )
+
+    if action_name == "move":
+        return MoveActionCfg(
+            control_part=arm_part,
+            sample_interval=_int_option(
+                cfg_payload.get(
+                    "sample_interval",
+                    kwargs.get("sample_interval", kwargs.get("sample_num")),
+                ),
+                default=50,
+            ),
+        )
+
+    raise RuntimeError(f"Unsupported atomic graph action '{action_name}'.")
+
+
+def _run_single_pick_up(
+    action: Mapping[str, Any],
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+) -> np.ndarray:
+    obj_name = _target_object_name(action.get("target", {}))
+    if obj_name is None:
+        raise RuntimeError("pick_up target requires obj_name.")
+
+    target = _resolve_action_target(
+        action,
+        env=env,
+        robot_name=robot_name,
+        kwargs=kwargs,
+    )
+    cfg_payload = dict(action.get("cfg", {}))
+    pre_grasp_distance = _float_option(
+        cfg_payload.get("pre_grasp_distance", cfg_payload.get("pre_grasp_dis")),
+        default=0.1,
+    )
+    graph_kwargs = _with_public_grasp_strategy_defaults(kwargs)
+    device = getattr(env.robot, "device", None)
+    configured_direction = cfg_payload.get("approach_direction")
+    if configured_direction is not None:
+        direction_candidates = [
+            (
+                "configured",
+                torch.as_tensor(
+                    configured_direction, dtype=torch.float32, device=device
+                ),
+            )
+        ]
+    else:
+        direction_candidates = _public_grasp_approach_direction_candidates(
+            env,
+            robot_name,
+            obj_name,
+            graph_kwargs,
+            device=device,
+        )
+
+    failures: list[str] = []
+    for label, direction in direction_candidates:
+        cfg = _build_pickup_cfg(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            pre_grasp_dis=pre_grasp_distance,
+            kwargs=graph_kwargs,
+            approach_direction=direction,
+        )
+        engine = _create_engine(env, [cfg])
+        is_success, trajectory = engine.execute_static(target_list=[target])
+        if is_success and trajectory.numel() > 0:
+            legacy_action = _extract_arm_action(env, robot_name, trajectory)
+            _sync_agent_arm_state(env, robot_name, legacy_action)
+            _register_public_grasp_physical_validation(
+                env=env,
+                kwargs=graph_kwargs,
+                robot_name=robot_name,
+                obj_name=obj_name,
+                label=label,
+                direction=direction,
+                lift_height=float(cfg.lift_height),
+                legacy_reference_pose=None,
+            )
+            return legacy_action
+        failures.append(label)
+
+    raise RuntimeError(
+        "AtomicActionEngine failed to produce a pick_up trajectory "
+        f"for approach directions: {', '.join(failures) or '<none>'}."
+    )
+
+
+def _resolve_action_target(
+    action: Mapping[str, Any],
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+):
+    action_name = action.get("name")
+    target = action.get("target", {})
+
+    if action_name == "pick_up":
+        obj_name = _target_object_name(target)
+        if obj_name is None:
+            raise RuntimeError("pick_up target requires obj_name.")
+        strict = bool(kwargs.get("require_atomic_action_graph", False))
+        semantics = _build_public_grasp_semantics(
+            env,
+            obj_name,
+            kwargs,
+            strict=strict,
+        )
+        if semantics is None:
+            raise RuntimeError(f"Cannot build ObjectSemantics for '{obj_name}'.")
+        return semantics
+
+    if action_name == "place":
+        return _resolve_place_target_pose(
+            target,
+            env=env,
+            robot_name=robot_name,
+            kwargs=kwargs,
+        )
+
+    if action_name == "move":
+        return _resolve_pose_target(target, env=env, robot_name=robot_name)
+
+    raise RuntimeError(f"Unsupported atomic graph action '{action_name}'.")
+
+
+def _target_object_name(target: Any) -> str | None:
+    if not isinstance(target, Mapping):
+        return None
+    obj_name = target.get("obj_name", target.get("object"))
+    return str(obj_name) if obj_name is not None else None
+
+
+def _float_option(value: Any, *, default: float) -> float:
+    return float(default if value is None else value)
+
+
+def _int_option(value: Any, *, default: int) -> int:
+    return int(default if value is None else value)
+
+
+def _resolve_place_target_pose(
+    target: Any,
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+) -> torch.Tensor:
+    if isinstance(target, Mapping) and target.get("pose") is not None:
+        return _as_pose_tensor(
+            target["pose"], device=getattr(env.robot, "device", None)
+        )
+
+    is_left, _, _ = _select_arm(robot_name)
+    current_pose = env.left_arm_current_xpos if is_left else env.right_arm_current_xpos
+    place_pose = deepcopy(current_pose)
+    obj_name = _target_object_name(target)
+    obj_info = getattr(env, "obj_info", {}).get(obj_name, {}) if obj_name else {}
+    height = obj_info.get("height")
+    if height is None and obj_name is not None:
+        env.update_obj_info()
+        height = getattr(env, "obj_info", {}).get(obj_name, {}).get("height")
+    if height is not None:
+        place_pose[2, 3] = height + kwargs.get("eps", 0.03)
+    if isinstance(target, Mapping):
+        if target.get("x") is not None:
+            place_pose[0, 3] = float(target["x"])
+        if target.get("y") is not None:
+            place_pose[1, 3] = float(target["y"])
+        if target.get("z") is not None:
+            place_pose[2, 3] = float(target["z"])
+    return _as_pose_tensor(place_pose, device=getattr(env.robot, "device", None))
+
+
+def _resolve_pose_target(
+    target: Any,
+    *,
+    env,
+    robot_name: str,
+) -> torch.Tensor:
+    device = getattr(env.robot, "device", None)
+    if isinstance(target, Mapping):
+        for key in ("pose", "matrix", "target_pose"):
+            if target.get(key) is not None:
+                return _as_pose_tensor(target[key], device=device)
+        target_kind = target.get("kind")
+        is_left, _, _ = _select_arm(robot_name)
+        if target_kind == "current_pose":
+            pose = env.left_arm_current_xpos if is_left else env.right_arm_current_xpos
+            return _as_pose_tensor(pose, device=device)
+        if target_kind == "initial_pose":
+            pose = env.left_arm_init_xpos if is_left else env.right_arm_init_xpos
+            return _as_pose_tensor(pose, device=device)
+    return _as_pose_tensor(target, device=device)
+
+
+def _create_engine(env, cfg_list: list[Any]) -> AtomicActionEngine:
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+    )
+    return AtomicActionEngine(
+        motion_generator=motion_generator,
+        actions_cfg_list=cfg_list,
+    )
+
+
+def _extract_arm_action(env, robot_name: str, trajectory: torch.Tensor) -> np.ndarray:
+    if trajectory.ndim != 3 or trajectory.shape[0] != 1:
+        raise RuntimeError(
+            "Atomic graph executor currently supports trajectory shape "
+            f"(1, T, dof), got {tuple(trajectory.shape)}."
+        )
+    is_left, _, _ = _select_arm(robot_name)
+    joint_ids = env.left_arm_joints if is_left else env.right_arm_joints
+    joint_ids = joint_ids + (env.left_eef_joints if is_left else env.right_eef_joints)
+    return (
+        trajectory[0, :, joint_ids]
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32, copy=False)
+    )

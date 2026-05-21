@@ -83,7 +83,7 @@ class SkillStep:
 
 def timestamped_output_root() -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    return ROOT_DIR / "outputs" / f"grasp_cup_{timestamp}"
+    return ROOT_DIR / "outputs" / f"{timestamp}_grasp_cup"
 
 
 def _parse_xyz(value: str) -> list[float]:
@@ -126,7 +126,7 @@ def parse_args() -> argparse.Namespace:
         "--output_root",
         type=str,
         default=None,
-        help="Output directory. Defaults to outputs/grasp_cup_YYYYMMDD_HHMM.",
+        help="Output directory. Defaults to outputs/YYYYMMDD_HHMM_grasp_cup.",
     )
     parser.add_argument(
         "--place_x",
@@ -1032,9 +1032,7 @@ def run_demo(args: argparse.Namespace, output_root: Path) -> Path:
                         raise RuntimeError(
                             "Cannot validate grasp physics before the grasp step runs."
                         )
-                    rows.append(
-                        _validate_grasp_lift_result(env, args, post_grasp_pose)
-                    )
+                    rows.append(_validate_grasp_lift_result(env, args, post_grasp_pose))
             rows.append(_validate_final_place_result(env, args))
         except Exception as exc:
             run_error = exc

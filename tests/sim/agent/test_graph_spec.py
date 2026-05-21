@@ -134,6 +134,127 @@ def _nominal_task_graph() -> dict[str, Any]:
     }
 
 
+def _expected_pick_up_action(
+    *,
+    robot_name: str = "left_arm",
+    obj_name: str = "cup",
+    pre_grasp_dis: float = 0.1,
+    force_valid: bool = False,
+) -> dict[str, Any]:
+    runtime_kwargs = {
+        "force_valid": force_valid,
+        "public_grasp_strategy": "legacy_guided",
+        "public_grasp_candidate_num": 32,
+        "public_grasp_pre_grasp_distance": 0.05,
+        "public_grasp_lift_height": 0.15,
+        "public_grasp_rank_by_legacy_pose": True,
+        "public_grasp_use_legacy_orientation": True,
+        "validate_public_grasp_after_action": True,
+        "public_grasp_validation_min_object_lift": 0.03,
+        "public_grasp_validation_max_object_xy_displacement": 0.16,
+    }
+    return {
+        "kind": "atomic_action",
+        "name": "pick_up",
+        "cfg_class": "PickUpActionCfg",
+        "cfg": {
+            "control_part": robot_name,
+            "hand_control_part": "right_eef" if "right" in robot_name else "left_eef",
+            "pre_grasp_distance": pre_grasp_dis,
+        },
+        "target": {"kind": "object_semantics", "obj_name": obj_name},
+        "runtime_kwargs": runtime_kwargs,
+        "fallback": {
+            "fn": "grasp",
+            "kwargs": {
+                "robot_name": robot_name,
+                "obj_name": obj_name,
+                "pre_grasp_dis": pre_grasp_dis,
+                "force_valid": force_valid,
+            },
+        },
+    }
+
+
+def _expected_place_action(
+    *,
+    robot_name: str = "left_arm",
+    obj_name: str = "cup",
+    pre_place_dis: float = 0.08,
+    force_valid: bool = True,
+    orientation: str | None = None,
+) -> dict[str, Any]:
+    target = {"kind": "table_pose", "obj_name": obj_name}
+    if orientation is not None:
+        target["orientation"] = orientation
+    return {
+        "kind": "atomic_action",
+        "name": "place",
+        "cfg_class": "PlaceActionCfg",
+        "cfg": {
+            "control_part": robot_name,
+            "hand_control_part": "right_eef" if "right" in robot_name else "left_eef",
+            "lift_height": pre_place_dis,
+        },
+        "target": target,
+        "runtime_kwargs": {"force_valid": force_valid},
+        "fallback": {
+            "fn": "place_on_table",
+            "kwargs": {
+                "robot_name": robot_name,
+                "obj_name": obj_name,
+                "pre_place_dis": pre_place_dis,
+                "force_valid": force_valid,
+            },
+        },
+    }
+
+
+def _expected_upright_object_sequence(
+    *,
+    robot_name: str = "left_arm",
+    obj_name: str = "cup",
+    pre_grasp_dis: float = 0.08,
+    pre_place_dis: float = 0.08,
+    force_valid: bool = True,
+) -> dict[str, Any]:
+    place_action = _expected_place_action(
+        robot_name=robot_name,
+        obj_name=obj_name,
+        pre_place_dis=pre_place_dis,
+        force_valid=force_valid,
+        orientation="upright",
+    )
+    return {
+        "kind": "atomic_sequence",
+        "name": "upright_object",
+        "actions": [
+            _expected_pick_up_action(
+                robot_name=robot_name,
+                obj_name=obj_name,
+                pre_grasp_dis=pre_grasp_dis,
+                force_valid=force_valid,
+            ),
+            place_action,
+        ],
+        "target_list": [
+            {"kind": "object_semantics", "obj_name": obj_name},
+            {"kind": "table_pose", "obj_name": obj_name, "orientation": "upright"},
+        ],
+        "runtime_kwargs": {"force_valid": force_valid},
+        "fallback": {
+            "fn": "upright_object",
+            "kwargs": {
+                "robot_name": robot_name,
+                "obj_name": obj_name,
+                "pre_grasp_dis": pre_grasp_dis,
+                "pre_place_dis": pre_place_dis,
+                "force_valid": force_valid,
+            },
+        },
+    }
+
+
 def test_expand_recovery_spec_generates_reusable_recovery_graph() -> None:
     recovery_graph = expand_recovery_spec(
         _nominal_task_graph(),
@@ -178,15 +299,7 @@ def test_expand_recovery_spec_generates_reusable_recovery_graph() -> None:
             "id": "re_e01_grasp_1_regrasp_cup",
             "source": "v0_start",
             "target": "v1_grasped",
-            "left_arm_action": {
-                "fn": "grasp",
-                "kwargs": {
-                    "robot_name": "left_arm",
-                    "obj_name": "cup",
-                    "pre_grasp_dis": 0.1,
-                    "force_valid": True,
-                },
-            },
+            "left_arm_action": _expected_pick_up_action(force_valid=True),
             "right_arm_action": None,
         }
     ]
@@ -259,6 +372,42 @@ def test_normalize_recovery_spec_infers_simple_aliases() -> None:
     }
 
 
+def test_normalize_recovery_spec_infers_targets_from_atomic_action_schema() -> None:
+    task_graph = _nominal_task_graph()
+    task_graph["edges"][0]["left_arm_action"] = _expected_pick_up_action(
+        force_valid=True
+    )
+    recovery_spec = {
+        "task": "grasp cup",
+        "bindings": [
+            {
+                "edge": "e01_grasp",
+                "failure": "cup_moved",
+                "monitor": [{"type": "object shifted"}],
+                "recovery": [{"type": "grasp again"}],
+                "merge": "complete",
+            }
+        ],
+    }
+
+    normalized, issues = normalize_recovery_spec(task_graph, recovery_spec)
+
+    assert issues == []
+    binding = normalized["recovery_bindings"][0]
+    assert binding["monitors"] == [
+        {"type": "object_moved", "objects": ["cup"], "threshold": 0.02}
+    ]
+    assert binding["recovery"] == [
+        {
+            "type": "regrasp",
+            "robot_name": "left_arm",
+            "obj_name": "cup",
+            "pre_grasp_dis": 0.1,
+            "force_valid": False,
+        }
+    ]
+
+
 def test_expand_recovery_spec_supports_upright_object_step() -> None:
     recovery_graph = expand_recovery_spec(
         _nominal_task_graph(),
@@ -296,16 +445,10 @@ def test_expand_recovery_spec_supports_upright_object_step() -> None:
             "id": "re_e01_grasp_1_upright_cup",
             "source": "v0_start",
             "target": "v0_start",
-            "left_arm_action": {
-                "fn": "upright_object",
-                "kwargs": {
-                    "robot_name": "left_arm",
-                    "obj_name": "cup",
-                    "pre_grasp_dis": 0.08,
-                    "pre_place_dis": 0.09,
-                    "force_valid": True,
-                },
-            },
+            "left_arm_action": _expected_upright_object_sequence(
+                pre_grasp_dis=0.08,
+                pre_place_dis=0.09,
+            ),
             "right_arm_action": None,
         }
     ]
@@ -361,16 +504,12 @@ def test_expand_recovery_spec_does_not_self_monitor_upright_object_step() -> Non
         },
     )
 
-    branch_ids = [
-        branch["edge_id"] for branch in recovery_graph["recovery_branches"]
-    ]
+    branch_ids = [branch["edge_id"] for branch in recovery_graph["recovery_branches"]]
 
     assert "re_e01_grasp_1_upright_cup" not in branch_ids
     assert "re_e01_grasp_2_return_arm_home" in branch_ids
     assert "re_e01_grasp_3_regrasp_cup" in branch_ids
-    assert [
-        edge["id"] for edge in recovery_graph["recovery_edges"]
-    ] == [
+    assert [edge["id"] for edge in recovery_graph["recovery_edges"]] == [
         "re_e01_grasp_1_upright_cup",
         "re_e01_grasp_2_return_arm_home",
         "re_e01_grasp_3_regrasp_cup",
@@ -566,6 +705,67 @@ def test_compile_agent_graph_spec_adds_explicit_recovery_branch() -> None:
     assert recovery_edge.left_arm_action.func is grasp
     assert recovery_edge.is_recovery is True
     assert graph.recovery_branches[("e01_grasp", 0)] == ["r_e01_regrasp"]
+
+
+def test_compile_agent_graph_spec_compiles_atomic_action_fallback() -> None:
+    env = object()
+
+    def grasp(**kwargs):
+        return kwargs
+
+    def move(**kwargs):
+        return kwargs
+
+    def monitor_object_moved(**kwargs):
+        return kwargs
+
+    atomic_action = _expected_pick_up_action(force_valid=True)
+    atomic_action.pop("fallback")
+    recovery_graph = {
+        "task": "grasp cup",
+        "recovery_nodes": [],
+        "recovery_edges": [
+            {
+                "id": "r_e01_regrasp",
+                "source": "v0_start",
+                "target": "v1_grasped",
+                "left_arm_action": atomic_action,
+                "right_arm_action": None,
+            }
+        ],
+        "recovery_branches": [
+            {
+                "edge_id": "e01_grasp",
+                "failure_name": "cup_moved",
+                "monitor_sequence": [
+                    {
+                        "fn": "monitor_object_moved",
+                        "kwargs": {"obj_name": "cup", "threshold": 0.02},
+                    }
+                ],
+                "recovery_edges": ["r_e01_regrasp"],
+            }
+        ],
+    }
+
+    graph = compile_agent_graph_spec(
+        _nominal_task_graph(),
+        recovery_graph,
+        env=env,
+        graph_cls=FakeGraph,
+        action_module={"grasp": grasp, "move": move},
+        monitor_module={"monitor_object_moved": monitor_object_moved},
+    )
+
+    recovery_action = graph.edges["r_e01_regrasp"].left_arm_action
+    assert recovery_action.func is grasp
+    assert recovery_action(env=env, use_atomic_action_graph=False) == {
+        "env": env,
+        "robot_name": "left_arm",
+        "obj_name": "cup",
+        "pre_grasp_dis": 0.1,
+        "force_valid": True,
+    }
 
 
 def test_compile_agent_graph_spec_allows_recovery_branch_on_recovery_edge() -> None:

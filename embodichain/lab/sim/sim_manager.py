@@ -264,6 +264,13 @@ class SimulationManager:
         self._window_record_input_control: ObjectManipulator | None = None
         self._window_record_save_threads: list[threading.Thread] = []
 
+        set_physics_fps = getattr(self._world, "set_physics_fps", None)
+        if callable(set_physics_fps):
+            set_physics_fps(int(1.0 / sim_config.physics_dt))
+
+        set_time_scale = getattr(self._world, "set_time_scale", None)
+        if callable(set_time_scale):
+            set_time_scale(1.0)
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
