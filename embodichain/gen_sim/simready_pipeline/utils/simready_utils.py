@@ -17,17 +17,17 @@
 import argparse
 import base64
 import json
+import os
 import re
 from pathlib import Path
 import numpy as np
 import trimesh
 import pyrender
 from PIL import Image
-from openai import AzureOpenAI
+from openai import OpenAI
 import itertools
 from scipy.spatial import ConvexHull
 from typing import Dict, Any, List
-from urllib.parse import urlsplit, urlunsplit
 
 
 def _load_gen_config() -> Dict[str, Any]:
@@ -36,12 +36,17 @@ def _load_gen_config() -> Dict[str, Any]:
         raise FileNotFoundError(f"gen_config.json not found: {config_path}")
 
     with config_path.open("r", encoding="utf-8") as f:
-        cfg = json.load(f)
+        raw_cfg = json.load(f)
 
-    cfg = cfg.get("llm", {}).get("azure_openai", {})
-    cfg.setdefault("api_version", "2024-02-15-preview")
+    cfg = raw_cfg.get("llm", {}).get("openai_compatible", {})
+    cfg["api_key"] = os.getenv("OPENAI_API_KEY") or cfg.get("api_key", "")
+    cfg["model"] = os.getenv("OPENAI_MODEL") or cfg.get("model", "")
+    cfg["base_url"] = os.getenv("OPENAI_BASE_URL") or cfg.get("base_url", "")
+    cfg["default_query"] = cfg.get("default_query", {})
+    if cfg["base_url"]:
+        cfg["base_url"] = cfg["base_url"].rstrip("/")
 
-    required = ["api_key", "model", "base_url", "api_version"]
+    required = ["api_key", "model", "base_url"]
     missing = [k for k in required if k not in cfg or not cfg[k]]
     if missing:
         raise ValueError(f"Missing required config keys: {missing}")
@@ -49,28 +54,14 @@ def _load_gen_config() -> Dict[str, Any]:
     return cfg
 
 
-def _normalize_azure_endpoint(base_url: str) -> str:
-    parsed = urlsplit(base_url)
-    path = parsed.path
-
-    if "/openai/deployments/" in path:
-        path = path.split("/openai/deployments/")[0]
-    elif path.endswith("/chat/completions"):
-        path = path[: -len("/chat/completions")]
-
-    return urlunsplit((parsed.scheme, parsed.netloc, path.rstrip("/"), "", ""))
-
-
 _GEN_CONFIG = _load_gen_config()
 
 DEPLOYMENT = _GEN_CONFIG["model"]
 
-AZURE_ENDPOINT = _normalize_azure_endpoint(_GEN_CONFIG["base_url"])
-
-client = AzureOpenAI(
+client = OpenAI(
     api_key=_GEN_CONFIG["api_key"],
-    api_version=_GEN_CONFIG["api_version"],
-    azure_endpoint=AZURE_ENDPOINT,
+    base_url=_GEN_CONFIG["base_url"],
+    default_query=_GEN_CONFIG.get("default_query") or None,
 )
 
 STRATEGY = None

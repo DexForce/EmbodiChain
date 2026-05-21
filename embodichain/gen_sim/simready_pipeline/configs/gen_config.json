@@ -60,11 +60,11 @@
     }
   },
   "llm": {
-    "azure_openai": {
+    "openai_compatible": {
       "api_key": "",
       "model": "gpt-4o",
       "base_url": "",
-      "api_version": "2024-02-15-preview"
+      "default_query": {}
     }
   }
 }

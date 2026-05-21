@@ -21,9 +21,6 @@ import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, List
-from urllib.parse import urlsplit, urlunsplit
-
-from openai import AzureOpenAI
 
 from embodichain.gen_sim.simready_pipeline.core.asset import Asset
 from embodichain.gen_sim.simready_pipeline.parser.base import AssetParser
@@ -348,7 +345,6 @@ class PhysicsParser(AssetParser):
         resp = client.chat.completions.create(
             model=DEPLOYMENT,
             temperature=0.0,
-            response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": PHYSICS_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},

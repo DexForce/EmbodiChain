@@ -23,13 +23,64 @@ python -m embodichain preview-asset \
 
 ## Prerequisites
 
-The full pipeline uses Blender, trimesh, pyrender, and an Azure OpenAI-compatible endpoint. Install EmbodiChain with the Blender package index enabled as described in the installation guide.
+The full pipeline uses Blender, trimesh, pyrender, and an OpenAI-compatible multimodal chat completions endpoint. Install EmbodiChain with the `gensim` extra and enable both the EmbodiChain package index and Blender package index.
 
-Set the LLM credentials before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`:
+Install from PyPI with `uv`:
 
 ```bash
-export AZURE_OPENAI_API_KEY="your-api-key"
-export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
+uv pip install "embodichain[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+Install from source with `uv`:
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+uv pip install -e ".[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+Install from PyPI with `pip`:
+
+```bash
+pip install "embodichain[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+Install from source with `pip`:
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+pip install -e ".[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+Set the OpenAI-compatible LLM credentials before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. Environment variables override the JSON config.
+
+OpenAI API example:
+
+```bash
+export OPENAI_API_KEY="your-openai-api-key"
+export OPENAI_MODEL="gpt-4o"
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+```
+
+Gemini API example:
+
+```bash
+export OPENAI_API_KEY="your-gemini-api-key"
+export OPENAI_MODEL="gemini-3.5-flash"
+export OPENAI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
 ```
 
 ## Processing Flow
@@ -159,16 +210,44 @@ This section controls source file discovery and the canonical output mesh name.
 
 ```json
 "llm": {
-  "azure_openai": {
+  "openai_compatible": {
     "api_key": "",
     "model": "gpt-4o",
-    "base_url": "",
-    "api_version": "2024-02-15-preview"
+    "base_url": "https://api.openai.com/v1",
+    "default_query": {}
   }
 }
 ```
 
-This section configures the multimodal LLM used for object classification, orientation selection, dimension inference, semantic annotation, and physics inference.
+This section configures the multimodal LLM used for object classification, orientation selection, dimension inference, semantic annotation, and physics inference. Any provider that supports the OpenAI-compatible chat completions API can be used by changing `api_key`, `model`, `base_url`, and optional `default_query` parameters.
+
+For Gemini, use the same config shape:
+
+```json
+"llm": {
+  "openai_compatible": {
+    "api_key": "your-gemini-api-key",
+    "model": "gemini-3.5-flash",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "default_query": {}
+  }
+}
+```
+
+For Azure-style OpenAI-compatible endpoints that require an API version query parameter, use `default_query`:
+
+```json
+"llm": {
+  "openai_compatible": {
+    "api_key": "your-api-key",
+    "model": "gpt-4o",
+    "base_url": "https://dex-gpt4.openai.azure.com/openai/deployments/gpt-4o",
+    "default_query": {
+      "api-version": "2025-01-01-preview"
+    }
+  }
+}
+```
 
 ## Default vs Simple Ingest
 
