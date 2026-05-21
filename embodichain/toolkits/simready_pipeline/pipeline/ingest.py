@@ -49,10 +49,10 @@ MESH_PROCESSING_CONFIG = GEN_CONFIG.get("mesh_processing", {})
 CANOCAIL_ASSET_NAME = INGEST_CONFIG.get("canonical_asset_name", "asset.obj")
 UNPROCESSED_FORMATS = INGEST_CONFIG.get(
     "unprocessed_formats", [".urdf", ".usd"]
-)  # 当前先复制，后续可以考虑解析
+)  # Copy these for now; parsing can be added later.
 PARSEABLE_MESH_FORMATS = INGEST_CONFIG.get(
     "parseable_mesh_formats", [".glb", ".gltf", ".obj", ".ply", ".stl"]
-)  # 主流的需要处理的格式
+)  # Common mesh formats that need processing.
 
 TRIMESH_INGEST_CONFIG = MESH_PROCESSING_CONFIG.get("trimesh_ingest", {})
 BLENDER_REMESH_BAKE_CONFIG = MESH_PROCESSING_CONFIG.get(

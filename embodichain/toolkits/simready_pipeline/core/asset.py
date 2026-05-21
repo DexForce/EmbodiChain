@@ -29,7 +29,7 @@ class Asset:
 
     parsed: Dict[str, Any] = field(
         default_factory=dict
-    )  # Visual, Geometry, Topology, 等解析或者入库时而来的信息
+    )  # Visual, Geometry, Topology
     semantics: Dict[str, Any] = field(default_factory=dict)
     physics: Dict[str, Any] = field(default_factory=dict)
     simulation: Dict[str, Any] = field(default_factory=dict)
@@ -41,7 +41,7 @@ class Asset:
     status: Dict[str, Any] = field(default_factory=dict)
     internal: Dict[str, Any] = field(default_factory=dict)
 
-    ingest_info: Dict[str, Any] = field(default_factory=dict)  # ingest相关的临时信息
+    ingest_info: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._init_simulation_defaults()

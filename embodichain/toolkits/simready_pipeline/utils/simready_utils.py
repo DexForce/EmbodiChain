@@ -1292,7 +1292,7 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
     else:
         raise ValueError()
 
-    # TODO： 还需要再做对齐分析！避免倾斜！！！！
+    # TODO: Add alignment analysis to avoid tilted outputs.
 
     normalize_to_unit_cube(mesh)
 

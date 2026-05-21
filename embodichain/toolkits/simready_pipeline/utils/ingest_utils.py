@@ -122,7 +122,7 @@ def load_one_trimesh(
     scene_mesh_strategy: str = "first",
 ) -> Union[
     trimesh.Trimesh, None
-]:  # 可能是个scene，但是我们只处理scene中的第一个geometry，如果有多个mesh，复合起来需要下一个版本
+]:  # The input may be a scene; process only the first geometry unless configured to concatenate.
     try:
         mesh_or_scene = trimesh.load_mesh(path)
         if isinstance(mesh_or_scene, trimesh.Scene):
@@ -246,11 +246,11 @@ def trimesh_parse_ingest(
             mtl_name=mtl_name,
         )
 
-        # ===== 写 OBJ =====
+        # ===== Write OBJ =====
         with open(obj_path, "w") as f:
             f.write(obj_str)
 
-        # ===== 写 texture / mtl =====
+        # ===== Write texture / MTL =====
         for name, data in tex_dict.items():
             file_path = asset_source / name
 
