@@ -9,7 +9,7 @@ Run the pipeline on a single asset directory:
 ```bash
 python -m embodichain.toolkits.simready_pipeline.cli.start \
     --input_dir /path/to/raw_mesh_folder \                                 
-    --output_root YourOutputDir \
+    --output_root /path/to/output_folder \
     --category YourCategory
 ```
 
@@ -177,7 +177,7 @@ The default command uses Blender during ingest:
 ```bash
 python -m embodichain.toolkits.simready_pipeline.cli.start \
     --input_dir /path/to/raw_mesh_folder \                                 
-    --output_root YourOutputDir \
+    --output_root /path/to/output_folder \
     --category YourCategory
 ```
 
@@ -186,7 +186,7 @@ Use `--simple` when you want faster trimesh-only ingest:
 ```bash
 python -m embodichain.toolkits.simready_pipeline.cli.start \
     --input_dir /path/to/raw_mesh_folder \                                 
-    --output_root YourOutputDir \
+    --output_root /path/to/output_folder \
     --category YourCategory
     --simple
 ```
