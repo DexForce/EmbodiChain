@@ -87,6 +87,16 @@ ALLOWED_MODES = {"rigid", "softbody", "articulation"}
 RIGID_KEYS = list(DEFAULT_RIGID_PHYSICS.keys())
 SOFT_KEYS = list(DEFAULT_SOFTBODY_PHYSICS.keys())
 
+
+def _load_simready_finalize_config() -> dict:
+    config_path = Path(__file__).resolve().parents[1] / "configs" / "gen_config.json"
+    with config_path.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    return cfg.get("mesh_processing", {}).get("simready_finalize", {})
+
+
+SIMREADY_FINALIZE_CONFIG = _load_simready_finalize_config()
+
 PHYSICS_SYSTEM_PROMPT = """You are a physics annotation model for robot training and simulation-ready asset ingestion.
 
 This task is safety-critical: a wrong physical annotation can cause severe hardware damage, unsafe robot behavior, broken simulation, and large downstream losses.
@@ -250,6 +260,7 @@ class PhysicsParser(AssetParser):
             "asset",
             extra_text=str(asset.ingest_info["extra_info"].get("simready_info", "")),
             out_dir=out_path,
+            res=int(SIMREADY_FINALIZE_CONFIG.get("render_resolution", 1024)),
         )
         print(result)
         semantics_generated = {}

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import uuid
 import trimesh
 import json
@@ -117,6 +119,7 @@ def inject_user_extra_info(asset_source: Path, asset: Asset) -> None:
 
 def load_one_trimesh(
     path: str,
+    scene_mesh_strategy: str = "first",
 ) -> Union[
     trimesh.Trimesh, None
 ]:  # 可能是个scene，但是我们只处理scene中的第一个geometry，如果有多个mesh，复合起来需要下一个版本
@@ -126,6 +129,9 @@ def load_one_trimesh(
             if len(mesh_or_scene.geometry) == 0:
                 print(f"No geometry found in Scene: {path}")
                 return None
+            if scene_mesh_strategy == "concatenate":
+                meshes = list(mesh_or_scene.geometry.values())
+                return trimesh.util.concatenate(meshes)
             first_mesh = list(mesh_or_scene.geometry.values())[0]
             return first_mesh
         if isinstance(mesh_or_scene, trimesh.Trimesh):
@@ -144,8 +150,15 @@ def trimesh_parse_ingest(
     obj_name: str = "asset.obj",
     mtl_name: str = "asset.mtl",
     write_files: bool = True,
+    config: Dict[str, Any] | None = None,
 ):
-    mesh = load_one_trimesh(source_file)
+    config = config or {}
+    visual_config = config.get("visual", {})
+    export_config = config.get("export", {})
+    scene_mesh_strategy = config.get("scene_mesh_strategy", "first")
+    mtl_name = config.get("mtl_name", mtl_name)
+
+    mesh = load_one_trimesh(source_file, scene_mesh_strategy=scene_mesh_strategy)
     if mesh is None:
         return None
 
@@ -172,7 +185,10 @@ def trimesh_parse_ingest(
         print("[INFO] No visual → assign default gray")
 
         mesh.visual = trimesh.visual.ColorVisuals(
-            mesh, face_colors=[128, 128, 128, 255]
+            mesh,
+            face_colors=visual_config.get(
+                "default_face_color", [128, 128, 128, 255]
+            ),
         )
         visual_ingest = "no visual"
 
@@ -192,7 +208,9 @@ def trimesh_parse_ingest(
 
         else:
             # ---------- PBR ----------
-            if material_kind == "pbr":
+            if material_kind == "pbr" and visual_config.get(
+                "pbr_base_color_only", True
+            ):
                 print("[WARN] PBR → only baseColorTexture will be used")
 
                 base_tex = textures.get("baseColorTexture", {})
@@ -220,11 +238,11 @@ def trimesh_parse_ingest(
     if write_files:
         obj_str, tex_dict = trimesh.exchange.obj.export_obj(
             mesh,
-            include_normals=True,
-            include_color=True,
-            include_texture=True,
+            include_normals=export_config.get("include_normals", True),
+            include_color=export_config.get("include_color", True),
+            include_texture=export_config.get("include_texture", True),
             return_texture=True,
-            write_texture=False,
+            write_texture=export_config.get("write_texture", False),
             mtl_name=mtl_name,
         )
 
@@ -275,13 +293,48 @@ def modify_mtl_file(mtl_path: Path, diffuse_name: str, normal_name: str) -> None
 def blender_remesh_bake(
     source_file: Path,
     asset_source: Path,
-    texture_size: int = 2048,
-    png_name: str = "surface_texture.png",
-    voxel_size: float = 0.01,
-    decimate_ratio: float = 0.5,
+    texture_size: int | None = None,
+    png_name: str | None = None,
+    voxel_size: float | None = None,
+    decimate_ratio: float | None = None,
     obj_name: str = "asset.obj",
+    config: Dict[str, Any] | None = None,
 ):
     """Remesh a high-poly mesh into a low-poly one and bake textures via Blender."""
+    config = config or {}
+    remesh_config = config.get("remesh", {})
+    decimate_config = config.get("decimate", {})
+    uv_config = config.get("uv", {})
+    bake_config = config.get("bake", {})
+    material_config = config.get("material", {})
+
+    texture_size = int(
+        texture_size
+        or bake_config.get("texture_size", config.get("texture_size", 2048))
+    )
+    diffuse_texture_name = png_name or bake_config.get(
+        "diffuse_texture_name", config.get("texture_name", "diffuse.png")
+    )
+    normal_texture_name = bake_config.get(
+        "normal_texture_name", config.get("normal_texture_name", "normal.png")
+    )
+    voxel_size = float(
+        voxel_size
+        if voxel_size is not None
+        else remesh_config.get("voxel_size", config.get("voxel_size", 0.01))
+    )
+    min_voxel_size_ratio = float(remesh_config.get("min_voxel_size_ratio", 0.005))
+    use_smooth_shade = bool(remesh_config.get("use_smooth_shade", True))
+    decimate_ratio = float(
+        decimate_ratio
+        if decimate_ratio is not None
+        else decimate_config.get("ratio", config.get("decimate_ratio", 0.5))
+    )
+    angle_limit = float(uv_config.get("angle_limit", 66.0))
+    island_margin = float(uv_config.get("island_margin", 0.02))
+    cage_extrusion_ratio = float(bake_config.get("cage_extrusion_ratio", 0.05))
+    material_name = material_config.get("name", "BakeMat")
+
     asset_source = Path(asset_source)
     asset_source.mkdir(parents=True, exist_ok=True)
     source_file = Path(source_file)
@@ -319,7 +372,7 @@ def blender_remesh_bake(
         raise RuntimeError("No active mesh object after import")
     high_poly.name = "High_Poly"
 
-    auto_extrusion = max(high_poly.dimensions) * 0.05
+    auto_extrusion = max(high_poly.dimensions) * cage_extrusion_ratio
 
     bpy.ops.object.select_all(action="DESELECT")
     high_poly.select_set(True)
@@ -336,8 +389,10 @@ def blender_remesh_bake(
 
     rem = low_poly.modifiers.new(name="Remesh", type="REMESH")
     rem.mode = "VOXEL"
-    rem.voxel_size = max(float(voxel_size), max(high_poly.dimensions) * 0.005)
-    rem.use_smooth_shade = True
+    rem.voxel_size = max(
+        float(voxel_size), max(high_poly.dimensions) * min_voxel_size_ratio
+    )
+    rem.use_smooth_shade = use_smooth_shade
     bpy.ops.object.modifier_apply(modifier="Remesh")
 
     dec = low_poly.modifiers.new(name="Decimate", type="DECIMATE")
@@ -347,10 +402,10 @@ def blender_remesh_bake(
     bpy.context.view_layer.objects.active = low_poly
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=66.0, island_margin=0.02)
+    bpy.ops.uv.smart_project(angle_limit=angle_limit, island_margin=island_margin)
     bpy.ops.object.mode_set(mode="OBJECT")
 
-    mat = bpy.data.materials.new(name="BakeMat")
+    mat = bpy.data.materials.new(name=material_name)
     mat.use_nodes = True
     low_poly.data.materials.append(mat)
     nodes = mat.node_tree.nodes
@@ -366,8 +421,8 @@ def blender_remesh_bake(
             img.colorspace_settings.name = "Non-Color"
         return node, img
 
-    diff_node, diff_img = setup_node("diffuse.png", True)
-    norm_node, norm_img = setup_node("normal.png", False)
+    diff_node, diff_img = setup_node(diffuse_texture_name, True)
+    norm_node, norm_img = setup_node(normal_texture_name, False)
 
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
@@ -381,12 +436,12 @@ def blender_remesh_bake(
 
     nodes.active = diff_node
     bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"})
-    diff_img.filepath_raw = str(asset_source / "diffuse.png")
+    diff_img.filepath_raw = str(asset_source / diffuse_texture_name)
     diff_img.save()
 
     nodes.active = norm_node
     bpy.ops.object.bake(type="NORMAL")
-    norm_img.filepath_raw = str(asset_source / "normal.png")
+    norm_img.filepath_raw = str(asset_source / normal_texture_name)
     norm_img.save()
 
     export_path = asset_source / obj_name
@@ -395,16 +450,21 @@ def blender_remesh_bake(
     bpy.ops.wm.obj_export(filepath=str(export_path), export_selected_objects=True)
 
     mtl_path = asset_source / Path(obj_name).with_suffix(".mtl").name
-    modify_mtl_file(mtl_path, "diffuse.png", "normal.png")
+    modify_mtl_file(mtl_path, diffuse_texture_name, normal_texture_name)
 
     return {
-        "png": str(asset_source / "diffuse.png"),
+        "png": str(asset_source / diffuse_texture_name),
         "obj": str(export_path),
         "mtl": str(mtl_path.name),
     }
 
 
-def blender_parse_ingest(source_file: Path, asset_source: Path, **kwargs):
+def blender_parse_ingest(
+    source_file: Path,
+    asset_source: Path,
+    trimesh_config: Dict[str, Any] | None = None,
+    **kwargs,
+):
     res = blender_remesh_bake(
         source_file=source_file,
         asset_source=asset_source,
@@ -412,7 +472,12 @@ def blender_parse_ingest(source_file: Path, asset_source: Path, **kwargs):
     )
     try:
         asset_obj = Path(res["obj"])
-        vis = trimesh_parse_ingest(asset_obj, asset_source, write_files=False)
+        vis = trimesh_parse_ingest(
+            asset_obj,
+            asset_source,
+            write_files=False,
+            config=trimesh_config,
+        )
         if isinstance(vis, dict):
             res.update(vis)
     except Exception:

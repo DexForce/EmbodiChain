@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Any
@@ -28,7 +30,10 @@ from embodichain.toolkits.simready_pipeline.utils.geometry_utils import process_
 def _load_geometry_cleanup_config() -> dict:
     config_path = Path(__file__).resolve().parents[1] / "configs" / "gen_config.json"
     with config_path.open("r", encoding="utf-8") as f:
-        return json.load(f).get("geometry_cleanup", {})
+        cfg = json.load(f)
+    return cfg.get("mesh_processing", {}).get(
+        "blender_cleanup_decimate", cfg.get("geometry_cleanup", {})
+    )
 
 
 GEOMETRY_CLEANUP_CONFIG = _load_geometry_cleanup_config()
@@ -97,17 +102,34 @@ class GeometryParser(AssetParser):
             return
 
         mesh_path = asset_root / asset.asset_data.get("path")
-        process_obj(
-            input_path=str(mesh_path),
-            output_path=str(mesh_path),
-            ratio=GEOMETRY_CLEANUP_CONFIG.get("ratio", 0.5),
-            weld_distance=GEOMETRY_CLEANUP_CONFIG.get("weld_distance", 0.0001),
-            merge_dist=GEOMETRY_CLEANUP_CONFIG.get("merge_dist", 1e-5),
-            remove_non_manifold=GEOMETRY_CLEANUP_CONFIG.get(
-                "remove_non_manifold", True
-            ),
-            triangulate=GEOMETRY_CLEANUP_CONFIG.get("triangulate", False),
-        )
+        if GEOMETRY_CLEANUP_CONFIG.get("enabled", True):
+            cleanup_config = GEOMETRY_CLEANUP_CONFIG.get("cleanup", {})
+            simplify_config = GEOMETRY_CLEANUP_CONFIG.get("simplify", {})
+            process_obj(
+                input_path=str(mesh_path),
+                output_path=str(mesh_path),
+                ratio=simplify_config.get(
+                    "ratio", GEOMETRY_CLEANUP_CONFIG.get("ratio", 0.5)
+                ),
+                weld_distance=simplify_config.get(
+                    "weld_distance",
+                    GEOMETRY_CLEANUP_CONFIG.get("weld_distance", 0.0001),
+                ),
+                merge_dist=cleanup_config.get(
+                    "merge_dist", GEOMETRY_CLEANUP_CONFIG.get("merge_dist", 1e-5)
+                ),
+                remove_non_manifold=cleanup_config.get(
+                    "remove_non_manifold",
+                    GEOMETRY_CLEANUP_CONFIG.get("remove_non_manifold", True),
+                ),
+                triangulate=cleanup_config.get(
+                    "triangulate",
+                    GEOMETRY_CLEANUP_CONFIG.get("triangulate", False),
+                ),
+                collapse_triangulate=simplify_config.get(
+                    "collapse_triangulate", True
+                ),
+            )
 
         try:
 

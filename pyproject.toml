@@ -48,10 +48,19 @@ dependencies = [
   "h5py",
   "tensordict",
   "viser==1.0.21",
-  "lerobot>=0.4.4"
+  "lerobot>=0.4.4",
+  "bpy",
+  "pyrender==0.1.45"
 ]
 
 [project.optional-dependencies]
+
+[tool.uv.sources]
+bpy = { index = "blender" }
+
+[[tool.uv.index]]
+name = "blender"
+url = "https://download.blender.org/pypi/"
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }

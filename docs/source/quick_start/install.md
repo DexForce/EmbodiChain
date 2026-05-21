@@ -46,7 +46,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 **Install from PyPI:**
 
 ```bash
-uv pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+uv pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site --extra-index-url https://download.blender.org/pypi/
 ```
 
 **Install from source (editable mode):**
@@ -54,7 +54,7 @@ uv pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
 cd EmbodiChain
-uv pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+uv pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site --extra-index-url https://download.blender.org/pypi/
 ```
 
 ### pip (PyPI)
@@ -63,7 +63,7 @@ uv pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --tru
 > We strongly recommend using a virtual environment to avoid dependency conflicts.
 
 ```bash
-pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site --extra-index-url https://download.blender.org/pypi/
 ```
 
 ### From Source
@@ -74,7 +74,7 @@ pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ -
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
 cd EmbodiChain
-pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site --extra-index-url https://download.blender.org/pypi/
 ```
 
 ## Verify Installation

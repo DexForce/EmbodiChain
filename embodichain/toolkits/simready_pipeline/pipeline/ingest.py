@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from pathlib import Path
 import json
 import os
@@ -38,10 +40,12 @@ from embodichain.toolkits.simready_pipeline.parser.base import ParserManager
 def _load_ingest_config() -> dict:
     config_path = Path(__file__).resolve().parents[1] / "configs" / "gen_config.json"
     with config_path.open("r", encoding="utf-8") as f:
-        return json.load(f).get("ingest", {})
+        return json.load(f)
 
 
-INGEST_CONFIG = _load_ingest_config()
+GEN_CONFIG = _load_ingest_config()
+INGEST_CONFIG = GEN_CONFIG.get("ingest", {})
+MESH_PROCESSING_CONFIG = GEN_CONFIG.get("mesh_processing", {})
 CANOCAIL_ASSET_NAME = INGEST_CONFIG.get("canonical_asset_name", "asset.obj")
 UNPROCESSED_FORMATS = INGEST_CONFIG.get(
     "unprocessed_formats", [".urdf", ".usd"]
@@ -50,11 +54,10 @@ PARSEABLE_MESH_FORMATS = INGEST_CONFIG.get(
     "parseable_mesh_formats", [".glb", ".gltf", ".obj", ".ply", ".stl"]
 )  # 主流的需要处理的格式
 
-tex_size: int = int(INGEST_CONFIG.get("blender_texture_size", 2048))
-png_name: str = INGEST_CONFIG.get("blender_texture_name", "surface_texture.png")
-BLENDER_REMESH_BAKE_CONFIG = INGEST_CONFIG.get("blender_remesh_bake", {})
-voxel_size: float = float(BLENDER_REMESH_BAKE_CONFIG.get("voxel_size", 0.01))
-decimate_ratio: float = float(BLENDER_REMESH_BAKE_CONFIG.get("decimate_ratio", 0.5))
+TRIMESH_INGEST_CONFIG = MESH_PROCESSING_CONFIG.get("trimesh_ingest", {})
+BLENDER_REMESH_BAKE_CONFIG = MESH_PROCESSING_CONFIG.get(
+    "blender_remesh_bake", INGEST_CONFIG.get("blender_remesh_bake", {})
+)
 
 
 def ingest_one_asset(
@@ -112,16 +115,15 @@ def ingest_one_asset(
                 asset_source,
                 obj_name=CANOCAIL_ASSET_NAME,
                 mtl_name=Path(CANOCAIL_ASSET_NAME).with_suffix(".mtl").name,
+                config=TRIMESH_INGEST_CONFIG,
             )
         else:
             visual_info = blender_parser_ingest(
                 source_file,
                 asset_source,
-                texture_size=tex_size,
-                png_name=png_name,
-                voxel_size=voxel_size,
-                decimate_ratio=decimate_ratio,
                 obj_name=CANOCAIL_ASSET_NAME,
+                config=BLENDER_REMESH_BAKE_CONFIG,
+                trimesh_config=TRIMESH_INGEST_CONFIG,
             )
 
     asset = Asset(

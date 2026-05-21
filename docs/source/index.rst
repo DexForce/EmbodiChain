@@ -41,6 +41,7 @@ Table of Contents
 
    features/online_data.md
    features/agents.md
+   features/simready_pipeline.md
    features/workspace_analyzer/index*
    features/interaction/index*
    features/toolkits/index*

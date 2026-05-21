@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import bpy
 from pathlib import Path
 
@@ -54,7 +56,12 @@ def join_meshes(objs):
     return bpy.context.active_object
 
 
-def decimate_optimized(obj, ratio: float = 0.5, weld_distance: float = 0.0001):
+def decimate_optimized(
+    obj,
+    ratio: float = 0.5,
+    weld_distance: float = 0.0001,
+    collapse_triangulate: bool = True,
+):
 
     bpy.context.view_layer.objects.active = obj
 
@@ -84,7 +91,7 @@ def decimate_optimized(obj, ratio: float = 0.5, weld_distance: float = 0.0001):
     print(f"Simplifying mesh (Ratio: {ratio})...")
     decimate_mod = obj.modifiers.new(name="Decimate", type="DECIMATE")
     decimate_mod.ratio = ratio
-    decimate_mod.use_collapse_triangulate = True
+    decimate_mod.use_collapse_triangulate = collapse_triangulate
     bpy.ops.object.modifier_apply(modifier=decimate_mod.name)
 
     # 4) post clean
@@ -169,6 +176,7 @@ def process_obj(
     merge_dist=1e-5,
     remove_non_manifold=True,
     triangulate=False,
+    collapse_triangulate=True,
 ):
     clear_scene()
     objs = load_obj(input_path)
@@ -186,7 +194,12 @@ def process_obj(
         remove_non_manifold=remove_non_manifold,
         triangulate=triangulate,
     )
-    decimate_optimized(obj, ratio=ratio, weld_distance=weld_distance)
+    decimate_optimized(
+        obj,
+        ratio=ratio,
+        weld_distance=weld_distance,
+        collapse_triangulate=collapse_triangulate,
+    )
 
     export_obj(obj, output_path)
     print("Clean mesh saved to:", output_path)
