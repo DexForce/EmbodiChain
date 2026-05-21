@@ -17,9 +17,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
-import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +36,6 @@ DEFAULT_VISUAL_RESULT: dict[str, Any] = {
 
 
 def _import_ingest_utils():
-    if importlib.util.find_spec("bpy") is None:
-        sys.modules.setdefault("bpy", types.SimpleNamespace())
     return importlib.import_module(
         "embodichain.gen_sim.simready_pipeline.utils.ingest_utils"
     )
