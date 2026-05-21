@@ -1,0 +1,654 @@
+#!/usr/bin/env python3
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import gymnasium
+import torch
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from embodichain.agents.hierarchy import llm as agent_llm
+from embodichain.lab.gym.utils.gym_utils import (
+    add_env_launcher_args_to_parser,
+    build_env_cfg_from_args,
+)
+from embodichain.lab.scripts.run_env import generate_and_execute_action_list
+from embodichain.utils import logger
+from embodichain.utils.utility import load_json
+
+DEFAULT_GYM_CONFIG = (
+    ROOT_DIR / "configs/gym/agent/rearrangement_agent/fast_gym_config.json"
+)
+DEFAULT_AGENT_CONFIG = (
+    ROOT_DIR / "configs/gym/agent/rearrangement_agent/agent_config.json"
+)
+DEFAULT_DATABASE_ARTIFACT_ROOT = (
+    ROOT_DIR / "embodichain/database/agent_generated_content/Rearrangement"
+)
+TASK_NAME = "Rearrangement"
+
+
+class _OfflineLLM:
+    """Fail fast if cached artifacts are missing and a prompt would call an LLM."""
+
+    def invoke(self, prompt):
+        raise RuntimeError(
+            "Offline Rearrangement demo expected cached agent artifacts. "
+            "Use --runtime_llm_recovery or provide fresh artifacts if LLM calls are needed."
+        )
+
+
+def _ensure_offline_llms(*, force: bool = False) -> None:
+    offline_llm = _OfflineLLM()
+    if force or agent_llm.task_llm is None:
+        agent_llm.task_llm = offline_llm
+    if force or agent_llm.recovery_llm is None:
+        agent_llm.recovery_llm = offline_llm
+    if force or agent_llm.compile_llm is None:
+        agent_llm.compile_llm = offline_llm
+    if force or agent_llm.failure_anticipation_llm is None:
+        agent_llm.failure_anticipation_llm = agent_llm.recovery_llm
+    if agent_llm.code_llm is None:
+        agent_llm.code_llm = agent_llm.compile_llm
+
+
+def _timestamped_output_root() -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    return ROOT_DIR / "outputs" / f"{timestamp}_rearrangement_atomic_graph"
+
+
+def _parse_xyz(value: str) -> list[float]:
+    parts = [float(part) for part in value.split(",")]
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError("Expected three comma-separated floats.")
+    return parts
+
+
+def _parse_xyz_list(value: str) -> list[list[float]]:
+    directions = [_parse_xyz(part.strip()) for part in value.split(";") if part.strip()]
+    if not directions:
+        raise argparse.ArgumentTypeError(
+            "Expected one or more xyz vectors separated by semicolons."
+        )
+    return directions
+
+
+def _parse_optional_bool(value: str | None) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected boolean value, got {value!r}.")
+
+
+def _disable_video_events(env_cfg) -> None:
+    env_cfg.filter_dataset_saving = True
+    events = getattr(env_cfg, "events", None)
+    if events is None:
+        return
+    for event_name in ("record_camera", "validation_cameras"):
+        if hasattr(events, event_name):
+            setattr(events, event_name, None)
+
+
+def _copy_database_artifacts(artifact_dir: Path, regenerate: bool) -> None:
+    if regenerate:
+        return
+    if not DEFAULT_DATABASE_ARTIFACT_ROOT.exists():
+        raise FileNotFoundError(
+            f"Rearrangement database artifacts not found: {DEFAULT_DATABASE_ARTIFACT_ROOT}"
+        )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(DEFAULT_DATABASE_ARTIFACT_ROOT, artifact_dir, dirs_exist_ok=True)
+    logger.log_info(
+        f"Copied Rearrangement agent artifacts from {DEFAULT_DATABASE_ARTIFACT_ROOT} "
+        f"to {artifact_dir}.",
+        color="cyan",
+    )
+
+
+def _build_forced_error_config(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not args.forced_error_injection:
+        return None
+    return {
+        "enabled": True,
+        "edge_index": args.error_injection_edge_index,
+        "step_index": args.error_injection_step,
+        "relative_error_xyz": args.error_injection_offset,
+        "error_type": args.error_injection_type,
+        "blind": False,
+        "blind_obj_name": args.error_injection_object,
+    }
+
+
+def _compiled_graph_stats(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"exists": False}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    counts: dict[str, int] = {}
+    action_names: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            kind = value.get("kind")
+            if kind is not None:
+                counts[kind] = counts.get(kind, 0) + 1
+                if kind in {"atomic_action", "atomic_sequence"}:
+                    action_names.append(str(value.get("name", kind)))
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(data)
+    return {
+        "exists": True,
+        "schema_version": data.get("metadata", {}).get("schema_version"),
+        "kind_counts": counts,
+        "atomic_action_names": action_names,
+    }
+
+
+def _as_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, torch.Tensor):
+        return bool(value.detach().cpu().reshape(-1)[0].item())
+    return bool(value)
+
+
+def _write_result(
+    *,
+    artifact_dir: Path,
+    program_success: bool,
+    task_success: bool | None,
+    forced_error_config: dict[str, Any] | None = None,
+    exception: Exception | None = None,
+) -> dict[str, Any]:
+    graph_path = artifact_dir / "agent_compiled_graph.json"
+    result = {
+        "task": TASK_NAME,
+        "program_success": program_success,
+        "task_success": task_success,
+        "compiled_graph": _compiled_graph_stats(graph_path),
+        "forced_error": _forced_error_summary(forced_error_config),
+        "exception": (
+            None
+            if exception is None
+            else {"type": type(exception).__name__, "message": str(exception)}
+        ),
+    }
+    result_path = artifact_dir / "case_result.json"
+    result_path.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    logger.log_info(f"Rearrangement result written to {result_path}", color="green")
+    return result
+
+
+def _forced_error_summary(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    if config is None:
+        return None
+    return {
+        "enabled": bool(config.get("enabled", False)),
+        "injected": bool(config.get("_injected", False)),
+        "triggered": bool(config.get("_triggered", False)),
+        "injected_at_step": config.get("_injected_at_step"),
+        "triggered_step": config.get("_triggered_step"),
+        "injected_monitor": config.get("_injected_monitor"),
+        "triggered_monitor": config.get("_triggered_monitor_name"),
+    }
+
+
+def build_parser() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the RearrangementAgent demo from cached agent JSON artifacts and "
+            "recompile recovery actions through the atomic graph runtime."
+        )
+    )
+    add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--output_root",
+        type=str,
+        default=None,
+        help=(
+            "Output directory. Defaults to "
+            "outputs/YYYYMMDD_HHMM_rearrangement_atomic_graph."
+        ),
+    )
+    parser.add_argument(
+        "--agent_config",
+        type=str,
+        default=str(DEFAULT_AGENT_CONFIG),
+        help="Path to the Rearrangement agent config JSON.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed used for env.reset().",
+    )
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        default=False,
+        help="Do not copy cached database artifacts; allow agents to regenerate JSON.",
+    )
+    parser.add_argument(
+        "--compile_only",
+        action="store_true",
+        default=False,
+        help="Only generate/recompile agent graph artifacts without executing actions.",
+    )
+    parser.add_argument(
+        "--record_video",
+        action="store_true",
+        default=False,
+        help="Enable record/validation camera events. Disabled by default for low memory.",
+    )
+    parser.add_argument(
+        "--open_window",
+        action="store_true",
+        default=False,
+        help="Open the simulator window.",
+    )
+    parser.add_argument(
+        "--runtime_llm_recovery",
+        action="store_true",
+        default=False,
+        help="Allow runtime recovery to call the RecoveryAgent instead of using only cached branches.",
+    )
+    parser.add_argument(
+        "--prefer_runtime_llm_recovery",
+        action="store_true",
+        default=False,
+        help="Prefer runtime LLM recovery when a monitor triggers.",
+    )
+    parser.add_argument(
+        "--disable_atomic_action_graph",
+        action="store_true",
+        default=False,
+        help="Disable atomic_action/atomic_sequence graph execution.",
+    )
+    parser.add_argument(
+        "--require_atomic_action_graph",
+        action="store_true",
+        default=False,
+        help="Fail instead of falling back if an atomic graph action cannot execute.",
+    )
+    parser.add_argument(
+        "--disable_public_grasp_candidate_generation",
+        action="store_true",
+        default=False,
+        help=(
+            "Require an existing public grasp annotation cache instead of "
+            "generating candidates offline."
+        ),
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_strategy",
+        choices=[
+            "none",
+            "top_down",
+            "bottle_lateral",
+            "lateral_down",
+            "legacy_guided",
+            "auto_try_all",
+            "auto_general",
+        ],
+        default="auto_general",
+        help=(
+            "Recovery-only semantic grasp strategy for compiled atomic pick_up "
+            "actions."
+        ),
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_candidate_num",
+        type=int,
+        default=64,
+        help="Recovery-only semantic grasp candidate count override.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_pre_grasp_distance",
+        type=float,
+        default=None,
+        help="Recovery-only public PickUpActionCfg pre_grasp_distance override.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_lift_height",
+        type=float,
+        default=None,
+        help="Recovery-only lift_height passed to compiled atomic pick_up actions.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_auto_approach_direction",
+        nargs="?",
+        const="true",
+        default=None,
+        type=_parse_optional_bool,
+        help="Recovery-only auto approach direction override.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_try_approach_directions",
+        nargs="?",
+        const="true",
+        default=None,
+        type=_parse_optional_bool,
+        help="Recovery-only multi-direction approach override.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_approach_direction",
+        type=_parse_xyz,
+        default=None,
+        help="Recovery-only explicit semantic grasp approach direction.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_approach_directions",
+        type=_parse_xyz_list,
+        default=None,
+        help=(
+            "Recovery-only approach directions, e.g. 0,0,-1;1,0,0. "
+            "Overrides strategy-generated directions."
+        ),
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_pose_offset_world",
+        type=_parse_xyz,
+        default=None,
+        help="Recovery-only world-frame xyz offset for semantic grasp poses.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_pose_offset_along_approach",
+        type=float,
+        default=None,
+        help="Recovery-only offset along semantic grasp approach direction.",
+    )
+    parser.add_argument(
+        "--recovery_validate_public_grasp_after_action",
+        nargs="?",
+        const="true",
+        default=False,
+        type=_parse_optional_bool,
+        help="Recovery-only physical validation override after atomic pick_up.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_validation_min_object_lift",
+        type=float,
+        default=None,
+        help="Recovery-only minimum object z displacement for validation.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_validation_max_object_lift",
+        type=float,
+        default=None,
+        help="Recovery-only maximum object z displacement for validation.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_validation_max_object_xy_displacement",
+        type=float,
+        default=None,
+        help="Recovery-only maximum object xy displacement for validation.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_rank_by_legacy_pose",
+        nargs="?",
+        const="true",
+        default=False,
+        type=_parse_optional_bool,
+        help="Recovery-only legacy-pose candidate ranking override.",
+    )
+    parser.add_argument(
+        "--recovery_public_grasp_use_legacy_orientation",
+        nargs="?",
+        const="true",
+        default=False,
+        type=_parse_optional_bool,
+        help="Recovery-only legacy-orientation candidate override.",
+    )
+    parser.add_argument("--grasp_max_open_length", type=float, default=0.088)
+    parser.add_argument("--grasp_min_open_length", type=float, default=0.003)
+    parser.add_argument("--grasp_finger_length", type=float, default=0.078)
+    parser.add_argument("--grasp_x_thickness", type=float, default=0.01)
+    parser.add_argument("--grasp_y_thickness", type=float, default=0.03)
+    parser.add_argument("--grasp_root_z_width", type=float, default=0.08)
+    parser.add_argument("--grasp_open_check_margin", type=float, default=0.01)
+    parser.add_argument("--grasp_point_sample_dense", type=float, default=0.012)
+    parser.add_argument("--grasp_antipodal_n_sample", type=int, default=20000)
+    parser.add_argument(
+        "--forced_error_injection",
+        action="store_true",
+        default=False,
+        help="Inject a deterministic error to exercise recovery branches.",
+    )
+    parser.add_argument(
+        "--error_injection_edge_index",
+        type=int,
+        default=1,
+        help=(
+            "1-based monitored-edge index where deterministic error injection is armed."
+        ),
+    )
+    parser.add_argument(
+        "--error_injection_step",
+        type=int,
+        default=10,
+        help="Step index within the selected edge where the error is injected.",
+    )
+    parser.add_argument(
+        "--error_injection_offset",
+        type=_parse_xyz,
+        default=[0.0, 0.1, 0.0],
+        help="Injected xyz displacement, for example 0,0.1,0.",
+    )
+    parser.add_argument(
+        "--error_injection_type",
+        choices=["misplaced_object", "fallen_object"],
+        default="misplaced_object",
+        help="Error primitive used for forced recovery injection.",
+    )
+    parser.add_argument(
+        "--error_injection_object",
+        default="fork",
+        help="Object used by forced recovery injection when a monitor does not select one.",
+    )
+    parser.add_argument(
+        "--max_episode_steps",
+        type=int,
+        default=None,
+        help="Optional max episode steps override.",
+    )
+
+    for action in parser._actions:
+        if action.dest == "gym_config":
+            action.required = False
+            action.default = str(DEFAULT_GYM_CONFIG)
+            break
+
+    default_device = "cuda" if torch.cuda.is_available() else "cpu"
+    parser.set_defaults(
+        device=default_device,
+        headless=True,
+        filter_visual_rand=True,
+        filter_dataset_saving=True,
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = build_parser()
+    if args.open_window:
+        args.headless = False
+    _ensure_offline_llms(force=not args.runtime_llm_recovery)
+
+    output_root = (
+        Path(args.output_root).resolve()
+        if args.output_root
+        else _timestamped_output_root()
+    )
+    case_dir = output_root / "rearrangement"
+    artifact_dir = case_dir / "artifacts"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    _copy_database_artifacts(artifact_dir, args.regenerate)
+
+    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+    if not args.record_video:
+        _disable_video_events(env_cfg)
+    if args.max_episode_steps is not None:
+        env_cfg.max_episode_steps = int(args.max_episode_steps)
+        gym_config["max_episode_steps"] = int(args.max_episode_steps)
+
+    agent_config = load_json(args.agent_config)
+    env = gymnasium.make(
+        id=gym_config["id"],
+        cfg=env_cfg,
+        agent_config=agent_config,
+        agent_config_path=args.agent_config,
+        task_name=TASK_NAME,
+        **action_config,
+    )
+
+    forced_error_config = _build_forced_error_config(args)
+    try:
+        env.reset(seed=args.seed)
+        common_kwargs = {
+            "regenerate": args.regenerate,
+            "recovery": True,
+            "runtime_llm_recovery": args.runtime_llm_recovery,
+            "prefer_runtime_llm_recovery": args.prefer_runtime_llm_recovery,
+            "forced_recovery_injection": forced_error_config,
+            "use_atomic_action_graph": not args.disable_atomic_action_graph,
+            "require_atomic_action_graph": args.require_atomic_action_graph,
+            "generate_public_grasp_candidates": (
+                not args.disable_public_grasp_candidate_generation
+            ),
+            "recovery_public_grasp_strategy": args.recovery_public_grasp_strategy,
+            "recovery_public_grasp_candidate_num": (
+                args.recovery_public_grasp_candidate_num
+            ),
+            "recovery_public_grasp_pre_grasp_distance": (
+                args.recovery_public_grasp_pre_grasp_distance
+            ),
+            "recovery_public_grasp_lift_height": (
+                args.recovery_public_grasp_lift_height
+            ),
+            "recovery_public_grasp_auto_approach_direction": (
+                args.recovery_public_grasp_auto_approach_direction
+            ),
+            "recovery_public_grasp_try_approach_directions": (
+                args.recovery_public_grasp_try_approach_directions
+            ),
+            "recovery_public_grasp_approach_direction": (
+                args.recovery_public_grasp_approach_direction
+            ),
+            "recovery_public_grasp_approach_directions": (
+                args.recovery_public_grasp_approach_directions
+            ),
+            "recovery_public_grasp_pose_offset_world": (
+                args.recovery_public_grasp_pose_offset_world
+            ),
+            "recovery_public_grasp_pose_offset_along_approach": (
+                args.recovery_public_grasp_pose_offset_along_approach
+            ),
+            "recovery_validate_public_grasp_after_action": (
+                args.recovery_validate_public_grasp_after_action
+            ),
+            "recovery_public_grasp_validation_min_object_lift": (
+                args.recovery_public_grasp_validation_min_object_lift
+            ),
+            "recovery_public_grasp_validation_max_object_lift": (
+                args.recovery_public_grasp_validation_max_object_lift
+            ),
+            "recovery_public_grasp_validation_max_object_xy_displacement": (
+                args.recovery_public_grasp_validation_max_object_xy_displacement
+            ),
+            "recovery_public_grasp_rank_by_legacy_pose": (
+                args.recovery_public_grasp_rank_by_legacy_pose
+            ),
+            "recovery_public_grasp_use_legacy_orientation": (
+                args.recovery_public_grasp_use_legacy_orientation
+            ),
+            "grasp_max_open_length": args.grasp_max_open_length,
+            "grasp_min_open_length": args.grasp_min_open_length,
+            "grasp_finger_length": args.grasp_finger_length,
+            "grasp_x_thickness": args.grasp_x_thickness,
+            "grasp_y_thickness": args.grasp_y_thickness,
+            "grasp_root_z_width": args.grasp_root_z_width,
+            "grasp_open_check_margin": args.grasp_open_check_margin,
+            "grasp_point_sample_dense": args.grasp_point_sample_dense,
+            "grasp_antipodal_n_sample": args.grasp_antipodal_n_sample,
+            "log_dir": str(artifact_dir),
+        }
+        if args.compile_only:
+            env.unwrapped.generate_graph_for_actions(**common_kwargs)
+            task_success = None
+        else:
+            valid = generate_and_execute_action_list(env, 0, False, **common_kwargs)
+            if not valid:
+                raise RuntimeError("Rearrangement demo produced no valid actions.")
+            if forced_error_config is not None and not forced_error_config.get(
+                "_triggered", False
+            ):
+                raise RuntimeError(
+                    "Forced recovery injection did not trigger a monitor. "
+                    "Try a different --error_injection_edge_index or "
+                    "--error_injection_step."
+                )
+            task_success = _as_bool(env.unwrapped.is_task_success())
+        _write_result(
+            artifact_dir=artifact_dir,
+            program_success=True,
+            task_success=task_success,
+            forced_error_config=forced_error_config,
+        )
+    except Exception as exc:
+        _write_result(
+            artifact_dir=artifact_dir,
+            program_success=False,
+            task_success=None,
+            forced_error_config=forced_error_config,
+            exception=exc,
+        )
+        raise
+    finally:
+        env.close()
+
+    logger.log_info(
+        f"Rearrangement atomic graph demo output: {case_dir}", color="green"
+    )
+
+
+if __name__ == "__main__":
+    main()

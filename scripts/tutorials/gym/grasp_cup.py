@@ -546,10 +546,24 @@ def create_camera(sim: SimulationManager) -> Camera:
     )
 
 
-def capture_frame(camera: Camera):
+def capture_frame(sim: SimulationManager, camera: Camera) -> np.ndarray:
+    if camera.is_rt_enabled:
+        sim.render_camera_group([camera.group_id])
     camera.update(fetch_only=camera.is_rt_enabled)
     rgb = camera.get_data()["color"][0, :, :, :3]
     return rgb.detach().cpu().numpy()
+
+
+def _frames_have_visible_content(frames: list[np.ndarray]) -> bool:
+    if not frames:
+        return False
+    sample_count = min(10, len(frames))
+    sample_indices = np.linspace(0, len(frames) - 1, sample_count, dtype=int)
+    for idx in sample_indices:
+        frame = np.asarray(frames[idx])
+        if frame.size > 0 and float(frame.mean()) > 1.0 and int(frame.max()) > 8:
+            return True
+    return False
 
 
 def _cup_side_grasp_pose(device: torch.device) -> torch.Tensor:
@@ -722,14 +736,14 @@ class AgentSkillSimEnvAdapter:
             ).reshape(1, -1)
             self.robot.set_qpos(full_qpos)
             self.sim.update(step=4)
-            self.frames.append(capture_frame(self.camera))
+            self.frames.append(capture_frame(self.sim, self.camera))
             time.sleep(1e-3)
         return len(action_np)
 
     def hold(self, seconds: float) -> None:
         for _ in range(max(1, int(round(seconds * FPS)))):
             self.sim.update(step=1)
-            self.frames.append(capture_frame(self.camera))
+            self.frames.append(capture_frame(self.sim, self.camera))
 
 
 def _use_public_grasp_semantics_from_args(args: argparse.Namespace) -> bool:
@@ -1019,6 +1033,7 @@ def run_demo(args: argparse.Namespace, output_root: Path) -> Path:
 
     rows: list[dict[str, str]] = []
     video_path = video_dir / "episode_0_cam1.mp4"
+    video_status = "not_recorded"
     run_error: Exception | None = None
     try:
         try:
@@ -1047,6 +1062,11 @@ def run_demo(args: argparse.Namespace, output_root: Path) -> Path:
             _pad_video(env, args.min_video_seconds)
             if env.frames:
                 images_to_video(env.frames, str(video_dir), "episode_0_cam1", fps=FPS)
+                video_status = (
+                    "ok"
+                    if _frames_have_visible_content(env.frames)
+                    else "black_frames_detected"
+                )
     finally:
         sim.destroy()
 
@@ -1066,7 +1086,7 @@ def run_demo(args: argparse.Namespace, output_root: Path) -> Path:
             {
                 "skill": "video",
                 "steps": str(video_path),
-                "status": "ok",
+                "status": video_status,
             }
         )
 

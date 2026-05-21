@@ -1666,7 +1666,8 @@ def _with_public_grasp_strategy_defaults(kwargs: dict[str, Any]) -> dict[str, An
             _set_if_missing_or_none(updated, "public_grasp_top_down_target_height_weight", 0.35)
             _set_if_missing_or_none(updated, "public_grasp_validation_min_object_lift", 0.04)
             _set_if_missing_or_none(updated, "public_grasp_validation_max_object_xy_displacement", 0.12)
-            updated["validate_public_grasp_after_action"] = True
+            if updated.get("validate_public_grasp_after_action") is None:
+                updated["validate_public_grasp_after_action"] = True
         return updated
 
     raise ValueError(
