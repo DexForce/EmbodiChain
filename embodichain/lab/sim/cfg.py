@@ -77,7 +77,7 @@ class RenderCfg:
 
 
 @configclass
-class PhysicsCfg:
+class DefaultPhysicsCfg:
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
     """Gravity vector for the simulation environment."""
 
@@ -122,6 +122,89 @@ class PhysicsCfg:
             "enable_friction_every_iteration": self.enable_friction_every_iteration,
         }
         return args
+
+
+# Backwards-compatible alias for existing task configs.
+PhysicsCfg = DefaultPhysicsCfg
+
+
+@configclass
+class NewtonPhysicsCfg:
+    """Configuration for DexSim Newton physics backend."""
+
+    num_substeps: int = 10
+    """Number of Newton solver substeps per EmbodiChain physics step."""
+
+    device: str | None = None
+    """Newton device. If None, derived from ``SimulationManagerCfg.sim_device`` and ``gpu_id``."""
+
+    require_grad: bool = False
+    """Whether to finalize the Newton model for differentiable simulation."""
+
+    use_cuda_graph: bool = True
+    """Whether to use CUDA graph capture for Newton stepping when supported."""
+
+    debug_mode: bool = False
+    """Whether to enable Newton debug mode."""
+
+    solver_type: Literal["mjwarp", "xpbd", "semi_implicit", "featherstone", "vbd"] = (
+        "mjwarp"
+    )
+    """Newton solver preset."""
+
+    def to_dexsim_cfg(
+        self,
+        physics_dt: float,
+        sim_device: str | torch.device,
+        gpu_id: int,
+    ):
+        """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        from dexsim.engine.newton_physics import (
+            FeatherstoneSolverCfg,
+            MJWarpSolverCfg,
+            NewtonCfg,
+            NewtonCollisionPipelineCfg,
+            SemiImplicitSolverCfg,
+            VBDSolverCfg,
+            XPBDSolverCfg,
+        )
+
+        torch_device = (
+            torch.device(sim_device) if isinstance(sim_device, str) else sim_device
+        )
+        device = self.device
+        if device is None:
+            device = f"cuda:{gpu_id}" if torch_device.type == "cuda" else "cpu"
+
+        solver_cfg_map = {
+            "mjwarp": MJWarpSolverCfg,
+            "xpbd": XPBDSolverCfg,
+            "semi_implicit": SemiImplicitSolverCfg,
+            "featherstone": FeatherstoneSolverCfg,
+            "vbd": VBDSolverCfg,
+        }
+        solver_cfg = solver_cfg_map[self.solver_type]()
+
+        if self.require_grad and self.solver_type != "semi_implicit":
+            logger.log_error(
+                "Newton gradient mode requires solver_type='semi_implicit'."
+            )
+
+        cfg = NewtonCfg(
+            dt=physics_dt,
+            num_substeps=self.num_substeps,
+            device=device,
+            debug_mode=self.debug_mode,
+            require_grad=self.require_grad,
+            solver_cfg=solver_cfg,
+            collision_pipeline_cfg=NewtonCollisionPipelineCfg(
+                broad_phase=self.broad_phase,
+                requires_grad=self.require_grad,
+            ),
+        )
+        cfg.use_cuda_graph = self.use_cuda_graph and not self.require_grad
+        cfg._visualizer_enabled = self.visualizer_enabled
+        return cfg
 
 
 @configclass

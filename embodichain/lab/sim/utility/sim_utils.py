@@ -26,7 +26,6 @@ from dexsim.types import (
     LoadOption,
     RigidBodyShape,
     SDFConfig,
-    PhysicalAttr,
 )
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
@@ -274,19 +273,21 @@ def load_mesh_objects_from_cfg(
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
+                obj.set_body_scale(*cfg.body_scale)
                 sdf_cfg = SDFConfig()
                 sdf_cfg.resolution = cfg.sdf_resolution
                 obj.add_physical_body(
                     body_type,
                     RigidBodyShape.SDF,
                     config=sdf_cfg,
-                    attr=PhysicalAttr(),
+                    attr=cfg.attrs.attr(),
                 )
             else:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                obj.add_rigidbody(body_type, RigidBodyShape.CONVEX)
+                obj.set_body_scale(*cfg.body_scale)
+                obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
             obj.set_name(f"{cfg.uid}_{i}")
             obj_list.append(obj)
 
@@ -305,7 +306,8 @@ def load_mesh_objects_from_cfg(
 
         obj_list = create_cube(env_list, cfg.shape.size, uid=cfg.uid)
         for obj in obj_list:
-            obj.add_rigidbody(body_type, RigidBodyShape.BOX)
+            obj.set_body_scale(*cfg.body_scale)
+            obj.add_rigidbody(body_type, RigidBodyShape.BOX, cfg.attrs.attr())
 
     elif isinstance(cfg.shape, SphereCfg):
         from embodichain.lab.sim.utility.sim_utils import create_sphere
@@ -314,7 +316,8 @@ def load_mesh_objects_from_cfg(
             env_list, cfg.shape.radius, cfg.shape.resolution, uid=cfg.uid
         )
         for obj in obj_list:
-            obj.add_rigidbody(body_type, RigidBodyShape.SPHERE)
+            obj.set_body_scale(*cfg.body_scale)
+            obj.add_rigidbody(body_type, RigidBodyShape.SPHERE, cfg.attrs.attr())
     else:
         logger.log_error(
             f"Unsupported rigid object shape type: {type(cfg.shape)}. Supported types: MeshCfg, CubeCfg, SphereCfg."

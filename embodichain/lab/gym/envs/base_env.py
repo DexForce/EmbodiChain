@@ -129,9 +129,7 @@ class BaseEnv(gym.Env):
 
         self._setup_scene(**kwargs)
 
-        # TODO: To be removed.
-        if self.device.type == "cuda":
-            self.sim.init_gpu_physics()
+        self.sim.prepare_physics()
 
         if not self.sim_cfg.headless:
             self.sim.open_window()
