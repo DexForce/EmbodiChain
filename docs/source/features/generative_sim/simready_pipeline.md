@@ -7,8 +7,8 @@ The SimReady asset pipeline converts raw mesh archives into normalized simulatio
 Run the pipeline on a single asset directory:
 
 ```bash
-python -m embodichain.toolkits.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \                                 
+python -m embodichain.gen_sim.simready_pipeline.cli.start \
+    --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory
 ```
@@ -25,7 +25,7 @@ python -m embodichain preview-asset \
 
 The full pipeline uses Blender, trimesh, pyrender, and an Azure OpenAI-compatible endpoint. Install EmbodiChain with the Blender package index enabled as described in the installation guide.
 
-Set the LLM credentials before running the pipeline, or configure them in `embodichain/toolkits/simready_pipeline/configs/gen_config.json`:
+Set the LLM credentials before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`:
 
 ```bash
 export AZURE_OPENAI_API_KEY="your-api-key"
@@ -76,7 +76,7 @@ Use `asset_simready/asset_simready.obj` or `asset_usd/` for simulation preview a
 
 ## Configuration
 
-Pipeline hyperparameters live in `embodichain/toolkits/simready_pipeline/configs/gen_config.json`.
+Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`.
 
 ### Ingest
 
@@ -175,8 +175,8 @@ This section configures the multimodal LLM used for object classification, orien
 The default command uses Blender during ingest:
 
 ```bash
-python -m embodichain.toolkits.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \                                 
+python -m embodichain.gen_sim.simready_pipeline.cli.start \
+    --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory
 ```
@@ -184,10 +184,10 @@ python -m embodichain.toolkits.simready_pipeline.cli.start \
 Use `--simple` when you want faster trimesh-only ingest:
 
 ```bash
-python -m embodichain.toolkits.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \                                 
+python -m embodichain.gen_sim.simready_pipeline.cli.start \
+    --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
-    --category YourCategory
+    --category YourCategory \
     --simple
 ```
 
@@ -195,6 +195,6 @@ The simple mode only affects the ingest step. The downstream geometry parser sti
 
 ## See Also
 
-- [Asset Preview](interaction/preview_asset.md): Load generated meshes and USD assets in the simulator.
-- [Installation](../quick_start/install.md): Install EmbodiChain with Blender and rendering dependencies.
-- [Toolkits](toolkits/index.rst): Other asset preparation utilities.
+- [Asset Preview](../interaction/preview_asset.md): Load generated meshes and USD assets in the simulator.
+- [Installation](../../quick_start/install.md): Install EmbodiChain with Blender and rendering dependencies.
+- [Toolkits](../toolkits/index.rst): Other asset preparation utilities.

@@ -42,7 +42,7 @@ def _import_ingest_utils():
     if importlib.util.find_spec("bpy") is None:
         sys.modules.setdefault("bpy", types.SimpleNamespace())
     return importlib.import_module(
-        "embodichain.toolkits.simready_pipeline.utils.ingest_utils"
+        "embodichain.gen_sim.simready_pipeline.utils.ingest_utils"
     )
 
 

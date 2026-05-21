@@ -25,16 +25,16 @@ import sys
 import tempfile
 from typing import Iterable, Optional
 
-from embodichain.toolkits.simready_pipeline.core.asset import Asset
-from embodichain.toolkits.simready_pipeline.utils.ingest_utils import (
+from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.simready_pipeline.utils.ingest_utils import (
     new_uuid,
     trimesh_parse_ingest,
     blender_parser_ingest,
     inject_semantic_from_config,
     inject_user_extra_info,
 )
-from embodichain.toolkits.simready_pipeline.io.json_store import JsonStore
-from embodichain.toolkits.simready_pipeline.parser.base import ParserManager
+from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
+from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
 
 
 def _load_ingest_config() -> dict:

@@ -22,9 +22,9 @@ from typing import Any
 
 import numpy as np
 import trimesh
-from embodichain.toolkits.simready_pipeline.parser.base import AssetParser
-from embodichain.toolkits.simready_pipeline.core.asset import Asset
-from embodichain.toolkits.simready_pipeline.utils.geometry_utils import process_obj
+from embodichain.gen_sim.simready_pipeline.parser.base import AssetParser
+from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.simready_pipeline.utils.geometry_utils import process_obj
 
 
 def _load_geometry_cleanup_config() -> dict:

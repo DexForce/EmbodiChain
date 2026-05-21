@@ -25,9 +25,9 @@ from urllib.parse import urlsplit, urlunsplit
 
 from openai import AzureOpenAI
 
-from embodichain.toolkits.simready_pipeline.core.asset import Asset
-from embodichain.toolkits.simready_pipeline.parser.base import AssetParser
-from embodichain.toolkits.simready_pipeline.utils.simready_utils import (
+from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.simready_pipeline.parser.base import AssetParser
+from embodichain.gen_sim.simready_pipeline.utils.simready_utils import (
     process_mesh,
     delete_rendered_pngs,
     client,

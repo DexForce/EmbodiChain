@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 
 from pathlib import Path
-from embodichain.toolkits.simready_pipeline.core.asset import Asset
-from embodichain.toolkits.simready_pipeline.parser.base import AssetParser
+from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.simready_pipeline.parser.base import AssetParser
 
 
 class AssetInspector(AssetParser):

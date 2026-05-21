@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = (
     REPO_ROOT
     / "embodichain"
-    / "toolkits"
+    / "gen_sim"
     / "simready_pipeline"
     / "configs"
     / "gen_config.json"

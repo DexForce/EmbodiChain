@@ -33,16 +33,16 @@ Convert a raw mesh asset directory into sim_ready assets for simulation.
 
 ```bash
 # Run the full SimReady pipeline on a single asset directory
-python -m embodichain.toolkits.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \                                 
+python -m embodichain.gen_sim.simready_pipeline.cli.start \
+    --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory
 
 # Use trimesh-only ingest for source normalization
-python -m embodichain.toolkits.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \                                 
+python -m embodichain.gen_sim.simready_pipeline.cli.start \
+    --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
-    --category YourCategory
+    --category YourCategory \
     --simple
 ```
 

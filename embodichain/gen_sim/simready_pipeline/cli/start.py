@@ -20,9 +20,9 @@ import os
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-from embodichain.toolkits.simready_pipeline.pipeline.ingest import ingest_one_asset
-from embodichain.toolkits.simready_pipeline.io.json_store import JsonStore
-from embodichain.toolkits.simready_pipeline.parser.base import ParserManager
+from embodichain.gen_sim.simready_pipeline.pipeline.ingest import ingest_one_asset
+from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
+from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
 
 
 def cli_ingest_single(
@@ -57,7 +57,7 @@ def cli_ingest_single(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="embodichain.toolkits.simready_pipeline Asset Ingestion Pipeline"
+        description="embodichain.gen_sim.simready_pipeline Asset Ingestion Pipeline"
     )
 
     parser.add_argument(
