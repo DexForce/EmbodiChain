@@ -126,7 +126,7 @@ def main():
     num_lights = 8
     radius = 5
     height = 8
-    intensity = 200
+    intensity = 50
     lights = []
 
     for i in range(num_lights):
