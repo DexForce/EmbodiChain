@@ -27,7 +27,7 @@ Key concepts covered:
   3. Running a pick → place → move sequence with execute_static()
 
 Run with:
-    python atomic_actions.py [--num_envs N] [--enable_rt]
+    python atomic_actions.py [--num_envs N] [--renderer hybrid|fast-rt|rt]
 """
 
 import argparse
@@ -40,8 +40,10 @@ from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
+    RenderCfg,
     RobotCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
@@ -79,12 +81,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -98,14 +95,16 @@ def initialize_simulation(args):
     Returns:
         SimulationManager: Configured simulation manager instance.
     """
-    config = SimulationManagerCfg(
+    sim_cfg = SimulationManagerCfg(
+        width=1920,
+        height=1080,
         headless=True,
         sim_device="cuda",
-        enable_rt=args.enable_rt,
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
+        render_cfg=RenderCfg(renderer=args.renderer),
     )
-    sim = SimulationManager(config)
+    sim = SimulationManager(sim_cfg)
 
     light = sim.add_light(
         cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
@@ -253,7 +252,8 @@ def main():
     )
 
     sim.init_gpu_physics()
-    sim.open_window()
+    if not args.headless:
+        sim.open_window()
 
     # ------------------------------------------------------------------ #
     # Step 5: Describe the mug with ObjectSemantics                       #

@@ -83,6 +83,27 @@ This page lists all available event functors that can be used with the Event Man
      "params": {"color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
                 "intensity_range": [0.5, 2.0]}}
     ```
+* - {class}`~randomization.visual.randomize_indirect_lighting`
+  - Randomize indirect (IBL) lighting or emissive light. Implemented as a Functor class. Operates in one of two **mutually exclusive** modes — configuring both raises a ``ValueError``:
+
+    **HDR mode** — provide ``path`` pointing to a folder of ``.hdr`` files. A random file is selected on each call and applied as the environment map. The ``path`` is resolved via ``get_data_path``, supporting absolute paths, data-root-relative paths, and dataset-class paths.
+
+    ```json
+    {"func": "randomize_indirect_lighting",
+     "mode": "interval", "interval_step": 10,
+     "params": {"path": "EnvMapHDR/EnvMapHDR"}}
+    ```
+
+    **Emissive mode** — provide ``emissive_color_range`` (pair of RGB lists) and/or ``emissive_intensity_range`` (pair of floats). Color and intensity are sampled uniformly on each call and applied via ``set_emission_light``.
+
+    ```json
+    {"func": "randomize_indirect_lighting",
+     "mode": "interval", "interval_step": 10,
+     "params": {"emissive_color_range": [[0.8, 0.8, 0.8], [1.0, 1.0, 1.0]],
+                "emissive_intensity_range": [80.0, 150.0]}}
+    ```
+
+    Applies the same lighting to all environments.
 * - {func}`~randomization.visual.randomize_camera_extrinsics`
   - Randomize camera poses for viewpoint diversity. Supports both attach mode (pos/euler perturbation) and look_at mode (eye/target/up perturbation).
 

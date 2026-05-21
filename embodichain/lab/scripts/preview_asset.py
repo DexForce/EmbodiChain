@@ -34,6 +34,16 @@ Usage examples::
     python -m embodichain.lab.scripts.preview_asset \\
         --asset_path /path/to/asset.usda \\
         --headless
+
+    # Preview with a built-in environment map
+    python -m embodichain.lab.scripts.preview_asset \\
+        --asset_path /path/to/sugar_box.usda \\
+        --env_map "Studio"
+
+    # Preview with a custom HDR environment map
+    python -m embodichain.lab.scripts.preview_asset \\
+        --asset_path /path/to/sugar_box.usda \\
+        --env_map /path/to/environment.hdr
 """
 
 from __future__ import annotations
@@ -208,6 +218,10 @@ def main(args: argparse.Namespace) -> None:
     sim = SimulationManager(sim_cfg)
 
     try:
+        if args.env_map:
+            log_info(f"Setting environment map: {args.env_map} ...", color="green")
+            sim.set_indirect_lighting(args.env_map)
+
         assets = load_assets(sim, args)
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
 
@@ -317,6 +331,15 @@ def cli():
         choices=["hybrid", "fast-rt", "rt"],
         default="hybrid",
         help="Renderer backend (default: hybrid).",
+    )
+    parser.add_argument(
+        "--env_map",
+        type=str,
+        default=None,
+        help=(
+            "Environment map for indirect lighting. Accepts a built-in IBL resource "
+            "name (e.g. 'Studio') or an absolute file path (.hdr/.png/.exr)."
+        ),
     )
     parser.add_argument(
         "--preview",
