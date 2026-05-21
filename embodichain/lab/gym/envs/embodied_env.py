@@ -54,6 +54,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.utils import configclass, logger
+from embodichain.data import get_data_path
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
@@ -932,6 +933,9 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.light.indirect is not None:
             if "emission_light" in self.cfg.light.indirect:
                 self.sim.set_emission_light(**self.cfg.light.indirect["emission_light"])
+            if "env_map" in self.cfg.light.indirect:
+                path = get_data_path(self.cfg.light.indirect["env_map"])
+                self.sim.set_indirect_lighting(path)
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
