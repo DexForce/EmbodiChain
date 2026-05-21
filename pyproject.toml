@@ -48,12 +48,14 @@ dependencies = [
   "h5py",
   "tensordict",
   "viser==1.0.21",
-  "lerobot>=0.4.4",
-  "bpy",
-  "pyrender==0.1.45"
+  "lerobot>=0.4.4"
 ]
 
 [project.optional-dependencies]
+gensim = [
+  "bpy",
+  "pyrender==0.1.45"
+]
 
 [tool.uv.sources]
 bpy = { index = "blender" }
