@@ -24,12 +24,54 @@ from embodichain.lab.sim import (
     VisualMaterialCfg,
 )
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    JointDrivePropertiesCfg,
+    LinkPhysicsOverrideCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyAttributesOverrideCfg,
+)
+from embodichain.lab.sim.utility.sim_utils import _resolve_link_physics_groups
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
+
+
+def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:
+    return art._entities[env_idx].get_physical_attr(link_name).static_friction
+
+
+class TestRigidBodyAttributesOverride:
+    """Pure-Python tests for per-link physics config merging."""
+
+    def test_merge_with_applies_only_set_fields(self):
+        base = RigidBodyAttributesCfg(
+            static_friction=0.3,
+            dynamic_friction=0.25,
+            linear_damping=0.5,
+        )
+        override = RigidBodyAttributesOverrideCfg(static_friction=0.85)
+        merged = override.merge_with(base)
+        assert abs(merged.static_friction - 0.85) < 1e-6
+        assert abs(merged.dynamic_friction - 0.25) < 1e-6
+        assert abs(merged.linear_damping - 0.5) < 1e-6
+
+    def test_resolve_link_physics_overlap_raises(self):
+        link_names = ["outer_box", "handle_xpos", "inner_drawer"]
+        link_attrs = {
+            "box": LinkPhysicsOverrideCfg(
+                link_names_expr=["outer_box", "handle_xpos"],
+                attrs=RigidBodyAttributesOverrideCfg(static_friction=0.9),
+            ),
+            "handle": LinkPhysicsOverrideCfg(
+                link_names_expr=["handle_xpos"],
+                attrs=RigidBodyAttributesOverrideCfg(static_friction=0.8),
+            ),
+        }
+        with pytest.raises(ValueError, match="multiple link_attrs groups"):
+            _resolve_link_physics_groups(link_names, link_attrs)
 
 
 class BaseArticulationTest:
@@ -255,6 +297,113 @@ class BaseArticulationTest:
         import gc
 
         gc.collect()
+
+
+class BaseArticulationLinkPhysicsTest:
+    """Tests for per-link physics configuration (isolated sim per test)."""
+
+    def setup_simulation(self, sim_device: str) -> None:
+        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=2)
+        self.sim = SimulationManager(config)
+        self.art_path = get_data_path(ART_PATH)
+        assert os.path.isfile(self.art_path)
+
+    def teardown_method(self):
+        self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        self.__dict__.clear()
+        import gc
+
+        gc.collect()
+
+    def test_global_attrs_applied_to_all_links(self):
+        """Default attrs should set the same static friction on every link."""
+        global_friction = 0.31
+        cfg = ArticulationCfg(
+            uid="drawer_global_attrs",
+            fpath=self.art_path,
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            attrs=RigidBodyAttributesCfg(static_friction=global_friction),
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        for link_name in art.link_names:
+            assert abs(_link_static_friction(art, link_name) - global_friction) < 1e-3
+
+    def test_link_attrs_override_selected_links(self):
+        """link_attrs should override friction only on matched links."""
+        global_friction = 0.31
+        handle_friction = 0.87
+        cfg = ArticulationCfg(
+            uid="drawer_link_attrs",
+            fpath=self.art_path,
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            attrs=RigidBodyAttributesCfg(static_friction=global_friction),
+            link_attrs={
+                "handle": LinkPhysicsOverrideCfg(
+                    link_names_expr=["handle_xpos"],
+                    attrs=RigidBodyAttributesOverrideCfg(
+                        static_friction=handle_friction
+                    ),
+                ),
+            },
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        assert abs(_link_static_friction(art, "handle_xpos") - handle_friction) < 1e-3
+        for link_name in art.link_names:
+            if link_name == "handle_xpos":
+                continue
+            assert abs(_link_static_friction(art, link_name) - global_friction) < 1e-3
+
+    def test_link_attrs_from_dict(self):
+        """ArticulationCfg.from_dict should parse nested link_attrs."""
+        cfg = ArticulationCfg.from_dict(
+            {
+                "uid": "drawer_link_attrs_dict",
+                "fpath": self.art_path,
+                "drive_pros": {"drive_type": "force"},
+                "attrs": {"static_friction": 0.4},
+                "link_attrs": {
+                    "handle": {
+                        "link_names_expr": ["handle_xpos"],
+                        "attrs": {"static_friction": 0.77},
+                    }
+                },
+            }
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        assert abs(_link_static_friction(art, "handle_xpos") - 0.77) < 1e-3
+        assert abs(_link_static_friction(art, "outer_box") - 0.4) < 1e-3
+
+    def test_set_link_physical_attr_runtime(self):
+        """Runtime API should update selected links without affecting others."""
+        cfg = ArticulationCfg(
+            uid="drawer_runtime_attrs",
+            fpath=self.art_path,
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        handle_friction = 0.66
+        art.set_link_physical_attr(
+            RigidBodyAttributesOverrideCfg(static_friction=handle_friction),
+            link_names=["handle_xpos"],
+        )
+        assert abs(_link_static_friction(art, "handle_xpos") - handle_friction) < 1e-3
+        for link_name in art.link_names:
+            if link_name == "handle_xpos":
+                continue
+            assert abs(_link_static_friction(art, link_name) - 0.5) < 1e-3
+
+
+class TestArticulationLinkPhysicsCPU(BaseArticulationLinkPhysicsTest):
+    def setup_method(self):
+        self.setup_simulation("cpu")
+
+
+class TestArticulationLinkPhysicsCUDA(BaseArticulationLinkPhysicsTest):
+    def setup_method(self):
+        self.setup_simulation("cuda")
 
 
 class TestArticulationCPU(BaseArticulationTest):

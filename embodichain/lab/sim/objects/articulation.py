@@ -31,7 +31,14 @@ from dexsim.types import (
 from dexsim.engine import CudaArray, PhysicsScene
 
 from embodichain.lab.sim import VisualMaterialInst, VisualMaterial
-from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    JointDrivePropertiesCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyAttributesOverrideCfg,
+)
+from dexsim.types import PhysicalAttr
+from embodichain.utils.string import resolve_matching_names
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -1288,6 +1295,86 @@ class Articulation(BatchEntity):
                     self._entities[env_idx].get_physical_body(name).get_mass()
                 )
         return mass_tensor
+
+    def get_link_physical_attr(
+        self,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> list[PhysicalAttr]:
+        """Get physical attributes for articulation links.
+
+        Args:
+            link_names: Link names or regex patterns. If None, all links are returned.
+            env_ids: Environment indices. If None, only env 0 is queried.
+
+        Returns:
+            List of :class:`~dexsim.types.PhysicalAttr`, one per (env, link) pair in
+            row-major order (env-major).
+        """
+        if link_names is None:
+            matched_link_names = self.link_names
+        elif isinstance(link_names, str):
+            _, matched_link_names = resolve_matching_names(
+                keys=link_names, list_of_strings=self.link_names
+            )
+        else:
+            _, matched_link_names = resolve_matching_names(
+                keys=link_names, list_of_strings=self.link_names
+            )
+
+        local_env_ids = [0] if env_ids is None else list(env_ids)
+        attrs: list[PhysicalAttr] = []
+        for env_idx in local_env_ids:
+            for name in matched_link_names:
+                attrs.append(self._entities[env_idx].get_physical_attr(name))
+        return attrs
+
+    def set_link_physical_attr(
+        self,
+        attrs: RigidBodyAttributesCfg | RigidBodyAttributesOverrideCfg | PhysicalAttr,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | None = None,
+        *,
+        base_attrs: RigidBodyAttributesCfg | None = None,
+        replace_inertial: bool = False,
+    ) -> None:
+        """Set physical attributes for selected articulation links.
+
+        Args:
+            attrs: Full, partial, or DexSim physical attributes to apply.
+            link_names: Link names or regex patterns. If None, all links are updated.
+            env_ids: Environment indices. If None, all environments are updated.
+            base_attrs: Base config used when ``attrs`` is a partial override.
+            replace_inertial: Recompute inertia when mass changes.
+        """
+        if link_names is None:
+            matched_link_names = self.link_names
+        elif isinstance(link_names, str):
+            _, matched_link_names = resolve_matching_names(
+                keys=link_names, list_of_strings=self.link_names
+            )
+        else:
+            _, matched_link_names = resolve_matching_names(
+                keys=link_names, list_of_strings=self.link_names
+            )
+
+        if isinstance(attrs, RigidBodyAttributesOverrideCfg):
+            if base_attrs is None:
+                base_attrs = self.cfg.attrs
+            physical_attr = attrs.merge_with(base_attrs)
+            if attrs.mass is not None:
+                replace_inertial = True
+        elif isinstance(attrs, RigidBodyAttributesCfg):
+            physical_attr = attrs.attr()
+        else:
+            physical_attr = attrs
+
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            for name in matched_link_names:
+                self._entities[env_idx].set_physical_attr(
+                    physical_attr, name, is_replace_inertial=replace_inertial
+                )
 
     def set_joint_drive(
         self,

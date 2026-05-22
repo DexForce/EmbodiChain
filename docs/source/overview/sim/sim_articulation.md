@@ -19,8 +19,40 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
 | `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
 | `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
-| `attrs` | `RigidBodyAttributesCfg` | `...` | Rigid body attributes configuration. |
+| `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
+| `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
+
+### Per-link physics (`link_attrs`)
+
+By default, `attrs` applies the same rigid-body physics to every link. Use `link_attrs` to
+override specific links (matched by regex, same rules as joint drive dict keys):
+
+```python
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    LinkPhysicsOverrideCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyAttributesOverrideCfg,
+)
+
+art_cfg = ArticulationCfg(
+    fpath="path/to/robot.urdf",
+    attrs=RigidBodyAttributesCfg(static_friction=0.5),
+    link_attrs={
+        "eef": LinkPhysicsOverrideCfg(
+            link_names_expr=[".*(hand|finger|ee).*"],
+            attrs=RigidBodyAttributesOverrideCfg(
+                static_friction=0.95,
+                contact_offset=0.001,
+            ),
+        ),
+    },
+)
+```
+
+At runtime, use `articulation.set_link_physical_attr(...)` and `get_link_physical_attr(...)`
+for the same partial-override behavior.
 
 ### Drive Configuration
 
