@@ -4,6 +4,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run merge_published_site unit tests
+        run: pytest tests/docs -q --confcutdir=tests/docs
+
   # -----------------------------------------------------------------------
   # Scenario A: push to main — existing v0.1.0, v0.2.0 must survive
   # Simulates: cache holds v0.1.0 + v0.2.0, build adds/updates main/
@@ -48,6 +55,68 @@ jobs:
           print('PASS: all versions present:', names)
           "
           echo "PASS: main_push — existing versions preserved"
+
+  # -----------------------------------------------------------------------
+  # Scenario D: main push after tag — stale cache (main only) + live Pages
+  # This is the production bug: tag cache is not on main; merge fixes it.
+  # -----------------------------------------------------------------------
+  test-main-after-tag-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stale default-branch cache (main/ only)
+        run: |
+          mkdir -p docs/build/html/main
+          echo "<html>stale main</html>" > docs/build/html/main/index.html
+
+      - name: Mock live GitHub Pages (has tag release v0.3.0)
+        run: |
+          PUBLISHED="${GITHUB_WORKSPACE}/mock-published-site"
+          mkdir -p "${PUBLISHED}/v0.3.0" "${PUBLISHED}/main"
+          echo "<html>v0.3.0 live</html>" > "${PUBLISHED}/v0.3.0/index.html"
+          echo "<html>main live</html>" > "${PUBLISHED}/main/index.html"
+          python3 -c "
+          import json, pathlib
+          root = pathlib.Path('${PUBLISHED}')
+          manifest = {
+            'latest': 'v0.3.0',
+            'versions': [
+              {'name': 'v0.3.0', 'url': './v0.3.0/index.html', 'type': 'tag'},
+              {'name': 'main', 'url': './main/index.html', 'type': 'branch'},
+            ],
+          }
+          (root / 'versions.json').write_text(json.dumps(manifest, indent=2))
+          "
+
+      - name: Merge published (skip main — will rebuild)
+        run: |
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/merge_published_site.py \
+            --build-dir ${GITHUB_WORKSPACE}/docs/build/html \
+            --published-root ${GITHUB_WORKSPACE}/mock-published-site \
+            --skip-version main
+
+      - name: Rebuild main/ only
+        run: |
+          rm -rf docs/build/html/main
+          mkdir -p docs/build/html/main
+          echo "<html>main rebuilt</html>" > docs/build/html/main/index.html
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+            --build-dir ${GITHUB_WORKSPACE}/docs/build/html
+
+      - name: Assert — v0.3.0 preserved after main push
+        run: |
+          [ -d docs/build/html/v0.3.0 ] || (echo "FAIL: v0.3.0 missing after merge!" && exit 1)
+          grep -q "v0.3.0 live" docs/build/html/v0.3.0/index.html
+          grep -q "main rebuilt" docs/build/html/main/index.html
+          python3 -c "
+          import json
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert 'v0.3.0' in names and 'main' in names, names
+          assert d['latest'] == 'v0.3.0', d['latest']
+          "
+          echo "PASS: main_after_tag — release dir restored from published mock"
 
   # -----------------------------------------------------------------------
   # Scenario B: tag push v0.3.0 — new version added, old dirs untouched
