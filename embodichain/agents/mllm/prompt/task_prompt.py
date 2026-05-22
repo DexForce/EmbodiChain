@@ -46,7 +46,13 @@ class TaskPrompt:
       "id": "e01_<action>",
       "source": "v0_start",
       "target": "v1_<state>",
-      "left_arm_action": {"fn": "<atomic_action>", "kwargs": {}},
+      "left_arm_action": {
+        "kind": "atomic_action",
+        "name": "<move|pick_up|place|gripper_open|gripper_close>",
+        "cfg": {"control_part": "<left_arm|right_arm|left_eef|right_eef>"},
+        "target": {"kind": "<target kind>"},
+        "runtime_kwargs": {}
+      },
       "right_arm_action": null
     }
   ]
@@ -72,7 +78,8 @@ class TaskPrompt:
                         "Given a camera observation and task description, produce only "
                         "the nominal atomic-action graph. Do not add failure monitors, "
                         "error injection, recovery branches, Python code, or prose. "
-                        "All actions must strictly use the provided atomic API functions."
+                        "All actions must strictly use the provided structured atomic "
+                        "graph action specs."
                     )
                 ),
                 HumanMessagePromptTemplate.from_template(
@@ -99,8 +106,11 @@ class TaskPrompt:
                                 "- Each edge is one semantic task step from source node to target node.\n"
                                 "- Every edge must define at least one non-null arm action.\n"
                                 "- Use `null` for an idle arm action.\n"
-                                "- Put only JSON primitives inside kwargs: strings, numbers, booleans, null, arrays, or objects.\n"
+                                "- Use only `move`, `pick_up`, `place`, `gripper_open`, or `gripper_close` action names.\n"
+                                '- Do not output legacy `{"fn": ...}` action calls.\n'
+                                "- Put only JSON primitives inside cfg, target, and runtime_kwargs: strings, numbers, booleans, null, arrays, or objects.\n"
                                 "- Do not include `env`, tensors, comments, validation conditions, monitors, errors, or recovery fields.\n"
+                                "- Express pouring wrist rotation, return-home, relative movement, and EEF orientation as `move` target kinds.\n"
                                 "- Preserve task order and use both arms on the same edge when they should act simultaneously.\n"
                                 "- Use stable ids such as `v0_start`, `v1_grasped`, `e01_grasp_objects`.\n"
                                 "- Replace `N` with the concrete final step index; do not literally output `vN_done`.\n"

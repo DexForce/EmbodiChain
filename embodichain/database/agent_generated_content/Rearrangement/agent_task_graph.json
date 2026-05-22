@@ -34,19 +34,55 @@
       "source": "v0_start",
       "target": "v1_grasped",
       "left_arm_action": {
-        "fn": "grasp",
-        "kwargs": {
-          "robot_name": "left_arm",
-          "obj_name": "fork",
-          "pre_grasp_dis": 0.1
+        "kind": "atomic_action",
+        "name": "pick_up",
+        "cfg_class": "PickUpActionCfg",
+        "cfg": {
+          "control_part": "left_arm",
+          "hand_control_part": "left_eef",
+          "pre_grasp_distance": 0.1
+        },
+        "target": {
+          "kind": "object_semantics",
+          "obj_name": "fork"
+        },
+        "runtime_kwargs": {
+          "force_valid": false,
+          "public_grasp_strategy": "legacy_guided",
+          "public_grasp_candidate_num": 32,
+          "public_grasp_pre_grasp_distance": 0.05,
+          "public_grasp_lift_height": 0.15,
+          "public_grasp_rank_by_legacy_pose": true,
+          "public_grasp_use_legacy_orientation": true,
+          "validate_public_grasp_after_action": true,
+          "public_grasp_validation_min_object_lift": 0.03,
+          "public_grasp_validation_max_object_xy_displacement": 0.16
         }
       },
       "right_arm_action": {
-        "fn": "grasp",
-        "kwargs": {
-          "robot_name": "right_arm",
-          "obj_name": "spoon",
-          "pre_grasp_dis": 0.1
+        "kind": "atomic_action",
+        "name": "pick_up",
+        "cfg_class": "PickUpActionCfg",
+        "cfg": {
+          "control_part": "right_arm",
+          "hand_control_part": "right_eef",
+          "pre_grasp_distance": 0.1
+        },
+        "target": {
+          "kind": "object_semantics",
+          "obj_name": "spoon"
+        },
+        "runtime_kwargs": {
+          "force_valid": false,
+          "public_grasp_strategy": "legacy_guided",
+          "public_grasp_candidate_num": 32,
+          "public_grasp_pre_grasp_distance": 0.05,
+          "public_grasp_lift_height": 0.15,
+          "public_grasp_rank_by_legacy_pose": true,
+          "public_grasp_use_legacy_orientation": true,
+          "validate_public_grasp_after_action": true,
+          "public_grasp_validation_min_object_lift": 0.03,
+          "public_grasp_validation_max_object_xy_displacement": 0.16
         }
       }
     },
@@ -55,18 +91,30 @@
       "source": "v1_grasped",
       "target": "v2_eef_down",
       "left_arm_action": {
-        "fn": "orient_eef",
-        "kwargs": {
-          "robot_name": "left_arm",
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {
+          "control_part": "left_arm"
+        },
+        "target": {
+          "kind": "eef_orientation",
           "direction": "down"
-        }
+        },
+        "runtime_kwargs": {}
       },
       "right_arm_action": {
-        "fn": "orient_eef",
-        "kwargs": {
-          "robot_name": "right_arm",
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {
+          "control_part": "right_arm"
+        },
+        "target": {
+          "kind": "eef_orientation",
           "direction": "down"
-        }
+        },
+        "runtime_kwargs": {}
       }
     },
     {
@@ -74,24 +122,36 @@
       "source": "v2_eef_down",
       "target": "v3_at_targets",
       "left_arm_action": {
-        "fn": "move_relative_to_object",
-        "kwargs": {
-          "robot_name": "left_arm",
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {
+          "control_part": "left_arm"
+        },
+        "target": {
+          "kind": "object_relative_pose",
           "obj_name": "plate",
           "x_offset": 0.0,
           "y_offset": 0.16,
           "z_offset": 0.0
-        }
+        },
+        "runtime_kwargs": {}
       },
       "right_arm_action": {
-        "fn": "move_relative_to_object",
-        "kwargs": {
-          "robot_name": "right_arm",
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {
+          "control_part": "right_arm"
+        },
+        "target": {
+          "kind": "object_relative_pose",
           "obj_name": "plate",
           "x_offset": 0.0,
           "y_offset": -0.16,
           "z_offset": 0.0
-        }
+        },
+        "runtime_kwargs": {}
       }
     },
     {
@@ -99,16 +159,32 @@
       "source": "v3_at_targets",
       "target": "v4_placed",
       "left_arm_action": {
-        "fn": "open_gripper",
-        "kwargs": {
-          "robot_name": "left_arm"
-        }
+        "kind": "atomic_action",
+        "name": "gripper_open",
+        "cfg_class": "GripperActionCfg",
+        "cfg": {
+          "control_part": "left_eef",
+          "arm_control_part": "left_arm"
+        },
+        "target": {
+          "kind": "gripper_state",
+          "state": "open"
+        },
+        "runtime_kwargs": {}
       },
       "right_arm_action": {
-        "fn": "open_gripper",
-        "kwargs": {
-          "robot_name": "right_arm"
-        }
+        "kind": "atomic_action",
+        "name": "gripper_open",
+        "cfg_class": "GripperActionCfg",
+        "cfg": {
+          "control_part": "right_eef",
+          "arm_control_part": "right_arm"
+        },
+        "target": {
+          "kind": "gripper_state",
+          "state": "open"
+        },
+        "runtime_kwargs": {}
       }
     },
     {
@@ -116,16 +192,28 @@
       "source": "v4_placed",
       "target": "v5_done",
       "left_arm_action": {
-        "fn": "back_to_initial_pose",
-        "kwargs": {
-          "robot_name": "left_arm"
-        }
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {
+          "control_part": "left_arm"
+        },
+        "target": {
+          "kind": "initial_pose"
+        },
+        "runtime_kwargs": {}
       },
       "right_arm_action": {
-        "fn": "back_to_initial_pose",
-        "kwargs": {
-          "robot_name": "right_arm"
-        }
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {
+          "control_part": "right_arm"
+        },
+        "target": {
+          "kind": "initial_pose"
+        },
+        "runtime_kwargs": {}
       }
     }
   ]

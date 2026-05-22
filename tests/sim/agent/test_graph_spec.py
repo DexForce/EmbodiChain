@@ -210,51 +210,6 @@ def _expected_place_action(
     }
 
 
-def _expected_upright_object_sequence(
-    *,
-    robot_name: str = "left_arm",
-    obj_name: str = "cup",
-    pre_grasp_dis: float = 0.08,
-    pre_place_dis: float = 0.08,
-    force_valid: bool = True,
-) -> dict[str, Any]:
-    place_action = _expected_place_action(
-        robot_name=robot_name,
-        obj_name=obj_name,
-        pre_place_dis=pre_place_dis,
-        force_valid=force_valid,
-        orientation="upright",
-    )
-    return {
-        "kind": "atomic_sequence",
-        "name": "upright_object",
-        "actions": [
-            _expected_pick_up_action(
-                robot_name=robot_name,
-                obj_name=obj_name,
-                pre_grasp_dis=pre_grasp_dis,
-                force_valid=force_valid,
-            ),
-            place_action,
-        ],
-        "target_list": [
-            {"kind": "object_semantics", "obj_name": obj_name},
-            {"kind": "table_pose", "obj_name": obj_name, "orientation": "upright"},
-        ],
-        "runtime_kwargs": {"force_valid": force_valid},
-        "fallback": {
-            "fn": "upright_object",
-            "kwargs": {
-                "robot_name": robot_name,
-                "obj_name": obj_name,
-                "pre_grasp_dis": pre_grasp_dis,
-                "pre_place_dis": pre_place_dis,
-                "force_valid": force_valid,
-            },
-        },
-    }
-
-
 def test_expand_recovery_spec_generates_reusable_recovery_graph() -> None:
     recovery_graph = expand_recovery_spec(
         _nominal_task_graph(),
@@ -408,112 +363,36 @@ def test_normalize_recovery_spec_infers_targets_from_atomic_action_schema() -> N
     ]
 
 
-def test_expand_recovery_spec_supports_upright_object_step() -> None:
-    recovery_graph = expand_recovery_spec(
-        _nominal_task_graph(),
-        {
-            "task": "grasp cup",
-            "recovery_bindings": [
-                {
-                    "edge_id": "e01_grasp",
-                    "failure_name": "cup_fallen",
-                    "monitors": [
-                        {
-                            "type": "object_fallen",
-                            "objects": ["cup"],
-                            "upright_threshold": 0.7,
-                        }
-                    ],
-                    "recovery": [
-                        {
-                            "type": "upright_object",
-                            "robot_name": "left_arm",
-                            "obj_name": "cup",
-                            "pre_grasp_dis": 0.08,
-                            "pre_place_dis": 0.09,
-                        }
-                    ],
-                    "merge": "source",
-                    "repeat_until_success": False,
-                }
-            ],
-        },
-    )
-
-    assert recovery_graph["recovery_edges"] == [
-        {
-            "id": "re_e01_grasp_1_upright_cup",
-            "source": "v0_start",
-            "target": "v0_start",
-            "left_arm_action": _expected_upright_object_sequence(
-                pre_grasp_dis=0.08,
-                pre_place_dis=0.09,
-            ),
-            "right_arm_action": None,
-        }
-    ]
-    assert recovery_graph["recovery_branches"][0]["monitor_sequence"] == [
-        {
-            "fn": "monitor_object_fallen",
-            "kwargs": {"obj_name": "cup", "upright_threshold": 0.7},
-        }
-    ]
-
-
-def test_expand_recovery_spec_does_not_self_monitor_upright_object_step() -> None:
-    recovery_graph = expand_recovery_spec(
-        _nominal_task_graph(),
-        {
-            "task": "grasp cup",
-            "recovery_bindings": [
-                {
-                    "edge_id": "e01_grasp",
-                    "failure_name": "cup_fallen",
-                    "monitors": [
-                        {
-                            "type": "object_fallen",
-                            "objects": ["cup"],
-                            "upright_threshold": 0.7,
-                        }
-                    ],
-                    "recovery": [
-                        {
-                            "type": "upright_object",
-                            "robot_name": "left_arm",
-                            "obj_name": "cup",
-                        },
-                        {
-                            "type": "action",
-                            "name": "return_arm_home",
-                            "left_arm_action": {
-                                "fn": "back_to_initial_pose",
-                                "kwargs": {"robot_name": "left_arm"},
-                            },
-                            "right_arm_action": None,
-                        },
-                        {
-                            "type": "regrasp",
-                            "robot_name": "left_arm",
-                            "obj_name": "cup",
-                        },
-                    ],
-                    "merge": "source",
-                    "repeat_until_success": True,
-                }
-            ],
-        },
-    )
-
-    branch_ids = [branch["edge_id"] for branch in recovery_graph["recovery_branches"]]
-
-    assert "re_e01_grasp_1_upright_cup" not in branch_ids
-    assert "re_e01_grasp_2_return_arm_home" in branch_ids
-    assert "re_e01_grasp_3_regrasp_cup" in branch_ids
-    assert [edge["id"] for edge in recovery_graph["recovery_edges"]] == [
-        "re_e01_grasp_1_upright_cup",
-        "re_e01_grasp_2_return_arm_home",
-        "re_e01_grasp_3_regrasp_cup",
-    ]
+def test_expand_recovery_spec_rejects_upright_object_step() -> None:
+    with pytest.raises(ValueError, match="supported type"):
+        expand_recovery_spec(
+            _nominal_task_graph(),
+            {
+                "task": "grasp cup",
+                "recovery_bindings": [
+                    {
+                        "edge_id": "e01_grasp",
+                        "failure_name": "cup_fallen",
+                        "monitors": [
+                            {
+                                "type": "object_fallen",
+                                "objects": ["cup"],
+                                "upright_threshold": 0.7,
+                            }
+                        ],
+                        "recovery": [
+                            {
+                                "type": "upright_object",
+                                "robot_name": "left_arm",
+                                "obj_name": "cup",
+                            }
+                        ],
+                        "merge": "source",
+                        "repeat_until_success": False,
+                    }
+                ],
+            },
+        )
 
 
 def test_expand_recovery_spec_accepts_canonicalized_direct_monitor() -> None:
@@ -689,8 +568,9 @@ def test_compile_agent_graph_spec_adds_explicit_recovery_branch() -> None:
 
     assert graph.start == "v0_start"
     assert graph.goal == "v2_done"
-    assert nominal_edge.left_arm_action.keywords == {
-        "robot_name": "left_arm",
+    assert nominal_edge.left_arm_action.action_name == "pick_up"
+    assert nominal_edge.left_arm_action.spec["target"] == {
+        "kind": "object_semantics",
         "obj_name": "cup",
     }
     assert nominal_edge.monitor_labels == ["cup_moved"]
@@ -702,6 +582,7 @@ def test_compile_agent_graph_spec_adds_explicit_recovery_branch() -> None:
     }
     assert recovery_edge.source == "v0_start"
     assert recovery_edge.target == "v1_grasped"
+    assert recovery_edge.left_arm_action.action_name == "pick_up"
     assert recovery_edge.left_arm_action.func is grasp
     assert recovery_edge.is_recovery is True
     assert graph.recovery_branches[("e01_grasp", 0)] == ["r_e01_regrasp"]
@@ -759,13 +640,154 @@ def test_compile_agent_graph_spec_compiles_atomic_action_fallback() -> None:
 
     recovery_action = graph.edges["r_e01_regrasp"].left_arm_action
     assert recovery_action.func is grasp
-    assert recovery_action(env=env, use_atomic_action_graph=False) == {
+    assert recovery_action.fallback_action(env=env) == {
         "env": env,
         "robot_name": "left_arm",
         "obj_name": "cup",
         "pre_grasp_dis": 0.1,
         "force_valid": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("fn_name", "kwargs", "expected_action_name", "expected_target_kind"),
+    [
+        (
+            "grasp",
+            {"robot_name": "left_arm", "obj_name": "cup"},
+            "pick_up",
+            "object_semantics",
+        ),
+        (
+            "place_on_table",
+            {"robot_name": "left_arm", "obj_name": "cup"},
+            "place",
+            "table_pose",
+        ),
+        (
+            "open_gripper",
+            {"robot_name": "left_arm"},
+            "gripper_open",
+            "gripper_state",
+        ),
+        (
+            "close_gripper",
+            {"robot_name": "left_arm"},
+            "gripper_close",
+            "gripper_state",
+        ),
+        (
+            "move_relative_to_object",
+            {"robot_name": "left_arm", "obj_name": "cup", "x_offset": 0.1},
+            "move",
+            "object_relative_pose",
+        ),
+        (
+            "move_to_absolute_position",
+            {"robot_name": "left_arm", "x": 0.2, "z": 0.3},
+            "move",
+            "absolute_position",
+        ),
+        (
+            "move_by_relative_offset",
+            {"robot_name": "left_arm", "dx": 0.1},
+            "move",
+            "relative_offset",
+        ),
+        (
+            "back_to_initial_pose",
+            {"robot_name": "left_arm"},
+            "move",
+            "initial_pose",
+        ),
+        (
+            "orient_eef",
+            {"robot_name": "left_arm", "direction": "down"},
+            "move",
+            "eef_orientation",
+        ),
+        (
+            "rotate_eef",
+            {"robot_name": "left_arm", "degree": -90},
+            "move",
+            "eef_rotation_delta",
+        ),
+        (
+            "move",
+            {"robot_name": "left_arm"},
+            "move",
+            "current_pose",
+        ),
+    ],
+)
+def test_compile_agent_graph_spec_converts_legacy_actions_to_atomic_graph_specs(
+    fn_name: str,
+    kwargs: dict[str, Any],
+    expected_action_name: str,
+    expected_target_kind: str,
+) -> None:
+    task_graph = {
+        "task": "legacy action",
+        "start": "v0_start",
+        "goal": "v1_done",
+        "nodes": [
+            {"id": "v0_start", "semantic": "Start."},
+            {"id": "v1_done", "semantic": "Done."},
+        ],
+        "edges": [
+            {
+                "id": "e01",
+                "source": "v0_start",
+                "target": "v1_done",
+                "left_arm_action": {"fn": fn_name, "kwargs": kwargs},
+                "right_arm_action": None,
+            }
+        ],
+    }
+    action_module = {
+        name: (lambda **call_kwargs: call_kwargs)
+        for name in {
+            "back_to_initial_pose",
+            "close_gripper",
+            "grasp",
+            "move",
+            "move_by_relative_offset",
+            "move_relative_to_object",
+            "move_to_absolute_position",
+            "open_gripper",
+            "orient_eef",
+            "place_on_table",
+            "rotate_eef",
+        }
+    }
+
+    graph = compile_agent_graph_spec(
+        task_graph,
+        graph_cls=FakeGraph,
+        action_module=action_module,
+        monitor_module={},
+    )
+
+    action = graph.edges["e01"].left_arm_action
+    assert action.action_name == expected_action_name
+    assert action.spec["kind"] == "atomic_action"
+    assert action.spec["target"]["kind"] == expected_target_kind
+
+
+def test_compile_agent_graph_spec_rejects_unsupported_legacy_action() -> None:
+    task_graph = _nominal_task_graph()
+    task_graph["edges"][0]["left_arm_action"] = {
+        "fn": "pour",
+        "kwargs": {"robot_name": "left_arm", "obj_name": "cup"},
+    }
+
+    with pytest.raises(ValueError, match="Unsupported legacy action 'pour'"):
+        compile_agent_graph_spec(
+            task_graph,
+            graph_cls=FakeGraph,
+            action_module={},
+            monitor_module={},
+        )
 
 
 def test_compile_agent_graph_spec_allows_recovery_branch_on_recovery_edge() -> None:

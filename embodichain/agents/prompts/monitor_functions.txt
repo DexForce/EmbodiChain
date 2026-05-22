@@ -1,4 +1,4 @@
-All monitor functions are designed to be passed into `drive(..., monitor_sequences=[...])`.
+All monitor functions are designed to be attached to AgentTaskGraph edges via `monitor_sequences`.
 Each monitor function returns:
 - `True`: the monitor is triggered and the failure condition is detected
 - `False`: the monitor is not triggered and the failure condition is not detected
@@ -80,4 +80,4 @@ Returns `True` when:
 
 Recommended use:
 - use when orientation matters, especially before retrying a grasp or place action
-- pair it with the `upright_object` recovery skill when a fallen object should be stood up first
+- only pair it with supported `move` and `regrasp` recovery steps; skip the binding if standing the object upright is required

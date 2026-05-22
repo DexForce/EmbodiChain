@@ -39,21 +39,21 @@ class RecoveryPrompt:
       ],
       "recovery": [
         {
-          "type": "upright_object",
+          "type": "regrasp",
           "robot_name": "<left_arm or right_arm>",
           "obj_name": "<object name>",
-          "pre_grasp_dis": 0.08,
-          "pre_place_dis": 0.08
+          "pre_grasp_dis": 0.1
         },
         {
           "type": "action",
           "name": "return_arm_home",
           "left_arm_action": null,
           "right_arm_action": {
-            "fn": "back_to_initial_pose",
-            "kwargs": {
-              "robot_name": "<same arm as upright_object>"
-            }
+            "kind": "atomic_action",
+            "name": "move",
+            "cfg": {"control_part": "<same arm as regrasp>"},
+            "target": {"kind": "initial_pose"},
+            "runtime_kwargs": {}
           }
         }
       ],
@@ -125,21 +125,15 @@ class RecoveryPrompt:
       ],
       "recovery": [
         {
-          "type": "upright_object",
-          "robot_name": "<left_arm or right_arm>",
-          "obj_name": "<object name>",
-          "pre_grasp_dis": 0.08,
-          "pre_place_dis": 0.08
-        },
-        {
           "type": "action",
           "name": "return_arm_home",
           "left_arm_action": null,
           "right_arm_action": {
-            "fn": "back_to_initial_pose",
-            "kwargs": {
-              "robot_name": "<same arm as upright_object>"
-            }
+            "kind": "atomic_action",
+            "name": "move",
+            "cfg": {"control_part": "<left_arm or right_arm>"},
+            "target": {"kind": "initial_pose"},
+            "runtime_kwargs": {}
           }
         },
         {
@@ -147,6 +141,9 @@ class RecoveryPrompt:
           "robot_name": "<left_arm or right_arm>",
           "obj_name": "<object name>",
           "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
         }
       ],
       "merge": "source",

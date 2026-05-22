@@ -25,14 +25,15 @@ Binding rules:
   - `regrasp`: fields `robot_name`, `obj_name`, optional `pre_grasp_dis`
   - `regrasp_both`: field `arms`, mapping robot names to object names, optional
     `pre_grasp_dis`
-  - `upright_object`: fields `robot_name`, `obj_name`, optional
-    `pre_grasp_dis`, optional `pre_place_dis`. Use this when a cup, bottle, or
-    container is fallen and should be stood upright before normal re-grasp or
-    placement policies continue.
   - `retry_failed_edge`
   - `replay_edge`: field `edge_id`
   - `action`: optional `left_arm_action`, optional `right_arm_action`
-- Use `action` only when the named templates are not enough.
+- `action` steps must use structured atomic graph action specs, not `{"fn": ...}`.
+  Allowed action names are `move`, `pick_up`, `place`, `gripper_open`, and
+  `gripper_close`.
+- Use `action` only when the named templates are not enough. Put the action
+  under the matching `left_arm_action` or `right_arm_action` field and set the
+  idle arm to null.
 - `merge` must be `target` when recovery completes the failed edge state, or
   `source` when recovery only restores the failed edge precondition and the
   failed edge should be retried.
@@ -45,7 +46,9 @@ Monitor guidance:
   or during grasping.
 - Use `hold_lost` only when the object should already be held by an arm.
 - Use `object_fallen` when the object orientation matters and a moved-object
-  monitor would not distinguish a shifted object from a toppled one.
+  monitor would not distinguish a shifted object from a toppled one. Since
+  `upright_object` is not a supported recovery step, skip this binding unless
+  the recovery can be expressed with supported `move` and `regrasp` steps.
 - If different failures need different recovery policies, create separate
   bindings instead of mixing them in one binding.
 
@@ -54,11 +57,12 @@ Recovery guidance:
   precondition.
 - Use `regrasp_both` when two arms can re-grasp independently and
   simultaneously.
-- Prefer `upright_object` before `regrasp` when a fallen object must be restored
-  to an upright tabletop pose before the nominal task can continue.
-- After `upright_object`, insert an `action` step that returns the same arm with
-  `back_to_initial_pose` before `regrasp`; this avoids starting a new grasp from
-  a constrained recovery pose.
+- Use `move` target `initial_pose` when an arm should return to its configured
+  initial joint state.
+- Use `move` target `object_relative_pose`, `absolute_position`,
+  `relative_offset`, `eef_orientation`, or `eef_rotation_delta` for direct
+  recovery motions. Do not invent action names such as `back_to_initial_pose`,
+  `orient_eef`, `rotate_eef`, `pour`, or `upright_object`.
 - If one recovery step depends on the physical result of a previous step, put
   them as separate ordered policy steps.
 - If an object is lost during a step whose source precondition required the

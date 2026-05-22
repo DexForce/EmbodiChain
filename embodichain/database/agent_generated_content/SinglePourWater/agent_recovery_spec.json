@@ -67,14 +67,20 @@
         {
           "type": "action",
           "right_arm_action": {
-            "fn": "move_relative_to_object",
-            "kwargs": {
-              "robot_name": "right_arm",
+            "kind": "atomic_action",
+            "name": "move",
+            "cfg_class": "MoveActionCfg",
+            "cfg": {
+              "control_part": "right_arm"
+            },
+            "target": {
+              "kind": "object_relative_pose",
               "obj_name": "cup",
               "x_offset": 0.05,
               "y_offset": -0.1,
               "z_offset": 0.125
-            }
+            },
+            "runtime_kwargs": {}
           }
         }
       ],

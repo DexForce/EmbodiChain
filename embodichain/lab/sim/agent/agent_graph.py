@@ -20,7 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from embodichain.lab.sim.agent.atom_actions import drive
+from embodichain.lab.sim.agent.edge_action_executor import EdgeActionExecutor
 
 __all__ = [
     "AgentGraphEdge",
@@ -140,11 +140,14 @@ class AgentTaskGraph:
         continuation_stack: list[list[Any]] = []
         executed_actions: list[Any] = []
         transitions = 0
-        disable_recovery_branches = bool(
-            kwargs.get("disable_recovery_branches", False)
-        )
+        disable_recovery_branches = bool(kwargs.get("disable_recovery_branches", False))
         runtime_recovery_planner = kwargs.get("runtime_recovery_planner")
         prefer_runtime_recovery = bool(kwargs.get("prefer_runtime_llm_recovery", False))
+        edge_executor = kwargs.get("edge_executor")
+        if edge_executor is None:
+            edge_executor = EdgeActionExecutor()
+        executor_kwargs = dict(kwargs)
+        executor_kwargs.pop("edge_executor", None)
 
         while current != self.goal or pending_edges or continuation_stack:
             transitions += 1
@@ -160,18 +163,17 @@ class AgentTaskGraph:
             edge = self._resolve_edge(edge_ref)
             edge_id = edge.id
             try:
-                result = drive(
-                    left_arm_action=edge.left_arm_action,
-                    right_arm_action=edge.right_arm_action,
-                    monitor_sequences=edge.monitor_sequences,
+                result = edge_executor.execute(
+                    edge=edge,
                     env=env,
-                    return_result=True,
-                    **kwargs,
+                    **executor_kwargs,
                 )
             except Exception as exc:
                 runtime_edges = None
                 if callable(runtime_recovery_planner) and not disable_recovery_branches:
-                    attempts = kwargs.setdefault("_runtime_recovery_exception_attempts", {})
+                    attempts = kwargs.setdefault(
+                        "_runtime_recovery_exception_attempts", {}
+                    )
                     attempt_key = edge.id
                     attempts[attempt_key] = int(attempts.get(attempt_key, 0)) + 1
                     if attempts[attempt_key] <= int(
@@ -192,7 +194,10 @@ class AgentTaskGraph:
                 if runtime_edges is not None:
                     branch_final_target = runtime_edges[-1].target
                     continuation_edges = list(pending_edges)
-                    if branch_final_target == edge.source and edge.source != edge.target:
+                    if (
+                        branch_final_target == edge.source
+                        and edge.source != edge.target
+                    ):
                         continuation_edges = [edge_ref, *continuation_edges]
                     elif branch_final_target != edge.target:
                         raise RuntimeError(

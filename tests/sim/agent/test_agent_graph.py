@@ -101,7 +101,7 @@ def _load_compile_agent_class():
     return namespace["CompileAgent"]
 
 
-def _load_agent_graph_namespace(fake_drive):
+def _load_agent_graph_namespace(fake_execute):
     source_path = REPO_ROOT / "embodichain" / "lab" / "sim" / "agent" / "agent_graph.py"
     source = source_path.read_text()
     module = ast.parse(source, filename=str(source_path))
@@ -110,15 +110,25 @@ def _load_agent_graph_namespace(fake_drive):
         for node in module.body
         if not (
             isinstance(node, ast.ImportFrom)
-            and node.module == "embodichain.lab.sim.agent.atom_actions"
+            and node.module == "embodichain.lab.sim.agent.edge_action_executor"
         )
     ]
+
+    class FakeEdgeActionExecutor:
+        def execute(self, *, edge, **kwargs):
+            return fake_execute(
+                left_arm_action=edge.left_arm_action,
+                right_arm_action=edge.right_arm_action,
+                monitor_sequences=edge.monitor_sequences,
+                **kwargs,
+            )
+
     namespace = {
         "defaultdict": defaultdict,
         "dataclass": dataclass,
         "field": field,
         "Any": Any,
-        "drive": fake_drive,
+        "EdgeActionExecutor": FakeEdgeActionExecutor,
     }
     exec(
         compile(ast.Module(body=body, type_ignores=[]), str(source_path), "exec"),
@@ -154,7 +164,7 @@ def _load_generate_and_execute_action_list():
 def test_agent_graph_can_recover_multiple_nominal_edges(monkeypatch) -> None:
     calls = []
 
-    def fake_drive(right_arm_action=None, return_result=False, **kwargs):
+    def fake_execute(right_arm_action=None, return_result=False, **kwargs):
         calls.append(right_arm_action)
         monitor_index = 0 if right_arm_action in {"fail_1", "fail_2"} else None
         return {
@@ -164,7 +174,7 @@ def test_agent_graph_can_recover_multiple_nominal_edges(monkeypatch) -> None:
             "step_index": 0 if monitor_index is not None else None,
         }
 
-    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
     agent_task_graph = graph_namespace["AgentTaskGraph"]
 
     graph = agent_task_graph(start="v0_start", goal="v2_done")
@@ -193,7 +203,7 @@ def test_agent_graph_can_use_runtime_recovery_planner() -> None:
     calls = []
     triggered = {"value": False}
 
-    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
         calls.append(right_arm_action)
         monitor_index = (
             0
@@ -207,11 +217,13 @@ def test_agent_graph_can_use_runtime_recovery_planner() -> None:
         return {
             "actions": [right_arm_action],
             "monitor_index": monitor_index,
-            "monitor_name": "monitor_object_fallen" if monitor_index is not None else None,
+            "monitor_name": (
+                "monitor_object_fallen" if monitor_index is not None else None
+            ),
             "step_index": 0 if monitor_index is not None else None,
         }
 
-    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
     agent_task_graph = graph_namespace["AgentTaskGraph"]
     agent_graph_edge = graph_namespace["AgentGraphEdge"]
 
@@ -252,7 +264,7 @@ def test_agent_graph_can_use_runtime_recovery_planner() -> None:
 def test_agent_graph_limits_total_runtime_recovery_attempts() -> None:
     calls = []
 
-    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
         calls.append(right_arm_action)
         return {
             "actions": [right_arm_action],
@@ -261,7 +273,7 @@ def test_agent_graph_limits_total_runtime_recovery_attempts() -> None:
             "step_index": 0 if monitor_sequences else None,
         }
 
-    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
     agent_task_graph = graph_namespace["AgentTaskGraph"]
     agent_graph_edge = graph_namespace["AgentGraphEdge"]
 
@@ -301,7 +313,7 @@ def test_agent_graph_limits_total_runtime_recovery_attempts() -> None:
 def test_agent_graph_recovers_inside_recovery_path_and_resumes_continuation() -> None:
     calls = []
 
-    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
         calls.append(right_arm_action)
         monitor_index = (
             0
@@ -316,7 +328,7 @@ def test_agent_graph_recovers_inside_recovery_path_and_resumes_continuation() ->
             "step_index": 0 if monitor_index is not None else None,
         }
 
-    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
     agent_task_graph = graph_namespace["AgentTaskGraph"]
 
     graph = agent_task_graph(start="v0_start", goal="v2_done")
@@ -388,7 +400,7 @@ def test_agent_graph_reuses_recovery_edge_until_it_succeeds() -> None:
     calls = []
     recovery_attempts = 0
 
-    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
         nonlocal recovery_attempts
 
         calls.append(right_arm_action)
@@ -407,7 +419,7 @@ def test_agent_graph_reuses_recovery_edge_until_it_succeeds() -> None:
             "step_index": 0 if monitor_index is not None else None,
         }
 
-    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
     agent_task_graph = graph_namespace["AgentTaskGraph"]
 
     graph = agent_task_graph(start="v0_start", goal="v2_done")
@@ -449,7 +461,7 @@ def test_agent_graph_self_loop_recovery_retries_without_duplicate_success() -> N
     calls = []
     self_loop_attempts = 0
 
-    def fake_drive(right_arm_action=None, monitor_sequences=None, **kwargs):
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
         nonlocal self_loop_attempts
 
         calls.append(right_arm_action)
@@ -468,7 +480,7 @@ def test_agent_graph_self_loop_recovery_retries_without_duplicate_success() -> N
             "step_index": 0 if monitor_index is not None else None,
         }
 
-    graph_namespace = _load_agent_graph_namespace(fake_drive)
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
     agent_task_graph = graph_namespace["AgentTaskGraph"]
 
     graph = agent_task_graph(start="v0_start", goal="v1_done")
@@ -578,7 +590,7 @@ def test_compile_agent_generate_writes_compiled_graph_bundle(tmp_path: Path) -> 
     assert bundle["recovery_spec"] == recovery_spec
     assert bundle["metadata"] == {
         "recovery_enabled": True,
-        "schema_version": "recovery_bindings_v1",
+        "schema_version": "recovery_bindings_atomic_v3",
         "task_graph_hash": stable_json_hash(task_graph),
         "raw_recovery_spec_hash": stable_json_hash(recovery_spec),
         "recovery_spec_hash": stable_json_hash(recovery_spec),

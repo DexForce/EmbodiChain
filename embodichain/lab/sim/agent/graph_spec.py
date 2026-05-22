@@ -67,11 +67,6 @@ RECOVERY_STEP_TYPE_ALIASES = {
     "dual_regrasp": "regrasp_both",
     "regrasp_objects": "regrasp_both",
     "regrasp_all": "regrasp_both",
-    "upright": "upright_object",
-    "upright_object": "upright_object",
-    "stand_object_up": "upright_object",
-    "restore_upright": "upright_object",
-    "set_object_upright": "upright_object",
     "action": "action",
     "atomic_action": "action",
 }
@@ -560,33 +555,6 @@ def _normalize_recovery_step(
         )
         return base, []
 
-    if step_type == "upright_object":
-        robot_name = step.get("robot_name", step.get("arm"))
-        obj_name = step.get("obj_name", step.get("object"))
-        if robot_name is None or obj_name is None:
-            inferred = _infer_regrasp_target(monitored_edge, monitors)
-            if inferred is not None:
-                robot_name = robot_name or inferred[0]
-                obj_name = obj_name or inferred[1]
-        if robot_name is None or obj_name is None:
-            return None, [
-                f"recovery step {step_index} upright_object needs robot_name and obj_name"
-            ]
-        base.update(
-            {
-                "robot_name": str(robot_name),
-                "obj_name": str(obj_name),
-                "pre_grasp_dis": step.get("pre_grasp_dis", 0.08),
-                "pre_place_dis": step.get("pre_place_dis", 0.08),
-                "force_valid": step.get("force_valid", True),
-            }
-        )
-        if "x" in step:
-            base["x"] = step["x"]
-        if "y" in step:
-            base["y"] = step["y"]
-        return base, []
-
     robot_name = step.get("robot_name", step.get("arm"))
     obj_name = step.get("obj_name", step.get("object"))
     if robot_name is None or obj_name is None:
@@ -844,8 +812,6 @@ def _expand_recovery_binding(
 
     if binding.get("repeat_until_success", True):
         for recovery_edge, step in generated_edges:
-            if _step_type(step) == "upright_object":
-                continue
             recovery_monitor_sequence = _recovery_step_monitor_sequence(
                 step,
                 fallback_monitor_sequence=monitor_sequence,
@@ -1039,21 +1005,10 @@ def _expand_recovery_step_actions(
             force_valid=bool(step.get("force_valid", False)),
         )
 
-    if step_type == "upright_object":
-        return _upright_object_actions(
-            robot_name=step["robot_name"],
-            obj_name=step["obj_name"],
-            pre_grasp_dis=float(step.get("pre_grasp_dis", 0.08)),
-            pre_place_dis=float(step.get("pre_place_dis", 0.08)),
-            force_valid=bool(step.get("force_valid", True)),
-            x=step.get("x"),
-            y=step.get("y"),
-        )
-
     if step_type == "action" or "left_arm_action" in step or "right_arm_action" in step:
         return {
-            "left_arm_action": deepcopy(step.get("left_arm_action")),
-            "right_arm_action": deepcopy(step.get("right_arm_action")),
+            "left_arm_action": _normalize_edge_action(step.get("left_arm_action")),
+            "right_arm_action": _normalize_edge_action(step.get("right_arm_action")),
         }
 
     raise ValueError(f"Unsupported recovery step type '{step_type}'.")
@@ -1064,8 +1019,8 @@ def _copy_edge_actions(
     *,
     force_valid: Any = None,
 ) -> dict[str, Any]:
-    left_action = deepcopy(edge.get("left_arm_action"))
-    right_action = deepcopy(edge.get("right_arm_action"))
+    left_action = _normalize_edge_action(edge.get("left_arm_action"))
+    right_action = _normalize_edge_action(edge.get("right_arm_action"))
     if force_valid is not None:
         _set_force_valid(left_action, bool(force_valid))
         _set_force_valid(right_action, bool(force_valid))
@@ -1073,6 +1028,155 @@ def _copy_edge_actions(
         "left_arm_action": left_action,
         "right_arm_action": right_action,
     }
+
+
+def _normalize_edge_action(action: Any) -> Any:
+    if action is None:
+        return None
+    if not isinstance(action, Mapping):
+        raise ValueError(f"Agent graph action must be an object, got {type(action)!r}.")
+    if _is_atomic_action_spec(action) or _is_atomic_sequence_spec(action):
+        return deepcopy(action)
+    return _legacy_action_to_atomic(action)
+
+
+def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
+    if "fn" not in action:
+        raise ValueError(f"Unsupported action schema: {action!r}.")
+    fn_name = str(action["fn"])
+    kwargs = dict(action.get("kwargs", {}))
+    robot_name = str(kwargs.get("robot_name", "left_arm"))
+
+    if fn_name == "grasp":
+        obj_name = kwargs.get("obj_name")
+        if obj_name is None:
+            raise ValueError("legacy grasp action requires obj_name.")
+        return _atomic_pick_up_action(
+            robot_name=robot_name,
+            obj_name=str(obj_name),
+            pre_grasp_dis=float(kwargs.get("pre_grasp_dis", 0.1)),
+            force_valid=bool(kwargs.get("force_valid", False)),
+        )
+
+    if fn_name == "place_on_table":
+        obj_name = kwargs.get("obj_name")
+        if obj_name is None:
+            raise ValueError("legacy place_on_table action requires obj_name.")
+        return _atomic_place_action(
+            robot_name=robot_name,
+            obj_name=str(obj_name),
+            pre_place_dis=float(kwargs.get("pre_place_dis", 0.08)),
+            force_valid=bool(kwargs.get("force_valid", False)),
+            x=kwargs.get("x"),
+            y=kwargs.get("y"),
+        )
+
+    if fn_name in {"open_gripper", "close_gripper"}:
+        state = "open" if fn_name == "open_gripper" else "close"
+        return _atomic_gripper_action(
+            robot_name=robot_name,
+            state=state,
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "move_relative_to_object":
+        obj_name = kwargs.get("obj_name")
+        if obj_name is None:
+            raise ValueError("legacy move_relative_to_object action requires obj_name.")
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target={
+                "kind": "object_relative_pose",
+                "obj_name": str(obj_name),
+                "x_offset": kwargs.get("x_offset", 0.0),
+                "y_offset": kwargs.get("y_offset", 0.0),
+                "z_offset": kwargs.get("z_offset", 0.0),
+            },
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "move_to_absolute_position":
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target={
+                "kind": "absolute_position",
+                "x": kwargs.get("x"),
+                "y": kwargs.get("y"),
+                "z": kwargs.get("z"),
+            },
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "move_by_relative_offset":
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target={
+                "kind": "relative_offset",
+                "dx": kwargs.get("dx", 0.0),
+                "dy": kwargs.get("dy", 0.0),
+                "dz": kwargs.get("dz", 0.0),
+                "mode": kwargs.get("mode", "extrinsic"),
+            },
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "back_to_initial_pose":
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target={"kind": "initial_pose"},
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "orient_eef":
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target={
+                "kind": "eef_orientation",
+                "direction": kwargs.get("direction", "front"),
+            },
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "rotate_eef":
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target={
+                "kind": "eef_rotation_delta",
+                "degree": kwargs.get("degree", 0),
+                "joint_index": kwargs.get("joint_index", 5),
+            },
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    if fn_name == "move":
+        target = kwargs.get("target", kwargs.get("target_pose", kwargs.get("pose")))
+        if target is None:
+            target = {"kind": "current_pose"}
+        return _atomic_move_action(
+            robot_name=robot_name,
+            target=target,
+            sample_interval=kwargs.get("sample_num"),
+            fallback_fn=fn_name,
+            fallback_kwargs=kwargs,
+        )
+
+    raise ValueError(
+        f"Unsupported legacy action '{fn_name}'. Use an atomic graph action spec."
+    )
 
 
 def _regrasp_actions(
@@ -1112,40 +1216,6 @@ def _multi_regrasp_actions(
         else:
             actions["right_arm_action"] = action
     return actions
-
-
-def _upright_object_actions(
-    *,
-    robot_name: str,
-    obj_name: str,
-    pre_grasp_dis: float,
-    pre_place_dis: float,
-    force_valid: bool,
-    x: Any = None,
-    y: Any = None,
-) -> dict[str, Any]:
-    kwargs = {
-        "robot_name": robot_name,
-        "obj_name": obj_name,
-        "pre_grasp_dis": pre_grasp_dis,
-        "pre_place_dis": pre_place_dis,
-        "force_valid": force_valid,
-    }
-    if x is not None:
-        kwargs["x"] = x
-    if y is not None:
-        kwargs["y"] = y
-    action = _atomic_upright_object_sequence(
-        robot_name=robot_name,
-        obj_name=obj_name,
-        pre_grasp_dis=pre_grasp_dis,
-        pre_place_dis=pre_place_dis,
-        force_valid=force_valid,
-        fallback_kwargs=kwargs,
-    )
-    if "left" in robot_name:
-        return {"left_arm_action": action, "right_arm_action": None}
-    return {"left_arm_action": None, "right_arm_action": action}
 
 
 def _atomic_pick_up_action(
@@ -1225,45 +1295,62 @@ def _atomic_place_action(
     }
 
 
-def _atomic_upright_object_sequence(
+def _atomic_move_action(
     *,
     robot_name: str,
-    obj_name: str,
-    pre_grasp_dis: float,
-    pre_place_dis: float,
-    force_valid: bool,
-    fallback_kwargs: Mapping[str, Any],
+    target: Any,
+    sample_interval: Any = None,
+    fallback_fn: str | None = None,
+    fallback_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    place_action = _atomic_place_action(
-        robot_name=robot_name,
-        obj_name=obj_name,
-        pre_place_dis=pre_place_dis,
-        force_valid=force_valid,
-        x=fallback_kwargs.get("x"),
-        y=fallback_kwargs.get("y"),
-    )
-    place_target = deepcopy(place_action["target"])
-    place_target["orientation"] = "upright"
-    place_action["target"] = place_target
-    return {
-        "kind": "atomic_sequence",
-        "name": "upright_object",
-        "actions": [
-            _atomic_pick_up_action(
-                robot_name=robot_name,
-                obj_name=obj_name,
-                pre_grasp_dis=pre_grasp_dis,
-                force_valid=force_valid,
-            ),
-            place_action,
-        ],
-        "target_list": [
-            {"kind": "object_semantics", "obj_name": obj_name},
-            place_target,
-        ],
-        "runtime_kwargs": {"force_valid": force_valid},
-        "fallback": {"fn": "upright_object", "kwargs": dict(fallback_kwargs)},
+    cfg: dict[str, Any] = {"control_part": _arm_control_part(robot_name)}
+    if sample_interval is not None:
+        cfg["sample_interval"] = int(sample_interval)
+    action = {
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": cfg,
+        "target": deepcopy(target),
+        "runtime_kwargs": {},
     }
+    if fallback_fn is not None:
+        action["fallback"] = {
+            "fn": fallback_fn,
+            "kwargs": dict(fallback_kwargs or {}),
+        }
+    return action
+
+
+def _atomic_gripper_action(
+    *,
+    robot_name: str,
+    state: str,
+    sample_interval: Any = None,
+    fallback_fn: str | None = None,
+    fallback_kwargs: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    action_name = "gripper_open" if state == "open" else "gripper_close"
+    cfg: dict[str, Any] = {
+        "control_part": _hand_control_part(robot_name),
+        "arm_control_part": _arm_control_part(robot_name),
+    }
+    if sample_interval is not None:
+        cfg["sample_interval"] = int(sample_interval)
+    action = {
+        "kind": "atomic_action",
+        "name": action_name,
+        "cfg_class": "GripperActionCfg",
+        "cfg": cfg,
+        "target": {"kind": "gripper_state", "state": state},
+        "runtime_kwargs": {},
+    }
+    if fallback_fn is not None:
+        action["fallback"] = {
+            "fn": fallback_fn,
+            "kwargs": dict(fallback_kwargs or {}),
+        }
+    return action
 
 
 def _arm_control_part(robot_name: str) -> str:
@@ -1384,8 +1471,6 @@ def _recovery_step_label(
         if step.get("arms"):
             return "regrasp_objects"
         return f"regrasp_{_sanitize_id(step['obj_name'])}"
-    if step_type == "upright_object":
-        return f"upright_{_sanitize_id(step['obj_name'])}"
     return _sanitize_id(step.get("name", step_type))
 
 
@@ -1746,8 +1831,8 @@ def _add_recovery_branches(
 def _is_place_hold_monitor_branch(edge: Any, branch: Mapping[str, Any]) -> bool:
     """Place actions intentionally release objects, so hold monitors are false positives."""
     if not (
-        _compiled_action_name(edge.left_arm_action) == "place_on_table"
-        or _compiled_action_name(edge.right_arm_action) == "place_on_table"
+        _compiled_action_name(edge.left_arm_action) in {"place", "place_on_table"}
+        or _compiled_action_name(edge.right_arm_action) in {"place", "place_on_table"}
     ):
         return False
 
@@ -1763,6 +1848,8 @@ def _is_place_hold_monitor_branch(edge: Any, branch: Mapping[str, Any]) -> bool:
 def _compiled_action_name(action: Any) -> str | None:
     if action is None:
         return None
+    if getattr(action, "action_name", None) is not None:
+        return str(action.action_name)
     func = getattr(action, "func", action)
     return getattr(func, "__name__", None)
 
@@ -1807,15 +1894,17 @@ def _validate_recovery_branch_path(
 def _compile_action(spec: Any, action_module: Any) -> Any:
     if spec is None:
         return None
+    if isinstance(spec, Mapping) and not (
+        _is_atomic_action_spec(spec) or _is_atomic_sequence_spec(spec)
+    ):
+        spec = _legacy_action_to_atomic(spec)
     if isinstance(spec, Mapping) and (
         _is_atomic_action_spec(spec) or _is_atomic_sequence_spec(spec)
     ):
         from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 
         fallback = _atomic_action_fallback(spec)
-        fallback_action = (
-            _compile_call(fallback, action_module) if fallback is not None else None
-        )
+        fallback_action = _compile_optional_call(fallback, action_module)
         return AtomicGraphAction(spec=spec, fallback_action=fallback_action)
     return _compile_call(spec, action_module)
 
@@ -1828,6 +1917,15 @@ def _compile_monitor(spec: Mapping[str, Any], monitor_module: Any, *, env: Any) 
 
 def _compile_call(spec: Mapping[str, Any], namespace: Any) -> Any:
     return partial(_resolve_attr(namespace, spec["fn"]), **dict(spec.get("kwargs", {})))
+
+
+def _compile_optional_call(spec: Mapping[str, Any] | None, namespace: Any) -> Any:
+    if spec is None:
+        return None
+    try:
+        return _compile_call(spec, namespace)
+    except (AttributeError, KeyError):
+        return None
 
 
 def _resolve_attr(namespace: Any, name: str) -> Any:

@@ -191,6 +191,8 @@ class AtomicActionEngine:
         builtin_action_map: Dict[str, Type[AtomicAction]] = {
             "move": MoveAction,
             "gripper": GripperAction,
+            "gripper_open": GripperAction,
+            "gripper_close": GripperAction,
             "open_gripper": GripperAction,
             "close_gripper": GripperAction,
             "pick_up": PickUpAction,
