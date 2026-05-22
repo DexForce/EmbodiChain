@@ -133,6 +133,24 @@ def test_executor_composes_single_arm_plan(monkeypatch) -> None:
     np.testing.assert_allclose(env.step_calls[-1][env.left_arm_joints], [0.0, 0.0])
 
 
+def test_executor_preserves_cached_gripper_target_for_arm_only_plan(
+    monkeypatch,
+) -> None:
+    env = _Env()
+    env.robot.qpos[:, env.right_eef_joints] = torch.tensor([0.03, 0.04])
+    env.right_arm_current_gripper_state = env.close_state
+    edge = _Edge()
+    edge.right_arm_action = _PlanAction(
+        _plan([[1.0, 1.1], [2.0, 2.1]], env.right_arm_joints)
+    )
+    _disable_post_action_validators(monkeypatch)
+
+    EdgeActionExecutor().execute(edge=edge, env=env)
+
+    np.testing.assert_allclose(env.step_calls[-1][env.right_eef_joints], [0.0, 0.0])
+    torch.testing.assert_close(env.right_arm_current_gripper_state, env.close_state)
+
+
 def test_executor_syncs_agent_state_after_success(monkeypatch) -> None:
     env = _Env()
     edge = _Edge()

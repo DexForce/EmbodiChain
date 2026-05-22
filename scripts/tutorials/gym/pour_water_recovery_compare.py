@@ -701,6 +701,26 @@ def build_parser() -> argparse.Namespace:
         help="Object moved in *_error_blind_no_recovery cases.",
     )
     parser.add_argument(
+        "--demo_allow_bottle_upright_drop_retries",
+        type=int,
+        default=2,
+        help=(
+            "Demo-only tolerance for *_error_with_recovery cases. When positive, "
+            "recovery grasp physical validation is deferred so upright bottle "
+            "slips can be handled by the graph monitors/recovery branches. A "
+            "toppled bottle is still reported as out of scope."
+        ),
+    )
+    parser.add_argument(
+        "--demo_bottle_toppled_upright_threshold",
+        type=float,
+        default=0.65,
+        help=(
+            "Bottle local-z/world-z alignment below this threshold is classified "
+            "as toppled and outside the current demo recovery scope."
+        ),
+    )
+    parser.add_argument(
         "--expected_failure_hold_seconds",
         type=float,
         default=8.0,
@@ -1365,6 +1385,28 @@ def _use_public_grasp_semantics_from_args(args: argparse.Namespace) -> bool:
     )
 
 
+def _demo_bottle_drop_tolerance_enabled(
+    case: CaseSpec,
+    args: argparse.Namespace,
+) -> bool:
+    return bool(
+        case.error_injection
+        and case.runtime_recovery
+        and int(args.demo_allow_bottle_upright_drop_retries) > 0
+    )
+
+
+def _effective_recovery_public_grasp_validation(
+    case: CaseSpec,
+    args: argparse.Namespace,
+) -> bool | None:
+    if args.recovery_validate_public_grasp_after_action is not None:
+        return args.recovery_validate_public_grasp_after_action
+    if _demo_bottle_drop_tolerance_enabled(case, args):
+        return False
+    return None
+
+
 class _CaseTaskValidationError(RuntimeError):
     pass
 
@@ -1459,6 +1501,10 @@ def _write_case_result(
             "exception": _exception_summary(exception),
         }
 
+    demo_scope = _demo_bottle_recovery_scope(case=case, args=args, result=result)
+    if demo_scope is not None:
+        result["demo_recovery_scope"] = demo_scope
+
     result_path = artifact_dir / "case_result.json"
     result_path.write_text(
         json.dumps(result, indent=2, ensure_ascii=False) + "\n",
@@ -1474,7 +1520,70 @@ def _write_case_result(
     )
     for reason in result.get("failure_reasons", [])[:5]:
         logger.log_warning(f"Case '{case.label}' semantic failure reason: {reason}")
+    demo_scope = result.get("demo_recovery_scope")
+    if demo_scope and demo_scope.get("classification") == "out_of_scope_toppled_bottle":
+        logger.log_warning(
+            f"Case '{case.label}' ended with a toppled bottle; this is outside "
+            "the current upright-drop recovery demo scope."
+        )
     return result
+
+
+def _demo_bottle_recovery_scope(
+    *,
+    case: CaseSpec,
+    args: argparse.Namespace,
+    result: dict,
+) -> dict | None:
+    if not _demo_bottle_drop_tolerance_enabled(case, args):
+        return None
+
+    bottle_state = result.get("task_state", {}).get("object_states", {}).get("bottle")
+    vertical_alignment = None
+    height_drop = None
+    is_toppled = None
+    if isinstance(bottle_state, dict):
+        vertical_alignment = bottle_state.get("vertical_alignment")
+        height_drop = bottle_state.get("height_drop")
+        if vertical_alignment is not None:
+            is_toppled = float(vertical_alignment) < float(
+                args.demo_bottle_toppled_upright_threshold
+            )
+
+    exception_message = (result.get("exception") or {}).get("message", "")
+    grasp_validation_failed = (
+        "Public grasp physical validation failed" in exception_message
+        or "object_lift" in exception_message
+    )
+
+    if is_toppled is True:
+        classification = "out_of_scope_toppled_bottle"
+    elif result.get("semantic_success") is True:
+        classification = "within_scope_completed"
+    elif grasp_validation_failed:
+        classification = "upright_drop_retry_candidate"
+    else:
+        classification = "within_scope_incomplete"
+
+    return {
+        "enabled": True,
+        "classification": classification,
+        "allowed_upright_drop_retries": int(
+            args.demo_allow_bottle_upright_drop_retries
+        ),
+        "recovery_grasp_validation_deferred": (
+            args.recovery_validate_public_grasp_after_action is None
+        ),
+        "toppled_upright_threshold": float(args.demo_bottle_toppled_upright_threshold),
+        "bottle_vertical_alignment": vertical_alignment,
+        "bottle_height_drop": height_drop,
+        "bottle_toppled": is_toppled,
+        "note": (
+            "This demo tolerates upright bottle slips by deferring recovery "
+            "grasp validation to graph monitors. Fallen/toppled bottle "
+            "uprighting remains outside the current demo scope."
+        ),
+    }
 
 
 def _case_expectation_matched(
@@ -1576,7 +1685,9 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
         f"force_valid_agent_ik={args.force_valid_agent_ik}, "
         f"move_orientation_fallback={args.allow_move_relative_orientation_fallback}, "
         f"public_place_upright={not args.disable_public_place_upright}, "
-        f"strict_public_grasp={args.require_public_grasp_action})",
+        f"strict_public_grasp={args.require_public_grasp_action}, "
+        f"demo_bottle_drop_tolerance="
+        f"{_demo_bottle_drop_tolerance_enabled(case, args)})",
         color="cyan",
     )
     forced_error_config = _build_forced_error_config(case, args)
@@ -1672,7 +1783,7 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                         args.validate_public_grasp_after_action
                     ),
                     recovery_validate_public_grasp_after_action=(
-                        args.recovery_validate_public_grasp_after_action
+                        _effective_recovery_public_grasp_validation(case, args)
                     ),
                     public_grasp_validation_min_object_lift=(
                         args.public_grasp_validation_min_object_lift

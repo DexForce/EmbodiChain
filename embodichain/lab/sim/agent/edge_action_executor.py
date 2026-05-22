@@ -147,6 +147,7 @@ class EdgeActionExecutor:
         ]
         n_steps = max(traj.shape[0] for traj in plan_trajs)
         actions = current_qpos[0].repeat(n_steps, 1)
+        controlled_joint_ids: set[int] = set()
 
         for plan, traj in zip(active_plans, plan_trajs):
             if not plan.is_success:
@@ -156,7 +157,15 @@ class EdgeActionExecutor:
             if traj.shape[0] < n_steps:
                 pad = traj[-1:].repeat(n_steps - traj.shape[0], 1)
                 traj = torch.cat([traj, pad], dim=0)
-            actions[:, list(plan.joint_ids)] = traj
+            joint_ids = list(plan.joint_ids)
+            actions[:, joint_ids] = traj
+            controlled_joint_ids.update(joint_ids)
+
+        self._preserve_cached_gripper_targets(
+            actions,
+            env=env,
+            controlled_joint_ids=controlled_joint_ids,
+        )
 
         return list(actions.to(dtype=torch.float32).unsqueeze(1).unbind(dim=0))
 
@@ -269,6 +278,7 @@ class EdgeActionExecutor:
             restore_interactive_error_input(interactive_input)
 
         sync_agent_state_from_robot(env)
+        self._sync_cached_gripper_targets_from_action(env, actions[-1])
         self._run_post_action_validators(env, kwargs)
         if monitor_sequences is not None:
             log_info("No monitor sequences triggered during execution.")
@@ -369,10 +379,86 @@ class EdgeActionExecutor:
         validate_pending_public_place_after_action(env, kwargs)
 
     @staticmethod
+    def _preserve_cached_gripper_targets(
+        actions: torch.Tensor,
+        *,
+        env,
+        controlled_joint_ids: set[int],
+    ) -> None:
+        for hand_joints, state_name in (
+            (getattr(env, "left_eef_joints", []), "left_arm_current_gripper_state"),
+            (getattr(env, "right_eef_joints", []), "right_arm_current_gripper_state"),
+        ):
+            missing_joints = [
+                int(joint_id)
+                for joint_id in hand_joints
+                if int(joint_id) not in controlled_joint_ids
+            ]
+            if not missing_joints:
+                continue
+            hand_target = _expand_joint_state(
+                getattr(env, state_name, None),
+                n_joints=len(hand_joints),
+                device=actions.device,
+                dtype=actions.dtype,
+            )
+            if hand_target is None:
+                continue
+            joint_values = {
+                int(joint_id): hand_target[idx]
+                for idx, joint_id in enumerate(hand_joints)
+            }
+            for joint_id in missing_joints:
+                actions[:, joint_id] = joint_values[joint_id]
+
+    @staticmethod
+    def _sync_cached_gripper_targets_from_action(env, action: torch.Tensor) -> None:
+        action = torch.as_tensor(action).squeeze(0)
+        gripper_dtype = getattr(getattr(env, "open_state", None), "dtype", action.dtype)
+        gripper_device = getattr(
+            getattr(env, "open_state", None),
+            "device",
+            action.device,
+        )
+        for hand_joints, state_name in (
+            (getattr(env, "left_eef_joints", []), "left_arm_current_gripper_state"),
+            (getattr(env, "right_eef_joints", []), "right_arm_current_gripper_state"),
+        ):
+            if not hand_joints:
+                continue
+            setattr(
+                env,
+                state_name,
+                action[list(hand_joints)][0]
+                .to(dtype=gripper_dtype, device=gripper_device)
+                .unsqueeze(0),
+            )
+
+    @staticmethod
     def _clear_pending_post_action_validators(env) -> None:
         setattr(env, "_pending_public_grasp_physical_validations", [])
         setattr(env, "_pending_public_grasp_physical_validation", None)
         setattr(env, "_pending_public_place_validations", [])
+
+
+def _expand_joint_state(
+    state,
+    *,
+    n_joints: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor | None:
+    if state is None or n_joints == 0:
+        return None
+    joint_state = torch.as_tensor(state, dtype=dtype, device=device).flatten()
+    if joint_state.numel() == 1:
+        return joint_state.repeat(n_joints)
+    if joint_state.numel() != n_joints:
+        raise RuntimeError(
+            "Cached gripper target width "
+            f"({joint_state.numel()}) does not match hand joint count ({n_joints})."
+        )
+    return joint_state
 
 
 def _callable_name(function: Any) -> str:
