@@ -23,6 +23,7 @@ from embodichain.lab.sim.agent.atom_action_utils import get_arm_states
 from embodichain.utils.logger import log_error
 from embodichain.utils.math import matrix_from_quat
 
+
 def _to_tensor(
     value: torch.Tensor | np.ndarray | list | tuple | float,
     *,
@@ -80,10 +81,28 @@ def _get_object_pose(env, obj_name: str) -> torch.Tensor:
     return _get_rigid_object(env, obj_name).get_local_pose(to_matrix=True).squeeze(0)
 
 
+def _get_object_hold_reference_pose(env, obj_name: str) -> torch.Tensor:
+    """Get the current object pose or grasp reference pose if available."""
+    object_pose = _get_object_pose(env, obj_name)
+    grasp_pose_obj = (
+        getattr(env, "obj_info", {}).get(obj_name, {}).get("grasp_pose_obj")
+    )
+    if grasp_pose_obj is None:
+        return object_pose
+    grasp_pose_obj = _as_pose_matrix(grasp_pose_obj, device=object_pose.device)
+    return object_pose @ grasp_pose_obj
+
+
 def _get_actual_arm_pose(env, robot_name: str) -> torch.Tensor:
     """Get the current end-effector pose of the selected arm."""
-    arm_qpos = env.robot.get_qpos().squeeze(0)[env.left_arm_joints if "left" in robot_name else env.right_arm_joints]
-    arm_pose = env.robot.compute_fk(arm_qpos, name="left_arm" if 'left' in robot_name else 'right_arm', to_matrix=True).squeeze(0)
+    arm_qpos = env.robot.get_qpos().squeeze(0)[
+        env.left_arm_joints if "left" in robot_name else env.right_arm_joints
+    ]
+    arm_pose = env.robot.compute_fk(
+        arm_qpos,
+        name="left_arm" if "left" in robot_name else "right_arm",
+        to_matrix=True,
+    ).squeeze(0)
     return arm_pose
 
 
@@ -104,7 +123,13 @@ def get_gripper_distance(env, robot_name: str) -> float:
 
 
 def get_arm_object_distance(env, robot_name: str, obj_name: str) -> float:
-    """Compute the distance between the current arm end-effector and object."""
+    """Compute the distance between the current arm end-effector and object hold point.
+
+    When ``env.obj_info[obj_name]["grasp_pose_obj"]`` is available, the distance is
+    measured against the corresponding world-space grasp reference instead of the
+    object center. This keeps hold checks stable for long or thin objects whose
+    center can move far from the gripper while they are still securely held.
+    """
     arm_pose = _get_actual_arm_pose(env, robot_name)
-    obj_pose = _get_object_pose(env, obj_name)
-    return float(torch.norm(arm_pose[:3, 3] - obj_pose[:3, 3]).item())
+    hold_pose = _get_object_hold_reference_pose(env, obj_name)
+    return float(torch.norm(arm_pose[:3, 3] - hold_pose[:3, 3]).item())

@@ -1042,6 +1042,7 @@ def build_parser() -> argparse.Namespace:
     parser.add_argument("--grasp_open_check_margin", type=float, default=0.01)
     parser.add_argument("--grasp_point_sample_dense", type=float, default=0.012)
     parser.add_argument("--grasp_antipodal_n_sample", type=int, default=20000)
+    parser.add_argument("--grasp_collision_query_batch_size", type=int, default=512)
     parser.add_argument(
         "--grasp_max_deviation_angle", type=float, default=float(torch.pi / 6)
     )
@@ -1733,6 +1734,9 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     grasp_open_check_margin=args.grasp_open_check_margin,
                     grasp_point_sample_dense=args.grasp_point_sample_dense,
                     grasp_antipodal_n_sample=args.grasp_antipodal_n_sample,
+                    grasp_collision_query_batch_size=(
+                        args.grasp_collision_query_batch_size
+                    ),
                     grasp_max_deviation_angle=args.grasp_max_deviation_angle,
                     force_valid=args.force_valid_agent_ik,
                     allow_move_relative_orientation_fallback=(

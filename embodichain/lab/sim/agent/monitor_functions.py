@@ -67,6 +67,8 @@ def monitor_object_held(
     The function name is historical. To keep all monitor semantics consistent,
     this function returns ``True`` when failure occurs, namely when the object is
     too far from the corresponding arm end-effector and is treated as no longer held.
+    When available, the distance is measured against the object's grasp reference
+    point instead of its center.
 
     Args:
         env: The current agent environment.
@@ -79,7 +81,40 @@ def monitor_object_held(
         close enough to the corresponding arm.
     """
     arm_object_distance = get_arm_object_distance(env, robot_name, obj_name)
-    return arm_object_distance > threshold
+    if _gripper_open_failure(env, robot_name, kwargs):
+        return True
+
+    effective_threshold = float(threshold)
+    if getattr(env, "obj_info", {}).get(obj_name, {}).get("grasp_pose_obj") is not None:
+        effective_threshold = max(
+            effective_threshold,
+            float(kwargs.get("grasp_reference_threshold", 0.08)),
+        )
+    return arm_object_distance > effective_threshold
+
+
+def _gripper_open_failure(env, robot_name: str, kwargs) -> bool:
+    """Return True only when the gripper is effectively open, not just object-width open."""
+    gripper_distance = get_gripper_distance(env, robot_name)
+    explicit_threshold = kwargs.get("gripper_distance_threshold")
+    if explicit_threshold is not None:
+        return gripper_distance > float(explicit_threshold)
+
+    open_state = getattr(env, "open_state", None)
+    close_state = getattr(env, "close_state", None)
+    if open_state is None or close_state is None:
+        return False
+
+    open_distance = _mean_abs_state(open_state)
+    close_distance = _mean_abs_state(close_state)
+    open_range = max(open_distance - close_distance, 1e-6)
+    open_fraction_threshold = float(kwargs.get("gripper_open_fraction_threshold", 0.85))
+    return gripper_distance >= close_distance + open_range * open_fraction_threshold
+
+
+def _mean_abs_state(value) -> float:
+    tensor = torch.as_tensor(value, dtype=torch.float32)
+    return float(torch.mean(torch.abs(tensor)).item())
 
 
 def monitor_object_fallen(

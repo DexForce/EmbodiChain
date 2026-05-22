@@ -45,12 +45,32 @@ def get_pcd_svd_frame(pc: torch.Tensor) -> torch.Tensor:
         )
     pc_center = pc.mean(axis=0)
     pc_centered = pc - pc_center
-    u, s, vt = torch.linalg.svd(pc_centered)
-    rotation = vt.T
+    try:
+        _, _, vt = torch.linalg.svd(pc_centered)
+    except RuntimeError as exc:
+        logger.log_warning(
+            "CUDA SVD failed in get_pcd_svd_frame, retrying on CPU. "
+            f"({type(exc).__name__}: {exc})"
+        )
+        _, _, vt = torch.linalg.svd(pc_centered.to("cpu"))
+        rotation = vt.T.to(device=pc.device)
+    else:
+        rotation = vt.T
     pc_pose = torch.eye(4, dtype=torch.float32, device=pc.device)
     pc_pose[:3, :3] = rotation
     pc_pose[:3, 3] = pc_center
     return pc_pose
+
+
+def _invert_rigid_pose(pose: torch.Tensor) -> torch.Tensor:
+    """Invert a rigid 4x4 transform without calling a linear solver."""
+    rotation = pose[:3, :3]
+    translation = pose[:3, 3]
+    inv_pose = torch.eye(4, dtype=pose.dtype, device=pose.device)
+    inv_rotation = rotation.T
+    inv_pose[:3, :3] = inv_rotation
+    inv_pose[:3, 3] = -(inv_rotation @ translation)
+    return inv_pose
 
 
 def apply_svd_transfer_pcd(
@@ -90,7 +110,7 @@ def apply_svd_transfer_pcd(
     standard_verts = []
     for object_verts in verts:
         pc_svd_frame = get_pcd_svd_frame(object_verts)
-        inv_svd_frame = torch.linalg.inv(pc_svd_frame)
+        inv_svd_frame = _invert_rigid_pose(pc_svd_frame)
         standard_object_verts = (
             object_verts @ inv_svd_frame[:3, :3].T + inv_svd_frame[:3, 3]
         )

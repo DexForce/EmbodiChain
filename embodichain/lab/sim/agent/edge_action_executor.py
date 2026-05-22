@@ -79,8 +79,14 @@ class EdgeActionExecutor:
         forced_recovery_injection: Any = None,
         **kwargs,
     ) -> EdgeExecutionResult:
-        left_plan = self._resolve_plan(edge.left_arm_action, env=env, kwargs=kwargs)
-        right_plan = self._resolve_plan(edge.right_arm_action, env=env, kwargs=kwargs)
+        plan_kwargs = dict(kwargs)
+        plan_kwargs["_edge_is_recovery"] = bool(getattr(edge, "is_recovery", False))
+        left_plan = self._resolve_plan(
+            edge.left_arm_action, env=env, kwargs=plan_kwargs
+        )
+        right_plan = self._resolve_plan(
+            edge.right_arm_action, env=env, kwargs=plan_kwargs
+        )
         actions = self._compose_full_actions(env, [left_plan, right_plan])
         return self._execute_actions(
             actions,
@@ -255,12 +261,14 @@ class EdgeActionExecutor:
                         actions=actions,
                     )
                     if triggered is not None:
+                        self._clear_pending_post_action_validators(env)
                         return triggered
 
                 env.update_obj_info()
         finally:
             restore_interactive_error_input(interactive_input)
 
+        sync_agent_state_from_robot(env)
         self._run_post_action_validators(env, kwargs)
         if monitor_sequences is not None:
             log_info("No monitor sequences triggered during execution.")
@@ -359,6 +367,12 @@ class EdgeActionExecutor:
     def _run_post_action_validators(env, kwargs: dict[str, Any]) -> None:
         validate_pending_public_grasp_after_action(env, kwargs)
         validate_pending_public_place_after_action(env, kwargs)
+
+    @staticmethod
+    def _clear_pending_post_action_validators(env) -> None:
+        setattr(env, "_pending_public_grasp_physical_validations", [])
+        setattr(env, "_pending_public_grasp_physical_validation", None)
+        setattr(env, "_pending_public_place_validations", [])
 
 
 def _callable_name(function: Any) -> str:

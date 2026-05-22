@@ -81,6 +81,9 @@ class GripperCollisionCfg:
     uncertainties in the gripper pose or object geometry, and can be set based on the specific requirements of the application.
     """
 
+    query_batch_size: int = 512
+    """Maximum number of grasp candidates checked in one collision query."""
+
 
 class GripperCollisionChecker:
     def __init__(
@@ -186,6 +189,24 @@ class GripperCollisionChecker:
         Returns:
             torch.Tensor: [B, ] boolean tensor indicating whether a grasp pose is collided.
         """
+        query_batch_size = max(1, int(self.cfg.query_batch_size))
+        if not is_visual and grasp_poses.shape[0] > query_batch_size:
+            collision_chunks = []
+            distance_chunks = []
+            for start in range(0, grasp_poses.shape[0], query_batch_size):
+                stop = min(start + query_batch_size, grasp_poses.shape[0])
+                collision_chunk, distance_chunk = self.query(
+                    obj_pose=obj_pose,
+                    grasp_poses=grasp_poses[start:stop],
+                    open_lengths=open_lengths[start:stop],
+                    collision_threshold=collision_threshold,
+                    is_filter_ground_collision=is_filter_ground_collision,
+                    is_visual=False,
+                )
+                collision_chunks.append(collision_chunk)
+                distance_chunks.append(distance_chunk)
+            return torch.cat(collision_chunks), torch.cat(distance_chunks)
+
         inv_obj_pose = obj_pose.clone()
         inv_obj_pose[:3, :3] = obj_pose[:3, :3].T
         inv_obj_pose[:3, 3] = -obj_pose[:3, 3] @ obj_pose[:3, :3]
@@ -235,7 +256,7 @@ class GripperCollisionChecker:
                     mesh_show_back_face=True,
                 )
 
-        return is_obj_gripper_collided.any(dim=1), obj_gripper_dis.min(dim=1).values
+        return is_gripper_collided.any(dim=1), gripper_dis.min(dim=1).values
 
 
 def box_surface_grid(

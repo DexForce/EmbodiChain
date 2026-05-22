@@ -31,10 +31,10 @@ from embodichain.lab.sim.agent.atomic_action_adapter import (
     _build_public_grasp_semantics,
     _public_grasp_approach_direction,
     _public_grasp_approach_direction_candidates,
-    _register_public_grasp_physical_validation,
     _select_arm,
     _state_to_hand_qpos,
     _with_public_grasp_strategy_defaults,
+    plan_public_semantic_grasp_action,
 )
 from embodichain.lab.sim.agent.edge_action_executor import ActionPlan
 from embodichain.lab.sim.atomic_actions import (
@@ -74,7 +74,9 @@ class AtomicGraphAction:
         try:
             return self._run_atomic_graph(env=env, kwargs=kwargs)
         except Exception as exc:
-            if kwargs.get("require_atomic_action_graph", False):
+            if kwargs.get("require_atomic_action_graph", False) or not kwargs.get(
+                "allow_legacy_atomic_action_fallback", False
+            ):
                 raise RuntimeError(
                     f"Atomic graph action '{self.action_name}' failed: {exc}"
                 ) from exc
@@ -170,6 +172,14 @@ class AtomicGraphAction:
             )
             if direct_plan is not None:
                 return direct_plan
+            orientation_plan = _single_eef_orientation_move_plan(
+                action_specs[0],
+                env=env,
+                robot_name=robot_name,
+                kwargs=_action_runtime_kwargs(action_specs[0], kwargs),
+            )
+            if orientation_plan is not None:
+                return orientation_plan
 
         action_kwargs_list = [
             _action_runtime_kwargs(action, kwargs) for action in action_specs
@@ -242,7 +252,8 @@ def _action_runtime_kwargs(
     action_kwargs = action.get("runtime_kwargs")
     if isinstance(action_kwargs, Mapping):
         merged.update(dict(action_kwargs))
-    _apply_recovery_public_grasp_overrides(merged, runtime_kwargs)
+    if bool(runtime_kwargs.get("_edge_is_recovery", False)):
+        _apply_recovery_public_grasp_overrides(merged, runtime_kwargs)
     return merged
 
 
@@ -470,41 +481,20 @@ def _run_single_pick_up(
             device=device,
         )
 
-    failures: list[str] = []
-    for label, direction in direction_candidates:
-        cfg = _build_pickup_cfg(
-            env=env,
-            robot_name=robot_name,
-            obj_name=obj_name,
-            pre_grasp_dis=pre_grasp_distance,
-            kwargs=graph_kwargs,
-            approach_direction=direction,
-        )
-        engine = _create_engine(env, [cfg])
-        is_success, trajectory = engine.execute_static(target_list=[target])
-        if is_success and trajectory.numel() > 0:
-            _register_public_grasp_physical_validation(
-                env=env,
-                kwargs=graph_kwargs,
-                robot_name=robot_name,
-                obj_name=obj_name,
-                label=label,
-                direction=direction,
-                lift_height=float(cfg.lift_height),
-                legacy_reference_pose=None,
-            )
-            joint_ids = _controlled_joint_ids(env, [action], robot_name)
-            return ActionPlan(
-                is_success=True,
-                trajectory=trajectory[:, :, joint_ids],
-                joint_ids=joint_ids,
-                action_name="pick_up",
-            )
-        failures.append(label)
-
-    raise RuntimeError(
-        "AtomicActionEngine failed to produce a pick_up trajectory "
-        f"for approach directions: {', '.join(failures) or '<none>'}."
+    semantic_plan = plan_public_semantic_grasp_action(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        pre_grasp_dis=pre_grasp_distance,
+        kwargs=graph_kwargs,
+        target=target,
+        directions=direction_candidates,
+    )
+    return ActionPlan(
+        is_success=True,
+        trajectory=semantic_plan.trajectory,
+        joint_ids=semantic_plan.joint_ids,
+        action_name="pick_up",
     )
 
 
@@ -642,6 +632,273 @@ def _direct_move_plan(
         joint_ids=list(env.left_arm_joints if is_left else env.right_arm_joints),
         action_name="move",
     )
+
+
+def _single_eef_orientation_move_plan(
+    action: Mapping[str, Any],
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+) -> ActionPlan | None:
+    if action.get("name") != "move":
+        return None
+    target = action.get("target", {})
+    if not isinstance(target, Mapping) or target.get("kind") != "eef_orientation":
+        return None
+    if target.get("rotation") is not None or target.get("matrix") is not None:
+        return None
+    if str(target.get("direction", "front")) != "down":
+        return None
+
+    hold_plan = _current_eef_down_hold_plan(
+        action,
+        env=env,
+        robot_name=robot_name,
+        kwargs=kwargs,
+    )
+    if hold_plan is not None:
+        return hold_plan
+
+    cfg_list = [
+        _build_action_cfg(
+            action,
+            env=env,
+            robot_name=robot_name,
+            kwargs=kwargs,
+        )
+    ]
+    target_candidates = _eef_orientation_down_pose_candidates(
+        target,
+        env=env,
+        robot_name=robot_name,
+        kwargs=kwargs,
+    )
+    joint_ids = _controlled_joint_ids(env, [action], robot_name)
+    attempted_labels: list[str] = []
+    for candidate_index, (label, target_pose) in enumerate(target_candidates):
+        attempted_labels.append(label)
+        engine = _create_engine(env, cfg_list)
+        is_success, trajectory = engine.execute_static(target_list=[target_pose])
+        if is_success and trajectory.numel() > 0:
+            if candidate_index > 0:
+                log_warning(
+                    "Atomic graph move(eef_orientation=down) succeeded with "
+                    f"candidate '{label}' for {robot_name} after failed "
+                    f"candidates: {attempted_labels[:-1]}."
+                )
+            return ActionPlan(
+                is_success=True,
+                trajectory=trajectory[:, :, joint_ids],
+                joint_ids=joint_ids,
+                action_name="move",
+            )
+
+    raise RuntimeError(
+        "AtomicActionEngine failed to produce a trajectory for "
+        f"move(eef_orientation=down) on {robot_name}; tried candidates "
+        f"{attempted_labels}."
+    )
+
+
+def _current_eef_down_hold_plan(
+    action: Mapping[str, Any],
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+) -> ActionPlan | None:
+    target = action.get("target", {})
+    if not isinstance(target, Mapping):
+        return None
+
+    is_left, arm_part, _ = _select_arm(robot_name)
+    device = getattr(env.robot, "device", None)
+    current_pose = _as_pose_tensor(
+        env.left_arm_current_xpos if is_left else env.right_arm_current_xpos,
+        device=device,
+    )
+    rotation = current_pose[:3, :3]
+    min_dot = float(
+        target.get(
+            "axis_min_dot",
+            kwargs.get("eef_orientation_down_axis_min_dot", 0.85),
+        )
+    )
+    axis_scores = {
+        axis_name: float((-rotation[:, axis_index].detach().cpu())[2].item())
+        for axis_name, axis_index in (("x", 0), ("y", 1), ("z", 2))
+    }
+    best_axis, best_dot = max(
+        axis_scores.items(),
+        key=lambda item: item[1],
+    )
+    if best_dot < min_dot:
+        return None
+
+    cfg_payload = dict(action.get("cfg", {}))
+    sample_interval = _int_option(
+        cfg_payload.get(
+            "sample_interval",
+            kwargs.get("sample_interval", kwargs.get("sample_num")),
+        ),
+        default=50,
+    )
+    current_qpos = env.robot.get_qpos(name=arm_part)
+    if current_qpos.ndim == 1:
+        current_qpos = current_qpos.unsqueeze(0)
+    trajectory = current_qpos.unsqueeze(1).repeat(1, sample_interval, 1)
+    log_warning(
+        "Atomic graph move(eef_orientation=down) using current-pose hold for "
+        f"{robot_name}: local {best_axis}-axis down dot={best_dot:.3f}."
+    )
+    return ActionPlan(
+        is_success=True,
+        trajectory=trajectory,
+        joint_ids=list(env.left_arm_joints if is_left else env.right_arm_joints),
+        action_name="move",
+    )
+
+
+def _eef_orientation_down_pose_candidates(
+    target: Mapping[str, Any],
+    *,
+    env,
+    robot_name: str,
+    kwargs: dict[str, Any],
+) -> list[tuple[str, torch.Tensor]]:
+    device = getattr(env.robot, "device", None)
+    is_left, _, _ = _select_arm(robot_name)
+    current_pose = _as_pose_tensor(
+        env.left_arm_current_xpos if is_left else env.right_arm_current_xpos,
+        device=device,
+    )
+    z_offsets = _float_sequence_option(
+        target.get(
+            "z_offsets",
+            target.get(
+                "z_offset",
+                kwargs.get("eef_orientation_down_z_offsets", (0.0, 0.03, 0.06)),
+            ),
+        ),
+        default=(0.0, 0.03, 0.06),
+    )
+    rotations = _eef_down_rotation_candidates(
+        current_pose[:3, :3],
+        target=target,
+        kwargs=kwargs,
+        device=device,
+    )
+
+    candidates: list[tuple[str, torch.Tensor]] = []
+    for z_offset in z_offsets:
+        for rotation_label, rotation in rotations:
+            pose = current_pose.clone()
+            pose[:3, :3] = rotation.to(dtype=pose.dtype, device=pose.device)
+            pose[2, 3] = pose[2, 3] + float(z_offset)
+            label = rotation_label
+            if abs(float(z_offset)) > 1e-9:
+                label = f"{label},z_offset={float(z_offset):.3f}"
+            candidates.append((label, _as_pose_tensor(pose, device=device)))
+    return candidates
+
+
+def _eef_down_rotation_candidates(
+    current_rotation: torch.Tensor,
+    *,
+    target: Mapping[str, Any],
+    kwargs: dict[str, Any],
+    device,
+) -> list[tuple[str, torch.Tensor]]:
+    base_rotation = _orientation_matrix("down", device=device)
+    candidates: list[tuple[str, torch.Tensor]] = [("down_default", base_rotation)]
+    configured_yaws = target.get(
+        "yaw_candidates_degrees",
+        target.get(
+            "yaw_degrees",
+            kwargs.get("eef_orientation_down_yaw_candidates_degrees"),
+        ),
+    )
+    if configured_yaws is None:
+        yaw_degrees = _default_eef_down_yaw_candidates(current_rotation)
+    else:
+        yaw_degrees = _float_sequence_option(configured_yaws, default=())
+
+    for yaw in yaw_degrees:
+        rotation = (
+            _rotation_matrix_xyz_degrees(
+                (0.0, 0.0, float(yaw)),
+                device=device,
+            )
+            @ base_rotation
+        )
+        if _has_similar_rotation(rotation, candidates):
+            continue
+        candidates.append((f"yaw={float(yaw):.1f}", rotation))
+    return candidates
+
+
+def _default_eef_down_yaw_candidates(current_rotation: torch.Tensor) -> list[float]:
+    yaw_candidates: list[float] = []
+    current_yaw = _horizontal_yaw_degrees(current_rotation)
+    if current_yaw is not None:
+        yaw_candidates.extend(
+            [
+                current_yaw,
+                current_yaw + 90.0,
+                current_yaw - 90.0,
+                current_yaw + 180.0,
+            ]
+        )
+    yaw_candidates.extend([0.0, 90.0, -90.0, 180.0])
+    return _dedupe_degrees(yaw_candidates)
+
+
+def _horizontal_yaw_degrees(rotation: torch.Tensor) -> float | None:
+    x_axis = rotation[:2, 0].detach().cpu()
+    norm = float(torch.linalg.norm(x_axis).item())
+    if norm < 1e-6:
+        return None
+    return math.degrees(math.atan2(float(x_axis[1]), float(x_axis[0])))
+
+
+def _dedupe_degrees(values: list[float]) -> list[float]:
+    seen: set[float] = set()
+    result: list[float] = []
+    for value in values:
+        normalized = ((float(value) + 180.0) % 360.0) - 180.0
+        key = round(normalized, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def _has_similar_rotation(
+    rotation: torch.Tensor,
+    candidates: list[tuple[str, torch.Tensor]],
+) -> bool:
+    for _, candidate in candidates:
+        if torch.allclose(
+            rotation.to(device=candidate.device, dtype=candidate.dtype),
+            candidate,
+            atol=1e-5,
+            rtol=1e-5,
+        ):
+            return True
+    return False
+
+
+def _float_sequence_option(value: Any, *, default: tuple[float, ...]) -> list[float]:
+    if value is None:
+        value = default
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        return [float(part) for part in parts]
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    return [float(item) for item in value]
 
 
 def _interpolate_qpos(
@@ -784,6 +1041,12 @@ def _resolve_gripper_target(
 
 
 def _object_pose(env, obj_name: str, *, device) -> torch.Tensor:
+    obj_info = getattr(env, "obj_info", None)
+    if isinstance(obj_info, Mapping):
+        cached = obj_info.get(obj_name, {}).get("pose")
+        if cached is not None:
+            return _as_pose_tensor(cached, device=device)
+
     obj_uids = env.sim.get_rigid_object_uid_list()
     if obj_name in obj_uids:
         return _as_pose_tensor(
@@ -792,9 +1055,6 @@ def _object_pose(env, obj_name: str, *, device) -> torch.Tensor:
             .squeeze(0),
             device=device,
         )
-    obj_info = getattr(env, "obj_info", {}).get(obj_name)
-    if obj_info and obj_info.get("pose") is not None:
-        return _as_pose_tensor(obj_info["pose"], device=device)
     raise RuntimeError(f"No matched object '{obj_name}'.")
 
 

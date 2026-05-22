@@ -18,10 +18,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
+from types import SimpleNamespace
 
 import numpy as np
 import torch
 
+from embodichain.lab.sim.agent import atomic_graph_executor as graph_executor
+from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 from embodichain.lab.sim.agent.edge_action_executor import (
     ActionPlan,
     EdgeActionExecutor,
@@ -33,6 +36,7 @@ class _Edge:
     left_arm_action = None
     right_arm_action = None
     monitor_sequences = None
+    is_recovery = False
 
 
 class _PlanAction:
@@ -45,9 +49,19 @@ class _PlanAction:
 
 class _Robot:
     def __init__(self) -> None:
+        self.dof = 8
+        self.device = torch.device("cpu")
         self.qpos = torch.zeros(1, 8, dtype=torch.float32)
 
-    def get_qpos(self) -> torch.Tensor:
+    def get_qpos(self, name=None) -> torch.Tensor:
+        if name == "left_arm":
+            return self.qpos[:, [0, 1]].clone()
+        if name == "right_arm":
+            return self.qpos[:, [4, 5]].clone()
+        if name == "left_eef":
+            return self.qpos[:, [2, 3]].clone()
+        if name == "right_eef":
+            return self.qpos[:, [6, 7]].clone()
         return self.qpos.clone()
 
     def compute_fk(self, qpos, name: str, to_matrix: bool = True) -> torch.Tensor:
@@ -63,6 +77,7 @@ class _Env:
         self.right_arm_joints = [4, 5]
         self.right_eef_joints = [6, 7]
         self.open_state = torch.tensor([0.05], dtype=torch.float32)
+        self.close_state = torch.tensor([0.0], dtype=torch.float32)
         self.robot = _Robot()
         self.step_calls: list[np.ndarray] = []
         self.update_calls = 0
@@ -91,12 +106,7 @@ def _plan(values, joint_ids, *, name="test") -> ActionPlan:
     )
 
 
-def test_executor_composes_single_arm_plan(monkeypatch) -> None:
-    env = _Env()
-    edge = _Edge()
-    edge.right_arm_action = _PlanAction(
-        _plan([[1.0, 1.1], [2.0, 2.1]], env.right_arm_joints)
-    )
+def _disable_post_action_validators(monkeypatch) -> None:
     monkeypatch.setattr(
         "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_grasp_after_action",
         lambda env, kwargs: None,
@@ -105,6 +115,15 @@ def test_executor_composes_single_arm_plan(monkeypatch) -> None:
         "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_place_after_action",
         lambda env, kwargs: None,
     )
+
+
+def test_executor_composes_single_arm_plan(monkeypatch) -> None:
+    env = _Env()
+    edge = _Edge()
+    edge.right_arm_action = _PlanAction(
+        _plan([[1.0, 1.1], [2.0, 2.1]], env.right_arm_joints)
+    )
+    _disable_post_action_validators(monkeypatch)
 
     result = EdgeActionExecutor().execute(edge=edge, env=env)
 
@@ -114,6 +133,20 @@ def test_executor_composes_single_arm_plan(monkeypatch) -> None:
     np.testing.assert_allclose(env.step_calls[-1][env.left_arm_joints], [0.0, 0.0])
 
 
+def test_executor_syncs_agent_state_after_success(monkeypatch) -> None:
+    env = _Env()
+    edge = _Edge()
+    edge.left_arm_action = _PlanAction(
+        _plan([[0.2, 0.3], [0.4, 0.5]], env.left_arm_joints)
+    )
+    _disable_post_action_validators(monkeypatch)
+
+    EdgeActionExecutor().execute(edge=edge, env=env)
+
+    torch.testing.assert_close(env.left_arm_current_qpos, torch.tensor([0.4, 0.5]))
+    torch.testing.assert_close(env.left_arm_current_xpos[0, 3], torch.tensor(0.9))
+
+
 def test_executor_pads_shorter_dual_arm_plan(monkeypatch) -> None:
     env = _Env()
     edge = _Edge()
@@ -121,14 +154,7 @@ def test_executor_pads_shorter_dual_arm_plan(monkeypatch) -> None:
     edge.right_arm_action = _PlanAction(
         _plan([[2.0, 2.1], [3.0, 3.1]], env.right_arm_joints)
     )
-    monkeypatch.setattr(
-        "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_grasp_after_action",
-        lambda env, kwargs: None,
-    )
-    monkeypatch.setattr(
-        "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_place_after_action",
-        lambda env, kwargs: None,
-    )
+    _disable_post_action_validators(monkeypatch)
 
     EdgeActionExecutor().execute(edge=edge, env=env)
 
@@ -141,14 +167,7 @@ def test_executor_writes_gripper_only_plan(monkeypatch) -> None:
     env = _Env()
     edge = _Edge()
     edge.left_arm_action = _PlanAction(_plan([[0.04, 0.04]], env.left_eef_joints))
-    monkeypatch.setattr(
-        "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_grasp_after_action",
-        lambda env, kwargs: None,
-    )
-    monkeypatch.setattr(
-        "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_place_after_action",
-        lambda env, kwargs: None,
-    )
+    _disable_post_action_validators(monkeypatch)
 
     EdgeActionExecutor().execute(edge=edge, env=env)
 
@@ -158,19 +177,15 @@ def test_executor_writes_gripper_only_plan(monkeypatch) -> None:
 
 def test_executor_returns_monitor_trigger_and_syncs_state(monkeypatch) -> None:
     env = _Env()
+    env._pending_public_grasp_physical_validations = [{"obj_name": "bottle"}]
+    env._pending_public_grasp_physical_validation = {"obj_name": "legacy_bottle"}
+    env._pending_public_place_validations = [{"obj_name": "cup"}]
     edge = _Edge()
     edge.right_arm_action = _PlanAction(
         _plan([[1.0, 1.1], [2.0, 2.1]], env.right_arm_joints)
     )
     edge.monitor_sequences = [[partial(lambda: True)]]
-    monkeypatch.setattr(
-        "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_grasp_after_action",
-        lambda env, kwargs: None,
-    )
-    monkeypatch.setattr(
-        "embodichain.lab.sim.agent.edge_action_executor.validate_pending_public_place_after_action",
-        lambda env, kwargs: None,
-    )
+    _disable_post_action_validators(monkeypatch)
 
     result = EdgeActionExecutor().execute(edge=edge, env=env)
 
@@ -178,3 +193,154 @@ def test_executor_returns_monitor_trigger_and_syncs_state(monkeypatch) -> None:
     assert result.step_index == 0
     assert len(result.actions) == 1
     np.testing.assert_allclose(env.right_arm_current_qpos, np.array([1.0, 1.1]))
+    assert env._pending_public_grasp_physical_validations == []
+    assert env._pending_public_grasp_physical_validation is None
+    assert env._pending_public_place_validations == []
+
+
+def test_executor_executes_atomic_graph_action_wrapper(monkeypatch) -> None:
+    env = _Env()
+    edge = _Edge()
+    edge.right_arm_action = AtomicGraphAction(
+        spec={
+            "kind": "atomic_action",
+            "name": "move",
+            "cfg": {"control_part": "right_arm", "sample_interval": 2},
+            "target": {"kind": "eef_rotation_delta", "joint_index": 1, "degree": 90},
+        }
+    )
+    _disable_post_action_validators(monkeypatch)
+
+    result = EdgeActionExecutor().execute(edge=edge, env=env)
+
+    assert len(result.actions) == 2
+    np.testing.assert_allclose(
+        env.step_calls[-1][env.right_arm_joints],
+        [0.0, np.pi / 2],
+        rtol=1e-6,
+    )
+
+
+def test_executor_pads_dual_atomic_graph_action_wrappers(monkeypatch) -> None:
+    env = _Env()
+    edge = _Edge()
+    edge.left_arm_action = AtomicGraphAction(
+        spec={
+            "kind": "atomic_action",
+            "name": "move",
+            "cfg": {"control_part": "left_arm", "sample_interval": 2},
+            "target": {"kind": "joint_delta", "joint_index": 0, "degree": 45},
+        }
+    )
+    edge.right_arm_action = AtomicGraphAction(
+        spec={
+            "kind": "atomic_action",
+            "name": "move",
+            "cfg": {"control_part": "right_arm", "sample_interval": 3},
+            "target": {"kind": "joint_delta", "joint_index": 1, "degree": 90},
+        }
+    )
+    _disable_post_action_validators(monkeypatch)
+
+    EdgeActionExecutor().execute(edge=edge, env=env)
+
+    assert len(env.step_calls) == 3
+    np.testing.assert_allclose(
+        env.step_calls[-1][env.left_arm_joints],
+        [np.pi / 4, 0.0],
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        env.step_calls[-1][env.right_arm_joints],
+        [0.0, np.pi / 2],
+        rtol=1e-6,
+    )
+
+
+def test_executor_executes_gripper_atomic_graph_action_wrapper(monkeypatch) -> None:
+    env = _Env()
+
+    class _Engine:
+        def __init__(self, cfg_list) -> None:
+            self.cfg_list = cfg_list if isinstance(cfg_list, list) else [cfg_list]
+
+        def execute_static(self, target_list):
+            trajectory = torch.zeros(1, 3, env.robot.dof)
+            trajectory[:, :, env.left_eef_joints] = torch.tensor([0.05, 0.05])
+            return True, trajectory
+
+    monkeypatch.setattr(
+        graph_executor,
+        "_create_engine",
+        lambda env, cfg_list: _Engine(cfg_list),
+    )
+    _disable_post_action_validators(monkeypatch)
+    edge = _Edge()
+    edge.left_arm_action = AtomicGraphAction(
+        spec={
+            "kind": "atomic_action",
+            "name": "gripper_open",
+            "cfg": {
+                "control_part": "left_eef",
+                "arm_control_part": "left_arm",
+                "sample_interval": 3,
+            },
+            "target": {"kind": "gripper_state", "state": "open"},
+        }
+    )
+
+    EdgeActionExecutor().execute(edge=edge, env=env)
+
+    np.testing.assert_allclose(env.step_calls[-1][env.left_eef_joints], [0.05, 0.05])
+    np.testing.assert_allclose(env.step_calls[-1][env.left_arm_joints], [0.0, 0.0])
+
+
+def test_executor_passes_recovery_flag_to_atomic_graph_action(monkeypatch) -> None:
+    env = _Env()
+    captured = {}
+    monkeypatch.setattr(
+        graph_executor,
+        "_resolve_action_target",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        graph_executor,
+        "_public_grasp_approach_direction_candidates",
+        lambda *args, **kwargs: [("ranked", torch.tensor([0.0, 0.0, -1.0]))],
+    )
+
+    def _plan_public_semantic_grasp_action(**kwargs):
+        captured["kwargs"] = kwargs["kwargs"]
+        return SimpleNamespace(
+            trajectory=torch.zeros(1, 1, 4),
+            joint_ids=env.right_arm_joints + env.right_eef_joints,
+        )
+
+    monkeypatch.setattr(
+        graph_executor,
+        "plan_public_semantic_grasp_action",
+        _plan_public_semantic_grasp_action,
+    )
+    _disable_post_action_validators(monkeypatch)
+    edge = _Edge()
+    edge.is_recovery = True
+    edge.right_arm_action = AtomicGraphAction(
+        spec={
+            "kind": "atomic_action",
+            "name": "pick_up",
+            "cfg": {"control_part": "right_arm", "hand_control_part": "right_eef"},
+            "target": {"kind": "object_semantics", "obj_name": "cup"},
+            "runtime_kwargs": {"public_grasp_strategy": "legacy_guided"},
+        }
+    )
+
+    EdgeActionExecutor().execute(
+        edge=edge,
+        env=env,
+        recovery_public_grasp_strategy="auto_general",
+        recovery_public_grasp_candidate_num=64,
+    )
+
+    assert captured["kwargs"]["_edge_is_recovery"] is True
+    assert captured["kwargs"]["public_grasp_strategy"] == "auto_general"
+    assert captured["kwargs"]["public_grasp_candidate_num"] == 64

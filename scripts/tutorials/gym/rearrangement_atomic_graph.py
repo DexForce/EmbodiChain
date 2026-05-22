@@ -121,14 +121,58 @@ def _disable_video_events(env_cfg) -> None:
             setattr(events, event_name, None)
 
 
+def _disable_validation_camera_events(env_cfg) -> None:
+    events = getattr(env_cfg, "events", None)
+    if events is None:
+        return
+    if hasattr(events, "validation_cameras"):
+        setattr(events, "validation_cameras", None)
+
+
+def _set_record_video_output_dir(env_cfg, save_path: Path) -> None:
+    events = getattr(env_cfg, "events", None)
+    if events is None:
+        return
+    record_camera = getattr(events, "record_camera", None)
+    if record_camera is None:
+        return
+    params = getattr(record_camera, "params", None)
+    if isinstance(params, dict):
+        params["save_path"] = str(save_path)
+
+
+def _flush_recorded_videos(env) -> int:
+    raw_env = getattr(env, "unwrapped", env)
+    event_manager = getattr(raw_env, "event_manager", None)
+    if event_manager is None:
+        return 0
+
+    try:
+        from embodichain.lab.gym.envs.managers.record import record_camera_data
+    except Exception:
+        return 0
+
+    flushed = 0
+    for mode_cfgs in getattr(event_manager, "_mode_functor_cfgs", {}).values():
+        for functor_cfg in mode_cfgs:
+            functor = getattr(functor_cfg, "func", None)
+            if not isinstance(functor, record_camera_data):
+                continue
+            if not getattr(functor, "_frames", []):
+                continue
+            functor.save_and_clear()
+            flushed += 1
+    return flushed
+
+
 def _copy_database_artifacts(artifact_dir: Path, regenerate: bool) -> None:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     if regenerate:
         return
     if not DEFAULT_DATABASE_ARTIFACT_ROOT.exists():
         raise FileNotFoundError(
             f"Rearrangement database artifacts not found: {DEFAULT_DATABASE_ARTIFACT_ROOT}"
         )
-    artifact_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(DEFAULT_DATABASE_ARTIFACT_ROOT, artifact_dir, dirs_exist_ok=True)
     logger.log_info(
         f"Copied Rearrangement agent artifacts from {DEFAULT_DATABASE_ARTIFACT_ROOT} "
@@ -447,6 +491,7 @@ def build_parser() -> argparse.Namespace:
     parser.add_argument("--grasp_open_check_margin", type=float, default=0.01)
     parser.add_argument("--grasp_point_sample_dense", type=float, default=0.012)
     parser.add_argument("--grasp_antipodal_n_sample", type=int, default=20000)
+    parser.add_argument("--grasp_collision_query_batch_size", type=int, default=512)
     parser.add_argument(
         "--forced_error_injection",
         action="store_true",
@@ -526,6 +571,9 @@ def main() -> None:
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
     if not args.record_video:
         _disable_video_events(env_cfg)
+    else:
+        _disable_validation_camera_events(env_cfg)
+        _set_record_video_output_dir(env_cfg, case_dir / "outputs" / "videos")
     if args.max_episode_steps is not None:
         env_cfg.max_episode_steps = int(args.max_episode_steps)
         gym_config["max_episode_steps"] = int(args.max_episode_steps)
@@ -609,6 +657,7 @@ def main() -> None:
             "grasp_open_check_margin": args.grasp_open_check_margin,
             "grasp_point_sample_dense": args.grasp_point_sample_dense,
             "grasp_antipodal_n_sample": args.grasp_antipodal_n_sample,
+            "grasp_collision_query_batch_size": args.grasp_collision_query_batch_size,
             "log_dir": str(artifact_dir),
         }
         if args.compile_only:
@@ -643,6 +692,14 @@ def main() -> None:
         )
         raise
     finally:
+        if args.record_video:
+            flushed_videos = _flush_recorded_videos(env)
+            if flushed_videos:
+                logger.log_info(
+                    f"Flushed {flushed_videos} recorded video stream(s) to "
+                    f"{case_dir / 'outputs' / 'videos'}.",
+                    color="green",
+                )
         env.close()
 
     logger.log_info(
