@@ -1814,19 +1814,13 @@ def _with_public_grasp_strategy_defaults(kwargs: dict[str, Any]) -> dict[str, An
     updated = dict(kwargs)
     if strategy == "top_down":
         _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
-        updated["public_grasp_candidate_num"] = max(
-            int(updated.get("public_grasp_candidate_num") or 0),
-            32,
-        )
+        _set_strategy_public_grasp_candidate_num(updated, 32)
         return updated
 
     if strategy in {"bottle_lateral", "lateral_down"}:
         updated["public_grasp_use_candidate_selection"] = True
         updated.setdefault("public_grasp_rank_mode", "planned_order")
-        updated["public_grasp_candidate_num"] = max(
-            int(updated.get("public_grasp_candidate_num") or 0),
-            32,
-        )
+        _set_strategy_public_grasp_candidate_num(updated, 32)
         _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
         _set_if_missing_or_none(updated, "public_grasp_lift_height", 0.15)
         _set_if_missing_or_none(updated, "public_grasp_lateral_down_z", -0.34)
@@ -1846,10 +1840,7 @@ def _with_public_grasp_strategy_defaults(kwargs: dict[str, Any]) -> dict[str, An
         updated["public_grasp_rank_by_legacy_pose"] = True
         updated["public_grasp_use_legacy_orientation"] = True
         _set_thin_object_public_grasp_defaults(updated)
-        updated["public_grasp_candidate_num"] = max(
-            int(updated.get("public_grasp_candidate_num") or 0),
-            32,
-        )
+        _set_strategy_public_grasp_candidate_num(updated, 32)
         _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
         _set_if_missing_or_none(updated, "public_grasp_lift_height", 0.15)
         return updated
@@ -1861,8 +1852,8 @@ def _with_public_grasp_strategy_defaults(kwargs: dict[str, Any]) -> dict[str, An
             "public_grasp_rank_mode",
             "",
         )
-        updated["public_grasp_candidate_num"] = max(
-            int(updated.get("public_grasp_candidate_num") or 0),
+        _set_strategy_public_grasp_candidate_num(
+            updated,
             64 if strategy == "auto_general" else 32,
         )
         _set_if_missing_or_none(updated, "public_grasp_pre_grasp_distance", 0.05)
@@ -1907,6 +1898,18 @@ def _is_zero_vector_like(value) -> bool:
     except Exception:
         return False
     return bool(tensor.numel() == 3 and torch.linalg.norm(tensor).item() <= 1e-8)
+
+
+def _set_strategy_public_grasp_candidate_num(
+    kwargs: dict[str, Any],
+    default_minimum: int,
+) -> None:
+    if kwargs.get("_recovery_public_grasp_candidate_num_override"):
+        return
+    kwargs["public_grasp_candidate_num"] = max(
+        int(kwargs.get("public_grasp_candidate_num") or 0),
+        int(default_minimum),
+    )
 
 
 def _set_if_missing_or_none(kwargs: dict[str, Any], name: str, value: Any) -> None:

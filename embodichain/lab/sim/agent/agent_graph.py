@@ -256,6 +256,11 @@ class AgentTaskGraph:
                     recovery_edges = list(runtime_edges)
                     branch_final_target = recovery_edges[-1].target
                 else:
+                    self._record_static_recovery_attempt(
+                        edge=edge,
+                        monitor_index=monitor_index,
+                        kwargs=kwargs,
+                    )
                     recovery_edges = list(branch.recovery_edges)
                     branch_final_target = self._resolve_edge(recovery_edges[-1]).target
                 continuation_edges = list(pending_edges)
@@ -275,6 +280,42 @@ class AgentTaskGraph:
             current = edge.target
 
         return ExecutedActionList(executed_actions)
+
+    @staticmethod
+    def _record_static_recovery_attempt(
+        *,
+        edge: AgentGraphEdge,
+        monitor_index: int,
+        kwargs: dict[str, Any],
+    ) -> None:
+        max_total_attempts = _optional_positive_int(
+            kwargs.get("recovery_max_total_attempts")
+        )
+        if max_total_attempts is not None:
+            total_attempts = int(kwargs.get("_static_recovery_total_attempts", 0)) + 1
+            kwargs["_static_recovery_total_attempts"] = total_attempts
+            if total_attempts > max_total_attempts:
+                raise RuntimeError(
+                    "Static recovery exceeded total retry limit "
+                    f"({max_total_attempts}). Last edge='{edge.id}', "
+                    f"monitor_index={monitor_index}."
+                )
+
+        max_monitor_attempts = _optional_positive_int(
+            kwargs.get("recovery_max_monitor_attempts")
+        )
+        if max_monitor_attempts is None:
+            return
+
+        attempts = kwargs.setdefault("_static_recovery_monitor_attempts", {})
+        attempt_key = f"{edge.id}:{monitor_index}"
+        attempts[attempt_key] = int(attempts.get(attempt_key, 0)) + 1
+        if attempts[attempt_key] > max_monitor_attempts:
+            raise RuntimeError(
+                "Static recovery exceeded monitor retry limit "
+                f"({max_monitor_attempts}) for edge '{edge.id}' "
+                f"monitor {monitor_index}."
+            )
 
     def _next_edge(self, node_id: str) -> str:
         for edge_id in self.outgoing[node_id]:
@@ -349,3 +390,12 @@ class AgentTaskGraph:
             env=env,
             kwargs=kwargs,
         )
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    value = int(value)
+    if value <= 0:
+        return None
+    return value

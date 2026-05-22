@@ -258,6 +258,53 @@ def test_single_atomic_graph_action_plan_smoke(
     assert tuple(plan.trajectory.shape) == expected_shape
 
 
+def test_recovery_public_grasp_candidate_override_caps_strategy_default(
+    monkeypatch,
+) -> None:
+    env = _Env()
+    captured_kwargs: dict[str, object] = {}
+    spec = {
+        "kind": "atomic_action",
+        "name": "pick_up",
+        "cfg": {"control_part": "right_arm", "hand_control_part": "right_eef"},
+        "target": {"kind": "object_semantics", "obj_name": "cup"},
+    }
+    monkeypatch.setattr(
+        executor,
+        "_resolve_action_target",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_public_grasp_approach_direction_candidates",
+        lambda *args, **kwargs: [("ranked", torch.tensor([0.0, 0.0, -1.0]))],
+    )
+
+    def _plan_public_semantic_grasp_action(**kwargs):
+        captured_kwargs.update(kwargs["kwargs"])
+        return SimpleNamespace(
+            trajectory=torch.zeros(1, 2, 4),
+            joint_ids=env.right_arm_joints + env.right_eef_joints,
+        )
+
+    monkeypatch.setattr(
+        executor,
+        "plan_public_semantic_grasp_action",
+        _plan_public_semantic_grasp_action,
+    )
+
+    AtomicGraphAction(spec=spec).plan(
+        env=env,
+        require_atomic_action_graph=True,
+        _edge_is_recovery=True,
+        recovery_public_grasp_strategy="auto_general",
+        recovery_public_grasp_candidate_num=16,
+    )
+
+    assert captured_kwargs["public_grasp_strategy"] == "auto_general"
+    assert captured_kwargs["public_grasp_candidate_num"] == 16
+
+
 def test_plan_returns_action_plan_for_joint_delta_move() -> None:
     env = _Env()
     action = AtomicGraphAction(

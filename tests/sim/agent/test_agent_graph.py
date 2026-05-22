@@ -457,6 +457,90 @@ def test_agent_graph_reuses_recovery_edge_until_it_succeeds() -> None:
     assert calls == actions.actions
 
 
+def test_agent_graph_limits_static_recovery_monitor_attempts() -> None:
+    calls = []
+
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": 0 if monitor_sequences else None,
+            "monitor_name": "triggered" if monitor_sequences else None,
+            "step_index": 0 if monitor_sequences else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+    graph.add_edge(
+        "r01_reusable",
+        "v0_start",
+        "v1_done",
+        right_arm_action="reusable_recovery",
+        monitor_sequences=[["monitor"]],
+        is_recovery=True,
+    )
+    graph.add_recovery("e01", monitor_index=0, recovery_edges=["r01_reusable"])
+    graph.add_recovery("r01_reusable", monitor_index=0, recovery_edges=["r01_reusable"])
+
+    with pytest.raises(RuntimeError, match="Static recovery exceeded monitor retry"):
+        graph.run(env=object(), recovery_max_monitor_attempts=1)
+
+    assert calls == ["fail_nominal", "reusable_recovery", "reusable_recovery"]
+
+
+def test_agent_graph_limits_static_recovery_total_attempts() -> None:
+    calls = []
+
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": 0 if monitor_sequences else None,
+            "monitor_name": "triggered" if monitor_sequences else None,
+            "step_index": 0 if monitor_sequences else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+    graph.add_edge(
+        "r01_reusable",
+        "v0_start",
+        "v1_done",
+        right_arm_action="reusable_recovery",
+        monitor_sequences=[["monitor"]],
+        is_recovery=True,
+    )
+    graph.add_recovery("e01", monitor_index=0, recovery_edges=["r01_reusable"])
+    graph.add_recovery("r01_reusable", monitor_index=0, recovery_edges=["r01_reusable"])
+
+    with pytest.raises(RuntimeError, match="Static recovery exceeded total retry"):
+        graph.run(env=object(), recovery_max_total_attempts=2)
+
+    assert calls == ["fail_nominal", "reusable_recovery", "reusable_recovery"]
+
+
 def test_agent_graph_self_loop_recovery_retries_without_duplicate_success() -> None:
     calls = []
     self_loop_attempts = 0

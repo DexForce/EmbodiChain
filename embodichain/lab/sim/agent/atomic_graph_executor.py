@@ -301,6 +301,8 @@ def _apply_recovery_public_grasp_overrides(
         value = runtime_kwargs.get(recovery_key)
         if value is not None:
             merged[public_key] = value
+            if recovery_key == "recovery_public_grasp_candidate_num":
+                merged["_recovery_public_grasp_candidate_num_override"] = True
 
 
 def _robot_name_from_action_spec(action: Mapping[str, Any]) -> str | None:

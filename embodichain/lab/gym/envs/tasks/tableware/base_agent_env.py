@@ -308,6 +308,8 @@ class BaseAgentEnv:
             "runtime_recovery_max_total_attempts",
             "runtime_recovery_max_monitor_attempts",
             "runtime_recovery_max_exception_attempts",
+            "recovery_max_total_attempts",
+            "recovery_max_monitor_attempts",
         ):
             if key in kwargs:
                 compile_kwargs[key] = kwargs[key]

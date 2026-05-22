@@ -342,6 +342,24 @@ def build_parser() -> argparse.Namespace:
         help="Prefer runtime LLM recovery when a monitor triggers.",
     )
     parser.add_argument(
+        "--recovery_max_monitor_attempts",
+        type=int,
+        default=2,
+        help=(
+            "Maximum static recovery attempts for the same edge/monitor pair. "
+            "Use 0 to keep retrying until graph max_transitions."
+        ),
+    )
+    parser.add_argument(
+        "--recovery_max_total_attempts",
+        type=int,
+        default=8,
+        help=(
+            "Maximum total static recovery attempts in one graph execution. "
+            "Use 0 to keep retrying until graph max_transitions."
+        ),
+    )
+    parser.add_argument(
         "--disable_atomic_action_graph",
         action="store_true",
         default=False,
@@ -596,6 +614,8 @@ def main() -> None:
             "recovery": True,
             "runtime_llm_recovery": args.runtime_llm_recovery,
             "prefer_runtime_llm_recovery": args.prefer_runtime_llm_recovery,
+            "recovery_max_monitor_attempts": args.recovery_max_monitor_attempts,
+            "recovery_max_total_attempts": args.recovery_max_total_attempts,
             "forced_recovery_injection": forced_error_config,
             "use_atomic_action_graph": not args.disable_atomic_action_graph,
             "require_atomic_action_graph": args.require_atomic_action_graph,
