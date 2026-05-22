@@ -148,9 +148,15 @@ class NewtonPhysicsCfg:
     """Whether to enable Newton debug mode."""
 
     solver_type: Literal["mjwarp", "xpbd", "semi_implicit", "featherstone", "vbd"] = (
-        "mjwarp"
+        "semi_implicit"
     )
     """Newton solver preset."""
+
+    broad_phase: Literal["nxn", "sap", "explicit"] | None = None
+    """Newton collision broad-phase implementation. If None, DexSim chooses its default."""
+
+    visualizer_enabled: bool = False
+    """Whether to enable the Newton visualizer."""
 
     def to_dexsim_cfg(
         self,

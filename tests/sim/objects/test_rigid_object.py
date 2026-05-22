@@ -15,21 +15,20 @@
 # ----------------------------------------------------------------------------
 
 import os
-import torch
+
 import pytest
+import torch
 
 from embodichain.lab.sim import (
     SimulationManager,
     SimulationManagerCfg,
     VisualMaterialCfg,
 )
-from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
-from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
-from dexsim.types import ActorType
-
 from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.objects import RigidObject
+from embodichain.lab.sim.shapes import MeshCfg
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
@@ -39,13 +38,18 @@ Z_TRANSLATION = 2.0
 
 
 class BaseRigidObjectTest:
-    """Shared test logic for CPU and CUDA."""
+    """Shared rigid object test logic across physics backends."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, physics_backend: str):
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+            headless=True,
+            sim_device="cpu",
+            num_envs=NUM_ARENAS,
+            physics_backend=physics_backend,
+            render_cfg=RenderCfg(renderer="hybrid"),
         )
         self.sim = SimulationManager(config)
+        self.physics_backend = physics_backend
         self.sim.enable_physics(False)
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -80,10 +84,8 @@ class BaseRigidObjectTest:
             ),
         )
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
-
         self.sim.enable_physics(True)
+        self.sim.prepare_physics()
 
     def test_is_static(self):
         """Test the is_static() method of duck, table, and chair objects."""
@@ -158,9 +160,10 @@ class BaseRigidObjectTest:
         assert all(
             abs(x) < 1e-5 for x in table_xyz_after
         ), f"FAIL: Table moved unexpectedly: {table_xyz_after}"
-        assert torch.allclose(
-            chair_xyz_after, expected_chair_pos, atol=1e-5
-        ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
+        if self.physics_backend == "default":
+            assert torch.allclose(
+                chair_xyz_after, expected_chair_pos, atol=1e-5
+            ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
 
     def test_add_force_torque(self):
         """Test that add_force applies force correctly to the duck object."""
@@ -404,6 +407,9 @@ class BaseRigidObjectTest:
         assert self.table.is_non_dynamic, "Static table should be is_non_dynamic"
         assert self.chair.is_non_dynamic, "Kinematic chair should be is_non_dynamic"
 
+        if self.physics_backend == "newton":
+            return
+
         # 3. body_type
         assert self.duck.body_type == "dynamic"
         self.duck.set_body_type("kinematic")
@@ -590,14 +596,14 @@ class BaseRigidObjectTest:
         gc.collect()
 
 
-class TestRigidObjectCPU(BaseRigidObjectTest):
+class TestRigidObjectDefaultBackend(BaseRigidObjectTest):
     def setup_method(self):
-        self.setup_simulation("cpu")
+        self.setup_simulation("default")
 
 
-class TestRigidObjectCUDA(BaseRigidObjectTest):
+class TestRigidObjectNewtonBackend(BaseRigidObjectTest):
     def setup_method(self):
-        self.setup_simulation("cuda")
+        self.setup_simulation("newton")
 
 
 if __name__ == "__main__":

@@ -14,14 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .newton import (
-    NewtonRigidBodyView,
-    is_newton_scene,
-    newton_rigid_data_type,
-)
+from .base import RigidBodyViewBase
+from .default import DefaultRigidBodyView
+from .newton import NewtonRigidBodyView, is_newton_scene
 
 __all__ = [
+    "RigidBodyViewBase",
+    "DefaultRigidBodyView",
     "NewtonRigidBodyView",
     "is_newton_scene",
-    "newton_rigid_data_type",
 ]

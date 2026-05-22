@@ -43,6 +43,18 @@ from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
 
 
+def _is_newton_backend_active() -> bool:
+    """Return whether the current default world uses the Newton physics scene."""
+    from embodichain.lab.sim.objects.backends import is_newton_scene
+
+    return is_newton_scene(dexsim.default_world().get_physics_scene())
+
+
+def _set_body_scale_after_rigidbody(obj: MeshObject, body_scale: tuple | list) -> None:
+    """Set body scale after rigid body creation for Newton compatibility."""
+    obj.set_body_scale(*body_scale)
+
+
 def get_dexsim_arenas() -> List[dexsim.environment.Arena]:
     """Get all arenas in the default dexsim world.
 
@@ -219,6 +231,7 @@ def load_mesh_objects_from_cfg(
     """
     obj_list = []
     body_type = cfg.to_dexsim_body_type()
+    is_newton_backend = _is_newton_backend_active()
     if isinstance(cfg.shape, MeshCfg):
 
         option = LoadOption()
@@ -273,7 +286,8 @@ def load_mesh_objects_from_cfg(
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                obj.set_body_scale(*cfg.body_scale)
+                if not is_newton_backend:
+                    obj.set_body_scale(*cfg.body_scale)
                 sdf_cfg = SDFConfig()
                 sdf_cfg.resolution = cfg.sdf_resolution
                 obj.add_physical_body(
@@ -282,12 +296,17 @@ def load_mesh_objects_from_cfg(
                     config=sdf_cfg,
                     attr=cfg.attrs.attr(),
                 )
+                if is_newton_backend:
+                    _set_body_scale_after_rigidbody(obj, cfg.body_scale)
             else:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                obj.set_body_scale(*cfg.body_scale)
+                if not is_newton_backend:
+                    obj.set_body_scale(*cfg.body_scale)
                 obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+                if is_newton_backend:
+                    _set_body_scale_after_rigidbody(obj, cfg.body_scale)
             obj.set_name(f"{cfg.uid}_{i}")
             obj_list.append(obj)
 
@@ -306,8 +325,11 @@ def load_mesh_objects_from_cfg(
 
         obj_list = create_cube(env_list, cfg.shape.size, uid=cfg.uid)
         for obj in obj_list:
-            obj.set_body_scale(*cfg.body_scale)
+            if not is_newton_backend:
+                obj.set_body_scale(*cfg.body_scale)
             obj.add_rigidbody(body_type, RigidBodyShape.BOX, cfg.attrs.attr())
+            if is_newton_backend:
+                _set_body_scale_after_rigidbody(obj, cfg.body_scale)
 
     elif isinstance(cfg.shape, SphereCfg):
         from embodichain.lab.sim.utility.sim_utils import create_sphere
@@ -316,8 +338,11 @@ def load_mesh_objects_from_cfg(
             env_list, cfg.shape.radius, cfg.shape.resolution, uid=cfg.uid
         )
         for obj in obj_list:
-            obj.set_body_scale(*cfg.body_scale)
+            if not is_newton_backend:
+                obj.set_body_scale(*cfg.body_scale)
             obj.add_rigidbody(body_type, RigidBodyShape.SPHERE, cfg.attrs.attr())
+            if is_newton_backend:
+                _set_body_scale_after_rigidbody(obj, cfg.body_scale)
     else:
         logger.log_error(
             f"Unsupported rigid object shape type: {type(cfg.shape)}. Supported types: MeshCfg, CubeCfg, SphereCfg."

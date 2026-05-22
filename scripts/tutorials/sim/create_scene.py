@@ -38,6 +38,18 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--physics_backend",
+        choices=["default", "newton"],
+        default="default",
+        help="Physics backend to use for the simulation.",
+    )
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=None,
+        help="Maximum number of simulation steps to run before exiting.",
+    )
     args = parser.parse_args()
 
     # Configure the simulation
@@ -47,6 +59,7 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
+        physics_backend=args.physics_backend,
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),
@@ -98,10 +111,10 @@ def main():
         sim.open_window()
 
     # Run the simulation
-    run_simulation(sim)
+    run_simulation(sim, max_steps=args.max_steps)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, max_steps: int | None = None):
     """Run the simulation loop.
 
     Args:
@@ -121,6 +134,9 @@ def run_simulation(sim: SimulationManager):
             # Update physics simulation
             sim.update(step=1)
             step_count += 1
+
+            if max_steps is not None and step_count >= max_steps:
+                break
 
             # Print FPS every second
             if step_count % 100 == 0:
