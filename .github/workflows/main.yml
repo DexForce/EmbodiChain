@@ -72,6 +72,21 @@ jobs:
           restore-keys: |
             docs-full-site-${{ github.repository }}-
 
+      # Tag-scoped caches are invisible on main; merge live Pages so releases survive.
+      - name: Merge versions from live GitHub Pages
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          SKIP_VERSION="main"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            SKIP_VERSION="${GITHUB_REF_NAME}"
+          fi
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/merge_published_site.py \
+            --build-dir ${GITHUB_WORKSPACE}/docs/build/html \
+            --site-base-url "${SITE_URL}" \
+            --skip-version "${SKIP_VERSION}"
+
       - name: Build docs
         shell: bash
         run: |
@@ -102,7 +117,7 @@ jobs:
 
           else
             echo "Building dev docs for main branch..."
-            # Only rebuild main/ — all other version dirs come from the cache
+            # Only rebuild main/ — other versions come from cache + live Pages merge
             rm -rf build/html/main
             sphinx-build source build/html/main
             cd build/html
@@ -112,9 +127,9 @@ jobs:
           python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
             --build-dir .
 
-      # Save the updated full site so the next run can restore all versions
+      # Default-branch cache only (tag-scoped caches are not visible on main).
       - name: Save full multi-version docs site
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: docs/build/html
@@ -145,17 +160,22 @@ jobs:
             --extra-index-url https://download.blender.org/pypi/
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
+          pytest tests/docs -q --confcutdir=tests/docs
           pytest tests
 
   publish:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       pages: write
       id-token: write
     steps:
       - name: Deploy GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
 
 

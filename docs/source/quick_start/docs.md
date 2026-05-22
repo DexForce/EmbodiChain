@@ -53,4 +53,6 @@ python3 scripts/generate_versions_json.py --build-dir build/html
 
 This generates both `versions.json` (for the sidebar version selector) and `index.html` (redirects to the latest stable version, falling back to `main`).
 
-> Old release versions beyond `DOCS_MAX_VERSIONS` (default: 4) are automatically pruned during CI builds.
+> Old release versions beyond `DOCS_MAX_VERSIONS` (default: 5 in CI) are automatically pruned during CI builds.
+>
+> CI merges missing version directories from the live GitHub Pages site before each build so a `main` push cannot wipe docs built for release tags. See `docs/scripts/merge_published_site.py` and `tests/docs/test_merge_published_site.py`.
