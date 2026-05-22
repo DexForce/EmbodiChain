@@ -23,9 +23,10 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
 
 
@@ -36,24 +37,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Run simulation in headless mode",
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
-    )
-    parser.add_argument(
-        "--enable_rt",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing for better visuals",
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Configure the simulation
@@ -63,7 +47,9 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        enable_rt=args.enable_rt,  # Enable ray tracing for better visuals
+        render_cfg=RenderCfg(
+            renderer=args.renderer,
+        ),
         num_envs=args.num_envs,
         arena_space=3.0,
     )
@@ -83,25 +69,23 @@ def main():
                 static_friction=0.5,
                 restitution=0.1,
             ),
-            init_pos=[0.5, 0.0, 1.0],
+            init_pos=[0, 0.0, 1.0],
         )
     )
 
-    # Add toy_duck object to the scene
-    toy_duck_path = get_data_path("ToyDuck/toy_duck.glb")
-    toy_duck: RigidObject = sim.add_rigid_object(
+    # Add chair object to the scene
+    path = get_data_path("Chair/chair.glb")
+    chair: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
-            uid="toy_duck",
-            shape=MeshCfg(fpath=toy_duck_path),
+            uid="chair",
+            shape=MeshCfg(fpath=path),
             body_type="dynamic",
             attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+                mass=3.0,
             ),
+            body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.2],
-            init_rot=[0.0, 0.0, 0.0],
+            init_rot=[90.0, 0.0, 0.0],
         )
     )
 

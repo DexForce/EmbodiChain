@@ -1,4 +1,4 @@
-# EmbodiAgent
+# EmbodiAgent（aborted）
 
 EmbodiAgent is a hierarchical multi-agent system that enables robots to perform complex manipulation tasks through closed-loop planning, graph compilation, and validation. The system combines vision-language models (VLMs) and large language models (LLMs) to translate high-level goals into executable robot actions.
 
@@ -177,3 +177,12 @@ embodichain/agents/
 │   └── prompt/                # Prompt templates (LangChain)
 └── prompts/                   # Agent prompt templates
 ```
+
+---
+
+## See Also
+
+- [Online Data Streaming](../online_data.md) — Streaming live simulation data for training
+- [RL Architecture](../../overview/rl/index.rst) — RL training pipeline and algorithms
+- [Atomic Actions Tutorial](../../tutorial/atomic_actions.rst) — Action primitives used by the CodeAgent
+- [Supported Tasks](../../resources/task/index.rst) — Available task environments

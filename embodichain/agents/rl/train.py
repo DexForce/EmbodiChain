@@ -37,6 +37,7 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_M
 from embodichain.utils.utility import load_json
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
 
@@ -113,7 +114,7 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     save_freq = int(trainer_cfg.get("save_freq", 50000))
     num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
     headless = bool(trainer_cfg.get("headless", True))
-    enable_rt = bool(trainer_cfg.get("enable_rt", False))
+    renderer = trainer_cfg.get("renderer", "hybrid")
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
     num_envs = trainer_cfg.get("num_envs", None)
     wandb_project_name = trainer_cfg.get("wandb_project_name", "embodichain-generic")
@@ -205,13 +206,12 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     else:
         gym_env_cfg.sim_cfg.sim_device = torch.device("cpu")
     gym_env_cfg.sim_cfg.headless = headless
-    gym_env_cfg.sim_cfg.enable_rt = enable_rt
-    gym_env_cfg.sim_cfg.gpu_id = local_rank if distributed else gpu_id
+    gym_env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
+    gym_env_cfg.sim_cfg.gpu_id = gpu_id
 
-    if rank == 0:
-        logger.log_info(
-            f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, enable_rt={gym_env_cfg.sim_cfg.enable_rt}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
-        )
+    logger.log_info(
+        f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
+    )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
     sample_obs, _ = env.reset()

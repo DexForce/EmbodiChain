@@ -34,6 +34,16 @@ Usage examples::
     python -m embodichain.lab.scripts.preview_asset \\
         --asset_path /path/to/asset.usda \\
         --headless
+
+    # Preview with a built-in environment map
+    python -m embodichain.lab.scripts.preview_asset \\
+        --asset_path /path/to/sugar_box.usda \\
+        --env_map "Studio"
+
+    # Preview with a custom HDR environment map
+    python -m embodichain.lab.scripts.preview_asset \\
+        --asset_path /path/to/sugar_box.usda \\
+        --env_map /path/to/environment.hdr
 """
 
 from __future__ import annotations
@@ -58,12 +68,13 @@ def build_sim_cfg(args: argparse.Namespace):
     Returns:
         SimulationManagerCfg: Simulation configuration.
     """
+    from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
     return SimulationManagerCfg(
         headless=args.headless,
-        enable_rt=args.enable_rt,
         sim_device=args.sim_device,
+        render_cfg=RenderCfg(renderer=args.renderer),
     )
 
 
@@ -87,9 +98,6 @@ def load_assets(sim: SimulationManager, args: argparse.Namespace):
         RigidObjectCfg,
     )
     from embodichain.lab.sim.shapes import MeshCfg
-
-    # --- light -----------------------------------------------------------
-    sim.set_emission_light(intensity=150)
 
     asset_paths = args.asset_path
     init_pos = tuple(args.init_pos)
@@ -210,6 +218,10 @@ def main(args: argparse.Namespace) -> None:
     sim = SimulationManager(sim_cfg)
 
     try:
+        if args.env_map:
+            log_info(f"Setting environment map: {args.env_map} ...", color="green")
+            sim.set_indirect_lighting(args.env_map)
+
         assets = load_assets(sim, args)
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
 
@@ -286,7 +298,7 @@ def cli():
         "--body_type",
         type=str,
         choices=["dynamic", "kinematic", "static"],
-        default="kinematic",
+        default="dynamic",
         help="Body type for rigid objects (default: kinematic).",
     )
     parser.add_argument(
@@ -314,10 +326,20 @@ def cli():
         help="Run without rendering window.",
     )
     parser.add_argument(
-        "--enable_rt",
-        action="store_true",
-        default=False,
-        help="Enable ray tracing.",
+        "--renderer",
+        type=str,
+        choices=["hybrid", "fast-rt", "rt"],
+        default="hybrid",
+        help="Renderer backend (default: hybrid).",
+    )
+    parser.add_argument(
+        "--env_map",
+        type=str,
+        default=None,
+        help=(
+            "Environment map for indirect lighting. Accepts a built-in IBL resource "
+            "name (e.g. 'Studio') or an absolute file path (.hdr/.png/.exr)."
+        ),
     )
     parser.add_argument(
         "--preview",

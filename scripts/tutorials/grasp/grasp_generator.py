@@ -30,8 +30,10 @@ from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
@@ -59,19 +61,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering"
-    )
-    parser.add_argument("--headless", action="store_true", help="Enable headless mode")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to run the environment on, e.g., 'cpu' or 'cuda'",
-    )
+    add_env_launcher_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -88,21 +78,20 @@ def initialize_simulation(args) -> SimulationManager:
     config = SimulationManagerCfg(
         headless=True,
         sim_device=args.device,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
     )
     sim = SimulationManager(config)
 
-    if args.enable_rt:
-        light = sim.add_light(
-            cfg=LightCfg(
-                uid="main_light",
-                color=(0.6, 0.6, 0.6),
-                intensity=30.0,
-                init_pos=(1.0, 0, 3.0),
-            )
+    light = sim.add_light(
+        cfg=LightCfg(
+            uid="main_light",
+            color=(0.6, 0.6, 0.6),
+            intensity=30.0,
+            init_pos=(1.0, 0, 3.0),
         )
+    )
 
     return sim
 
@@ -238,6 +227,8 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=20000, max_length=0.088, min_length=0.003
         ),
+        is_partial_annotate=True,
+        is_filter_ground_collision=True,
     )
     sim.open_window()
 
@@ -277,7 +268,10 @@ if __name__ == "__main__":
     )[0]
     for i, obj_pose in enumerate(obj_poses):
         is_success, grasp_pose, open_length = grasp_generator.get_grasp_poses(
-            obj_pose, approach_direction, visualize_pose=False
+            obj_pose,
+            approach_direction,
+            visualize_collision=False,
+            visualize_pose=False,
         )
         if is_success:
             grasp_xpos_list.append(grasp_pose.unsqueeze(0))

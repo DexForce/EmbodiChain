@@ -21,6 +21,7 @@ import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 def grid_sample_qpos_from_limits(
@@ -98,7 +99,12 @@ class BaseSolverTest:
                     "class_type": "OPWSolver",
                     "end_link_name": "left_link6",
                     "root_link_name": "left_arm_base",
-                    "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+                    "tcp": [
+                        [0, 0, -1, 0],
+                        [0, 1, 0, 0],
+                        [1, 0, 0, 0.143],
+                        [0, 0, 0, 1],
+                    ],
                     "qpos_limits": [
                         [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944],
                         [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944],
@@ -190,7 +196,6 @@ class TestOPWSolver(BaseSolverTest):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestOPWSolverCUDA(BaseSolverTest):
     def setup_method(self):
         self.setup_simulation("cuda")

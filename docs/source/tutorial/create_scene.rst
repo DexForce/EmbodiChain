@@ -89,3 +89,12 @@ You can also pass arguments to customize the simulation. For example, to run in 
    python scripts/tutorials/sim/create_scene.py --headless --num_envs <n> --device <cuda/cpu>
 
 Now that we have a basic understanding of how to create a scene, let's move on to more advanced topics.
+
+Next Steps
+~~~~~~~~~~
+
+- :doc:`create_softbody` — Add deformable bodies to your scene
+- :doc:`robot` — Load and control a robot
+- :doc:`sensor` — Add cameras and capture sensor data
+- :doc:`basic_env` — Create your first Gymnasium environment
+- :doc:`/overview/sim/sim_manager` — Full SimulationManager API reference

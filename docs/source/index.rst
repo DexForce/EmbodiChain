@@ -1,7 +1,9 @@
 EmbodiChain Documentation
 =========================
 
-Welcome to the EmbodiChain! 
+EmbodiChain is a GPU-accelerated robotics simulation framework for embodied AI research. It provides tools for building generating and processing simulation assets and scenes, creating robot learning environments, generating expert demonstration data, training policies with imitation learning and reinforcement learning, and deploying models into real world.
+
+The framework is built on top of `DexSim <https://github.com/DexForce>`_, a high-performance physics and rendering engine, designed for Embodied AI research and production use.
 
 Table of Contents
 =================
@@ -38,7 +40,7 @@ Table of Contents
    :glob:
 
    features/online_data.md
-   features/agents.md
+   features/generative_sim/index*
    features/workspace_analyzer/index*
    features/interaction/index*
    features/toolkits/index*
@@ -52,6 +54,7 @@ Table of Contents
    resources/robot/index*
    resources/task/index*
    resources/roadmap.md
+   resources/publications/README.md
 
 .. toctree::
    :maxdepth: 2
@@ -59,4 +62,3 @@ Table of Contents
    :titlesonly:
 
    api_reference/index
-

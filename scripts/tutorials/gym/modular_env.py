@@ -33,6 +33,7 @@ from embodichain.lab.sim.robots import DexforceW1Cfg
 from embodichain.lab.sim.sensors import StereoCameraCfg, SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     LightCfg,
     ArticulationCfg,
     RobotCfg,
@@ -78,7 +79,7 @@ class ExampleEventCfg:
             ),
             "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
             "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
-            "intensity_range": [50.0, 100.0],
+            "intensity_range": [10.0, 30.0],
         },
     )
 
@@ -144,7 +145,7 @@ class ExampleCfg(EmbodiedEnvCfg):
                 uid="point",
                 light_type="point",
                 color=(1.0, 1.0, 1.0),
-                intensity=50.0,
+                intensity=20.0,
                 init_pos=(0, 0, 2),
             )
         ]
@@ -209,12 +210,20 @@ if __name__ == "__main__":
     import argparse
 
     from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--enable_rt", action="store_true", help="Enable ray tracing")
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
-    env_cfg = ExampleCfg(sim_cfg=SimulationManagerCfg(enable_rt=args.enable_rt))
+    env_cfg = ExampleCfg(
+        sim_cfg=SimulationManagerCfg(
+            render_cfg=RenderCfg(renderer=args.renderer),
+            headless=args.headless,
+            sim_device=args.device,
+            num_envs=args.num_envs,
+        )
+    )
 
     # Create the Gym environment
     env = gym.make("ModularEnv-v1", cfg=env_cfg)

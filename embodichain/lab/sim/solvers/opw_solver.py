@@ -127,7 +127,7 @@ class OPWSolver(BaseSolver):
         self._tcp_warp = wp.mat44f(self.tcp_xpos)
         tcp_inv = np.eye(4, dtype=float)
         tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
-        tcp_inv[:3, 3] = -tcp_inv[:3, :3].T @ self.tcp_xpos[:3, 3]
+        tcp_inv[:3, 3] = -tcp_inv[:3, :3] @ self.tcp_xpos[:3, 3]
         self._tcp_inv_warp = wp.mat44f(tcp_inv)
 
     def _init_warp_solver(self, cfg: OPWSolverCfg, **kwargs):

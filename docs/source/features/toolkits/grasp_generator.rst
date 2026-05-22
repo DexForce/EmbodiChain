@@ -24,7 +24,7 @@ The Code Explained
 Configuring the simulation
 --------------------------
 
-Command-line arguments are parsed with ``argparse`` to select the number of parallel environments, the compute device, and optional rendering features such as ray tracing and headless mode.
+Command-line arguments are parsed with ``argparse`` to select the number of parallel environments, the compute device, and optional rendering features such as renderer backend and headless mode.
 
 .. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
    :language: python
@@ -109,6 +109,12 @@ Configuring GraspGeneratorCfg
    * - ``max_deviation_angle``
      - ``π / 12``
      - Maximum allowed angle (in radians) between the specified approach direction and the axis connecting an antipodal point pair. Pairs that deviate more than this threshold are discarded.
+   * - ``is_partial_annotate``
+     - ``True``
+     - When ``True``, the annotator allows selecting a partial region of the mesh for grasp sampling. If ``False``, the entire mesh is used.
+   * - ``is_filter_ground_collision``
+     - ``True``
+     - Whether to filter out grasp poses that would cause the gripper to  collide.
 
 The ``antipodal_sampler_cfg`` field accepts an :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalSamplerCfg` instance, which controls how antipodal point pairs are sampled on the mesh surface.
 
@@ -185,7 +191,7 @@ You can customize the run with additional arguments:
 
 .. code-block:: bash
 
-   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --enable_rt --headless
+   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --renderer <legacy|hybrid|fast-rt|rt> --headless
 
 After confirming the grasp region in the browser, the script will compute a grasp pose, print the elapsed time, and then wait for you to press **Enter** before executing the full grasp trajectory in the simulation. Press **Enter** again to exit once the motion is complete.
 

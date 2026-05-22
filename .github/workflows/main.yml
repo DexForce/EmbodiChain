@@ -24,6 +24,7 @@ jobs:
         - "/usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d"
         - "/tmp/.X11-unix:/tmp/.X11-unix"
         - "/dev/shm/shared:/dev/shm/shared"
+        - "/usr/share/nvidia:/usr/share/nvidia"
       options: --memory 100g --gpus device=1 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +32,7 @@ jobs:
         run: |
           echo "Workspace: ${GITHUB_WORKSPACE}"
           ls
-          pip install black==24.3.0
+          pip install black==26.3.1
           black --check --diff --color ./
           if [ $? -ne 0 ]; then
             echo "Code style check failed, please run [black ./] before commit!"
@@ -45,7 +46,7 @@ jobs:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
-      DOCS_MAX_VERSIONS: "4"  # Max number of release versions to keep
+      DOCS_MAX_VERSIONS: 5
     container: *container_template
     steps:
       - uses: actions/checkout@v4
@@ -59,20 +60,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-docs-
 
-      - name: Restore previous docs output
+      # Restore the full multi-version site from the last successful build.
+      # The key never matches exactly (run_id is unique), so restore-keys is
+      # always used to pick up the most recently saved full site.
+      - name: Restore full multi-version docs site
         if: github.event_name == 'push'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: docs/build/html
-          key: docs-output-${{ github.repository }}-${{ github.ref_name }}
+          key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
           restore-keys: |
-            docs-output-${{ github.repository }}-${{ github.ref_name }}-
-            docs-output-${{ github.repository }}-
+            docs-full-site-${{ github.repository }}-
 
       - name: Build docs
         shell: bash
         run: |
-          pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -e ".[gensim]" \
+            --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+            --trusted-host pyp.open3dv.site \
+            --extra-index-url https://download.blender.org/pypi/
           pip install -r docs/requirements.txt
           python3 docs/scripts/sync_readme.py
           cd ${GITHUB_WORKSPACE}/docs
@@ -82,36 +88,37 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME}"
             echo "Building docs for release tag ${VERSION}..."
-
-            # Build only this version into its own subdirectory
             sphinx-build source build/html/${VERSION}
 
             cd build/html
 
             # Prune old release versions beyond the window
             mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS:-5} ]]; do
               echo "Pruning old version: ${TAG_DIRS[0]}"
               rm -rf "${TAG_DIRS[0]}"
               TAG_DIRS=("${TAG_DIRS[@]:1}")
             done
 
-            # Generate versions.json and root index.html
-            python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
-              --build-dir .
-
           else
             echo "Building dev docs for main branch..."
-            # Build only main/ — don't touch existing version directories
+            # Only rebuild main/ — all other version dirs come from the cache
             rm -rf build/html/main
             sphinx-build source build/html/main
-
             cd build/html
-
-            # Generate versions.json and root index.html
-            python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
-              --build-dir .
           fi
+
+          # Regenerate versions.json and root index.html from all present dirs
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+            --build-dir .
+
+      # Save the updated full site so the next run can restore all versions
+      - name: Save full multi-version docs site
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: docs/build/html
+          key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
 
       - name: Upload docs artifact
         if: github.event_name == 'push'
@@ -132,65 +139,80 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests
         run: |
-          pip install -e .[lerobot] --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+          pip install -e ".[gensim]" \
+            --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+            --trusted-host pyp.open3dv.site \
+            --extra-index-url https://download.blender.org/pypi/
           echo "Unit test Start"
           export HF_ENDPOINT=https://hf-mirror.com
-          pip uninstall pymeshlab -y
-          pip install pymeshlab==2023.12.post3
-          pip install numpy==1.26.4
           pytest tests
 
   publish:
     if: github.event_name == 'push'
     needs: build
-    runs-on: Linux
+    runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
     steps:
-      - name: Download docs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: github-pages
-
       - name: Deploy GitHub Pages
         uses: actions/deploy-pages@v4
 
 
-  # release:
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   runs-on: Linux
-  #   permissions:
-  #     contents: write
-  #     id-token: write   # PyPI Trusted Publishing
+  release-build:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: lint
+    runs-on: Linux
 
-  #   container: *container_template
+    container: *container_template
 
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         fetch-depth: 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  #     - name: (Release) Install build tools
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install build
+      - name: (Release) Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
 
-  #     - name: (Release) Build sdist and wheel
-  #       run: |
-  #         python -m build --wheel
+      - name: (Release) Build sdist and wheel
+        run: |
+          python -m build
 
-  #     # - name: (Release) Create GitHub Release (draft)
-  #     #   uses: softprops/action-gh-release@v2
-  #     #   with:
-  #     #     draft: true
-  #     #     generate_release_notes: true
-  #     #     files: |
-  #     #       dist/*
-  #     #   env:
-  #     #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # - name: (Release) Create GitHub Release (draft)
+      #   uses: softprops/action-gh-release@v2
+      #   with:
+      #     draft: true
+      #     generate_release_notes: true
+      #     files: |
+      #       dist/*
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  #     - name: (Release) Publish to PyPI
-  #       uses: pypa/gh-action-pypi-publish@release/v1
-  #       with:
-  #         password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: (Release) Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+  release-publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/embodichain
+    permissions:
+      contents: read
+      id-token: write   # PyPI Trusted Publishing
+
+    steps:
+      - name: (Release) Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: (Release) Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

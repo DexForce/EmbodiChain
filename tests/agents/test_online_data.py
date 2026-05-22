@@ -111,14 +111,14 @@ def _make_fake_engine(
     engine.buffer_size = buffer_size
     engine.device = shared_buffer.device
 
-    # Interprocess primitives — use mp objects so the locking logic works.
+    # Interprocess primitives — use the same mp context consistently to avoid
     engine._mp_ctx = mp.get_context("spawn")
-    engine._lock_index = mp.Array("i", [lock_start, lock_end])
-    engine._fill_signal = mp.Event()
-    engine._init_signal = mp.Event()
+    engine._lock_index = engine._mp_ctx.Array("i", [lock_start, lock_end])
+    engine._fill_signal = engine._mp_ctx.Event()
+    engine._init_signal = engine._mp_ctx.Event()
     engine._init_signal.set()  # mark as initialised
-    engine._close_signal = mp.Event()
-    engine._sample_count = mp.Value("i", 0)
+    engine._close_signal = engine._mp_ctx.Event()
+    engine._sample_count = engine._mp_ctx.Value("i", 0)
 
     engine.start()
 

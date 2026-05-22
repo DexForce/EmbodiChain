@@ -116,7 +116,7 @@ You can customize the simulation with various command-line options:
    python scripts/tutorials/sim/create_robot.py --headless
    
    # Enable ray tracing rendering
-   python scripts/tutorials/sim/create_robot.py --enable_rt
+   python scripts/tutorials/sim/create_robot.py --renderer
 
 The simulation will show the robot moving through different poses, demonstrating basic joint control capabilities.
 

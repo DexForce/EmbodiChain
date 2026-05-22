@@ -13,7 +13,7 @@ EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It stre
 
 > [!NOTE]
 > EmbodiChain is in Alpha and under active development:
-> * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/resources/roadmap.html).
+> * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html).
 > * Since this is an early release, we welcome feedback (bug reports, feature requests, etc.) via GitHub Issues.
 
 
@@ -44,6 +44,10 @@ To get started with EmbodiChain, follow these steps:
 
 We welcome contributions! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for guidelines on how to get started.
 
+## Publications
+
+See [Academic Publications](docs/source/resources/publications/README.md) for a complete list of academic papers related to EmbodiChain.
+
 ## Citation
 
 If you find EmbodiChain helpful for your research, please consider citing our work:
@@ -67,14 +71,4 @@ If you find EmbodiChain helpful for your research, please consider citing our wo
    year = {2025},
    journal = {TechRxiv}
    }
-```
-
-```bibtex
-@inproceedings{Sim2RealVLA,
-    title = {Sim2Real {VLA}: Zero-Shot Generalization of Synthesized Skills to Realistic Manipulation},
-    author = {Runyi Zhao, Sheng Xu, Ruixing Jin, Yueci Deng, Yunxin Tai, Kui Jia, Guiliang Liu},
-    booktitle = {The Fourteenth International Conference on Learning Representations, ICLR},
-    year = {2026},
-    url = {https://openreview.net/forum?id=H4SyKHjd4c}
-}
 ```

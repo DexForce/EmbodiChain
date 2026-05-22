@@ -213,7 +213,7 @@ Command-line options:
 - ``--device cpu|cuda``: Choose simulation device
 - ``--num_envs N``: Number of parallel environments
 - ``--headless``: Run without GUI for automated testing
-- ``--enable_rt``: Enable ray tracing for better visuals
+- ``--renderer``: Enable ray tracing for better visuals
 
 Once running:
 

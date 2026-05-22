@@ -17,19 +17,15 @@
 from __future__ import annotations
 
 import dexsim
-import math
 import torch
 import dexsim.render as dr
-import warp as wp
 
 from functools import cached_property
-from typing import Union, Tuple, Sequence, List
+from typing import Tuple, Sequence, List
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
-from embodichain.utils.warp.kernels import reshape_tiled_image
 from embodichain.utils import logger, configclass
-from embodichain.lab.sim.utility.sim_utils import is_rt_enabled
 
 
 @configclass
@@ -97,17 +93,12 @@ class CameraCfg(SensorCfg):
             The view attributes for the camera.
         """
         view_attrib: dr.ViewFlags = dr.ViewFlags.COLOR
-        # TODO: change for fast-rt renderer backend.
         if self.enable_color:
             view_attrib |= dr.ViewFlags.COLOR
         if self.enable_depth:
-            if is_rt_enabled() is False:
-                view_attrib |= dr.ViewFlags.NORMAL
             view_attrib |= dr.ViewFlags.DEPTH
         if self.enable_mask:
             view_attrib |= dr.ViewFlags.MASK
-            if is_rt_enabled() is False:
-                view_attrib |= dr.ViewFlags.DEPTH
         if self.enable_normal:
             view_attrib |= dr.ViewFlags.NORMAL
         if self.enable_position:
@@ -152,55 +143,25 @@ class Camera(BaseSensor):
             arenas = [env]
         num_instances = len(arenas)
 
-        if self.is_rt_enabled:
-            self._frame_buffer = self._world.create_camera_group(
-                [config.width, config.height], num_instances, True
+        self._frame_buffer = self._world.create_camera_group(
+            [config.width, config.height], num_instances, True
+        )
+
+        view_attrib = config.get_view_attrib()
+        for i, arena in enumerate(arenas):
+            view_name = f"{self.uid}_view{i + 1}"
+            view = arena.create_camera(
+                view_name,
+                config.width,
+                config.height,
+                True,
+                view_attrib,
+                self._frame_buffer,
             )
-
-            view_attrib = config.get_view_attrib()
-            for i, arena in enumerate(arenas):
-                view_name = f"{self.uid}_view{i + 1}"
-                view = arena.create_camera(
-                    view_name,
-                    config.width,
-                    config.height,
-                    True,
-                    view_attrib,
-                    self._frame_buffer,
-                )
-                view.set_intrinsic(config.intrinsics)
-                view.set_near(config.near)
-                view.set_far(config.far)
-                self._entities[i] = view
-
-        else:
-            self._grid_size = math.ceil(math.sqrt(num_instances))
-            frame_width = self._grid_size * config.width
-            frame_height = self._grid_size * config.height
-            view_attrib = config.get_view_attrib()
-            # Create the data frame
-            self._frame_buffer = self._world.create_frame_buffer(
-                [frame_width, frame_height], view_attrib, True
-            )
-            self._frame_buffer.set_read_able(view_attrib)
-
-            # Create camera views
-            for i, arena in enumerate(arenas):
-                col = i // self._grid_size
-                row = i % self._grid_size
-                x = row * config.width
-                y = col * config.height
-                view_name = f"{self.uid}_view{i + 1}"
-
-                view = arena.create_camera_view(
-                    view_name, (x, y), (config.width, config.height), self._frame_buffer
-                )
-                view.set_intrinsic(config.intrinsics)
-                view.set_near(config.near)
-                view.set_far(config.far)
-                view.enable_postprocessing(True)
-
-                self._entities[i] = view
+            view.set_intrinsic(config.intrinsics)
+            view.set_near(config.near)
+            view.set_far(config.far)
+            self._entities[i] = view
 
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
@@ -240,28 +201,13 @@ class Camera(BaseSensor):
             self._attach_to_entity()
 
     @cached_property
-    def is_rt_enabled(self) -> bool:
-        """Check if Ray Tracing rendering backend is enabled in the default dexsim world.
-
-        Returns:
-            bool: True if Ray Tracing rendering is enabled, False otherwise.
-        """
-        return is_rt_enabled()
-
-    @cached_property
     def group_id(self) -> int:
         """Get the camera group ID in the dexsim world.
 
         Returns:
             int: The camera group ID.
         """
-        if self.is_rt_enabled:
-            return self._frame_buffer.get_group_id()
-        else:
-            logger.log_warning(
-                "Camera group ID is only available for Ray Tracing renderer. Returning -1 for non-RT renderer."
-            )
-            return -1
+        return self._frame_buffer.get_group_id()
 
     @property
     def is_attached(self) -> bool:
@@ -284,81 +230,38 @@ class Camera(BaseSensor):
 
         Args:
             **kwargs: Additional keyword arguments for sensor update.
-                - fetch_only (bool): If True, only fetch the data from dexsim internal frame buffer without performing rendering.
         """
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
-            if self.is_rt_enabled:
-                self._frame_buffer.apply()
-            else:
-                self._frame_buffer.apply_frame()
-
+            self._frame_buffer.apply()
         self.cfg: CameraCfg
-        # TODO: support fetch data from gpu buffer directly.
+
         if self.cfg.enable_color:
-            if self.is_rt_enabled:
-                self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
-                    self.device
-                )
-            else:
-                data = self._frame_buffer.get_color_gpu_buffer().to(self.device)
-                self._update_buffer_impl(data, self._data_buffer["color"])
+            self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
+                self.device
+            )
 
         if self.cfg.enable_depth:
-            data = self._frame_buffer.get_depth_gpu_buffer().to(self.device)
-            if self.is_rt_enabled:
-                self._data_buffer["depth"] = data
-            else:
-                self._update_buffer_impl(
-                    data, self._data_buffer["depth"].unsqueeze_(-1)
-                )
-                self._data_buffer["depth"].squeeze_(-1)
+            self._data_buffer["depth"] = self._frame_buffer.get_depth_gpu_buffer().to(
+                self.device
+            )
 
         if self.cfg.enable_mask:
-            if self.is_rt_enabled:
-                data = self._frame_buffer.get_visible_mask_gpu_buffer().to(
-                    self.device, torch.int32
-                )
-                self._data_buffer["mask"] = data
-            else:
-                data = self._frame_buffer.get_visible_gpu_buffer().to(
-                    self.device, torch.int32
-                )
-                self._update_buffer_impl(data, self._data_buffer["mask"].unsqueeze_(-1))
-                self._data_buffer["mask"].squeeze_(-1)
+            self._data_buffer[
+                "mask"
+            ] = self._frame_buffer.get_visible_mask_gpu_buffer().to(
+                self.device, torch.int32
+            )
 
         if self.cfg.enable_normal:
-            data = self._frame_buffer.get_normal_gpu_buffer().to(self.device)
-            if self.is_rt_enabled:
-                self._data_buffer["normal"] = data
-            else:
-                self._update_buffer_impl(data, self._data_buffer["normal"])
+            self._data_buffer["normal"] = self._frame_buffer.get_normal_gpu_buffer().to(
+                self.device
+            )[..., :3]
 
         if self.cfg.enable_position:
-            data = self._frame_buffer.get_position_gpu_buffer().to(self.device)
-            if self.is_rt_enabled:
-                self._data_buffer["position"] = data
-            else:
-                self._update_buffer_impl(data, self._data_buffer["position"])
-
-    def _update_buffer_impl(
-        self, data_buffer: torch.Tensor, data_buffer_out: torch.Tensor
-    ) -> None:
-        device = str(self.device)
-        channel = data_buffer.shape[-1] if data_buffer.dim() >= 3 else 1
-        wp.launch(
-            kernel=reshape_tiled_image,
-            dim=(self.num_instances, self.cfg.height, self.cfg.width),
-            inputs=[
-                wp.from_torch(data_buffer).flatten(),
-                wp.from_torch(data_buffer_out),
-                self.cfg.height,
-                self.cfg.width,
-                channel,
-                self._grid_size,
-            ],
-            device="cuda:0" if device == "cuda" else device,
-        )
+            self._data_buffer["position"] = (
+                self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
+            )
 
     def _attach_to_entity(self) -> None:
         """Attach the sensor to the parent entity in each environment."""

@@ -143,3 +143,11 @@ It shows item mode, batch mode, and dynamic chunk sizes. Run it with:
 ```bash
 python examples/agents/datasets/online_dataset_demo.py
 ```
+
+---
+
+## See Also
+
+- [EmbodiAgent](generative_sim/agents.md) — Hierarchical agent that uses online data for training
+- [RL Architecture](../overview/rl/index.rst) — RL training pipeline
+- [Data Generation Tutorial](../tutorial/data_generation.rst) — Generating offline datasets

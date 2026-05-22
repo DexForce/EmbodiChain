@@ -26,7 +26,7 @@ dynamic = ["version"]
 # Core install dependencies (kept from requirements.txt). Some VCS links are
 # specified using PEP 508 direct references where present.
 dependencies = [
-  "dexsim_engine==0.3.11",
+  "dexsim_engine==0.4.1",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
   "langchain",
@@ -39,12 +39,8 @@ dependencies = [
   "pytorch_kinematics==0.10.0",
   "polars==1.31.0",
   "PyYAML>=6.0",
-  "accelerate>=1.10.0",
   "wandb>=0.21.0",
   "tensorboard>=2.20.0",
-  "transformers>=4.53.0",
-  "diffusers>=0.32.1",
-  "deepspeed>=0.16.2",
   "ortools",
   "prettytable",
   "black==26.3.1",
@@ -56,6 +52,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gensim = [
+  "bpy",
+  "pyrender==0.1.45"
+]
+
+[tool.uv.sources]
+bpy = { index = "blender" }
+
+[[tool.uv.index]]
+name = "blender"
+url = "https://download.blender.org/pypi/"
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }

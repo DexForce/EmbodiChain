@@ -24,13 +24,14 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import (
     RigidObject,
     RigidObjectCfg,
-    ArticulationCfg,
-    Articulation,
+    RobotCfg,
+    Robot,
 )
 from embodichain.data import get_data_path
 
@@ -42,15 +43,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Run simulation in headless mode",
-    )
-    parser.add_argument(
-        "--device", type=str, default="cpu", help="Simulation device (cuda or cpu)"
-    )
+    add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
 
     # Configure the simulation
@@ -60,7 +53,9 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        enable_rt=True,  # Enable ray tracing for better visuals
+        render_cfg=RenderCfg(
+            renderer=args.renderer,
+        ),  # Enable ray tracing for better visuals
         num_envs=1,
         arena_space=3.0,
     )
@@ -98,12 +93,12 @@ def main():
     # Add objects to the scene
     h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
     print(f"Loading USD file from: {h1_path}")
-    h1: Articulation = sim.add_articulation(
-        cfg=ArticulationCfg(
+    h1: Robot = sim.add_robot(
+        cfg=RobotCfg(
             uid="h1",
             fpath=h1_path,
             build_pk_chain=False,
-            init_pos=[-0.2, -0.2, 1.0],
+            init_pos=[-0.2, -0.2, 1.05],
             use_usd_properties=False,
         )
     )

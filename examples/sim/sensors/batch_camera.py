@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, LightCfg
+from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, LightCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, Light
 from embodichain.lab.sim.sensors import (
@@ -28,6 +28,7 @@ from embodichain.lab.sim.sensors import (
     CameraCfg,
     StereoCameraCfg,
 )
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
 
 
@@ -37,7 +38,7 @@ def main(args):
         sim_device=args.device,
         num_envs=args.num_envs,
         arena_space=2,
-        enable_rt=args.enable_rt,
+        render_cfg=RenderCfg(renderer=args.renderer),
     )
     sim = SimulationManager(config)
 
@@ -47,9 +48,6 @@ def main(args):
             shape=MeshCfg(fpath=get_data_path("Chair/chair.glb")),
             init_pos=(0, 0, 0.2),
         )
-    )
-    light: Light = sim.add_light(
-        cfg=LightCfg(light_type="point", init_pos=(0, 0, 2), intensity=50)
     )
 
     if sim.is_use_gpu_physics:
@@ -98,7 +96,7 @@ def main(args):
     # plot rgba into a grid of images
     grid_x = np.ceil(np.sqrt(args.num_envs)).astype(int)
     grid_y = np.ceil(args.num_envs / grid_x).astype(int)
-    fig, axs = plt.subplots(grid_x, grid_y, figsize=(12, 6))
+    fig, axs = plt.subplots(grid_x, grid_y, figsize=(12, 6), squeeze=False)
     axs = axs.flatten()
     for i in range(args.num_envs):
 
@@ -120,22 +118,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the batch robot simulation.")
-    parser.add_argument(
-        "--num_envs", type=int, default=4, help="Number of environments to simulate."
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Device to run the simulation on.",
-    )
-    parser.add_argument(
-        "--headless", action="store_true", help="Run the simulation in headless mode."
-    )
-    parser.add_argument(
-        "--enable_rt", action="store_true", help="Enable ray tracing rendering."
-    )
+    add_env_launcher_args_to_parser(parser)
     parser.add_argument(
         "--sensor_type",
         type=str,

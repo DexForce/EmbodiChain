@@ -17,7 +17,11 @@
 from __future__ import annotations
 
 import os
+import gc
 import sys
+import queue
+import time
+import threading
 import dexsim
 import torch
 import numpy as np
@@ -26,6 +30,7 @@ import warp as wp
 from tqdm import tqdm
 from pathlib import Path
 from copy import deepcopy
+from datetime import datetime
 from functools import cached_property
 from typing import List, Union, Dict, Union, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
@@ -45,6 +50,7 @@ from dexsim.types import (
     RigidBodyGPUAPIReadType,
     ArticulationGPUAPIReadType,
 )
+from dexsim.core import TASK_RETURN
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType, Windows
@@ -68,9 +74,11 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
+    WindowRecordCfg,
     LightCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -105,14 +113,8 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run the simulation in headless mode (no Window)."""
 
-    enable_rt: bool = False
-    """Whether to enable ray tracing rendering."""
-
-    enable_denoiser: bool = True
-    """Whether to enable denoising for ray tracing rendering."""
-
-    spp: int = 64
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when ray tracing is enabled and enable_denoiser is False."""
+    render_cfg: RenderCfg = field(default_factory=RenderCfg)
+    """The rendering configuration parameters."""
 
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
@@ -147,6 +149,26 @@ class SimulationManagerCfg:
     gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
     """The GPU memory configuration parameters."""
 
+    window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
+    """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
+
+
+@dataclass
+class _WindowRecordState:
+    """Internal state for viewer-window recording."""
+
+    time_step: float
+    max_memory_bytes: int
+    output_dir: str
+    video_name: str
+    save_kwargs: dict[str, object]
+    record_camera: object | None = None
+    frames: list[np.ndarray] = field(default_factory=list)
+    current_memory_bytes: int = 0
+    last_capture_time: float = field(default_factory=time.time)
+    task_status: int = TASK_RETURN.TASK_LOOP
+    loop_handle: object | None = None
+
 
 class SimulationManager:
     r"""Global Embodied AI simulation manager.
@@ -165,6 +187,8 @@ class SimulationManager:
     """
 
     _instances = {}
+
+    _cleanup_queue: queue.Queue = queue.Queue()
 
     SUPPORTED_SENSOR_TYPES = {
         "Camera": Camera,
@@ -188,11 +212,6 @@ class SimulationManager:
 
         # Mark as initialized
         self.instance_id = instance_id
-
-        if sim_config.enable_rt and instance_id > 0:
-            logger.log_error(
-                f"Ray Tracing rendering backend is only supported for single instance (instance_id=0). "
-            )
 
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -220,11 +239,22 @@ class SimulationManager:
 
         self._window: Windows | None = None
         self._is_registered_window_control = False
+        self._window_record_state: _WindowRecordState | None = None
+        self._window_record_camera: object | None = None
+        wr = sim_config.window_record
+        self._window_record_hotkey_cfg: dict[str, object] | None = (
+            {
+                "save_path": wr.save_path,
+                "fps": wr.fps,
+                "max_memory": wr.max_memory,
+                "video_prefix": wr.video_prefix,
+            }
+            if wr.enable_hotkey
+            else None
+        )
+        self._window_record_input_control: ObjectManipulator | None = None
+        self._window_record_save_threads: list[threading.Thread] = []
 
-        fps = int(1.0 / sim_config.physics_dt)
-        self._world.set_physics_fps(fps)
-
-        self._world.set_time_scale(1.0)
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
@@ -238,13 +268,6 @@ class SimulationManager:
         self.enable_physics(True)
 
         self._env = self._world.get_env()
-
-        # set unique material path to accelerate material creation.
-        # TODO: This will be removed.
-        if self.sim_config.enable_rt is False:
-            self._env.set_unique_mat_path(
-                os.path.join(self._material_cache_dir, "default_mat")
-            )
 
         # arena is used as a standalone space for robots to simulate in.
         self._arenas: List[dexsim.environment.Arena] = []
@@ -284,7 +307,7 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            self._register_default_window_control()
+            # self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -334,7 +357,7 @@ class SimulationManager:
         """
         return instance_id in cls._instances
 
-    @property
+    @cached_property
     def num_envs(self) -> int:
         """Get the number of arenas in the simulation.
 
@@ -343,16 +366,10 @@ class SimulationManager:
         """
         return len(self._arenas) if len(self._arenas) > 0 else 1
 
-    @cached_property
+    @property
     def is_use_gpu_physics(self) -> bool:
         """Check if the physics simulation is using GPU."""
-        world_config = dexsim.get_world_config()
-        return self.device.type == "cuda" and world_config.enable_gpu_sim
-
-    @property
-    def is_rt_enabled(self) -> bool:
-        """Check if Ray Tracing rendering backend is enabled."""
-        return self.sim_config.enable_rt
+        return self.device.type == "cuda"
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -395,11 +412,10 @@ class SimulationManager:
         world_config.length_tolerance = sim_config.physics_config.length_tolerance
         world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
 
-        if sim_config.enable_rt:
-            world_config.renderer = dexsim.types.Renderer.FASTRT
-            if sim_config.enable_denoiser is False:
-                world_config.raytrace_config.spp = sim_config.spp
-                world_config.raytrace_config.open_denoise = False
+        world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+        if sim_config.render_cfg.enable_denoiser is False:
+            world_config.raytrace_config.spp = sim_config.render_cfg.spp
+            world_config.raytrace_config.open_denoise = False
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
@@ -458,28 +474,6 @@ class SimulationManager:
         if self._is_initialized_gpu_physics:
             return
 
-        # init rigid body.
-        rigid_body_num = (
-            0
-            if self._get_non_static_rigid_obj_num() == 0
-            else len(self._ps.get_gpu_rigid_indices())
-        )
-        self._rigid_body_pose = torch.zeros(
-            (rigid_body_num, 7), dtype=torch.float32, device=self.device
-        )
-
-        # init articulation.
-        articulation_num = (
-            0
-            if len(self._articulations) == 0 and len(self._robots) == 0
-            else len(self._ps.get_gpu_articulation_indices())
-        )
-        max_link_count = self._ps.gpu_get_articulation_max_link_count()
-        self._link_pose = torch.zeros(
-            (articulation_num, max_link_count, 7),
-            dtype=torch.float32,
-            device=self.device,
-        )
         for art in self._articulations.values():
             art.reallocate_body_data()
         for robot in self._robots.values():
@@ -498,12 +492,7 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
-        if self.is_rt_enabled:
-            self._world.render_camera_group(group_ids)
-        else:
-            logger.log_warning(
-                "This interface is only valid when Ray Tracing rendering backend is enabled."
-            )
+        self._world.render_camera_group(group_ids)
 
     def update(self, physics_dt: float | None = None, step: int = 10) -> None:
         """Update the physics.
@@ -524,42 +513,8 @@ class SimulationManager:
             for i in range(step):
                 self._world.update(physics_dt)
 
-            if self.sim_config.enable_rt is False:
-                self._sync_gpu_data()
-
         else:
             logger.log_warning("Physics simulation is not manually updated.")
-
-    def _sync_gpu_data(self) -> None:
-        if not self.is_use_gpu_physics:
-            return
-
-        if not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                "GPU physics is not initialized. Skipping GPU data synchronization."
-            )
-            return
-
-        if self.is_window_opened or self._sensors:
-            if len(self._rigid_body_pose) > 0:
-                self._ps.gpu_fetch_rigid_body_data(
-                    data=CudaArray(self._rigid_body_pose),
-                    gpu_indices=self._ps.get_gpu_rigid_indices(),
-                    data_type=RigidBodyGPUAPIReadType.POSE,
-                )
-
-            if len(self._link_pose) > 0:
-                self._ps.gpu_fetch_link_data(
-                    data=CudaArray(self._link_pose),
-                    gpu_indices=self._ps.get_gpu_articulation_indices(),
-                    data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
-                )
-
-            # TODO: might be optimized.
-            self._world.sync_poses_gpu_to_cpu(
-                rigid_pose=CudaArray(self._rigid_body_pose),
-                link_pose=CudaArray(self._link_pose),
-            )
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -589,12 +544,23 @@ class SimulationManager:
         """Open the simulation window."""
         self._world.open_window()
         self._window = self._world.get_windows()
-        self._register_default_window_control()
+
+        # TODO: will open these features after fix the related blocking issues.
+        # self._register_default_window_control()
+        # if (
+        #     self._window_record_hotkey_cfg is not None
+        #     and self._window_record_input_control is None
+        # ):
+        #     self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
         """Close the simulation window."""
+        if self.is_window_recording():
+            self.stop_window_record()
         self._world.close_window()
+        self._window = None
+        self._window_record_input_control = None
         self.is_window_opened = False
 
     def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
@@ -662,6 +628,7 @@ class SimulationManager:
         plane_collision = self._env.create_cube(
             default_length, default_length, default_length / 10
         )
+        plane_collision.set_visible(False)
         plane_collision_pose = np.eye(4, dtype=float)
         plane_collision_pose[2, 3] = -default_length / 20 - 0.001
         plane_collision.set_local_pose(plane_collision_pose)
@@ -682,16 +649,25 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
+                roughness=0.7,
             )
         )
 
-        if self.sim_config.enable_rt:
-            self.set_emission_light([1.0, 1.0, 1.0], 80.0)
-        else:
-            self.set_indirect_lighting("lab_day")
+        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
 
         self._default_plane.set_material(mat.get_instance("plane_mat").mat)
         self._visual_materials[mat_name] = mat
+
+    def set_ground_plane_visibility(self, visible: bool) -> None:
+        """_summary_
+
+        Args:
+            visible (bool): _description_
+        """
+        if visible:
+            self._default_plane.set_visible(True)
+        else:
+            self._default_plane.set_visible(False)
 
     def set_texture_cache(
         self, key: str, texture: Union[torch.Tensor, List[torch.Tensor]]
@@ -1064,17 +1040,20 @@ class SimulationManager:
             )
         return arena_offsets
 
-    def _get_non_static_rigid_obj_num(self) -> int:
-        """Get the number of non-static rigid objects in the scene.
+    def has_non_static_rigid_object(self) -> bool:
+        """Check if there is any non-static rigid object in the simulation.
 
         Returns:
-            int: The number of non-static rigid objects.
+            bool: True if there is at least one non-static rigid object, False otherwise.
         """
-        count = 0
-        for obj in self._rigid_objects.values():
-            if obj.cfg.body_type != "static":
-                count += 1
-        return count
+        for rigid_obj in self._rigid_objects.values():
+            if rigid_obj.body_type != "static":
+                return True
+
+        if len(self._rigid_object_groups) > 0:
+            return True
+
+        return False
 
     def add_articulation(
         self,
@@ -1105,7 +1084,9 @@ class SimulationManager:
             if len(env_list) > 1:
                 logger.log_error(f"Currently not supporting multiple arenas for USD.")
             env = self._env
-            results = env.import_from_usd_file(cfg.fpath, return_object=True)
+            results = env.import_from_usd_file(
+                cfg.fpath, return_object=True, cache_dir=self._convex_decomp_dir
+            )
             # print("USD import results:", results)
 
             articulations_found = []
@@ -1664,11 +1645,6 @@ class SimulationManager:
         """Register default window controls for better simulation interaction."""
         from dexsim.types import InputKey
 
-        # TODO: window control has stucking issue with extra sensor under Raster renderer backend.
-        # Will be fixed in next dexsim release.
-        if self.is_rt_enabled is False:
-            return
-
         if self._is_registered_window_control:
             return
 
@@ -1706,6 +1682,230 @@ class SimulationManager:
         for control in controls:
             self._window.add_input_control(control)
 
+    def _build_window_record_output(
+        self, save_path: str | None, video_prefix: str
+    ) -> tuple[str, str]:
+        """Resolve the output directory and file name for viewer recording."""
+        if save_path is None:
+            output_dir = os.path.join(os.getcwd(), "outputs", "videos")
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            video_name = f"{video_prefix}_{timestamp}"
+        else:
+            output_dir = os.path.dirname(save_path) or os.getcwd()
+            video_name = Path(os.path.basename(save_path)).stem
+        return output_dir, video_name
+
+    def is_window_recording(self) -> bool:
+        """Check whether the viewer window is currently recording."""
+        return self._window_record_state is not None
+
+    def _step_window_record(self, state: _WindowRecordState) -> int:
+        """Capture frames in the render thread without blocking the UI loop."""
+        if state.task_status != TASK_RETURN.TASK_LOOP:
+            return state.task_status
+
+        now = time.time()
+        if now - state.last_capture_time < state.time_step:
+            return state.task_status
+
+        state.last_capture_time = now
+        frame: np.ndarray | None = None
+        if self._window is not None and state.record_camera is not None:
+            pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+            state.record_camera.set_world_pose(pose)
+            state.record_camera.render()
+            rgb = np.asarray(state.record_camera.get_rgb_map())
+            if rgb.size != 0:
+                frame = np.ascontiguousarray(rgb[..., :3])
+        if frame is None:
+            return state.task_status
+
+        state.frames.append(frame)
+        state.current_memory_bytes += frame.nbytes
+        if state.current_memory_bytes > state.max_memory_bytes:
+            logger.log_warning(
+                "Viewer recording exceeded the configured memory budget. "
+                "Press 'r' again to flush the buffered frames to disk."
+            )
+            state.task_status = TASK_RETURN.TASK_EXIT
+
+        return state.task_status
+
+    def _save_window_record_worker(
+        self,
+        frames: list[np.ndarray],
+        output_dir: str,
+        video_name: str,
+        save_kwargs: dict[str, object],
+    ) -> None:
+        """Encode buffered frames into a video file in a background thread."""
+        from dexsim.utility import images_to_video
+
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            images_to_video(
+                images=frames,
+                output_dir=output_dir,
+                video_name=video_name,
+                **save_kwargs,
+            )
+            logger.log_info(
+                f"Viewer recording saved to {os.path.join(output_dir, video_name + '.mp4')}"
+            )
+        except Exception as exc:
+            logger.log_error(f"Failed to save viewer recording: {exc}")
+
+    def start_window_record(
+        self,
+        save_path: str | None = None,
+        fps: int = 20,
+        max_memory: int = 1024,
+        video_prefix: str = "viewer_record",
+    ) -> bool:
+        """Start asynchronously recording the viewer by buffering frames from a hidden camera
+        that follows the live window camera pose.
+        """
+        if self._window is None:
+            logger.log_warning("No simulation window available for viewer recording.")
+            return False
+        width = self.sim_config.width
+        height = self.sim_config.height
+        if self._window_record_camera is None:
+            camera_name = f"viewer_record_camera_{self.instance_id}"
+            self._window_record_camera = self._env.create_camera(
+                camera_name, width, height
+            )
+        record_camera = self._window_record_camera
+        if hasattr(record_camera, "is_open") and record_camera.is_open() is False:
+            record_camera.open_camera()
+
+        time_step = 1.0 / float(fps)
+        output_dir, video_name = self._build_window_record_output(
+            save_path, video_prefix
+        )
+        state = _WindowRecordState(
+            time_step=time_step,
+            max_memory_bytes=max_memory * 1024 * 1024,
+            output_dir=output_dir,
+            video_name=video_name,
+            save_kwargs={"fps": fps},
+            record_camera=record_camera,
+            last_capture_time=time.time() - time_step,
+        )
+
+        def _window_record_loop(_: float) -> int:
+            return self._step_window_record(state)
+
+        state.loop_handle = self._world.thread_rt().add_loop(
+            _window_record_loop, time_step
+        )
+        self._window_record_state = state
+
+        logger.log_info(
+            f"Viewer recording started. Press 'r' again to stop and save to "
+            f"{os.path.join(output_dir, video_name + '.mp4')}"
+        )
+        return True
+
+    def stop_window_record(self, save_path: str | None = None) -> bool:
+        """Stop the active viewer recording and save frames in the background."""
+        if self._window_record_state is None:
+            logger.log_warning("No active viewer recording session found.")
+            return False
+
+        state = self._window_record_state
+        state.task_status = TASK_RETURN.TASK_EXIT
+        if save_path is not None:
+            output_dir, video_name = self._build_window_record_output(
+                save_path, "viewer_record"
+            )
+        else:
+            output_dir, video_name = state.output_dir, state.video_name
+
+        if state.record_camera is not None and hasattr(state.record_camera, "is_open"):
+            if state.record_camera.is_open():
+                state.record_camera.close_camera()
+
+        frames = list(state.frames)
+        self._window_record_state = None
+        if len(frames) == 0:
+            logger.log_warning(
+                "Viewer recording stopped, but no frames were captured. Skipping video export."
+            )
+            return False
+
+        self._window_record_save_threads = [
+            thread for thread in self._window_record_save_threads if thread.is_alive()
+        ]
+        save_thread = threading.Thread(
+            target=self._save_window_record_worker,
+            args=(frames, output_dir, video_name, dict(state.save_kwargs)),
+            daemon=False,
+        )
+        save_thread.start()
+        self._window_record_save_threads.append(save_thread)
+        logger.log_info(
+            "Viewer recording stopped. Saving video to "
+            f"{os.path.join(output_dir, video_name + '.mp4')} in background."
+        )
+        return True
+
+    def toggle_window_record(
+        self,
+        save_path: str | None = None,
+        fps: int = 20,
+        max_memory: int = 1024,
+        video_prefix: str = "viewer_record",
+    ) -> bool:
+        """Toggle viewer recording on or off."""
+        if self.is_window_recording():
+            return self.stop_window_record(save_path=save_path)
+        return self.start_window_record(
+            save_path=save_path,
+            fps=fps,
+            max_memory=max_memory,
+            video_prefix=video_prefix,
+        )
+
+    def enable_window_record_hotkey(
+        self,
+        save_path: str | None = None,
+        fps: int = 20,
+        max_memory: int = 1024,
+        video_prefix: str = "viewer_record",
+    ) -> bool:
+        """Register the ``r`` key to start/stop viewer recording."""
+        self._window_record_hotkey_cfg = {
+            "save_path": save_path,
+            "fps": fps,
+            "max_memory": max_memory,
+            "video_prefix": video_prefix,
+        }
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The viewer record hotkey will be registered after `open_window()`."
+            )
+            return False
+        if self._window_record_input_control is not None:
+            return True
+
+        from dexsim.types import InputKey
+
+        sim = self
+        hotkey_cfg = dict(self._window_record_hotkey_cfg)
+
+        class WindowRecordEvent(ObjectManipulator):
+            def on_key_down(self, key):
+                if key == InputKey.SCANCODE_R.value:
+                    sim.toggle_window_record(**hotkey_cfg)
+
+        self._window_record_input_control = WindowRecordEvent()
+        self._window.add_input_control(self._window_record_input_control)
+        logger.log_info(
+            "Viewer record hotkey registered. Press 'r' to start/stop recording."
+        )
+        return True
+
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.
 
@@ -1742,7 +1942,8 @@ class SimulationManager:
 
     def clean_materials(self):
         self._visual_materials = {}
-        self._env.clean_materials()
+        if self._env:
+            self._env.clean_materials()
 
     def reset_objects_state(
         self,
@@ -1792,15 +1993,136 @@ class SimulationManager:
             logger.log_error(f"Failed to export simulation scene to USD: {e}")
             return False
 
+    @staticmethod
+    def wait_scene_destruction(timeout_ms: int = 10000) -> None:
+        """A public helper to wait for the underlying C++ scenes (dexsim.World) to destruct completely."""
+        import dexsim
+        import gc
+
+        # Force garbage collection to break cycle references
+        gc.collect()
+
+        import time
+
+        wait_times = 0
+        scene_count = dexsim.get_world_num()
+        max_loops = timeout_ms // 10
+        while scene_count > 0 and wait_times < max_loops:
+            time.sleep(0.01)
+            scene_count = dexsim.get_world_num()
+            wait_times += 1
+            if wait_times % 50 == 0:
+                from embodichain.utils import logger
+
+                logger.log_info(
+                    f"Waiting for dexsim.World scenes to destruct. Remaining scenes: {scene_count}"
+                )
+        if scene_count > 0:
+            from embodichain.utils import logger
+
+            logger.log_warning(
+                f"Scene destruction wait timeout, {scene_count} C++ scene(s) still alive!"
+            )
+
     def destroy(self) -> None:
+        """
+        No longer destructs C++ objects in place due to lingering deep local variables;
+        instead, packages itself into a destruction task, submits to the cleanup queue,
+        and waits for top-level delayed consumption.
+        """
+        self._is_pending_kill = True
+
+        # Transfer the actual destruction logic to the cleanup queue
+        SimulationManager._cleanup_queue.put(self._deferred_destroy)
+
+    def _deferred_destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)
 
+        import sys, gc
+
         self.clean_materials()
 
-        self._env.clean()
-        self._world.quit()
+        if self._env:
+            self._env.clean()
+        if self._world:
+            self._world.quit()
+
+        # REMOVE INSTANCE FROM POOL
+        instance_id = getattr(self, "instance_id", 0)
+        SimulationManager.reset(instance_id)
+
+        # Helper to aggressively decouple C++ wrapped objects
+        def _sever_wrapper_refs(obj_registry):
+            if not hasattr(self, obj_registry):
+                return
+            registry = getattr(self, obj_registry)
+            if not isinstance(registry, dict):
+                return
+            for uid, obj in registry.items():
+                if hasattr(obj, "_world"):
+                    obj._world = None
+                if hasattr(obj, "_ps"):
+                    obj._ps = None
+                if hasattr(obj, "_env"):
+                    obj._env = None
+                if hasattr(obj, "_entities"):
+                    obj._entities = []
+            registry.clear()
+
+        _sever_wrapper_refs("_gizmos")
+        _sever_wrapper_refs("_markers")
+        _sever_wrapper_refs("_rigid_objects")
+        _sever_wrapper_refs("_rigid_object_groups")
+        _sever_wrapper_refs("_soft_objects")
+        _sever_wrapper_refs("_cloth_objects")
+        _sever_wrapper_refs("_articulations")
+        _sever_wrapper_refs("_robots")
+        _sever_wrapper_refs("_sensors")
+        _sever_wrapper_refs("_lights")
+
+        # Explicitly clear Python references to trigger C++ object destructors
+        self._ps = None
+        self._env = None
+        self._world = None
+        self._default_plane = None
+
+        # Try to break ANY possible frame cycle
+        gc.collect()
+
+        self._visual_materials.clear()
+        self._texture_cache.clear()
+        self._arenas.clear()
+        self._markers.clear()
+        self._gizmos.clear()
 
         SimulationManager.reset(self.instance_id)
+
+        # Forcefully drop underlying C++ object wrappers
+        self._env = None
+        self._world = None
+
+        gc.collect()
+
+    @staticmethod
+    def flush_cleanup_queue():
+        """Dequeue executor and synchronization barrier provided for top-level main loop / Pytest Fixture calls"""
+        import gc
+
+        while not SimulationManager._cleanup_queue.empty():
+            task = SimulationManager._cleanup_queue.get_nowait()
+            try:
+                task()
+            except Exception as e:
+                from embodichain.utils import logger
+
+                logger.log_error(f"Error during delayed destruction: {e}")
+                pass
+
+        # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
+        gc.collect()
+
+        # At this point, wait for the C++ Scene to return to zero, since the stack is at the top level, there will definitely be no deadlock
+        SimulationManager.wait_scene_destruction()

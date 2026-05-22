@@ -1,0 +1,157 @@
+name: Test docs publish logic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Scenario A: push to main — existing v0.1.0, v0.2.0 must survive
+  # Simulates: cache holds v0.1.0 + v0.2.0, build adds/updates main/
+  # -----------------------------------------------------------------------
+  test-main-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up fake "cache" (previous full-site with versioned dirs)
+        run: |
+          mkdir -p docs/build/html/v0.1.0 docs/build/html/v0.2.0
+          echo "<html>v0.1.0</html>" > docs/build/html/v0.1.0/index.html
+          echo "<html>v0.2.0</html>" > docs/build/html/v0.2.0/index.html
+
+      - name: Simulate build step — update main/ only
+        run: |
+          GITHUB_REF=refs/heads/main
+          DOCS_MAX_VERSIONS=4
+
+          # Mirrors the workflow: rm -rf build/html/main, then build
+          rm -rf docs/build/html/main
+          mkdir -p docs/build/html/main
+          echo "<html><body>main docs (new build)</body></html>" > docs/build/html/main/index.html
+
+          cd docs/build/html
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py --build-dir .
+
+      - name: Assert — v0.1.0 and v0.2.0 still present, main updated
+        run: |
+          echo "=== docs/build/html structure ===" && find docs/build/html -maxdepth 1 | sort
+          [ -d docs/build/html/v0.1.0 ] || (echo "FAIL: v0.1.0 removed!" && exit 1)
+          [ -d docs/build/html/v0.2.0 ] || (echo "FAIL: v0.2.0 removed!" && exit 1)
+          grep -q "new build" docs/build/html/main/index.html || (echo "FAIL: main not updated!" && exit 1)
+          [ -f docs/build/html/versions.json ] || (echo "FAIL: versions.json missing!" && exit 1)
+          echo "=== versions.json ===" && cat docs/build/html/versions.json
+          python3 -c "
+          import json
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert 'v0.1.0' in names and 'v0.2.0' in names and 'main' in names, f'Missing versions: {names}'
+          print('PASS: all versions present:', names)
+          "
+          echo "PASS: main_push — existing versions preserved"
+
+  # -----------------------------------------------------------------------
+  # Scenario B: tag push v0.3.0 — new version added, old dirs untouched
+  # -----------------------------------------------------------------------
+  test-tag-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up fake "cache" (previous full-site)
+        run: |
+          mkdir -p docs/build/html/v0.1.0 docs/build/html/v0.2.0 docs/build/html/main
+          echo "<html>v0.1.0</html>" > docs/build/html/v0.1.0/index.html
+          echo "<html>v0.2.0</html>" > docs/build/html/v0.2.0/index.html
+          echo "<html>main</html>"   > docs/build/html/main/index.html
+
+      - name: Simulate build step — add v0.3.0
+        run: |
+          GITHUB_REF=refs/tags/v0.3.0
+          DOCS_MAX_VERSIONS=4
+
+          mkdir -p docs/build/html/v0.3.0
+          echo "<html>v0.3.0</html>" > docs/build/html/v0.3.0/index.html
+
+          cd docs/build/html
+          mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+          while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+            echo "Pruning: ${TAG_DIRS[0]}"
+            rm -rf "${TAG_DIRS[0]}"
+            TAG_DIRS=("${TAG_DIRS[@]:1}")
+          done
+
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py --build-dir .
+
+      - name: Assert — all four dirs present, latest is v0.3.0
+        run: |
+          echo "=== docs/build/html structure ===" && find docs/build/html -maxdepth 1 | sort
+          for d in v0.1.0 v0.2.0 v0.3.0 main; do
+            [ -d "docs/build/html/$d" ] || (echo "FAIL: $d missing!" && exit 1)
+          done
+          echo "=== versions.json ===" && cat docs/build/html/versions.json
+          python3 -c "
+          import json
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert d['latest'] == 'v0.3.0', f'latest should be v0.3.0, got {d[\"latest\"]}'
+          assert all(n in names for n in ['v0.1.0','v0.2.0','v0.3.0','main']), f'Missing: {names}'
+          print('PASS: versions.json correct, latest =', d['latest'])
+          "
+          echo "PASS: tag_push — new version added, others preserved"
+
+  # -----------------------------------------------------------------------
+  # Scenario C: 5th tag triggers pruning — oldest (v0.1.0) removed
+  # -----------------------------------------------------------------------
+  test-prune-old-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up fake "cache" with 4 existing tag dirs (at the limit)
+        run: |
+          for v in v0.1.0 v0.2.0 v0.3.0 v0.4.0; do
+            mkdir -p docs/build/html/${v}
+            echo "<html>${v}</html>" > docs/build/html/${v}/index.html
+          done
+          mkdir -p docs/build/html/main
+          echo "<html>main</html>" > docs/build/html/main/index.html
+
+      - name: Simulate build step — push v0.5.0 triggers prune
+        run: |
+          GITHUB_REF=refs/tags/v0.5.0
+          DOCS_MAX_VERSIONS=4
+
+          mkdir -p docs/build/html/v0.5.0
+          echo "<html>v0.5.0</html>" > docs/build/html/v0.5.0/index.html
+
+          cd docs/build/html
+          mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+          while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS} ]]; do
+            echo "Pruning: ${TAG_DIRS[0]}"
+            rm -rf "${TAG_DIRS[0]}"
+            TAG_DIRS=("${TAG_DIRS[@]:1}")
+          done
+
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py --build-dir .
+
+      - name: Assert — v0.1.0 pruned, max 4 tags kept, main untouched
+        run: |
+          echo "=== docs/build/html structure ===" && find docs/build/html -maxdepth 1 | sort
+          [ ! -d docs/build/html/v0.1.0 ] || (echo "FAIL: v0.1.0 should be pruned!" && exit 1)
+          for d in v0.2.0 v0.3.0 v0.4.0 v0.5.0 main; do
+            [ -d "docs/build/html/$d" ] || (echo "FAIL: $d was incorrectly removed!" && exit 1)
+          done
+          TAG_COUNT=$(ls -d docs/build/html/v*/ 2>/dev/null | wc -l)
+          [ "${TAG_COUNT}" -le 4 ] || (echo "FAIL: ${TAG_COUNT} tags exceed DOCS_MAX_VERSIONS=4" && exit 1)
+          echo "=== versions.json ===" && cat docs/build/html/versions.json
+          python3 -c "
+          import json
+          d = json.load(open('docs/build/html/versions.json'))
+          names = [v['name'] for v in d['versions']]
+          assert 'v0.1.0' not in names, f'v0.1.0 should be pruned: {names}'
+          assert d['latest'] == 'v0.5.0', f'latest should be v0.5.0, got {d[\"latest\"]}'
+          tag_count = sum(1 for v in d['versions'] if v['type'] == 'tag')
+          assert tag_count <= 4, f'Too many tags: {tag_count}'
+          print('PASS: pruning correct, latest =', d['latest'], ', tag count =', tag_count)
+          "
+          echo "PASS: prune — oldest removed, within limit, main preserved"

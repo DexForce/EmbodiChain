@@ -1,11 +1,10 @@
-{ 
+{
     "trainer": {
         "exp_name": "cart_pole_ppo",
         "gym_config": "configs/agents/rl/basic/cart_pole/gym_config.json",
         "seed": 42,
         "device": "cuda:0",
         "headless": true,
-        "enable_rt": false,
         "gpu_id": 0,
         "num_envs": 64,
         "iterations": 1000,
@@ -22,30 +21,57 @@
                     "interval_step": 1,
                     "params": {
                         "name": "main_cam",
-                        "resolution": [640, 480],
-                        "eye": [-1.4, 1.4, 2.5],
-                        "target": [0, 0, 0.7],
-                        "up": [0, 0, 1],
-                        "intrinsics": [600, 600, 320, 240],
+                        "resolution": [
+                            640,
+                            480
+                        ],
+                        "eye": [
+                            -1.4,
+                            1.4,
+                            2.5
+                        ],
+                        "target": [
+                            0,
+                            0,
+                            0.7
+                        ],
+                        "up": [
+                            0,
+                            0,
+                            1
+                        ],
+                        "intrinsics": [
+                            600,
+                            600,
+                            320,
+                            240
+                        ],
                         "save_path": "./outputs/videos/eval"
                     }
                 }
             }
-        }
+        },
+        "renderer": "fast-rt"
     },
     "policy": {
         "name": "actor_critic",
         "actor": {
             "type": "mlp",
             "network_cfg": {
-                "hidden_sizes": [256, 256],
+                "hidden_sizes": [
+                    256,
+                    256
+                ],
                 "activation": "relu"
             }
         },
         "critic": {
             "type": "mlp",
             "network_cfg": {
-                "hidden_sizes": [256, 256],
+                "hidden_sizes": [
+                    256,
+                    256
+                ],
                 "activation": "relu"
             }
         }

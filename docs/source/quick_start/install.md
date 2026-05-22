@@ -32,6 +32,31 @@ Use the provided run script ([`docker/docker_run.sh`](../../../docker/docker_run
 ./docker/docker_run.sh <container_name> <data_path>
 ```
 
+### uv (Recommended for local development)
+
+> [!TIP]
+> [uv](https://github.com/astral-sh/uv) is an extremely fast Python package manager and project manager. We recommend using `uv` for local development due to its significantly faster dependency resolution and installation times compared to pip.
+
+**Install uv:**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Install from PyPI:**
+
+```bash
+uv pip install embodichain --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+```
+
+**Install from source (editable mode):**
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+uv pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
+```
+
 ### pip (PyPI)
 
 > [!TIP]
@@ -52,6 +77,50 @@ cd EmbodiChain
 pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 ```
 
+### Generative Simulation Dependencies
+
+If you want to use the generative simulation features, install EmbodiChain with the `gensim` extra. This installs the additional rendering and asset-processing dependencies, including `pyrender` and `bpy`. The `bpy` wheel is distributed from Blender's package index, so the Blender index must be included in the install command.
+
+**Install from PyPI with `uv`:**
+
+```bash
+uv pip install "embodichain[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+**Install from source with `uv`:**
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+uv pip install -e ".[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+**Install from PyPI with `pip`:**
+
+```bash
+pip install "embodichain[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+**Install from source with `pip`:**
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+pip install -e ".[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
 ## Verify Installation
 
 Run the demo script to confirm everything is set up correctly:
@@ -64,20 +133,4 @@ If the installation is successful, you will see a simulation window with a rende
 
 ```bash
 python scripts/tutorials/sim/create_scene.py --headless
-```
-
-## Using an AI Coding Agent
-
-EmbodiChain ships with built-in skills for AI coding agents (Claude Code, Copilot CLI, etc.) that automate common development tasks:
-
-| Skill | Command | Purpose |
-|-------|---------|---------|
-| Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
-| Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
-| Add Test | `/add-test` | Write tests following project conventions |
-| Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
-| Create PR | `/pr` | Create a PR following the project template |
-| Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |
-
-Run `/pre-commit-check` before every commit to catch formatting, header, annotation, and export issues locally — the same checks the CI pipeline enforces.
 ```
