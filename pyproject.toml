@@ -48,8 +48,12 @@ dependencies = [
   "h5py",
   "tensordict",
   "viser==1.0.21",
-  "lerobot>=0.4.4"
+  "lerobot>=0.4.4",
+  "jinja2>=3.1.0"
 ]
+
+[project.scripts]
+embodichain-new-task = "embodichain.toolkits.scaffold.cli:main"
 
 [project.optional-dependencies]
 gensim = [
@@ -70,5 +74,8 @@ version = { file = ["VERSION"] }
 [tool.setuptools.packages.find]
 where = ["."]
 exclude = ["docs"]
+
+[tool.setuptools.package-data]
+"embodichain.toolkits.scaffold" = ["templates/**/*.j2"]
 
 [tool.black]
