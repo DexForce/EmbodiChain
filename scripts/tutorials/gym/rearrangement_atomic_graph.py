@@ -339,7 +339,10 @@ def build_parser() -> argparse.Namespace:
         "--prefer_runtime_llm_recovery",
         action="store_true",
         default=False,
-        help="Prefer runtime LLM recovery when a monitor triggers.",
+        help=(
+            "Prefer runtime LLM recovery when a monitor triggers. "
+            "Enabled automatically by --runtime_llm_recovery."
+        ),
     )
     parser.add_argument(
         "--recovery_max_monitor_attempts",
@@ -613,9 +616,15 @@ def main() -> None:
             "regenerate": args.regenerate,
             "recovery": True,
             "runtime_llm_recovery": args.runtime_llm_recovery,
-            "prefer_runtime_llm_recovery": args.prefer_runtime_llm_recovery,
+            "prefer_runtime_llm_recovery": (
+                args.prefer_runtime_llm_recovery or args.runtime_llm_recovery
+            ),
             "recovery_max_monitor_attempts": args.recovery_max_monitor_attempts,
             "recovery_max_total_attempts": args.recovery_max_total_attempts,
+            "runtime_recovery_max_monitor_attempts": (
+                args.recovery_max_monitor_attempts
+            ),
+            "runtime_recovery_max_total_attempts": (args.recovery_max_total_attempts),
             "forced_recovery_injection": forced_error_config,
             "use_atomic_action_graph": not args.disable_atomic_action_graph,
             "require_atomic_action_graph": args.require_atomic_action_graph,

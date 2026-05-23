@@ -45,16 +45,8 @@ class RecoveryPrompt:
           "pre_grasp_dis": 0.1
         },
         {
-          "type": "action",
-          "name": "return_arm_home",
-          "left_arm_action": null,
-          "right_arm_action": {
-            "kind": "atomic_action",
-            "name": "move",
-            "cfg": {"control_part": "<same arm as regrasp>"},
-            "target": {"kind": "initial_pose"},
-            "runtime_kwargs": {}
-          }
+          "type": "move_to_safe_pose",
+          "robot_name": "<same arm as regrasp>"
         }
       ],
       "merge": "target",
@@ -125,16 +117,8 @@ class RecoveryPrompt:
       ],
       "recovery": [
         {
-          "type": "action",
-          "name": "return_arm_home",
-          "left_arm_action": null,
-          "right_arm_action": {
-            "kind": "atomic_action",
-            "name": "move",
-            "cfg": {"control_part": "<left_arm or right_arm>"},
-            "target": {"kind": "initial_pose"},
-            "runtime_kwargs": {}
-          }
+          "type": "move_to_safe_pose",
+          "arms": ["<left_arm or right_arm>"]
         },
         {
           "type": "regrasp",
@@ -184,6 +168,10 @@ class RecoveryPrompt:
                                 "**Runtime state summary:**\n{runtime_state}\n\n"
                                 "**Nominal task graph JSON:**\n{task_graph}\n\n"
                                 "**Required JSON schema:**\n{recovery_schema}\n\n"
+                                "Allowed runtime recovery step types are only "
+                                "`move_to_safe_pose`, `regrasp`, "
+                                "`retry_failed_edge`, and `replay_edge`. Do not "
+                                "output direct `action` steps.\n\n"
                                 "Output exactly one JSON object. If the failure is "
                                 "not recoverable using supported steps, output "
                                 "`{empty_recovery_schema}`."

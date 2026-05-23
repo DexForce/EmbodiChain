@@ -22,6 +22,7 @@ import json
 import sys
 import types
 from collections import defaultdict
+from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -49,7 +50,7 @@ def stable_json_hash(content):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _load_compile_agent_class():
+def _load_compile_agent_namespace():
     source_path = (
         REPO_ROOT / "embodichain" / "agents" / "hierarchy" / "compile_agent.py"
     )
@@ -73,10 +74,23 @@ def _load_compile_agent_class():
             in {
                 "_canonicalize_recovery_spec_with_llm",
                 "_build_runtime_recovery_planner",
+                "_call_runtime_recovery_agent",
                 "_heuristic_runtime_recovery_edges",
+                "_heuristic_runtime_recovery_spec",
                 "_infer_recovery_object_name",
                 "_default_recovery_robot_for_object",
                 "_collect_runtime_state",
+                "_sanitize_runtime_recovery_spec",
+                "_sanitize_runtime_recovery_step",
+                "_runtime_recovery_signature",
+                "_runtime_recovery_repeats_strategy",
+                "_runtime_recovery_step_type",
+                "_first_runtime_branch_edges",
+                "_task_graph_with_runtime_edge",
+                "_edge_to_dict",
+                "_action_to_jsonable",
+                "_monitor_from_failure_context",
+                "_jsonable",
                 "_empty_recovery_spec",
                 "_runtime_kwargs",
                 "_stable_json_hash",
@@ -90,6 +104,7 @@ def _load_compile_agent_class():
         "json": json,
         "Path": Path,
         "partial": partial,
+        "deepcopy": deepcopy,
         "database_agent_prompt_dir": Path("/tmp"),
         "extract_json_object": extract_json_object,
         "normalize_json_content": normalize_json_content,
@@ -98,6 +113,11 @@ def _load_compile_agent_class():
         compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"),
         namespace,
     )
+    return namespace
+
+
+def _load_compile_agent_class():
+    namespace = _load_compile_agent_namespace()
     return namespace["CompileAgent"]
 
 
@@ -261,6 +281,237 @@ def test_agent_graph_can_use_runtime_recovery_planner() -> None:
     assert calls == ["fail_nominal", "runtime_upright", "fail_nominal"]
 
 
+def test_agent_graph_prefers_runtime_recovery_over_static_branch() -> None:
+    calls = []
+    captured_contexts = []
+    triggered = {"value": False}
+
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        monitor_index = (
+            0
+            if right_arm_action == "fail_nominal"
+            and monitor_sequences
+            and not triggered["value"]
+            else None
+        )
+        if monitor_index is not None:
+            triggered["value"] = True
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": monitor_index,
+            "monitor_name": (
+                "monitor_object_held" if monitor_index is not None else None
+            ),
+            "step_index": 3 if monitor_index is not None else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+    agent_graph_edge = graph_namespace["AgentGraphEdge"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+    graph.add_edge(
+        "r_static",
+        "v0_start",
+        "v1_done",
+        right_arm_action="static_recovery",
+        is_recovery=True,
+    )
+    graph.add_recovery("e01", monitor_index=0, recovery_edges=["r_static"])
+
+    def runtime_planner(**kwargs):
+        captured_contexts.append(kwargs)
+        return [
+            agent_graph_edge(
+                id="rt01",
+                source="v0_start",
+                target="v0_start",
+                right_arm_action="runtime_recovery",
+                is_recovery=True,
+            )
+        ]
+
+    actions = graph.run(
+        env=object(),
+        runtime_recovery_planner=runtime_planner,
+        prefer_runtime_llm_recovery=True,
+    )
+
+    assert actions.actions == ["fail_nominal", "runtime_recovery", "fail_nominal"]
+    assert calls == ["fail_nominal", "runtime_recovery", "fail_nominal"]
+    assert captured_contexts[0]["failure_context"] == {
+        "edge_id": "e01",
+        "origin_edge_id": "e01",
+        "edge_source": "v0_start",
+        "edge_target": "v1_done",
+        "edge_is_recovery": False,
+        "monitor_index": 0,
+        "monitor_name": "monitor_object_held",
+        "step_index": 3,
+        "failure_class": "monitor:monitor_object_held:0",
+        "failure_reason": "Monitor 'monitor_object_held' triggered.",
+    }
+    assert captured_contexts[0]["recovery_history"] == []
+
+
+def test_agent_graph_passes_recovery_history_to_runtime_planner() -> None:
+    calls = []
+    planner_calls = []
+    nominal_failures = 0
+    runtime_failures = 0
+
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
+        nonlocal nominal_failures, runtime_failures
+
+        calls.append(right_arm_action)
+        monitor_index = None
+        if right_arm_action == "fail_nominal" and monitor_sequences:
+            nominal_failures += 1
+            monitor_index = 0 if nominal_failures == 1 else None
+        elif right_arm_action == "runtime_recovery" and monitor_sequences:
+            runtime_failures += 1
+            monitor_index = 0 if runtime_failures == 1 else None
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": monitor_index,
+            "monitor_name": (
+                "monitor_object_held" if monitor_index is not None else None
+            ),
+            "step_index": 0 if monitor_index is not None else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+    agent_graph_edge = graph_namespace["AgentGraphEdge"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+
+    def runtime_planner(edge, recovery_history, **kwargs):
+        planner_calls.append(
+            {
+                "edge_id": edge.id,
+                "failure_context": kwargs["failure_context"],
+                "recovery_history": list(recovery_history),
+            }
+        )
+        if edge.id == "e01":
+            return [
+                agent_graph_edge(
+                    id="rt01",
+                    source="v0_start",
+                    target="v0_start",
+                    right_arm_action="runtime_recovery",
+                    monitor_sequences=[["monitor"]],
+                    is_recovery=True,
+                )
+            ]
+        return [
+            agent_graph_edge(
+                id="rt_fix",
+                source="v0_start",
+                target="v0_start",
+                right_arm_action="runtime_fix",
+                is_recovery=True,
+            )
+        ]
+
+    actions = graph.run(
+        env=object(),
+        runtime_recovery_planner=runtime_planner,
+        prefer_runtime_llm_recovery=True,
+    )
+
+    assert actions.actions == [
+        "fail_nominal",
+        "runtime_recovery",
+        "runtime_fix",
+        "fail_nominal",
+    ]
+    assert planner_calls[0]["edge_id"] == "e01"
+    assert planner_calls[0]["recovery_history"] == []
+    assert planner_calls[0]["failure_context"]["origin_edge_id"] == "e01"
+    assert planner_calls[0]["failure_context"]["failure_class"] == (
+        "monitor:monitor_object_held:0"
+    )
+    assert planner_calls[1]["edge_id"] == "rt01"
+    assert planner_calls[1]["failure_context"]["origin_edge_id"] == "e01"
+    assert planner_calls[1]["failure_context"]["failure_class"] == (
+        "monitor:monitor_object_held:0"
+    )
+    assert planner_calls[1]["recovery_history"][0]["strategy"] == "runtime"
+    assert planner_calls[1]["recovery_history"][0]["edge_id"] == "e01"
+    assert planner_calls[1]["recovery_history"][0]["origin_edge_id"] == "e01"
+    assert planner_calls[1]["recovery_history"][0]["attempt_key"] == (
+        "e01:monitor:monitor_object_held:0"
+    )
+    assert planner_calls[1]["recovery_history"][0]["recovery_edge_ids"] == ["rt01"]
+
+
+def test_agent_graph_falls_back_to_static_when_runtime_returns_no_edges() -> None:
+    calls = []
+
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": 0 if right_arm_action == "fail_nominal" else None,
+            "monitor_name": (
+                "monitor_object_held" if right_arm_action == "fail_nominal" else None
+            ),
+            "step_index": 0 if right_arm_action == "fail_nominal" else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+    graph.add_edge(
+        "r_static",
+        "v0_start",
+        "v1_done",
+        right_arm_action="static_recovery",
+        is_recovery=True,
+    )
+    graph.add_recovery("e01", monitor_index=0, recovery_edges=["r_static"])
+
+    actions = graph.run(
+        env=object(),
+        runtime_recovery_planner=lambda **kwargs: None,
+        prefer_runtime_llm_recovery=True,
+    )
+
+    assert actions.actions == ["fail_nominal", "static_recovery"]
+    assert calls == ["fail_nominal", "static_recovery"]
+
+
 def test_agent_graph_limits_total_runtime_recovery_attempts() -> None:
     calls = []
 
@@ -305,6 +556,58 @@ def test_agent_graph_limits_total_runtime_recovery_attempts() -> None:
             env=object(),
             runtime_recovery_planner=runtime_planner,
             runtime_recovery_max_total_attempts=1,
+        )
+
+    assert calls == ["fail_nominal", "runtime_upright"]
+
+
+def test_agent_graph_limits_runtime_recovery_by_origin_failure_class() -> None:
+    calls = []
+
+    def fake_execute(right_arm_action=None, monitor_sequences=None, **kwargs):
+        calls.append(right_arm_action)
+        return {
+            "actions": [right_arm_action],
+            "monitor_index": 0 if monitor_sequences else None,
+            "monitor_name": "monitor_object_held" if monitor_sequences else None,
+            "step_index": 0 if monitor_sequences else None,
+        }
+
+    graph_namespace = _load_agent_graph_namespace(fake_execute)
+    agent_task_graph = graph_namespace["AgentTaskGraph"]
+    agent_graph_edge = graph_namespace["AgentGraphEdge"]
+
+    graph = agent_task_graph(start="v0_start", goal="v1_done")
+    graph.add_node("v0_start")
+    graph.add_node("v1_done")
+    graph.add_edge(
+        "e01",
+        "v0_start",
+        "v1_done",
+        right_arm_action="fail_nominal",
+        monitor_sequences=[["monitor"]],
+    )
+
+    def runtime_planner(edge, **kwargs):
+        return [
+            agent_graph_edge(
+                id=f"rt_{edge.id}",
+                source=edge.source,
+                target=edge.source,
+                right_arm_action="runtime_upright",
+                monitor_sequences=[["monitor"]],
+                is_recovery=True,
+            )
+        ]
+
+    with pytest.raises(
+        RuntimeError,
+        match="e01:monitor:monitor_object_held:0",
+    ):
+        graph.run(
+            env=object(),
+            runtime_recovery_planner=runtime_planner,
+            runtime_recovery_max_monitor_attempts=1,
         )
 
     assert calls == ["fail_nominal", "runtime_upright"]
@@ -829,6 +1132,427 @@ def test_compile_agent_executes_compiled_json_graph(
     assert actions.already_executed is True
     assert actions.actions == ["done"]
     assert calls == [{"env": env}]
+
+
+def test_compile_agent_act_wires_runtime_recovery_agent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    code_path = tmp_path / "agent_compiled_graph.json"
+    code_path.write_text(
+        json.dumps(
+            {
+                "task_graph": {
+                    "task": "runtime",
+                    "start": "v0_start",
+                    "goal": "v1_done",
+                    "nodes": [],
+                    "edges": [],
+                },
+                "recovery_graph": {},
+            }
+        )
+    )
+    env = object()
+    calls = []
+
+    class FakeGraph:
+        def run(self, **kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(already_executed=True, actions=["done"])
+
+    def compile_agent_graph_from_file(path, env=None):
+        assert path == code_path
+        assert env is not None
+        return FakeGraph()
+
+    lab_module = types.ModuleType("embodichain.lab")
+    sim_module = types.ModuleType("embodichain.lab.sim")
+    agent_module = types.ModuleType("embodichain.lab.sim.agent")
+    graph_spec_module = types.ModuleType("embodichain.lab.sim.agent.graph_spec")
+
+    lab_module.__path__ = []
+    sim_module.__path__ = []
+    agent_module.__path__ = []
+    graph_spec_module.compile_agent_graph_from_file = compile_agent_graph_from_file
+
+    monkeypatch.setitem(sys.modules, "embodichain.lab", lab_module)
+    monkeypatch.setitem(sys.modules, "embodichain.lab.sim", sim_module)
+    monkeypatch.setitem(sys.modules, "embodichain.lab.sim.agent", agent_module)
+    monkeypatch.setitem(
+        sys.modules, "embodichain.lab.sim.agent.graph_spec", graph_spec_module
+    )
+
+    compile_agent_cls = _load_compile_agent_class()
+    agent = object.__new__(compile_agent_cls)
+    agent.prompt_kwargs = {}
+
+    actions = agent.act(
+        code_path,
+        env=env,
+        runtime_llm_recovery=True,
+        runtime_recovery_agent=object(),
+        prefer_runtime_llm_recovery=False,
+    )
+
+    assert actions.already_executed is True
+    assert actions.actions == ["done"]
+    assert "runtime_recovery_agent" not in calls[0]
+    assert callable(calls[0]["runtime_recovery_planner"])
+    assert callable(calls[0]["runtime_state_collector"])
+    assert calls[0]["prefer_runtime_llm_recovery"] is True
+
+
+def test_runtime_recovery_normalizer_expands_regrasp_both() -> None:
+    namespace = _load_compile_agent_namespace()
+    sanitize_runtime_recovery_spec = namespace["_sanitize_runtime_recovery_spec"]
+
+    normalized = sanitize_runtime_recovery_spec(
+        {
+            "task": "runtime",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e02",
+                    "failure_name": "runtime_repair",
+                    "monitors": [
+                        {
+                            "type": "hold_lost",
+                            "robot_name": "left_arm",
+                            "obj_name": "fork",
+                        }
+                    ],
+                    "recovery": [
+                        {
+                            "type": "regrasp_both",
+                            "arms": {
+                                "right_arm": "spoon",
+                                "left_arm": "fork",
+                            },
+                            "pre_grasp_dis": 0.12,
+                            "force_valid": True,
+                        }
+                    ],
+                    "merge": "target",
+                }
+            ],
+        },
+        current_edge_id="e02",
+    )
+
+    assert normalized is not None
+    binding = normalized["recovery_bindings"][0]
+    assert binding["merge"] == "source"
+    assert binding["recovery"] == [
+        {
+            "type": "regrasp",
+            "robot_name": "left_arm",
+            "obj_name": "fork",
+            "pre_grasp_dis": 0.12,
+            "force_valid": True,
+        },
+        {
+            "type": "regrasp",
+            "robot_name": "right_arm",
+            "obj_name": "spoon",
+            "pre_grasp_dis": 0.12,
+            "force_valid": True,
+        },
+    ]
+
+
+def test_runtime_recovery_normalizer_resolves_replay_edge() -> None:
+    namespace = _load_compile_agent_namespace()
+    sanitize_runtime_recovery_spec = namespace["_sanitize_runtime_recovery_spec"]
+
+    nominal_edges = {
+        "e01": {
+            "id": "e01",
+            "source": "v0_start",
+            "target": "v1_mid",
+            "left_arm_action": {
+                "kind": "atomic_action",
+                "name": "move",
+                "cfg_class": "MoveActionCfg",
+                "cfg": {"control_part": "left_arm"},
+                "target": {
+                    "kind": "eef_orientation",
+                    "direction": "down",
+                },
+                "runtime_kwargs": {},
+            },
+            "right_arm_action": None,
+        }
+    }
+
+    normalized = sanitize_runtime_recovery_spec(
+        {
+            "task": "runtime",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e02",
+                    "monitors": [
+                        {
+                            "type": "hold_lost",
+                            "robot_name": "left_arm",
+                            "obj_name": "fork",
+                        }
+                    ],
+                    "recovery": [{"type": "replay_edge", "edge_id": "e01"}],
+                }
+            ],
+        },
+        current_edge_id="e02",
+        nominal_edges=nominal_edges,
+    )
+
+    assert normalized is not None
+    binding = normalized["recovery_bindings"][0]
+    assert binding["merge"] == "target"
+    assert binding["recovery"] == [
+        {
+            "type": "action",
+            "name": "replay_e01",
+            "left_arm_action": nominal_edges["e01"]["left_arm_action"],
+            "right_arm_action": None,
+        }
+    ]
+
+
+def test_runtime_recovery_normalizer_rejects_unknown_step_type() -> None:
+    namespace = _load_compile_agent_namespace()
+    sanitize_runtime_recovery_spec = namespace["_sanitize_runtime_recovery_spec"]
+
+    normalized = sanitize_runtime_recovery_spec(
+        {
+            "task": "runtime",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e02",
+                    "monitors": [{"type": "hold_lost"}],
+                    "recovery": [{"type": "teleport_object"}],
+                }
+            ],
+        },
+        current_edge_id="e02",
+    )
+
+    assert normalized is None
+
+
+def test_runtime_recovery_planner_accepts_regrasp_both() -> None:
+    namespace = _load_compile_agent_namespace()
+    build_runtime_recovery_planner = namespace["_build_runtime_recovery_planner"]
+
+    task_graph = {
+        "task": "runtime",
+        "start": "v0_start",
+        "goal": "v1_done",
+        "nodes": [
+            {"id": "v0_start", "semantic": ""},
+            {"id": "v1_done", "semantic": ""},
+        ],
+        "edges": [
+            {
+                "id": "e02",
+                "source": "v0_start",
+                "target": "v1_done",
+                "left_arm_action": {
+                    "kind": "atomic_action",
+                    "name": "move",
+                    "cfg_class": "MoveActionCfg",
+                    "cfg": {"control_part": "left_arm"},
+                    "target": {
+                        "kind": "eef_orientation",
+                        "direction": "down",
+                    },
+                    "runtime_kwargs": {},
+                },
+                "right_arm_action": {
+                    "kind": "atomic_action",
+                    "name": "move",
+                    "cfg_class": "MoveActionCfg",
+                    "cfg": {"control_part": "right_arm"},
+                    "target": {
+                        "kind": "eef_orientation",
+                        "direction": "down",
+                    },
+                    "runtime_kwargs": {},
+                },
+            }
+        ],
+    }
+
+    class FakeRecoveryAgent:
+        def get_composed_observations(self, **kwargs):
+            return kwargs
+
+        def generate_runtime(self, **kwargs):
+            return json.dumps(
+                {
+                    "task": "runtime",
+                    "recovery_bindings": [
+                        {
+                            "edge_id": "e02",
+                            "monitors": [
+                                {
+                                    "type": "hold_lost",
+                                    "robot_name": "left_arm",
+                                    "obj_name": "fork",
+                                }
+                            ],
+                            "recovery": [
+                                {
+                                    "type": "regrasp_both",
+                                    "arms": {
+                                        "left_arm": "fork",
+                                        "right_arm": "spoon",
+                                    },
+                                    "pre_grasp_dis": 0.12,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+
+    planner = build_runtime_recovery_planner(
+        FakeRecoveryAgent(),
+        task_graph=task_graph,
+        use_llm=True,
+    )
+    edge = types.SimpleNamespace(
+        id="e02",
+        source="v0_start",
+        target="v1_done",
+        left_arm_action=task_graph["edges"][0]["left_arm_action"],
+        right_arm_action=task_graph["edges"][0]["right_arm_action"],
+        is_recovery=False,
+    )
+
+    recovery_edges = planner(
+        graph=object(),
+        edge=edge,
+        monitor_index=0,
+        monitor_name="monitor_object_held",
+        step_index=0,
+        env=object(),
+        runtime_kwargs={},
+        failure_context={
+            "edge_id": "e02",
+            "edge_source": "v0_start",
+            "edge_target": "v1_done",
+            "edge_is_recovery": False,
+            "monitor_index": 0,
+            "monitor_name": "monitor_object_held",
+            "step_index": 0,
+            "failure_reason": "Monitor 'monitor_object_held' triggered.",
+        },
+        runtime_state={},
+        recovery_history=[],
+    )
+
+    assert recovery_edges is not None
+    assert len(recovery_edges) == 2
+    assert recovery_edges[-1].target == "v0_start"
+
+
+def test_runtime_recovery_planner_rejects_repeated_origin_strategy() -> None:
+    namespace = _load_compile_agent_namespace()
+    build_runtime_recovery_planner = namespace["_build_runtime_recovery_planner"]
+    sanitize_runtime_recovery_spec = namespace["_sanitize_runtime_recovery_spec"]
+    runtime_recovery_signature = namespace["_runtime_recovery_signature"]
+
+    task_graph = {
+        "task": "runtime",
+        "start": "v0_start",
+        "goal": "v1_done",
+        "nodes": [
+            {"id": "v0_start", "semantic": ""},
+            {"id": "v1_done", "semantic": ""},
+        ],
+        "edges": [
+            {
+                "id": "e02",
+                "source": "v0_start",
+                "target": "v1_done",
+                "left_arm_action": None,
+                "right_arm_action": None,
+            }
+        ],
+    }
+    raw_recovery_spec = {
+        "task": "runtime",
+        "recovery_bindings": [
+            {
+                "edge_id": "e02",
+                "monitors": [{"type": "hold_lost"}],
+                "recovery": [
+                    {"type": "move_to_safe_pose", "arms": ["left_arm"]},
+                    {
+                        "type": "regrasp",
+                        "robot_name": "left_arm",
+                        "obj_name": "fork",
+                    },
+                ],
+            }
+        ],
+    }
+    normalized_recovery_spec = sanitize_runtime_recovery_spec(
+        raw_recovery_spec,
+        current_edge_id="e02",
+    )
+    repeated_signature = runtime_recovery_signature(normalized_recovery_spec)
+
+    class FakeRecoveryAgent:
+        def get_composed_observations(self, **kwargs):
+            return kwargs
+
+        def generate_runtime(self, **kwargs):
+            return json.dumps(raw_recovery_spec)
+
+    planner = build_runtime_recovery_planner(
+        FakeRecoveryAgent(),
+        task_graph=task_graph,
+        use_llm=True,
+    )
+    edge = types.SimpleNamespace(
+        id="e02",
+        source="v0_start",
+        target="v1_done",
+        left_arm_action=None,
+        right_arm_action=None,
+        is_recovery=False,
+    )
+
+    recovery_edges = planner(
+        graph=object(),
+        edge=edge,
+        monitor_index=0,
+        monitor_name="monitor_object_held",
+        step_index=0,
+        env=object(),
+        runtime_kwargs={},
+        failure_context={
+            "edge_id": "e02",
+            "origin_edge_id": "e02",
+            "monitor_index": 0,
+            "monitor_name": "monitor_object_held",
+            "step_index": 0,
+            "failure_class": "monitor:monitor_object_held:0",
+            "failure_reason": "Monitor 'monitor_object_held' triggered.",
+        },
+        runtime_state={},
+        recovery_history=[
+            {
+                "strategy": "runtime",
+                "edge_id": "e02",
+                "origin_edge_id": "e02",
+                "failure_class": "monitor:monitor_object_held:0",
+                "recovery_signature": repeated_signature,
+            }
+        ],
+    )
+
+    assert recovery_edges is None
 
 
 def test_run_env_does_not_replay_already_executed_agent_graph_actions() -> None:

@@ -210,6 +210,21 @@ def _expected_place_action(
     }
 
 
+def _expected_safe_pose_action(robot_name: str = "left_arm") -> dict[str, Any]:
+    return {
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
+        "cfg": {"control_part": robot_name},
+        "target": {"kind": "initial_pose"},
+        "runtime_kwargs": {},
+        "fallback": {
+            "fn": "back_to_initial_pose",
+            "kwargs": {"robot_name": robot_name},
+        },
+    }
+
+
 def test_expand_recovery_spec_generates_reusable_recovery_graph() -> None:
     recovery_graph = expand_recovery_spec(
         _nominal_task_graph(),
@@ -281,6 +296,77 @@ def test_expand_recovery_spec_generates_reusable_recovery_graph() -> None:
             ],
             "recovery_edges": ["re_e01_grasp_1_regrasp_cup"],
         },
+    ]
+
+
+def test_expand_recovery_spec_supports_move_to_safe_pose_single_arm() -> None:
+    recovery_graph = expand_recovery_spec(
+        _nominal_task_graph(),
+        {
+            "task": "grasp cup",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e12_move",
+                    "failure_name": "cup_hold_lost",
+                    "monitors": [
+                        {
+                            "type": "hold_lost",
+                            "robot_name": "left_arm",
+                            "obj_name": "cup",
+                        }
+                    ],
+                    "recovery": [{"type": "move_to_safe_pose"}],
+                    "merge": "source",
+                    "repeat_until_success": False,
+                }
+            ],
+        },
+    )
+
+    assert recovery_graph["recovery_edges"] == [
+        {
+            "id": "re_e12_move_1_safe_pose_left_arm",
+            "source": "v1_grasped",
+            "target": "v1_grasped",
+            "left_arm_action": _expected_safe_pose_action("left_arm"),
+            "right_arm_action": None,
+        }
+    ]
+
+
+def test_expand_recovery_spec_supports_move_to_safe_pose_dual_arm() -> None:
+    recovery_graph = expand_recovery_spec(
+        _nominal_task_graph(),
+        {
+            "task": "grasp cup",
+            "recovery_bindings": [
+                {
+                    "edge_id": "e12_move",
+                    "failure_name": "safe_both_arms",
+                    "monitors": [
+                        {"type": "object_moved", "objects": ["cup"]},
+                    ],
+                    "recovery": [
+                        {
+                            "type": "move_to_safe_pose",
+                            "arms": ["left_arm", "right_arm"],
+                        }
+                    ],
+                    "merge": "source",
+                    "repeat_until_success": False,
+                }
+            ],
+        },
+    )
+
+    assert recovery_graph["recovery_edges"] == [
+        {
+            "id": "re_e12_move_1_safe_pose_arms",
+            "source": "v1_grasped",
+            "target": "v1_grasped",
+            "left_arm_action": _expected_safe_pose_action("left_arm"),
+            "right_arm_action": _expected_safe_pose_action("right_arm"),
+        }
     ]
 
 

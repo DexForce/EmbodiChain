@@ -27,6 +27,8 @@ Binding rules:
     `pre_grasp_dis`
   - `retry_failed_edge`
   - `replay_edge`: field `edge_id`
+  - `move_to_safe_pose`: field `robot_name` or `arms`; moves arm(s) to the
+    configured initial pose
   - `action`: optional `left_arm_action`, optional `right_arm_action`
 - `action` steps must use structured atomic graph action specs, not `{"fn": ...}`.
   Allowed action names are `move`, `pick_up`, `place`, `gripper_open`, and
@@ -59,6 +61,8 @@ Recovery guidance:
   simultaneously.
 - Use `move` target `initial_pose` when an arm should return to its configured
   initial joint state.
+- Prefer `move_to_safe_pose` over direct `action` steps when a recovery only
+  needs to move arm(s) to the configured initial pose.
 - Use `move` target `object_relative_pose`, `absolute_position`,
   `relative_offset`, `eef_orientation`, or `eef_rotation_delta` for direct
   recovery motions. Do not invent action names such as `back_to_initial_pose`,

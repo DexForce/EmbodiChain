@@ -67,6 +67,9 @@ RECOVERY_STEP_TYPE_ALIASES = {
     "dual_regrasp": "regrasp_both",
     "regrasp_objects": "regrasp_both",
     "regrasp_all": "regrasp_both",
+    "move_to_safe_pose": "move_to_safe_pose",
+    "safe_pose": "move_to_safe_pose",
+    "move_safe": "move_to_safe_pose",
     "action": "action",
     "atomic_action": "action",
 }
@@ -540,6 +543,15 @@ def _normalize_recovery_step(
             base["force_valid"] = step["force_valid"]
         return base, []
 
+    if step_type == "move_to_safe_pose":
+        arms = _normalize_safe_pose_arms(step, monitored_edge, monitors)
+        if not arms:
+            return None, [
+                f"recovery step {step_index} move_to_safe_pose needs robot_name or arms"
+            ]
+        base["arms"] = arms
+        return base, []
+
     if step_type == "regrasp_both":
         arms = step.get("arms")
         if arms is None:
@@ -728,6 +740,71 @@ def _infer_regrasp_arms(
         if monitor.get("type") == "hold_lost":
             arms[str(monitor["robot_name"])] = str(monitor["obj_name"])
     return arms
+
+
+def _normalize_safe_pose_arms(
+    step: Mapping[str, Any],
+    edge: Mapping[str, Any] | None,
+    monitors: list[Mapping[str, Any]],
+) -> list[str]:
+    arms: list[str] = []
+    robot_name = step.get("robot_name", step.get("arm"))
+    if robot_name is not None:
+        arms.append(str(robot_name))
+
+    step_arms = step.get("arms")
+    if isinstance(step_arms, Mapping):
+        arms.extend(str(arm) for arm in step_arms.keys())
+    elif step_arms is not None:
+        arms.extend(str(arm) for arm in _as_list(step_arms) if arm)
+
+    if not arms:
+        for monitor in monitors:
+            robot_name = monitor.get("robot_name")
+            if robot_name is not None:
+                arms.append(str(robot_name))
+
+    if not arms:
+        arms.extend(_edge_action_robots(edge))
+
+    return _dedupe_preserve_order(arms)
+
+
+def _edge_action_robots(edge: Mapping[str, Any] | None) -> list[str]:
+    robots: list[str] = []
+    if edge is None:
+        return robots
+    for action_key in ("left_arm_action", "right_arm_action"):
+        action = edge.get(action_key)
+        if not action:
+            continue
+        robots.extend(_action_robots(action))
+    return _dedupe_preserve_order(robots)
+
+
+def _action_robots(action: Mapping[str, Any]) -> list[str]:
+    robots: list[str] = []
+    if not isinstance(action, Mapping):
+        return robots
+
+    if _is_atomic_action_spec(action):
+        robot_name = dict(action.get("cfg", {})).get("control_part")
+        if robot_name is not None:
+            robots.append(str(robot_name))
+    elif _is_atomic_sequence_spec(action):
+        for nested_action in action.get("actions", []):
+            if isinstance(nested_action, Mapping):
+                robots.extend(_action_robots(nested_action))
+
+    fallback = _atomic_action_fallback(action)
+    if fallback is not None:
+        robots.extend(_action_robots(fallback))
+
+    kwargs = dict(action.get("kwargs", {}))
+    robot_name = kwargs.get("robot_name")
+    if robot_name is not None:
+        robots.append(str(robot_name))
+    return _dedupe_preserve_order(robots)
 
 
 def _expand_recovery_binding(
@@ -1005,6 +1082,9 @@ def _expand_recovery_step_actions(
             force_valid=bool(step.get("force_valid", False)),
         )
 
+    if step_type == "move_to_safe_pose":
+        return _move_to_safe_pose_actions(step["arms"])
+
     if step_type == "action" or "left_arm_action" in step or "right_arm_action" in step:
         return {
             "left_arm_action": _normalize_edge_action(step.get("left_arm_action")),
@@ -1210,6 +1290,22 @@ def _multi_regrasp_actions(
             obj_name=obj_name,
             pre_grasp_dis=pre_grasp_dis,
             force_valid=force_valid,
+        )
+        if "left" in robot_name:
+            actions["left_arm_action"] = action
+        else:
+            actions["right_arm_action"] = action
+    return actions
+
+
+def _move_to_safe_pose_actions(arms: list[str]) -> dict[str, Any]:
+    actions = {"left_arm_action": None, "right_arm_action": None}
+    for robot_name in arms:
+        action = _atomic_move_action(
+            robot_name=robot_name,
+            target={"kind": "initial_pose"},
+            fallback_fn="back_to_initial_pose",
+            fallback_kwargs={"robot_name": robot_name},
         )
         if "left" in robot_name:
             actions["left_arm_action"] = action
@@ -1471,6 +1567,11 @@ def _recovery_step_label(
         if step.get("arms"):
             return "regrasp_objects"
         return f"regrasp_{_sanitize_id(step['obj_name'])}"
+    if step_type == "move_to_safe_pose":
+        arms = step.get("arms", [])
+        if len(arms) == 1:
+            return f"safe_pose_{_sanitize_id(arms[0])}"
+        return "safe_pose_arms"
     return _sanitize_id(step.get("name", step_type))
 
 

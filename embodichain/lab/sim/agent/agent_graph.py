@@ -147,7 +147,13 @@ class AgentTaskGraph:
         if edge_executor is None:
             edge_executor = EdgeActionExecutor()
         executor_kwargs = dict(kwargs)
-        executor_kwargs.pop("edge_executor", None)
+        for internal_key in (
+            "edge_executor",
+            "runtime_recovery_planner",
+            "runtime_state_collector",
+            "runtime_recovery_agent",
+        ):
+            executor_kwargs.pop(internal_key, None)
 
         while current != self.goal or pending_edges or continuation_stack:
             transitions += 1
@@ -206,6 +212,18 @@ class AgentTaskGraph:
                         ) from exc
                     if continuation_edges:
                         continuation_stack.append(continuation_edges)
+                    self._record_recovery_history(
+                        edge=edge,
+                        monitor_index=-1,
+                        result={
+                            "monitor_name": "edge_exception",
+                            "step_index": None,
+                            "exception": exc,
+                        },
+                        recovery_edges=runtime_edges,
+                        strategy="runtime",
+                        kwargs=kwargs,
+                    )
                     pending_edges = list(runtime_edges)
                     current = edge.source
                     continue
@@ -255,6 +273,7 @@ class AgentTaskGraph:
                         )
                     recovery_edges = list(runtime_edges)
                     branch_final_target = recovery_edges[-1].target
+                    recovery_strategy = "runtime"
                 else:
                     self._record_static_recovery_attempt(
                         edge=edge,
@@ -263,6 +282,7 @@ class AgentTaskGraph:
                     )
                     recovery_edges = list(branch.recovery_edges)
                     branch_final_target = self._resolve_edge(recovery_edges[-1]).target
+                    recovery_strategy = "static"
                 continuation_edges = list(pending_edges)
                 if branch_final_target == edge.source and edge.source != edge.target:
                     continuation_edges = [edge_ref, *continuation_edges]
@@ -273,6 +293,14 @@ class AgentTaskGraph:
 
                 if continuation_edges:
                     continuation_stack.append(continuation_edges)
+                self._record_recovery_history(
+                    edge=edge,
+                    monitor_index=monitor_index,
+                    result=result,
+                    recovery_edges=recovery_edges,
+                    strategy=recovery_strategy,
+                    kwargs=kwargs,
+                )
                 pending_edges = recovery_edges
                 current = edge.source
                 continue
@@ -280,6 +308,49 @@ class AgentTaskGraph:
             current = edge.target
 
         return ExecutedActionList(executed_actions)
+
+    def _record_recovery_history(
+        self,
+        *,
+        edge: AgentGraphEdge,
+        monitor_index: int,
+        result: dict[str, Any],
+        recovery_edges: list[Any],
+        strategy: str,
+        kwargs: dict[str, Any],
+    ) -> None:
+        history = kwargs.setdefault("_recovery_attempt_history", [])
+        origin_edge_id = _origin_edge_id(edge, history)
+        failure_class = _failure_class(monitor_index, result)
+        recovery_edge_ids = [
+            self._resolve_edge(edge_ref).id for edge_ref in recovery_edges
+        ]
+        recovery_signatures = [
+            getattr(self._resolve_edge(edge_ref), "runtime_recovery_signature", None)
+            for edge_ref in recovery_edges
+        ]
+        recovery_signature = next(
+            (signature for signature in recovery_signatures if signature),
+            None,
+        )
+        history.append(
+            {
+                "strategy": strategy,
+                "edge_id": edge.id,
+                "origin_edge_id": origin_edge_id,
+                "edge_source": edge.source,
+                "edge_target": edge.target,
+                "edge_is_recovery": edge.is_recovery,
+                "monitor_index": monitor_index,
+                "monitor_name": result.get("monitor_name"),
+                "step_index": result.get("step_index"),
+                "failure_class": failure_class,
+                "failure_reason": _failure_reason(result),
+                "attempt_key": _attempt_key(origin_edge_id, failure_class),
+                "recovery_edge_ids": recovery_edge_ids,
+                "recovery_signature": recovery_signature,
+            }
+        )
 
     @staticmethod
     def _record_static_recovery_attempt(
@@ -349,6 +420,9 @@ class AgentTaskGraph:
                 f"({max_total_attempts}). Last edge='{edge.id}', "
                 f"monitor_index={monitor_index}."
             )
+        history = list(kwargs.get("_recovery_attempt_history", []))
+        origin_edge_id = _origin_edge_id(edge, history)
+        failure_class = _failure_class(monitor_index, result)
         recovery_edges = planner(
             graph=self,
             edge=edge,
@@ -357,6 +431,15 @@ class AgentTaskGraph:
             step_index=result.get("step_index"),
             env=env,
             runtime_kwargs=kwargs,
+            failure_context=_failure_context(
+                edge,
+                monitor_index,
+                result,
+                origin_edge_id=origin_edge_id,
+                failure_class=failure_class,
+            ),
+            runtime_state=_collect_runtime_state(kwargs, env),
+            recovery_history=history,
         )
         if not recovery_edges:
             return None
@@ -373,14 +456,17 @@ class AgentTaskGraph:
         kwargs: dict[str, Any],
     ) -> list[AgentGraphEdge] | None:
         attempts = kwargs.setdefault("_runtime_recovery_monitor_attempts", {})
-        attempt_key = f"{edge.id}:{monitor_index}"
+        history = list(kwargs.get("_recovery_attempt_history", []))
+        attempt_key = _attempt_key(
+            _origin_edge_id(edge, history),
+            _failure_class(monitor_index, result),
+        )
         attempts[attempt_key] = int(attempts.get(attempt_key, 0)) + 1
         if attempts[attempt_key] > int(
             kwargs.get("runtime_recovery_max_monitor_attempts", 2)
         ):
             raise RuntimeError(
-                f"Runtime recovery exceeded monitor retry limit for "
-                f"edge '{edge.id}' monitor {monitor_index}."
+                f"Runtime recovery exceeded monitor retry limit for " f"{attempt_key}."
             )
         return self._plan_runtime_recovery(
             planner,
@@ -399,3 +485,63 @@ def _optional_positive_int(value: Any) -> int | None:
     if value <= 0:
         return None
     return value
+
+
+def _failure_context(
+    edge: AgentGraphEdge,
+    monitor_index: int,
+    result: dict[str, Any],
+    *,
+    origin_edge_id: str | None = None,
+    failure_class: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "edge_id": edge.id,
+        "origin_edge_id": origin_edge_id or edge.id,
+        "edge_source": edge.source,
+        "edge_target": edge.target,
+        "edge_is_recovery": edge.is_recovery,
+        "monitor_index": monitor_index,
+        "monitor_name": result.get("monitor_name"),
+        "step_index": result.get("step_index"),
+        "failure_class": failure_class or _failure_class(monitor_index, result),
+        "failure_reason": _failure_reason(result),
+    }
+
+
+def _origin_edge_id(edge: AgentGraphEdge, history: list[dict[str, Any]]) -> str:
+    if not edge.is_recovery:
+        return edge.id
+    for attempt in reversed(history):
+        if edge.id in attempt.get("recovery_edge_ids", []):
+            return str(attempt.get("origin_edge_id") or attempt.get("edge_id"))
+    return edge.id
+
+
+def _failure_class(monitor_index: int, result: dict[str, Any]) -> str:
+    exception = result.get("exception")
+    if exception is not None:
+        return f"exception:{type(exception).__name__}"
+    monitor_name = result.get("monitor_name") or "unknown_monitor"
+    return f"monitor:{monitor_name}:{monitor_index}"
+
+
+def _attempt_key(origin_edge_id: str, failure_class: str) -> str:
+    return f"{origin_edge_id}:{failure_class}"
+
+
+def _failure_reason(result: dict[str, Any]) -> str:
+    exception = result.get("exception")
+    if exception is not None:
+        return f"{type(exception).__name__}: {exception}"
+    monitor_name = result.get("monitor_name")
+    if monitor_name:
+        return f"Monitor '{monitor_name}' triggered."
+    return "Unknown runtime failure."
+
+
+def _collect_runtime_state(kwargs: dict[str, Any], env) -> dict[str, Any] | None:
+    collector = kwargs.get("runtime_state_collector")
+    if not callable(collector):
+        return None
+    return collector(env)

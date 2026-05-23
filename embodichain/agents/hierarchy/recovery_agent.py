@@ -64,3 +64,12 @@ class RecoveryAgent(AgentBase):
         print(f"Generated recovery spec saved to {file_path}")
 
         return content
+
+    def generate_runtime(self, **kwargs) -> str:
+        """Generate one runtime recovery binding without using static caches."""
+
+        prompt = RecoveryPrompt.runtime_recovery_binding(**kwargs)
+        response = self.llm.invoke(prompt)
+        content = getattr(response, "content", response)
+        print(f"\033[91m\nRuntime recovery agent output:\n{content}\n\033[0m")
+        return normalize_json_content(content)
