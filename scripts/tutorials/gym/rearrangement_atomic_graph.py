@@ -51,6 +51,26 @@ DEFAULT_DATABASE_ARTIFACT_ROOT = (
     ROOT_DIR / "embodichain/database/agent_generated_content/Rearrangement"
 )
 TASK_NAME = "Rearrangement"
+FORCED_ERROR_PRESETS: dict[str, dict[str, Any]] = {
+    "plate_moved_retry": {
+        "edge_index": 3,
+        "blind": True,
+        "blind_obj_name": "plate",
+        "error_type": "misplaced_object",
+        "relative_error_xyz": [0.08, 0.0, 0.0],
+        "require_precompiled_recovery": True,
+        "require_task_success": True,
+    },
+    "legacy_monitor_index": {
+        "edge_index": 1,
+        "blind": False,
+        "blind_obj_name": "fork",
+        "error_type": "misplaced_object",
+        "relative_error_xyz": [0.0, 0.1, 0.0],
+        "require_precompiled_recovery": False,
+        "require_task_success": False,
+    },
+}
 
 
 class _OfflineLLM:
@@ -184,14 +204,36 @@ def _copy_database_artifacts(artifact_dir: Path, regenerate: bool) -> None:
 def _build_forced_error_config(args: argparse.Namespace) -> dict[str, Any] | None:
     if not args.forced_error_injection:
         return None
+    preset = dict(FORCED_ERROR_PRESETS[args.forced_error_preset])
+    edge_index = (
+        int(args.error_injection_edge_index)
+        if args.error_injection_edge_index is not None
+        else int(preset.get("edge_index", 1))
+    )
+    error_type = (
+        preset.get("error_type", "misplaced_object")
+        if args.error_injection_type == "auto"
+        else args.error_injection_type
+    )
+    relative_error_xyz = (
+        args.error_injection_offset
+        if args.error_injection_offset is not None
+        else list(preset.get("relative_error_xyz", [0.0, 0.1, 0.0]))
+    )
+    blind_obj_name = args.error_injection_object or preset.get("blind_obj_name", "fork")
     return {
         "enabled": True,
-        "edge_index": args.error_injection_edge_index,
+        "preset": args.forced_error_preset,
+        "edge_index": edge_index,
         "step_index": args.error_injection_step,
-        "relative_error_xyz": args.error_injection_offset,
-        "error_type": args.error_injection_type,
-        "blind": False,
-        "blind_obj_name": args.error_injection_object,
+        "relative_error_xyz": relative_error_xyz,
+        "error_type": error_type,
+        "require_precompiled_recovery": bool(
+            preset.get("require_precompiled_recovery", False)
+        ),
+        "require_task_success": bool(preset.get("require_task_success", False)),
+        "blind": bool(preset.get("blind", False)),
+        "blind_obj_name": blind_obj_name,
     }
 
 
@@ -267,13 +309,49 @@ def _forced_error_summary(config: dict[str, Any] | None) -> dict[str, Any] | Non
         return None
     return {
         "enabled": bool(config.get("enabled", False)),
+        "preset": config.get("preset"),
+        "edge_index": config.get("edge_index"),
+        "blind": bool(config.get("blind", False)),
+        "blind_obj_name": config.get("blind_obj_name"),
+        "error_type": config.get("error_type"),
+        "relative_error_xyz": config.get("relative_error_xyz"),
+        "require_precompiled_recovery": bool(
+            config.get("require_precompiled_recovery", False)
+        ),
+        "require_task_success": bool(config.get("require_task_success", False)),
         "injected": bool(config.get("_injected", False)),
         "triggered": bool(config.get("_triggered", False)),
         "injected_at_step": config.get("_injected_at_step"),
         "triggered_step": config.get("_triggered_step"),
         "injected_monitor": config.get("_injected_monitor"),
         "triggered_monitor": config.get("_triggered_monitor_name"),
+        "validation": config.get("_validation"),
     }
+
+
+def _validate_forced_recovery_demo(
+    *,
+    forced_error_config: dict[str, Any],
+    task_success: bool | None,
+) -> None:
+    validation = {
+        "monitor_triggered": bool(forced_error_config.get("_triggered", False)),
+        "task_success": task_success,
+        "passed": True,
+        "failure_reasons": [],
+    }
+    if not validation["monitor_triggered"]:
+        validation["failure_reasons"].append("forced monitor did not trigger")
+    if forced_error_config.get("require_task_success", False) and task_success is not True:
+        validation["failure_reasons"].append("task did not succeed after recovery")
+
+    validation["passed"] = not validation["failure_reasons"]
+    forced_error_config["_validation"] = validation
+    if not validation["passed"]:
+        raise RuntimeError(
+            "Forced recovery demo validation failed: "
+            + "; ".join(validation["failure_reasons"])
+        )
 
 
 def build_parser() -> argparse.Namespace:
@@ -520,35 +598,47 @@ def build_parser() -> argparse.Namespace:
         help="Inject a deterministic error to exercise recovery branches.",
     )
     parser.add_argument(
+        "--forced_error_preset",
+        choices=sorted(FORCED_ERROR_PRESETS),
+        default="plate_moved_retry",
+        help=(
+            "Deterministic recovery demo preset. plate_moved_retry uses a "
+            "demo-local blind plate displacement on nominal edge #3 so the "
+            "precompiled e03 plate-moved retry branch can run; "
+            "legacy_monitor_index keeps the old monitored-edge index behavior."
+        ),
+    )
+    parser.add_argument(
         "--error_injection_edge_index",
         type=int,
-        default=1,
+        default=None,
         help=(
-            "1-based monitored-edge index where deterministic error injection is armed."
+            "Override the preset 1-based edge index. For blind presets this counts "
+            "all graph edges; otherwise it counts monitored edges."
         ),
     )
     parser.add_argument(
         "--error_injection_step",
         type=int,
-        default=10,
-        help="Step index within the selected edge where the error is injected.",
+        default=-1,
+        help="Step index within the selected edge; negative means the final step.",
     )
     parser.add_argument(
         "--error_injection_offset",
         type=_parse_xyz,
-        default=[0.0, 0.1, 0.0],
+        default=None,
         help="Injected xyz displacement, for example 0,0.1,0.",
     )
     parser.add_argument(
         "--error_injection_type",
-        choices=["misplaced_object", "fallen_object"],
-        default="misplaced_object",
+        choices=["auto", "misplaced_object", "fallen_object"],
+        default="auto",
         help="Error primitive used for forced recovery injection.",
     )
     parser.add_argument(
         "--error_injection_object",
-        default="fork",
-        help="Object used by forced recovery injection when a monitor does not select one.",
+        default=None,
+        help="Object used by blind forced recovery injection.",
     )
     parser.add_argument(
         "--max_episode_steps",
@@ -610,7 +700,17 @@ def main() -> None:
     )
 
     forced_error_config = _build_forced_error_config(args)
+    task_success = None
     try:
+        if (
+            forced_error_config is not None
+            and forced_error_config.get("require_precompiled_recovery", False)
+            and args.runtime_llm_recovery
+        ):
+            raise ValueError(
+                "--runtime_llm_recovery conflicts with static forced recovery presets. "
+                "Use --forced_error_preset legacy_monitor_index for runtime recovery tests."
+            )
         env.reset(seed=args.seed)
         common_kwargs = {
             "regenerate": args.regenerate,
@@ -696,15 +796,12 @@ def main() -> None:
             valid = generate_and_execute_action_list(env, 0, False, **common_kwargs)
             if not valid:
                 raise RuntimeError("Rearrangement demo produced no valid actions.")
-            if forced_error_config is not None and not forced_error_config.get(
-                "_triggered", False
-            ):
-                raise RuntimeError(
-                    "Forced recovery injection did not trigger a monitor. "
-                    "Try a different --error_injection_edge_index or "
-                    "--error_injection_step."
-                )
             task_success = _as_bool(env.unwrapped.is_task_success())
+            if forced_error_config is not None:
+                _validate_forced_recovery_demo(
+                    forced_error_config=forced_error_config,
+                    task_success=task_success,
+                )
         _write_result(
             artifact_dir=artifact_dir,
             program_success=True,
@@ -715,7 +812,7 @@ def main() -> None:
         _write_result(
             artifact_dir=artifact_dir,
             program_success=False,
-            task_success=None,
+            task_success=task_success,
             forced_error_config=forced_error_config,
             exception=exc,
         )
