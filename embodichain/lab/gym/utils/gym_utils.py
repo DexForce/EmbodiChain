@@ -27,6 +27,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.types import Device, Array
 from embodichain.lab.sim.objects import Robot
+from embodichain.env import get_default_headless, get_default_sim_device
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
@@ -735,8 +736,8 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
 
     This function adds the following arguments to the provided parser:
         --num_envs: Number of environments to run in parallel (default: 1)
-        --device: Device to run the environment on (default: 'cpu')
-        --headless: Whether to perform the simulation in headless mode (default: False)
+        --device: Device to run the environment on.
+        --headless: Whether to perform the simulation in headless mode.
         --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
         --gpu_id: The GPU ID to use for the simulation (default: 0)
         --gym_config: Path to gym config file (default: '')
@@ -760,14 +761,14 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=get_default_sim_device(),
         help="Device to run the environment on, e.g., 'cpu' or 'cuda'.",
     )
     parser.add_argument(
         "--headless",
         help="Whether to perform the simulation in headless mode.",
-        default=False,
-        action="store_true",
+        default=get_default_headless(),
+        action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
         "--renderer",

@@ -14,34 +14,41 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import os
-from pathlib import Path
+from __future__ import annotations
 
-from dotenv import load_dotenv
+import os
+
 from langchain_openai import ChatOpenAI
+
+from embodichain.env import (
+    DEFAULT_HTTP_PROXY,
+    DEFAULT_HTTPS_PROXY,
+    get_api_key,
+    get_llm_model,
+    get_llm_url,
+)
 
 # ------------------------------------------------------------------------------
 # Environment configuration
 # ------------------------------------------------------------------------------
 
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
-
-for proxy_var in (
-    "ALL_PROXY",
-    "all_proxy",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "http_proxy",
-    "https_proxy",
-):
+for proxy_var in ("ALL_PROXY", "all_proxy"):
     os.environ[proxy_var] = ""
 
-DEFAULT_LLM_URL = os.getenv("LLM_URL", "https://token-plan-cn.xiaomimimo.com/v1")
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "mimo-v2.5")
+for proxy_var, proxy_value in (
+    ("HTTP_PROXY", DEFAULT_HTTP_PROXY),
+    ("HTTPS_PROXY", DEFAULT_HTTPS_PROXY),
+    ("http_proxy", DEFAULT_HTTP_PROXY),
+    ("https_proxy", DEFAULT_HTTPS_PROXY),
+):
+    os.environ[proxy_var] = proxy_value
+
+DEFAULT_LLM_URL = get_llm_url()
+DEFAULT_LLM_MODEL = get_llm_model()
 
 
 def _get_api_key():
-    return os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+    return get_api_key()
 
 
 # ------------------------------------------------------------------------------

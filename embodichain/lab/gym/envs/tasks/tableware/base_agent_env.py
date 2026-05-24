@@ -185,6 +185,9 @@ class BaseAgentEnv:
 
     # -------------------- get compiled graph for action list --------------------
     def generate_graph_for_actions(self, regenerate=False, recovery=False, **kwargs):
+        task_regenerate = bool(kwargs.pop("task_regenerate", regenerate))
+        recovery_regenerate = bool(kwargs.pop("recovery_regenerate", regenerate))
+        compile_regenerate = bool(kwargs.pop("compile_regenerate", regenerate))
         logger.log_info(
             f"Generate graph for creating {'recovery' if recovery else ''} action list for {self.compile_agent.task_name}.",
             color="yellow" if recovery else "green",
@@ -193,7 +196,7 @@ class BaseAgentEnv:
         print(f"\033[92m\nStart task graph generation.\n\033[0m")
         task_agent_input = self.task_agent.get_composed_observations(
             env=self,
-            regenerate=regenerate,
+            regenerate=task_regenerate,
             observations=self.get_obs_for_agent(),
             **kwargs,
         )
@@ -204,7 +207,7 @@ class BaseAgentEnv:
             print(f"\033[91m\nStart recovery spec generation.\n\033[0m")
             recovery_agent_input = self.recovery_agent.get_composed_observations(
                 env=self,
-                regenerate=regenerate,
+                regenerate=recovery_regenerate,
                 task_graph=task_graph,
                 **kwargs,
             )
@@ -213,7 +216,7 @@ class BaseAgentEnv:
         print(f"\033[94m\nStart graph compilation.\n\033[0m")
         compile_agent_input = self.compile_agent.get_composed_observations(
             env=self,
-            regenerate=regenerate,
+            regenerate=compile_regenerate,
             task_graph=task_graph,
             recovery_spec=recovery_spec,
             recovery_enabled=recovery,

@@ -228,7 +228,8 @@ def pushd(path: Path) -> Iterator[None]:
 class _OfflineLLM:
     def invoke(self, *args, **kwargs):
         raise RuntimeError(
-            "This compare runner expected cached agent artifacts and should not call the LLM."
+            "This compare runner expected cached agent artifacts. "
+            "Use --regenerate or --runtime_llm_recovery if LLM calls are needed."
         )
 
 
@@ -244,6 +245,35 @@ def _ensure_offline_llms(*, force: bool = False) -> None:
         agent_llm.failure_anticipation_llm = agent_llm.recovery_llm
     if agent_llm.code_llm is None:
         agent_llm.code_llm = agent_llm.compile_llm
+
+
+def _configure_llms_for_args(args: argparse.Namespace) -> None:
+    """Allow only the agent phase explicitly requested by the CLI flags."""
+
+    offline_llm = _OfflineLLM()
+    if not args.regenerate or agent_llm.task_llm is None:
+        agent_llm.task_llm = offline_llm
+    if not args.runtime_llm_recovery or agent_llm.recovery_llm is None:
+        agent_llm.recovery_llm = offline_llm
+    if (
+        not (args.regenerate or args.runtime_llm_recovery)
+        or agent_llm.compile_llm is None
+    ):
+        agent_llm.compile_llm = offline_llm
+    agent_llm.failure_anticipation_llm = agent_llm.recovery_llm
+    agent_llm.code_llm = agent_llm.compile_llm
+
+
+def _agent_regenerate_kwargs(args: argparse.Namespace) -> dict[str, bool]:
+    """Map CLI flags to per-agent regeneration controls."""
+
+    task_regenerate = bool(args.regenerate)
+    recovery_regenerate = bool(args.runtime_llm_recovery)
+    return {
+        "task_regenerate": task_regenerate,
+        "recovery_regenerate": recovery_regenerate,
+        "compile_regenerate": task_regenerate or recovery_regenerate,
+    }
 
 
 def _parse_xyz(value: str) -> list[float]:
@@ -594,7 +624,10 @@ def build_parser() -> argparse.Namespace:
         "--regenerate",
         action="store_true",
         default=False,
-        help="Force regeneration of the agent graph artifacts.",
+        help=(
+            "Regenerate the nominal task graph JSON. Cached recovery JSON is reused "
+            "unless --runtime_llm_recovery is also set."
+        ),
     )
     parser.add_argument(
         "--interactive_error_injection",
@@ -607,9 +640,9 @@ def build_parser() -> argparse.Namespace:
         action="store_true",
         default=False,
         help=(
-            "Enable runtime recovery planning after a monitor triggers. This asks "
-            "RecoveryAgent for a one-edge recovery binding instead of only using "
-            "the precompiled recovery graph."
+            "Regenerate recovery JSON and enable runtime recovery planning after a "
+            "monitor triggers. This asks RecoveryAgent for a one-edge recovery "
+            "binding instead of only using the precompiled recovery graph."
         ),
     )
     parser.add_argument(
@@ -1272,11 +1305,8 @@ def build_parser() -> argparse.Namespace:
 
 
 def _copy_cached_artifacts(
-    case: CaseSpec, artifact_dir: Path, regenerate: bool
+    case: CaseSpec, artifact_dir: Path, _regenerate: bool
 ) -> None:
-    if regenerate:
-        return
-
     database_source = DATABASE_ARTIFACT_SOURCE_BY_CASE_SOURCE.get(
         case.artifact_source_dir
     )
@@ -1635,7 +1665,7 @@ def _raise_if_strict_validation_failed(case: CaseSpec, result: dict) -> None:
 
 
 def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> None:
-    _ensure_offline_llms(force=not args.runtime_llm_recovery)
+    _configure_llms_for_args(args)
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
     if args.no_record_video:
         _disable_video_events(env_cfg)
@@ -1710,6 +1740,7 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     0,
                     False,
                     regenerate=args.regenerate,
+                    **_agent_regenerate_kwargs(args),
                     recovery=case.compile_recovery,
                     interactive_error_injection=args.interactive_error_injection,
                     runtime_llm_recovery=args.runtime_llm_recovery,

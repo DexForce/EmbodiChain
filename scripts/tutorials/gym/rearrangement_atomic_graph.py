@@ -92,7 +92,7 @@ class _OfflineLLM:
     def invoke(self, prompt):
         raise RuntimeError(
             "Offline Rearrangement demo expected cached agent artifacts. "
-            "Use --runtime_llm_recovery or provide fresh artifacts if LLM calls are needed."
+            "Use --regenerate or --runtime_llm_recovery if LLM calls are needed."
         )
 
 
@@ -108,6 +108,35 @@ def _ensure_offline_llms(*, force: bool = False) -> None:
         agent_llm.failure_anticipation_llm = agent_llm.recovery_llm
     if agent_llm.code_llm is None:
         agent_llm.code_llm = agent_llm.compile_llm
+
+
+def _configure_llms_for_args(args: argparse.Namespace) -> None:
+    """Allow only the agent phase explicitly requested by the CLI flags."""
+
+    offline_llm = _OfflineLLM()
+    if not args.regenerate or agent_llm.task_llm is None:
+        agent_llm.task_llm = offline_llm
+    if not args.runtime_llm_recovery or agent_llm.recovery_llm is None:
+        agent_llm.recovery_llm = offline_llm
+    if (
+        not (args.regenerate or args.runtime_llm_recovery)
+        or agent_llm.compile_llm is None
+    ):
+        agent_llm.compile_llm = offline_llm
+    agent_llm.failure_anticipation_llm = agent_llm.recovery_llm
+    agent_llm.code_llm = agent_llm.compile_llm
+
+
+def _agent_regenerate_kwargs(args: argparse.Namespace) -> dict[str, bool]:
+    """Map CLI flags to per-agent regeneration controls."""
+
+    task_regenerate = bool(args.regenerate)
+    recovery_regenerate = bool(args.runtime_llm_recovery)
+    return {
+        "task_regenerate": task_regenerate,
+        "recovery_regenerate": recovery_regenerate,
+        "compile_regenerate": task_regenerate or recovery_regenerate,
+    }
 
 
 def _timestamped_output_root() -> Path:
@@ -198,10 +227,8 @@ def _flush_recorded_videos(env) -> int:
     return flushed
 
 
-def _copy_database_artifacts(artifact_dir: Path, regenerate: bool) -> None:
+def _copy_database_artifacts(artifact_dir: Path, _regenerate: bool) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    if regenerate:
-        return
     if not DEFAULT_DATABASE_ARTIFACT_ROOT.exists():
         raise FileNotFoundError(
             f"Rearrangement database artifacts not found: {DEFAULT_DATABASE_ARTIFACT_ROOT}"
@@ -488,7 +515,10 @@ def build_parser() -> argparse.Namespace:
         "--regenerate",
         action="store_true",
         default=False,
-        help="Do not copy cached database artifacts; allow agents to regenerate JSON.",
+        help=(
+            "Regenerate the nominal task graph JSON. Cached recovery JSON is reused "
+            "unless --runtime_llm_recovery is also set."
+        ),
     )
     parser.add_argument(
         "--compile_only",
@@ -512,7 +542,10 @@ def build_parser() -> argparse.Namespace:
         "--runtime_llm_recovery",
         action="store_true",
         default=False,
-        help="Allow runtime recovery to call the RecoveryAgent instead of using only cached branches.",
+        help=(
+            "Regenerate recovery JSON and allow runtime recovery to call the "
+            "RecoveryAgent instead of using only cached branches."
+        ),
     )
     parser.add_argument(
         "--prefer_runtime_llm_recovery",
@@ -770,7 +803,7 @@ def main() -> None:
     args = build_parser()
     if args.open_window:
         args.headless = False
-    _ensure_offline_llms(force=not args.runtime_llm_recovery)
+    _configure_llms_for_args(args)
 
     output_root = (
         Path(args.output_root).resolve()
@@ -817,6 +850,7 @@ def main() -> None:
         env.reset(seed=args.seed)
         common_kwargs = {
             "regenerate": args.regenerate,
+            **_agent_regenerate_kwargs(args),
             "recovery": True,
             "runtime_llm_recovery": args.runtime_llm_recovery,
             "prefer_runtime_llm_recovery": (

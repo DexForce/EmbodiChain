@@ -14,10 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import argparse
 import base64
 import json
-import os
 import re
 from pathlib import Path
 import numpy as np
@@ -29,6 +30,12 @@ import itertools
 from scipy.spatial import ConvexHull
 from typing import Dict, Any, List
 
+from embodichain.env import (
+    get_openai_compatible_api_key,
+    get_openai_compatible_base_url,
+    get_openai_compatible_model,
+)
+
 
 def _load_gen_config() -> Dict[str, Any]:
     config_path = Path(__file__).resolve().parents[1] / "configs" / "gen_config.json"
@@ -39,9 +46,9 @@ def _load_gen_config() -> Dict[str, Any]:
         raw_cfg = json.load(f)
 
     cfg = raw_cfg.get("llm", {}).get("openai_compatible", {})
-    cfg["api_key"] = os.getenv("OPENAI_API_KEY") or cfg.get("api_key", "")
-    cfg["model"] = os.getenv("OPENAI_MODEL") or cfg.get("model", "")
-    cfg["base_url"] = os.getenv("OPENAI_BASE_URL") or cfg.get("base_url", "")
+    cfg["api_key"] = get_openai_compatible_api_key() or cfg.get("api_key", "")
+    cfg["model"] = get_openai_compatible_model() or cfg.get("model", "")
+    cfg["base_url"] = get_openai_compatible_base_url() or cfg.get("base_url", "")
     cfg["default_query"] = cfg.get("default_query", {})
     if cfg["base_url"]:
         cfg["base_url"] = cfg["base_url"].rstrip("/")
