@@ -992,6 +992,75 @@ def test_compile_agent_generate_writes_compiled_graph_bundle(tmp_path: Path) -> 
     assert json.loads(path.read_text()) == bundle
 
 
+def test_compile_agent_generate_normalizes_llm_pick_up_runtime_kwargs(
+    tmp_path: Path,
+) -> None:
+    compile_agent_cls = _load_compile_agent_class()
+    agent = object.__new__(compile_agent_cls)
+    agent.prompt_name = "compile_agent_graph"
+    agent.task_name = "Task"
+
+    task_graph = {
+        "task": "grasp",
+        "start": "v0_start",
+        "goal": "v1_grasped",
+        "nodes": [
+            {"id": "v0_start", "semantic": "Cup is on table."},
+            {"id": "v1_grasped", "semantic": "Cup is grasped."},
+        ],
+        "edges": [
+            {
+                "id": "e01_grasp",
+                "source": "v0_start",
+                "target": "v1_grasped",
+                "left_arm_action": {
+                    "kind": "atomic_action",
+                    "name": "pick_up",
+                    "cfg": {
+                        "control_part": "left_arm",
+                        "hand_control_part": "left_eef",
+                        "pre_grasp_distance": 0.1,
+                    },
+                    "target": {"kind": "object_semantics", "obj_name": "cup"},
+                    "runtime_kwargs": {},
+                },
+                "right_arm_action": None,
+            }
+        ],
+    }
+    recovery_spec = {"task": "grasp", "recovery_bindings": []}
+
+    path, _, content = agent.generate(
+        log_dir=tmp_path,
+        regenerate=True,
+        task_graph=task_graph,
+        recovery_spec=recovery_spec,
+        recovery_enabled=False,
+    )
+
+    bundle = json.loads(content)
+    runtime_kwargs = bundle["task_graph"]["edges"][0]["left_arm_action"][
+        "runtime_kwargs"
+    ]
+
+    assert path.name == "agent_compiled_graph.json"
+    assert runtime_kwargs == {
+        "force_valid": False,
+        "public_grasp_strategy": "legacy_guided",
+        "public_grasp_candidate_num": 32,
+        "public_grasp_pre_grasp_distance": 0.05,
+        "public_grasp_lift_height": 0.15,
+        "public_grasp_rank_by_legacy_pose": True,
+        "public_grasp_use_legacy_orientation": True,
+        "validate_public_grasp_after_action": True,
+        "public_grasp_validation_min_object_lift": 0.03,
+        "public_grasp_validation_max_object_xy_displacement": 0.16,
+    }
+    assert bundle["metadata"]["task_graph_hash"] == stable_json_hash(
+        bundle["task_graph"]
+    )
+
+
 def test_compile_agent_uses_one_llm_call_for_ambiguous_recovery_spec(
     tmp_path: Path,
 ) -> None:

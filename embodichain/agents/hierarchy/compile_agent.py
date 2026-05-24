@@ -55,7 +55,13 @@ class CompileAgent(AgentBase):
         )
         file_path = Path(log_dir) / "agent_compiled_graph.json"
         recovery_enabled = bool(kwargs.get("recovery_enabled", False))
-        task_graph = extract_json_object(kwargs["task_graph"])
+        from embodichain.lab.sim.agent.graph_spec import (
+            expand_recovery_spec,
+            normalize_recovery_spec,
+            normalize_task_graph_for_execution,
+        )
+
+        task_graph = normalize_task_graph_for_execution(kwargs["task_graph"])
         raw_recovery_spec = extract_json_object(
             kwargs.get("recovery_spec") or _empty_recovery_spec(task_graph)
         )
@@ -73,11 +79,6 @@ class CompileAgent(AgentBase):
             ):
                 print(f"Compiled graph artifact already exists at {file_path}.")
                 return file_path, kwargs, None
-
-        from embodichain.lab.sim.agent.graph_spec import (
-            expand_recovery_spec,
-            normalize_recovery_spec,
-        )
 
         recovery_spec, issues = normalize_recovery_spec(task_graph, raw_recovery_spec)
         if issues:

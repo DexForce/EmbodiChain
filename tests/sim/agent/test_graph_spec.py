@@ -735,6 +735,86 @@ def test_compile_agent_graph_spec_compiles_atomic_action_fallback() -> None:
     }
 
 
+def test_compile_agent_graph_spec_normalizes_llm_pick_up_runtime_kwargs() -> None:
+    env = object()
+
+    task_graph = {
+        "task": "grasp cup",
+        "start": "v0_start",
+        "goal": "v2_done",
+        "nodes": [
+            {"id": "v0_start", "semantic": "Cup is on table."},
+            {"id": "v1_grasped", "semantic": "Cup is grasped."},
+            {"id": "v2_done", "semantic": "Cup has been moved."},
+        ],
+        "edges": [
+            {
+                "id": "e01_pick_up",
+                "source": "v0_start",
+                "target": "v1_grasped",
+                "left_arm_action": {
+                    "kind": "atomic_action",
+                    "name": "pick_up",
+                    "cfg": {
+                        "control_part": "left_arm",
+                        "hand_control_part": "left_eef",
+                        "pre_grasp_distance": 0.1,
+                    },
+                    "target": {
+                        "kind": "object_semantics",
+                        "obj_name": "cup",
+                    },
+                    "runtime_kwargs": {},
+                },
+                "right_arm_action": None,
+            },
+            {
+                "id": "e02_move",
+                "source": "v1_grasped",
+                "target": "v2_done",
+                "left_arm_action": {
+                    "kind": "atomic_action",
+                    "name": "move",
+                    "cfg": {"control_part": "left_arm"},
+                    "target": {"kind": "initial_pose"},
+                    "runtime_kwargs": {},
+                },
+                "right_arm_action": None,
+            },
+        ],
+    }
+
+    graph = compile_agent_graph_spec(
+        task_graph,
+        env=env,
+        graph_cls=FakeGraph,
+        action_module={
+            "grasp": lambda **kwargs: kwargs,
+            "move": lambda **kwargs: kwargs,
+        },
+        monitor_module={},
+    )
+
+    pick_up_action = graph.edges["e01_pick_up"].left_arm_action
+    move_action = graph.edges["e02_move"].left_arm_action
+
+    assert pick_up_action.action_name == "pick_up"
+    assert pick_up_action.spec["runtime_kwargs"] == {
+        "force_valid": False,
+        "public_grasp_strategy": "legacy_guided",
+        "public_grasp_candidate_num": 32,
+        "public_grasp_pre_grasp_distance": 0.05,
+        "public_grasp_lift_height": 0.15,
+        "public_grasp_rank_by_legacy_pose": True,
+        "public_grasp_use_legacy_orientation": True,
+        "validate_public_grasp_after_action": True,
+        "public_grasp_validation_min_object_lift": 0.03,
+        "public_grasp_validation_max_object_xy_displacement": 0.16,
+    }
+    assert move_action.action_name == "move"
+    assert move_action.spec["runtime_kwargs"] == {}
+
+
 @pytest.mark.parametrize(
     ("fn_name", "kwargs", "expected_action_name", "expected_target_kind"),
     [

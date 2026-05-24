@@ -107,7 +107,7 @@ class TaskPrompt:
                                 "- Every edge must define at least one non-null arm action.\n"
                                 "- Use `null` for an idle arm action.\n"
                                 "- Use only `move`, `pick_up`, `place`, `gripper_open`, or `gripper_close` action names.\n"
-                                '- Do not output legacy `{"fn": ...}` action calls.\n'
+                                '- Do not output legacy `{{"fn": ...}}` action calls.\n'
                                 "- Put only JSON primitives inside cfg, target, and runtime_kwargs: strings, numbers, booleans, null, arrays, or objects.\n"
                                 "- Do not include `env`, tensors, comments, validation conditions, monitors, errors, or recovery fields.\n"
                                 "- Express pouring wrist rotation, return-home, relative movement, and EEF orientation as `move` target kinds.\n"

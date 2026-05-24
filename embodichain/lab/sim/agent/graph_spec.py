@@ -32,7 +32,21 @@ __all__ = [
     "expand_recovery_spec",
     "load_agent_graph_bundle",
     "normalize_recovery_spec",
+    "normalize_task_graph_for_execution",
 ]
+
+_DEFAULT_PICK_UP_RUNTIME_KWARGS = {
+    "force_valid": False,
+    "public_grasp_strategy": "legacy_guided",
+    "public_grasp_candidate_num": 32,
+    "public_grasp_pre_grasp_distance": 0.05,
+    "public_grasp_lift_height": 0.15,
+    "public_grasp_rank_by_legacy_pose": True,
+    "public_grasp_use_legacy_orientation": True,
+    "validate_public_grasp_after_action": True,
+    "public_grasp_validation_min_object_lift": 0.03,
+    "public_grasp_validation_max_object_xy_displacement": 0.16,
+}
 
 MONITOR_TYPE_ALIASES = {
     "object_moved": "object_moved",
@@ -80,6 +94,25 @@ def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
     return extract_json_object(Path(path).read_text(encoding="utf-8"))
 
 
+def normalize_task_graph_for_execution(
+    task_graph: str | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Normalize a nominal task graph for execution-time compilation.
+
+    The nominal graph can stay compact for authoring, but execution expects
+    some atomic actions to carry deterministic runtime knobs. Right now we only
+    enrich ``pick_up`` actions, because they depend on the public grasp planner.
+    """
+
+    task_spec = deepcopy(extract_json_object(task_graph))
+    for edge in task_spec.get("edges", []):
+        if not isinstance(edge, Mapping):
+            continue
+        for action_key in ("left_arm_action", "right_arm_action"):
+            edge[action_key] = _normalize_nominal_atomic_action(edge.get(action_key))
+    return task_spec
+
+
 def compile_agent_graph_from_file(
     path: str | Path,
     *,
@@ -125,7 +158,7 @@ def compile_agent_graph_spec(
     Returns:
         Executable ``AgentTaskGraph`` instance.
     """
-    task_spec = extract_json_object(task_graph)
+    task_spec = normalize_task_graph_for_execution(task_graph)
     recovery_spec = extract_json_object(
         recovery_graph or _empty_recovery_graph(task_spec)
     )
@@ -2006,8 +2039,35 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
 
         fallback = _atomic_action_fallback(spec)
         fallback_action = _compile_optional_call(fallback, action_module)
-        return AtomicGraphAction(spec=spec, fallback_action=fallback_action)
+        return AtomicGraphAction(
+            spec=_normalize_nominal_atomic_action(spec),
+            fallback_action=fallback_action,
+        )
     return _compile_call(spec, action_module)
+
+
+def _normalize_nominal_atomic_action(action: Any) -> Any:
+    if action is None:
+        return None
+    if not isinstance(action, Mapping):
+        return deepcopy(action)
+
+    normalized = deepcopy(dict(action))
+    if normalized.get("kind") != "atomic_action":
+        if normalized.get("kind") == "atomic_sequence":
+            actions = normalized.get("actions")
+            if isinstance(actions, list):
+                normalized["actions"] = [
+                    _normalize_nominal_atomic_action(item) for item in actions
+                ]
+        return normalized
+
+    if normalized.get("name") == "pick_up":
+        runtime_kwargs = dict(normalized.get("runtime_kwargs") or {})
+        for key, value in _DEFAULT_PICK_UP_RUNTIME_KWARGS.items():
+            runtime_kwargs.setdefault(key, value)
+        normalized["runtime_kwargs"] = runtime_kwargs
+    return normalized
 
 
 def _compile_monitor(spec: Mapping[str, Any], monitor_module: Any, *, env: Any) -> Any:
