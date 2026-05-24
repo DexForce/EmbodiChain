@@ -52,6 +52,17 @@ DEFAULT_DATABASE_ARTIFACT_ROOT = (
 )
 TASK_NAME = "Rearrangement"
 FORCED_ERROR_PRESETS: dict[str, dict[str, Any]] = {
+    "hold_lost_move_regrasp": {
+        "edge_index": 3,
+        "blind": False,
+        "blind_obj_name": "fork",
+        "error_type": "misplaced_object",
+        "relative_error_xyz": [0.10, 0.0, 0.0],
+        "expected_monitor": "monitor_object_held",
+        "require_precompiled_recovery": True,
+        "require_task_success": True,
+        "require_layout_success": True,
+    },
     "plate_moved_retry": {
         "edge_index": 3,
         "blind": True,
@@ -60,6 +71,7 @@ FORCED_ERROR_PRESETS: dict[str, dict[str, Any]] = {
         "relative_error_xyz": [0.08, 0.0, 0.0],
         "require_precompiled_recovery": True,
         "require_task_success": True,
+        "require_layout_success": True,
     },
     "legacy_monitor_index": {
         "edge_index": 1,
@@ -69,6 +81,7 @@ FORCED_ERROR_PRESETS: dict[str, dict[str, Any]] = {
         "relative_error_xyz": [0.0, 0.1, 0.0],
         "require_precompiled_recovery": False,
         "require_task_success": False,
+        "require_layout_success": False,
     },
 }
 
@@ -232,6 +245,8 @@ def _build_forced_error_config(args: argparse.Namespace) -> dict[str, Any] | Non
             preset.get("require_precompiled_recovery", False)
         ),
         "require_task_success": bool(preset.get("require_task_success", False)),
+        "require_layout_success": bool(preset.get("require_layout_success", False)),
+        "expected_monitor": preset.get("expected_monitor"),
         "blind": bool(preset.get("blind", False)),
         "blind_obj_name": blind_obj_name,
     }
@@ -280,13 +295,16 @@ def _write_result(
     program_success: bool,
     task_success: bool | None,
     forced_error_config: dict[str, Any] | None = None,
+    env=None,
     exception: Exception | None = None,
 ) -> dict[str, Any]:
     graph_path = artifact_dir / "agent_compiled_graph.json"
+    layout = _rearrangement_layout_summary(env)
     result = {
         "task": TASK_NAME,
         "program_success": program_success,
         "task_success": task_success,
+        "layout": layout,
         "compiled_graph": _compiled_graph_stats(graph_path),
         "forced_error": _forced_error_summary(forced_error_config),
         "exception": (
@@ -319,6 +337,8 @@ def _forced_error_summary(config: dict[str, Any] | None) -> dict[str, Any] | Non
             config.get("require_precompiled_recovery", False)
         ),
         "require_task_success": bool(config.get("require_task_success", False)),
+        "require_layout_success": bool(config.get("require_layout_success", False)),
+        "expected_monitor": config.get("expected_monitor"),
         "injected": bool(config.get("_injected", False)),
         "triggered": bool(config.get("_triggered", False)),
         "injected_at_step": config.get("_injected_at_step"),
@@ -333,17 +353,35 @@ def _validate_forced_recovery_demo(
     *,
     forced_error_config: dict[str, Any],
     task_success: bool | None,
+    layout: dict[str, Any] | None,
 ) -> None:
     validation = {
         "monitor_triggered": bool(forced_error_config.get("_triggered", False)),
         "task_success": task_success,
+        "layout_success": None if layout is None else layout.get("success_xy"),
         "passed": True,
         "failure_reasons": [],
     }
     if not validation["monitor_triggered"]:
         validation["failure_reasons"].append("forced monitor did not trigger")
-    if forced_error_config.get("require_task_success", False) and task_success is not True:
+    expected_monitor = forced_error_config.get("expected_monitor")
+    triggered_monitor = forced_error_config.get("_triggered_monitor_name")
+    if expected_monitor and triggered_monitor != expected_monitor:
+        validation["failure_reasons"].append(
+            f"expected monitor {expected_monitor}, got {triggered_monitor}"
+        )
+    if (
+        forced_error_config.get("require_task_success", False)
+        and task_success is not True
+    ):
         validation["failure_reasons"].append("task did not succeed after recovery")
+    if (
+        forced_error_config.get("require_layout_success", False)
+        and validation["layout_success"] is not True
+    ):
+        validation["failure_reasons"].append(
+            "final fork/spoon xy layout is not aligned with the moved plate"
+        )
 
     validation["passed"] = not validation["failure_reasons"]
     forced_error_config["_validation"] = validation
@@ -352,6 +390,69 @@ def _validate_forced_recovery_demo(
             "Forced recovery demo validation failed: "
             + "; ".join(validation["failure_reasons"])
         )
+
+
+def _rearrangement_layout_summary(env) -> dict[str, Any] | None:
+    if env is None:
+        return None
+    raw_env = getattr(env, "unwrapped", env)
+    sim = getattr(raw_env, "sim", None)
+    if sim is None:
+        return None
+    try:
+        plate_xy = _object_xy(raw_env, "plate")
+        fork_xy = _object_xy(raw_env, "fork")
+        spoon_xy = _object_xy(raw_env, "spoon")
+    except Exception as exc:
+        return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    tolerance = float(
+        getattr(raw_env, "metadata", {})
+        .get("success_params", {})
+        .get("tolerance", 0.02)
+    )
+    expected = {
+        "fork": [plate_xy[0], plate_xy[1] + 0.16],
+        "spoon": [plate_xy[0], plate_xy[1] - 0.16],
+    }
+    errors = {
+        "fork": _xy_error(fork_xy, expected["fork"]),
+        "spoon": _xy_error(spoon_xy, expected["spoon"]),
+    }
+    success_xy = all(
+        abs(error["dx"]) <= tolerance and abs(error["dy"]) <= tolerance
+        for error in errors.values()
+    )
+    success_y_only = all(abs(error["dy"]) <= tolerance for error in errors.values())
+    return {
+        "available": True,
+        "tolerance": tolerance,
+        "positions_xy": {
+            "plate": plate_xy,
+            "fork": fork_xy,
+            "spoon": spoon_xy,
+        },
+        "expected_xy": expected,
+        "errors": errors,
+        "success_xy": success_xy,
+        "success_y_only": success_y_only,
+    }
+
+
+def _object_xy(env, obj_name: str) -> list[float]:
+    pose = env.sim.get_rigid_object(obj_name).get_local_pose(to_matrix=True)
+    tensor = torch.as_tensor(pose).detach().cpu()
+    return [float(tensor[0, 0, 3].item()), float(tensor[0, 1, 3].item())]
+
+
+def _xy_error(actual: list[float], expected: list[float]) -> dict[str, float]:
+    dx = float(actual[0] - expected[0])
+    dy = float(actual[1] - expected[1])
+    return {
+        "dx": dx,
+        "dy": dy,
+        "distance_xy": float((dx * dx + dy * dy) ** 0.5),
+    }
 
 
 def build_parser() -> argparse.Namespace:
@@ -600,11 +701,13 @@ def build_parser() -> argparse.Namespace:
     parser.add_argument(
         "--forced_error_preset",
         choices=sorted(FORCED_ERROR_PRESETS),
-        default="plate_moved_retry",
+        default="hold_lost_move_regrasp",
         help=(
-            "Deterministic recovery demo preset. plate_moved_retry uses a "
-            "demo-local blind plate displacement on nominal edge #3 so the "
-            "precompiled e03 plate-moved retry branch can run; "
+            "Deterministic recovery demo preset. hold_lost_move_regrasp "
+            "displaces the held fork on monitored edge #3 so the precompiled "
+            "e03 hold-lost branch can regrasp, replay e02, and retry e03; "
+            "plate_moved_retry keeps the earlier blind plate displacement "
+            "retry scenario; "
             "legacy_monitor_index keeps the old monitored-edge index behavior."
         ),
     )
@@ -797,16 +900,19 @@ def main() -> None:
             if not valid:
                 raise RuntimeError("Rearrangement demo produced no valid actions.")
             task_success = _as_bool(env.unwrapped.is_task_success())
+            layout = _rearrangement_layout_summary(env)
             if forced_error_config is not None:
                 _validate_forced_recovery_demo(
                     forced_error_config=forced_error_config,
                     task_success=task_success,
+                    layout=layout,
                 )
         _write_result(
             artifact_dir=artifact_dir,
             program_success=True,
             task_success=task_success,
             forced_error_config=forced_error_config,
+            env=env,
         )
     except Exception as exc:
         _write_result(
@@ -814,6 +920,7 @@ def main() -> None:
             program_success=False,
             task_success=task_success,
             forced_error_config=forced_error_config,
+            env=env,
             exception=exc,
         )
         raise

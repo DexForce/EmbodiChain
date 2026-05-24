@@ -154,8 +154,8 @@
         "kwargs": {
           "robot_name": "right_arm",
           "obj_name": "bottle",
-          "x": 0.7,
-          "y": -0.1,
+          "x": 0.75,
+          "y": -0.16,
           "pre_place_dis": 0.08
         }
       }

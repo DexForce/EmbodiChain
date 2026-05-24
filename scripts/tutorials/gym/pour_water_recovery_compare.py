@@ -1112,6 +1112,15 @@ def build_parser() -> argparse.Namespace:
         help="Maximum final xy error accepted by public place validation.",
     )
     parser.add_argument(
+        "--return_to_initial_clearance_height",
+        type=float,
+        default=0.12,
+        help=(
+            "Vertical clearance used before atomic_engine back_to_initial_pose "
+            "joint interpolation."
+        ),
+    )
+    parser.add_argument(
         "--disable_public_gripper_action",
         action="store_true",
         default=False,
@@ -1861,6 +1870,9 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     ),
                     public_place_validation_max_xy_error=(
                         args.public_place_validation_max_xy_error
+                    ),
+                    return_to_initial_clearance_height=(
+                        args.return_to_initial_clearance_height
                     ),
                     validate_place_preconditions=True,
                     validate_public_place_after_action=True,

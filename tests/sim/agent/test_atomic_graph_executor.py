@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain.lab.sim.agent import atomic_graph_executor as executor
+from embodichain.lab.sim.agent import atomic_engine_planner as executor
 from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 from embodichain.lab.sim.agent.edge_action_executor import ActionPlan
 from embodichain.lab.sim.atomic_actions import GripperActionCfg, PlaceActionCfg
@@ -321,6 +321,25 @@ def test_plan_returns_action_plan_for_joint_delta_move() -> None:
     assert isinstance(plan, ActionPlan)
     assert plan.joint_ids == env.right_arm_joints
     assert plan.trajectory.shape == (1, 3, 2)
+    torch.testing.assert_close(
+        plan.trajectory[0, -1],
+        torch.tensor([0.0, torch.pi / 2], dtype=torch.float32),
+    )
+
+
+def test_atomic_engine_planner_plans_joint_delta_move_directly() -> None:
+    env = _Env()
+    spec = {
+        "kind": "atomic_action",
+        "name": "move",
+        "cfg": {"control_part": "right_arm", "sample_interval": 3},
+        "target": {"kind": "eef_rotation_delta", "joint_index": 1, "degree": 90},
+    }
+
+    plan = executor.AtomicEnginePlanner().plan(spec, env=env)
+
+    assert isinstance(plan, ActionPlan)
+    assert plan.joint_ids == env.right_arm_joints
     torch.testing.assert_close(
         plan.trajectory[0, -1],
         torch.tensor([0.0, torch.pi / 2], dtype=torch.float32),

@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-from embodichain.lab.sim.agent import atomic_graph_executor as graph_executor
+from embodichain.lab.sim.agent import atomic_engine_planner as graph_executor
 from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 from embodichain.lab.sim.agent.edge_action_executor import (
     ActionPlan,

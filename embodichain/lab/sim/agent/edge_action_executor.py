@@ -22,6 +22,7 @@ from typing import Any
 import torch
 from tqdm import tqdm
 
+from embodichain.lab.sim.agent.action_plan import ActionPlan
 from embodichain.lab.sim.agent.atom_action_utils import sync_agent_state_from_robot
 from embodichain.lab.sim.agent.atomic_action_adapter import (
     validate_pending_public_grasp_after_action,
@@ -39,16 +40,6 @@ from embodichain.lab.sim.agent.error_functions import (
 from embodichain.utils.logger import log_info, log_warning
 
 __all__ = ["ActionPlan", "EdgeExecutionResult", "EdgeActionExecutor"]
-
-
-@dataclass
-class ActionPlan:
-    """Structured plan returned by graph-backed atomic actions."""
-
-    is_success: bool
-    trajectory: torch.Tensor
-    joint_ids: list[int]
-    action_name: str
 
 
 @dataclass
