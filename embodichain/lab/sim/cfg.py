@@ -77,7 +77,38 @@ class RenderCfg:
 
 
 @configclass
-class DefaultPhysicsCfg:
+class GPUMemoryCfg:
+    """GPU memory configuration for default-backend GPU physics simulation."""
+
+    temp_buffer_capacity: int = 2**24
+    """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
+
+    max_rigid_contact_count: int = 2**19
+    """Increase this if you get 'Contact buffer overflow detected'"""
+
+    max_rigid_patch_count: int = (
+        2**18
+    )  # 81920 is DexSim default but most tasks work with 2**18
+    """Increase this if you get 'Patch buffer overflow detected'"""
+
+    heap_capacity: int = 2**26
+
+    found_lost_pairs_capacity: int = (
+        2**25
+    )  # 262144 is DexSim default but most tasks work with 2**25
+    found_lost_aggregate_pairs_capacity: int = 2**10
+    total_aggregate_pairs_capacity: int = 2**10
+
+
+@configclass
+class PhysicsCfg:
+    """Base configuration for DexSim physics backends."""
+
+
+@configclass
+class DefaultPhysicsCfg(PhysicsCfg):
+    """Configuration for the DexSim default (PhysX) physics backend."""
+
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
     """Gravity vector for the simulation environment."""
 
@@ -101,14 +132,17 @@ class DefaultPhysicsCfg:
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
-    
-    Note: the larger the tolerance, the faster the simulation will be. 
+
+    Note: the larger the tolerance, the faster the simulation will be.
     """
     speed_tolerance: float = 0.25
     """The speed tolerance for the simulation.
-    
+
     Note: the larger the tolerance, the faster the simulation will be.
     """
+
+    gpu_memory: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
+    """GPU memory configuration for GPU physics simulation."""
 
     def to_dexsim_args(self) -> Dict[str, Any]:
         """Convert to dexsim physics args dictionary."""
@@ -124,12 +158,8 @@ class DefaultPhysicsCfg:
         return args
 
 
-# Backwards-compatible alias for existing task configs.
-PhysicsCfg = DefaultPhysicsCfg
-
-
 @configclass
-class NewtonPhysicsCfg:
+class NewtonPhysicsCfg(PhysicsCfg):
     """Configuration for DexSim Newton physics backend."""
 
     num_substeps: int = 10
@@ -270,28 +300,32 @@ class WindowRecordCfg:
     """Video file prefix used when no explicit save path is provided."""
 
 
-@configclass
-class GPUMemoryCfg:
-    """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
+def physics_cfg_for_backend(
+    backend: Literal["default", "newton"],
+) -> DefaultPhysicsCfg | NewtonPhysicsCfg:
+    """Return a default physics configuration instance for the given backend."""
+    if backend == "newton":
+        return NewtonPhysicsCfg()
+    return DefaultPhysicsCfg()
 
-    temp_buffer_capacity: int = 2**24
-    """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
 
-    max_rigid_contact_count: int = 2**19
-    """Increase this if you get 'Contact buffer overflow detected'"""
+def physics_backend_from_cfg(
+    physics_cfg: PhysicsCfg,
+) -> Literal["default", "newton"]:
+    """Infer the physics backend name from a physics configuration instance."""
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        return "newton"
+    if isinstance(physics_cfg, DefaultPhysicsCfg):
+        return "default"
+    logger.log_error(
+        f"Unsupported physics_cfg type '{type(physics_cfg).__name__}'. "
+        "Expected DefaultPhysicsCfg or NewtonPhysicsCfg."
+    )
 
-    max_rigid_patch_count: int = (
-        2**18
-    )  # 81920 is DexSim default but most tasks work with 2**18
-    """Increase this if you get 'Patch buffer overflow detected'"""
 
-    heap_capacity: int = 2**26
-
-    found_lost_pairs_capacity: int = (
-        2**25
-    )  # 262144 is DexSim default but most tasks work with 2**25
-    found_lost_aggregate_pairs_capacity: int = 2**10
-    total_aggregate_pairs_capacity: int = 2**10
+def validate_physics_cfg(physics_cfg: PhysicsCfg) -> None:
+    """Validate that ``physics_cfg`` is a supported backend configuration."""
+    physics_backend_from_cfg(physics_cfg)
 
 
 @configclass

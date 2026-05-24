@@ -33,7 +33,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import List, Union, Dict, Union, Sequence
+from typing import List, Union, Dict, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -56,6 +56,7 @@ from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType, Windows
 from dexsim.engine import GizmoController, ObjectManipulator
+from dexsim.engine.newton_physics import NewtonManager
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -76,11 +77,11 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    PhysicsCfg,
     DefaultPhysicsCfg,
     NewtonPhysicsCfg,
+    physics_backend_from_cfg,
+    validate_physics_cfg,
     MarkerCfg,
-    GPUMemoryCfg,
     WindowRecordCfg,
     LightCfg,
     RigidObjectCfg,
@@ -147,29 +148,16 @@ class SimulationManagerCfg:
     sim_device: Union[str, torch.device] = "cpu"
     """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
 
-    physics_backend: str = "default"
-    """Physics backend name. Supported values are 'default' and 'newton'."""
-
-    default_physics_cfg: DefaultPhysicsCfg = field(default_factory=DefaultPhysicsCfg)
-    """The existing DexSim default-backend physics configuration parameters."""
-
-    newton_physics_cfg: NewtonPhysicsCfg = field(default_factory=NewtonPhysicsCfg)
-    """DexSim Newton backend physics configuration parameters."""
-
-    physics_config: PhysicsCfg | None = None
-    """Deprecated alias for ``default_physics_cfg`` kept for existing configs."""
-
-    gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
-    """The GPU memory configuration parameters."""
+    physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg = field(
+        default_factory=DefaultPhysicsCfg
+    )
+    """Physics backend configuration (type selects default vs Newton backend)."""
 
     window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
     """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
 
     def __post_init__(self):
-        if self.physics_config is not None:
-            self.default_physics_cfg = self.physics_config
-        else:
-            self.physics_config = self.default_physics_cfg
+        validate_physics_cfg(self.physics_cfg)
 
 
 @dataclass
@@ -249,14 +237,7 @@ class SimulationManager:
 
         self.sim_config = sim_config
         self.device = torch.device("cpu")
-        self._physics_backend = getattr(
-            sim_config, "physics_backend", "default"
-        ).lower()
-        if self._physics_backend not in ("default", "newton"):
-            logger.log_error(
-                f"Unsupported physics backend '{self._physics_backend}'. "
-                "Supported backends are 'default' and 'newton'."
-            )
+        self._physics_backend = physics_backend_from_cfg(sim_config.physics_cfg)
         self._newton_manager = None
 
         world_config = self._convert_sim_config(sim_config)
@@ -287,9 +268,11 @@ class SimulationManager:
         self._world.show_coordinate_axis(False)
 
         if self.is_default_backend:
-            dexsim.set_physics_config(**sim_config.default_physics_cfg.to_dexsim_args())
+            default_physics_cfg = sim_config.physics_cfg
+            assert isinstance(default_physics_cfg, DefaultPhysicsCfg)
+            dexsim.set_physics_config(**default_physics_cfg.to_dexsim_args())
             dexsim.set_physics_gpu_memory_config(
-                **sim_config.gpu_memory_config.to_dict()
+                **default_physics_cfg.gpu_memory.to_dict()
             )
         else:
             from dexsim.engine.newton_physics import get_newton_manager
@@ -437,9 +420,10 @@ class SimulationManager:
         return str(mgr.cfg.device).startswith("cuda")
 
     @property
-    def newton_manager(self):
+    def newton_manager(self) -> NewtonManager:
         """Return the DexSim Newton manager for this world, if active."""
         if not self.is_newton_backend:
+            logger.log_warning("Newton backend is not active.")
             return None
         if self._newton_manager is None:
             from dexsim.engine.newton_physics import get_newton_manager
@@ -491,8 +475,9 @@ class SimulationManager:
         world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
-        world_config.length_tolerance = sim_config.default_physics_cfg.length_tolerance
-        world_config.speed_tolerance = sim_config.default_physics_cfg.speed_tolerance
+        if isinstance(sim_config.physics_cfg, DefaultPhysicsCfg):
+            world_config.length_tolerance = sim_config.physics_cfg.length_tolerance
+            world_config.speed_tolerance = sim_config.physics_cfg.speed_tolerance
 
         world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
         if sim_config.render_cfg.enable_denoiser is False:
@@ -520,7 +505,9 @@ class SimulationManager:
         if self.is_newton_backend:
             importlib.import_module("dexsim.engine.newton_physics")
 
-            world_config.newton_cfg = sim_config.newton_physics_cfg.to_dexsim_cfg(
+            newton_physics_cfg = sim_config.physics_cfg
+            assert isinstance(newton_physics_cfg, NewtonPhysicsCfg)
+            world_config.newton_cfg = newton_physics_cfg.to_dexsim_cfg(
                 physics_dt=sim_config.physics_dt,
                 sim_device=self.device,
                 gpu_id=sim_config.gpu_id,

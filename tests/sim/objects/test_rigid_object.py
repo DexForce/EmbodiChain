@@ -25,7 +25,7 @@ from embodichain.lab.sim import (
     VisualMaterialCfg,
 )
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, physics_cfg_for_backend
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
@@ -45,7 +45,7 @@ class BaseRigidObjectTest:
             headless=True,
             sim_device="cpu",
             num_envs=NUM_ARENAS,
-            physics_backend=physics_backend,
+            physics_cfg=physics_cfg_for_backend(physics_backend),
             render_cfg=RenderCfg(renderer="hybrid"),
         )
         self.sim = SimulationManager(config)

@@ -41,12 +41,13 @@ sim_config = SimulationManagerCfg(
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
 | `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
-| `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
-| `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
+| `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 
 ### Physics Configuration
 
-The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parameters.
+Use {class}`~cfg.DefaultPhysicsCfg` for the default PhysX backend or {class}`~cfg.NewtonPhysicsCfg` for Newton. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
+
+The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend physics simulation parameters.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |

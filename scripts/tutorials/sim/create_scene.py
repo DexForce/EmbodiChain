@@ -23,7 +23,11 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    RigidBodyAttributesCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -59,7 +63,7 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        physics_backend=args.physics_backend,
+        physics_cfg=physics_cfg_for_backend(args.physics_backend),
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),
