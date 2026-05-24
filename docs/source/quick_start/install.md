@@ -77,6 +77,50 @@ cd EmbodiChain
 pip install -e . --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 ```
 
+### Generative Simulation Dependencies
+
+If you want to use the generative simulation features, install EmbodiChain with the `gensim` extra. This installs the additional rendering and asset-processing dependencies, including `pyrender` and `bpy`. The `bpy` wheel is distributed from Blender's package index, so the Blender index must be included in the install command.
+
+**Install from PyPI with `uv`:**
+
+```bash
+uv pip install "embodichain[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+**Install from source with `uv`:**
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+uv pip install -e ".[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+**Install from PyPI with `pip`:**
+
+```bash
+pip install "embodichain[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
+**Install from source with `pip`:**
+
+```bash
+git clone https://github.com/DexForce/EmbodiChain.git
+cd EmbodiChain
+pip install -e ".[gensim]" \
+    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+    --trusted-host pyp.open3dv.site \
+    --extra-index-url https://download.blender.org/pypi/
+```
+
 ## Verify Installation
 
 Run the demo script to confirm everything is set up correctly:

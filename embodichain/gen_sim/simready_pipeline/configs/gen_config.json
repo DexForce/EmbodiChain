@@ -1,0 +1,70 @@
+{
+  "ingest": {
+    "canonical_asset_name": "asset.obj",
+    "unprocessed_formats": [".urdf", ".usd"],
+    "parseable_mesh_formats": [".glb", ".gltf", ".obj", ".ply", ".stl"]
+  },
+  "mesh_processing": {
+    "trimesh_ingest": {
+      "scene_mesh_strategy": "first",
+      "mtl_name": "asset.mtl",
+      "visual": {
+        "default_face_color": [128, 128, 128, 255],
+        "pbr_base_color_only": true
+      },
+      "export": {
+        "include_normals": true,
+        "include_color": true,
+        "include_texture": true,
+        "write_texture": false
+      }
+    },
+    "blender_remesh_bake": {
+      "remesh": {
+        "voxel_size": 0.01,
+        "min_voxel_size_ratio": 0.005,
+        "use_smooth_shade": true
+      },
+      "decimate": {
+        "ratio": 0.9
+      },
+      "uv": {
+        "angle_limit": 66.0,
+        "island_margin": 0.02
+      },
+      "bake": {
+        "texture_size": 2048,
+        "diffuse_texture_name": "diffuse.png",
+        "normal_texture_name": "normal.png",
+        "cage_extrusion_ratio": 0.05
+      },
+      "material": {
+        "name": "BakeMat"
+      }
+    },
+    "blender_cleanup_decimate": {
+      "enabled": true,
+      "cleanup": {
+        "merge_dist": 0.00001,
+        "remove_non_manifold": true,
+        "triangulate": false
+      },
+      "simplify": {
+        "ratio": 0.5,
+        "weld_distance": 0.0001,
+        "collapse_triangulate": true
+      }
+    },
+    "simready_finalize": {
+      "render_resolution": 1024
+    }
+  },
+  "llm": {
+    "openai_compatible": {
+      "api_key": "",
+      "model": "gpt-4o",
+      "base_url": "",
+      "default_query": {}
+    }
+  }
+}
