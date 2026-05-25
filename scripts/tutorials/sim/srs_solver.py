@@ -33,9 +33,7 @@ def main():
     # Initialize simulation
     device = "cpu"
     sim = SimulationManager(
-        SimulationManagerCfg(
-            headless=False, device=device, width=2200, height=1200
-        )
+        SimulationManagerCfg(headless=False, device=device, width=2200, height=1200)
     )
 
     sim.set_manual_update(False)

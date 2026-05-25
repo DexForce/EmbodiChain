@@ -207,9 +207,7 @@ class NewtonPhysicsCfg(PhysicsCfg):
         )
 
         torch_device = (
-            torch.device(self.device)
-            if isinstance(self.device, str)
-            else self.device
+            torch.device(self.device) if isinstance(self.device, str) else self.device
         )
         device = (
             f"cuda:{gpu_id}"

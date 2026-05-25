@@ -36,9 +36,7 @@ class BaseArticulationTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, device):
-        config = SimulationManagerCfg(
-            headless=True, device=device, num_envs=NUM_ARENAS
-        )
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=NUM_ARENAS)
         self.sim = SimulationManager(config)
 
         art_path = get_data_path(ART_PATH)
