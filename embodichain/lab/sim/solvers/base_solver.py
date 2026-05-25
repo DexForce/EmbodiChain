@@ -177,10 +177,17 @@ class BaseSolver(metaclass=ABCMeta):
                     th, end_only=True
                 ).get_matrix()
 
-            self.compiled_fk = torch.compile(
-                _fk_end_matrix,
-                dynamic=True,
-            )
+            self._fk_end_matrix = _fk_end_matrix
+            self.compiled_fk = _fk_end_matrix
+            try:
+                self.compiled_fk = torch.compile(
+                    _fk_end_matrix,
+                    dynamic=True,
+                )
+            except Exception as exc:
+                logger.log_warning(
+                    f"torch.compile failed for forward kinematics; using eager mode instead. Error: {exc}"
+                )
 
         self._init_qpos_limits()
 
@@ -437,7 +444,17 @@ class BaseSolver(metaclass=ABCMeta):
             logger.log_error("Kinematic chain is not initialized.")
             return torch.eye(4, device=self.device)
         # Compute forward kinematics
-        ee_link_xpos = self.compiled_fk(qpos)
+        try:
+            ee_link_xpos = self.compiled_fk(qpos)
+        except Exception as exc:
+            if hasattr(self, "_fk_end_matrix"):
+                logger.log_warning(
+                    f"Compiled forward kinematics failed; falling back to eager mode. Error: {exc}"
+                )
+                self.compiled_fk = self._fk_end_matrix
+                ee_link_xpos = self.compiled_fk(qpos)
+            else:
+                raise
 
         # Ensure batch format for TCP
         batch_size = qpos.shape[0]
