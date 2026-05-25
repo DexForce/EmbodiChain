@@ -287,7 +287,8 @@ class SimulationManager:
         self.sim_config = sim_config
         self.device = torch.device("cpu")
         self._physics_backend = physics_backend_from_cfg(sim_config.physics_cfg)
-        self._newton_manager = None
+        self._newton_manager: NewtonManager = None
+        self._newton_scene_signature: tuple | None = None
 
         world_config = self._convert_sim_config(sim_config)
 
@@ -435,8 +436,8 @@ class SimulationManager:
 
     @property
     def is_use_gpu_physics(self) -> bool:
-        """Check if the default backend GPU physics API is active."""
-        return self.is_default_gpu_backend
+        """Whether the active physics backend is running on GPU."""
+        return self.device.type == "cuda"
 
     @property
     def physics_backend(self) -> str:
@@ -455,18 +456,13 @@ class SimulationManager:
 
     @property
     def is_default_gpu_backend(self) -> bool:
-        """Whether the default backend is using the DexSim GPU physics API."""
+        """Whether the DexSim default GPU physics backend is active."""
         return self.is_default_backend and self.device.type == "cuda"
 
     @property
     def is_newton_gpu_backend(self) -> bool:
-        """Whether Newton is configured to run on CUDA."""
-        if not self.is_newton_backend:
-            return False
-        mgr = self.newton_manager
-        if mgr is None:
-            return self.device.type == "cuda"
-        return str(mgr.cfg.device).startswith("cuda")
+        """Whether the DexSim Newton backend is active on a CUDA device."""
+        return self.is_newton_backend and self.device.type == "cuda"
 
     @property
     def newton_manager(self) -> NewtonManager:
@@ -479,12 +475,6 @@ class SimulationManager:
 
             self._newton_manager = get_newton_manager(self._world)
         return self._newton_manager
-
-    @property
-    def newton_scene(self):
-        """Return the DexSim Newton scene view, if active."""
-        mgr = self.newton_manager
-        return None if mgr is None else mgr.newton_scene
 
     @property
     def is_physics_manually_update(self) -> bool:

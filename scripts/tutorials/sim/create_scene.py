@@ -74,6 +74,7 @@ def main():
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
+            body_scale=[0.5, 0.5, 0.5],
             attrs=RigidBodyAttributesCfg(
                 mass=1.0,
                 dynamic_friction=0.5,
@@ -107,6 +108,9 @@ def main():
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
+
+    mgr = sim.newton_manager
+    mgr.start_simulation()
     from IPython import embed
 
     embed()
