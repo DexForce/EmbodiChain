@@ -30,6 +30,7 @@ from tensordict import TensorDict
 
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
+from embodichain.data.enum import LeRobotKey
 from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from .manager_base import Functor
@@ -275,17 +276,7 @@ class LeRobotRecorder(Functor):
             self._env.robot.joint_names[i] for i in self._env.active_joint_ids
         ]
 
-        features["observation.qpos"] = {
-            "dtype": "float32",
-            "shape": (state_dim,),
-            "names": joint_names,
-        }
-        features["observation.qvel"] = {
-            "dtype": "float32",
-            "shape": (state_dim,),
-            "names": joint_names,
-        }
-        features["observation.qf"] = {
+        features[LeRobotKey.OBS_STATE.value] = {
             "dtype": "float32",
             "shape": (state_dim,),
             "names": joint_names,
@@ -293,7 +284,7 @@ class LeRobotRecorder(Functor):
 
         # Use full qpos dimension for action (includes gripper)
         action_dim = state_dim
-        features["action"] = {
+        features[LeRobotKey.ACTION.value] = {
             "dtype": "float32",
             "shape": (action_dim,),
             "names": joint_names,
@@ -316,14 +307,14 @@ class LeRobotRecorder(Functor):
                                 f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
                             )
 
-                        features[f"{sensor_name}.{frame_name}"] = {
+                        features[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = {
                             "dtype": "video" if self.use_videos else "image",
                             "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                             "names": ["height", "width", "channel"],
                         }
 
                         if is_stereo:
-                            features[f"{sensor_name}.{frame_name}_right"] = {
+                            features[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = {
                                 "dtype": "video" if self.use_videos else "image",
                                 "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                                 "names": ["height", "width", "channel"],
@@ -379,7 +370,7 @@ class LeRobotRecorder(Functor):
                 # Recursively handle deeper nesting
                 self._add_nested_features(features, f"{key}.{sub_key}", sub_space)
             else:
-                feature_name = f"observation.{key}.{sub_key}"
+                feature_name = f"{LeRobotKey.OBS_PREFIX.value}{key}.{sub_key}"
                 # Handle empty shapes for scalar values (e.g., mass, friction, damping)
                 # LeRobot requires non-empty shapes, so convert () to (1,)
                 shape = sub_space.shape if sub_space.shape else (1,)
@@ -463,12 +454,12 @@ class LeRobotRecorder(Functor):
 
                     color_data = obs["sensor"][sensor_name]["color"]
                     color_img = color_data[:, :, :3].cpu()
-                    frame[f"{sensor_name}.color"] = color_img
+                    frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = color_img
 
                     if is_stereo:
                         color_right_data = obs["sensor"][sensor_name]["color_right"]
                         color_right_img = color_right_data[:, :, :3].cpu()
-                        frame[f"{sensor_name}.color_right"] = color_right_img
+                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = color_right_img
                 elif isinstance(sensor, ContactSensor):
                     for frame_name in value.keys():
                         frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][
@@ -481,10 +472,8 @@ class LeRobotRecorder(Functor):
                         f"Unsupported sensor type for '{sensor_name}' when converting to LeRobot format. Currently only support Camera and ContactSensor."
                     )
 
-        # Add state
-        frame["observation.qpos"] = obs["robot"]["qpos"].cpu()
-        frame["observation.qvel"] = obs["robot"]["qvel"].cpu()
-        frame["observation.qf"] = obs["robot"]["qf"].cpu()
+        # Add state (use LeRobot standard key "observation.state")
+        frame[LeRobotKey.OBS_STATE.value] = obs["robot"]["qpos"].cpu()
 
         # Add extra observation features if they exist
         for key in obs.keys():
@@ -516,7 +505,7 @@ class LeRobotRecorder(Functor):
             if isinstance(action_tensor, torch.Tensor):
                 action_data = action_tensor.cpu()
 
-        frame["action"] = action_data
+        frame[LeRobotKey.ACTION.value] = action_data
 
         return frame
 
@@ -548,7 +537,7 @@ class LeRobotRecorder(Functor):
                 # Handle 0D tensors (scalars) - convert to 1D for LeRobot compatibility
                 if isinstance(value, torch.Tensor) and value.ndim == 0:
                     value = value.unsqueeze(0)
-                frame[f"observation.{key}.{sub_key}"] = value
+                frame[f"{LeRobotKey.OBS_PREFIX.value}{key}.{sub_key}"] = value
 
     def _update_dataset_info(self, updates: dict) -> bool:
         """Update dataset metadata."""

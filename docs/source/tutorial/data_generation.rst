@@ -83,7 +83,7 @@ Important parameters are:
 - **env.control_parts**: Controlled robot parts in the environment.
 
 
-In the current implementation, ``LeRobotRecorder`` stores robot state and action features such as ``observation.qpos``, ``observation.qvel``, ``observation.qf``, ``action``, and camera images when sensors are present.
+In the current implementation, ``LeRobotRecorder`` stores robot state and action features following LeRobot official format: ``observation.state`` for joint positions, ``action`` for applied actions, and ``observation.images.{sensor_name}`` for camera images.
 
 Step 2: Prepare the Action Configuration
 ----------------------------------------
