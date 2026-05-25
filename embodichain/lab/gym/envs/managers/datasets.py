@@ -314,7 +314,9 @@ class LeRobotRecorder(Functor):
                         }
 
                         if is_stereo:
-                            features[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = {
+                            features[
+                                f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"
+                            ] = {
                                 "dtype": "video" if self.use_videos else "image",
                                 "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                                 "names": ["height", "width", "channel"],
@@ -459,7 +461,9 @@ class LeRobotRecorder(Functor):
                     if is_stereo:
                         color_right_data = obs["sensor"][sensor_name]["color_right"]
                         color_right_img = color_right_data[:, :, :3].cpu()
-                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = color_right_img
+                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = (
+                            color_right_img
+                        )
                 elif isinstance(sensor, ContactSensor):
                     for frame_name in value.keys():
                         frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][

@@ -30,6 +30,7 @@ try:
     )
 
     from embodichain.data.enum import LeRobotKey
+
     LEROBOT_AVAILABLE = True
 except ImportError:
     LEROBOT_AVAILABLE = False
