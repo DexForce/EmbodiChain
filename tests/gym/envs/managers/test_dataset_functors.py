@@ -276,8 +276,8 @@ class TestLeRobotRecorderFeatures:
             recorder = LeRobotRecorder(cfg, env)
             features = recorder._build_features()
 
-        # Check camera feature exists
-        assert "camera.color" in features
+        # Check camera feature exists (use LeRobot standard key format)
+        assert f"{LeRobotKey.OBS_IMAGES.value}.camera" in features
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
