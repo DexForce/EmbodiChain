@@ -83,6 +83,8 @@ class LeRobotKey(Enum):
     OBS_PREFIX = "observation."
     OBS_ENV_STATE = "observation.environment_state"
     OBS_STATE = "observation.state"
+    OBS_QVEL = "observation.qvel"
+    OBS_QF = "observation.qf"
     OBS_IMAGE = "observation.image"
     OBS_IMAGES = "observation.images"
     OBS_LANGUAGE = "observation.language"

@@ -281,6 +281,16 @@ class LeRobotRecorder(Functor):
             "shape": (state_dim,),
             "names": joint_names,
         }
+        features[LeRobotKey.OBS_QVEL.value] = {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": joint_names,
+        }
+        features[LeRobotKey.OBS_QF.value] = {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": joint_names,
+        }
 
         # Use full qpos dimension for action (includes gripper)
         action_dim = state_dim
@@ -478,6 +488,9 @@ class LeRobotRecorder(Functor):
 
         # Add state (use LeRobot standard key "observation.state")
         frame[LeRobotKey.OBS_STATE.value] = obs["robot"]["qpos"].cpu()
+        # Keep additional proprio data that may be useful even though not in official LeRobot format
+        frame[LeRobotKey.OBS_QVEL.value] = obs["robot"]["qvel"].cpu()
+        frame[LeRobotKey.OBS_QF.value] = obs["robot"]["qf"].cpu()
 
         # Add extra observation features if they exist
         for key in obs.keys():
