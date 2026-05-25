@@ -15,13 +15,16 @@ The simulation is configured using the {class}`SimulationManagerCfg` class.
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
 sim_config = SimulationManagerCfg(
     width=1920,               # Window width
     height=1080,              # Window height
     num_envs=10,              # Number of parallel environments
-    physics_dt=0.01,          # Physics time step
-    sim_device="cpu",         # Simulation device ("cpu" or "cuda:0", etc.)
+    physics_cfg=DefaultPhysicsCfg(
+        physics_dt=0.01,      # Physics time step
+        sim_device="cpu",     # Simulation device ("cpu" or "cuda:0", etc.)
+    ),
     arena_space=5.0           # Spacing between environments
 )
 ```
@@ -39,13 +42,18 @@ sim_config = SimulationManagerCfg(
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
-| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
-| `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 | `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 
 ### Physics Configuration
 
 Use {class}`~cfg.DefaultPhysicsCfg` for the default PhysX backend or {class}`~cfg.NewtonPhysicsCfg` for Newton. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
+
+All physics backends inherit these base parameters from {class}`~cfg.PhysicsCfg`:
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 
 The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend physics simulation parameters.
 

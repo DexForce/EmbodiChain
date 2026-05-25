@@ -30,6 +30,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -61,6 +62,7 @@ def initialize_simulation(args):
     config = SimulationManagerCfg(
         headless=True,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
     )
     sim = SimulationManager(config)

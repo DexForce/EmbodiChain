@@ -108,6 +108,43 @@ __all__ = [
 class SimulationManagerCfg:
     """Global robot simulation configuration."""
 
+    def __init__(
+        self,
+        width: int = 1920,
+        height: int = 1080,
+        headless: bool = False,
+        render_cfg: RenderCfg | None = None,
+        gpu_id: int = 0,
+        thread_mode: ThreadMode = ThreadMode.RENDER_SHARE_ENGINE,
+        cpu_num: int = 1,
+        num_envs: int = 1,
+        arena_space: float = 5.0,
+        physics_dt: float | None = None,
+        sim_device: str | torch.device | None = None,
+        physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg | None = None,
+        window_record: WindowRecordCfg | None = None,
+    ) -> None:
+        self.width = width
+        self.height = height
+        self.headless = headless
+        self.render_cfg = RenderCfg() if render_cfg is None else render_cfg
+        self.gpu_id = gpu_id
+        self.thread_mode = thread_mode
+        self.cpu_num = cpu_num
+        self.num_envs = num_envs
+        self.arena_space = arena_space
+        self.physics_cfg = DefaultPhysicsCfg() if physics_cfg is None else physics_cfg
+        self.window_record = (
+            WindowRecordCfg() if window_record is None else window_record
+        )
+
+        if physics_dt is not None:
+            self.physics_cfg.physics_dt = physics_dt
+        if sim_device is not None:
+            self.physics_cfg.sim_device = sim_device
+
+        self.__post_init__()
+
     width: int = 1920
     """The width of the simulation window."""
 
@@ -142,12 +179,6 @@ class SimulationManagerCfg:
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
-    physics_dt: float = 1.0 / 100.0
-    """The time step for the physics simulation."""
-
-    sim_device: Union[str, torch.device] = "cpu"
-    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
-
     physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg = field(
         default_factory=DefaultPhysicsCfg
     )
@@ -158,6 +189,24 @@ class SimulationManagerCfg:
 
     def __post_init__(self):
         validate_physics_cfg(self.physics_cfg)
+
+    @property
+    def physics_dt(self) -> float:
+        """The time step for the physics simulation."""
+        return self.physics_cfg.physics_dt
+
+    @physics_dt.setter
+    def physics_dt(self, value: float) -> None:
+        self.physics_cfg.physics_dt = value
+
+    @property
+    def sim_device(self) -> str | torch.device:
+        """The device for the physics simulation."""
+        return self.physics_cfg.sim_device
+
+    @sim_device.setter
+    def sim_device(self, value: str | torch.device) -> None:
+        self.physics_cfg.sim_device = value
 
 
 @dataclass
@@ -508,8 +557,6 @@ class SimulationManager:
             newton_physics_cfg = sim_config.physics_cfg
             assert isinstance(newton_physics_cfg, NewtonPhysicsCfg)
             world_config.newton_cfg = newton_physics_cfg.to_dexsim_cfg(
-                physics_dt=sim_config.physics_dt,
-                sim_device=self.device,
                 gpu_id=sim_config.gpu_id,
             )
 

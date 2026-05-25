@@ -134,7 +134,9 @@ For RL training and data generation, EmbodiChain uses JSON config files. The JSO
     "env": {
         "num_envs": 4,
         "sim_cfg": {
-            "sim_device": "cuda:0",
+            "physics_cfg": {
+                "sim_device": "cuda:0"
+            },
             "headless": true
         },
         "robot": {

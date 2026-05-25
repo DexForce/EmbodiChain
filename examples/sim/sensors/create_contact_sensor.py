@@ -26,6 +26,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.sensors import (
@@ -193,6 +194,7 @@ def main():
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
     )
 
     # Create the simulation instance

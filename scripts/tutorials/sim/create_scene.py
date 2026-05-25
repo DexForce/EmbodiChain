@@ -43,12 +43,6 @@ def main():
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
-        "--physics_backend",
-        choices=["default", "newton"],
-        default="default",
-        help="Physics backend to use for the simulation.",
-    )
-    parser.add_argument(
         "--max_steps",
         type=int,
         default=None,
@@ -63,7 +57,7 @@ def main():
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
-        physics_cfg=physics_cfg_for_backend(args.physics_backend),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),
@@ -113,7 +107,9 @@ def main():
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
+    from IPython import embed
 
+    embed()
     # Run the simulation
     run_simulation(sim, max_steps=args.max_steps)
 

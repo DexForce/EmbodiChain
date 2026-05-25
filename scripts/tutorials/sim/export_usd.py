@@ -25,6 +25,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
@@ -66,6 +67,7 @@ def initialize_simulation(args) -> SimulationManager:
         headless=True,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=1,
         arena_space=2.5,

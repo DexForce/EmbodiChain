@@ -34,6 +34,7 @@ from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -90,6 +91,7 @@ def main():
         sim_device=args.device,
         arena_space=3.0,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
     )

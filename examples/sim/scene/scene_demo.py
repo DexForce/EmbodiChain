@@ -26,6 +26,7 @@ import embodichain.utils.logger as logger
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RigidBodyAttributesCfg,
     LightCfg,
     RobotCfg,
@@ -118,6 +119,7 @@ def main():
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=args.num_envs,
         arena_space=10.0,
     )

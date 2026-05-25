@@ -44,6 +44,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
@@ -103,6 +104,7 @@ def initialize_simulation(args):
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
     )
     sim = SimulationManager(sim_cfg)
 

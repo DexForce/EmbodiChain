@@ -104,6 +104,12 @@ class GPUMemoryCfg:
 class PhysicsCfg:
     """Base configuration for DexSim physics backends."""
 
+    physics_dt: float = 1.0 / 100.0
+    """The time step for the physics simulation."""
+
+    sim_device: str | torch.device = "cpu"
+    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
+
 
 @configclass
 class DefaultPhysicsCfg(PhysicsCfg):
@@ -165,9 +171,6 @@ class NewtonPhysicsCfg(PhysicsCfg):
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step."""
 
-    device: str | None = None
-    """Newton device. If None, derived from ``SimulationManagerCfg.sim_device`` and ``gpu_id``."""
-
     require_grad: bool = False
     """Whether to finalize the Newton model for differentiable simulation."""
 
@@ -190,8 +193,6 @@ class NewtonPhysicsCfg(PhysicsCfg):
 
     def to_dexsim_cfg(
         self,
-        physics_dt: float,
-        sim_device: str | torch.device,
         gpu_id: int,
     ):
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
@@ -206,11 +207,15 @@ class NewtonPhysicsCfg(PhysicsCfg):
         )
 
         torch_device = (
-            torch.device(sim_device) if isinstance(sim_device, str) else sim_device
+            torch.device(self.sim_device)
+            if isinstance(self.sim_device, str)
+            else self.sim_device
         )
-        device = self.device
-        if device is None:
-            device = f"cuda:{gpu_id}" if torch_device.type == "cuda" else "cpu"
+        device = (
+            f"cuda:{gpu_id}"
+            if torch_device.type == "cuda" and torch_device.index is None
+            else str(torch_device)
+        )
 
         solver_cfg_map = {
             "mjwarp": MJWarpSolverCfg,
@@ -227,7 +232,7 @@ class NewtonPhysicsCfg(PhysicsCfg):
             )
 
         cfg = NewtonCfg(
-            dt=physics_dt,
+            dt=self.physics_dt,
             num_substeps=self.num_substeps,
             device=device,
             debug_mode=self.debug_mode,

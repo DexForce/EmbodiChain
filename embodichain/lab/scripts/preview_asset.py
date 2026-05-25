@@ -68,13 +68,14 @@ def build_sim_cfg(args: argparse.Namespace):
     Returns:
         SimulationManagerCfg: Simulation configuration.
     """
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
     return SimulationManagerCfg(
         headless=args.headless,
         sim_device=args.sim_device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
     )
 
 
@@ -331,6 +332,13 @@ def cli():
         choices=["hybrid", "fast-rt", "rt"],
         default="hybrid",
         help="Renderer backend (default: hybrid).",
+    )
+    parser.add_argument(
+        "--physics",
+        type=str,
+        choices=["default", "newton"],
+        default="default",
+        help="Physics backend configuration to use for the simulation.",
     )
     parser.add_argument(
         "--env_map",
