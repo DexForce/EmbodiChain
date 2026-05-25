@@ -29,6 +29,8 @@ from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
 
+DEFAULT_CAPTURE_PATH = "./outputs/window_capture/create_scene.png"
+
 
 def main():
     """Main function to create and run the simulation scene."""
@@ -39,20 +41,9 @@ def main():
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
-        "--capture-window",
-        action="store_true",
-        help="Capture one RGB frame with SimulationManager.capture_window().",
-    )
-    parser.add_argument(
-        "--capture-path",
-        type=str,
-        default="./outputs/window_capture/create_scene.png",
-        help="Output path used when --capture-window is set.",
-    )
-    parser.add_argument(
         "--max-steps",
         type=int,
-        default=None,
+        default=10000,
         help="Optional number of simulation steps to run before exiting.",
     )
     args = parser.parse_args()
@@ -109,6 +100,11 @@ def main():
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")
+    if not args.headless:
+        print(
+            "[INFO]: Press 'p' in the viewer to capture a frame "
+            "(saved under ./outputs/window_capture/)"
+        )
 
     # Open window when the scene has been set up
     if not args.headless:
@@ -117,8 +113,8 @@ def main():
     # Run the simulation
     run_simulation(
         sim,
-        capture_window=args.capture_window,
-        capture_path=args.capture_path,
+        capture_window=args.headless,
+        capture_path=DEFAULT_CAPTURE_PATH,
         max_steps=args.max_steps,
     )
 
@@ -126,7 +122,7 @@ def main():
 def run_simulation(
     sim: SimulationManager,
     capture_window: bool = False,
-    capture_path: str = "./outputs/window_capture/create_scene.png",
+    capture_path: str = DEFAULT_CAPTURE_PATH,
     max_steps: int | None = None,
 ) -> None:
     """Run the simulation loop.
@@ -134,7 +130,8 @@ def run_simulation(
     Args:
         sim: The SimulationManager instance to run
         capture_window: Whether to capture a single frame with the hidden window
-            capture camera.
+            capture camera. Enabled by default when ``--headless`` is passed.
+            When a viewer window is open, press ``p`` to capture asynchronously instead.
         capture_path: Path where the captured image is saved.
         max_steps: Optional number of steps to run before exiting.
     """

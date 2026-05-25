@@ -182,6 +182,23 @@ class WindowRecordCfg:
 
 
 @configclass
+class WindowCaptureCfg:
+    """Configuration for interactive viewer window capture."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``p`` hotkey for single-frame capture when the window opens."""
+
+    save_path: str | None = None
+    """Optional output image path. If None, use the default outputs directory with a timestamp."""
+
+    image_prefix: str = "window_capture"
+    """Image file prefix used when no explicit save path is provided."""
+
+    use_window_pose: bool = True
+    """Whether the hidden capture camera follows the current viewer pose."""
+
+
+@configclass
 class GPUMemoryCfg:
     """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
 
