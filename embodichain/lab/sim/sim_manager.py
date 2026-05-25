@@ -767,22 +767,9 @@ class SimulationManager:
         self._default_plane = self._env.create_plane(
             0, default_length, repeat_uv_size, repeat_uv_size
         )
-        if self.is_newton_backend and self.newton_manager is not None:
-            plane_handle = int(self._default_plane.get_native_handle())
-            if plane_handle < 0:
-                plane_handle &= (1 << 64) - 1
-            self.newton_manager.dexsim_meta.pop(plane_handle, None)
         self._default_plane.set_name("default_plane")
-        plane_collision = self._env.create_cube(
-            default_length, default_length, default_length / 10
-        )
-        plane_collision.set_visible(False)
-        plane_collision_pose = np.eye(4, dtype=float)
-        plane_collision_pose[2, 3] = -default_length / 20 - 0.001
-        plane_collision.set_local_pose(plane_collision_pose)
-        plane_collision.add_rigidbody(ActorType.KINEMATIC, RigidBodyShape.CONVEX)
-
-        # TODO: add default physics attributes for the plane.
+        attr = PhysicalAttr(dynamic_friction=0.5, static_friction=0.5)
+        self._default_plane.add_rigidbody(ActorType.STATIC, RigidBodyShape.PLANE, attr)
 
     def set_default_background(self) -> None:
         """Set default background."""

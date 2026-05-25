@@ -288,8 +288,7 @@ def load_mesh_objects_from_cfg(
                 )
                 if not is_newton_backend:
                     obj.set_body_scale(*cfg.body_scale)
-                sdf_cfg = SDFConfig()
-                sdf_cfg.resolution = cfg.sdf_resolution
+                sdf_cfg = SDFConfig(resolution=cfg.sdf_resolution)
                 obj.add_physical_body(
                     body_type,
                     RigidBodyShape.SDF,
