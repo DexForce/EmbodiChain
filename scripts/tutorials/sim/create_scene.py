@@ -38,6 +38,23 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--capture-window",
+        action="store_true",
+        help="Capture one RGB frame with SimulationManager.capture_window().",
+    )
+    parser.add_argument(
+        "--capture-path",
+        type=str,
+        default="./outputs/window_capture/create_scene.png",
+        help="Output path used when --capture-window is set.",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Optional number of simulation steps to run before exiting.",
+    )
     args = parser.parse_args()
 
     # Configure the simulation
@@ -98,14 +115,28 @@ def main():
         sim.open_window()
 
     # Run the simulation
-    run_simulation(sim)
+    run_simulation(
+        sim,
+        capture_window=args.capture_window,
+        capture_path=args.capture_path,
+        max_steps=args.max_steps,
+    )
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(
+    sim: SimulationManager,
+    capture_window: bool = False,
+    capture_path: str = "./outputs/window_capture/create_scene.png",
+    max_steps: int | None = None,
+) -> None:
     """Run the simulation loop.
 
     Args:
         sim: The SimulationManager instance to run
+        capture_window: Whether to capture a single frame with the hidden window
+            capture camera.
+        capture_path: Path where the captured image is saved.
+        max_steps: Optional number of steps to run before exiting.
     """
 
     # Initialize GPU physics if using CUDA
@@ -113,6 +144,10 @@ def run_simulation(sim: SimulationManager):
         sim.init_gpu_physics()
 
     step_count = 0
+    capture_done = False
+    capture_step = 10
+    if max_steps is not None:
+        capture_step = max(1, min(capture_step, max_steps))
 
     try:
         last_time = time.time()
@@ -134,6 +169,20 @@ def run_simulation(sim: SimulationManager):
                 print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            if capture_window and not capture_done and step_count >= capture_step:
+                frame = sim.capture_window(save_path=capture_path)
+                if frame is None:
+                    raise RuntimeError("Window capture failed to produce a frame.")
+                print(
+                    f"[INFO]: Captured window frame at {capture_path} "
+                    f"with shape {frame.shape}"
+                )
+                capture_done = True
+
+            if max_steps is not None and step_count >= max_steps:
+                print(f"[INFO]: Reached max steps: {max_steps}")
+                break
 
     except KeyboardInterrupt:
         print("\n[INFO]: Stopping simulation...")

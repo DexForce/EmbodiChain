@@ -88,6 +88,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.utils.math import look_at_to_pose
 from embodichain.utils import configclass, logger
 
 __all__ = [
@@ -241,6 +242,8 @@ class SimulationManager:
         self._is_registered_window_control = False
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
+        self._window_capture_camera: object | None = None
+        self._window_capture_camera_size: tuple[int, int] | None = None
         wr = sim_config.window_record
         self._window_record_hotkey_cfg: dict[str, object] | None = (
             {
@@ -1699,6 +1702,122 @@ class SimulationManager:
         """Check whether the viewer window is currently recording."""
         return self._window_record_state is not None
 
+    def _get_window_capture_camera(self, width: int, height: int) -> object:
+        """Get or create the hidden camera used for window capture."""
+        camera_size = (width, height)
+        if (
+            self._window_capture_camera is None
+            or self._window_capture_camera_size != camera_size
+        ):
+            camera_name = f"window_capture_camera_{self.instance_id}"
+            self._window_capture_camera = self._env.create_camera(
+                camera_name, width, height
+            )
+            self._window_capture_camera_size = camera_size
+        return self._window_capture_camera
+
+    def _capture_rgb_from_camera(
+        self, record_camera: object, camera_pose: np.ndarray
+    ) -> np.ndarray | None:
+        """Render an RGB frame from a hidden DexSim camera."""
+        if hasattr(record_camera, "is_open") and record_camera.is_open() is False:
+            record_camera.open_camera()
+
+        record_camera.set_world_pose(camera_pose)
+        record_camera.render()
+        rgb = np.asarray(record_camera.get_rgb_map())
+        if rgb.size == 0:
+            return None
+        return np.ascontiguousarray(rgb[..., :3])
+
+    def _resolve_window_capture_pose(
+        self,
+        camera_pose: np.ndarray | torch.Tensor | None,
+        eye: Sequence[float] | None,
+        target: Sequence[float] | None,
+        up: Sequence[float] | None,
+        use_window_pose: bool,
+    ) -> np.ndarray:
+        """Resolve the camera pose for single-frame window capture."""
+        if camera_pose is not None:
+            if isinstance(camera_pose, torch.Tensor):
+                return camera_pose.detach().cpu().numpy().astype(np.float32)
+            return np.asarray(camera_pose, dtype=np.float32)
+
+        if use_window_pose and self._window is not None:
+            return np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+
+        if eye is None:
+            eye = (2.5, -3.0, 2.0)
+        if target is None:
+            target = (0.0, 0.0, 0.5)
+        if up is None:
+            up = (0.0, 0.0, 1.0)
+
+        pose = look_at_to_pose(eye, target, up)
+        pose[:, :3, 1] = -pose[:, :3, 1]
+        pose[:, :3, 2] = -pose[:, :3, 2]
+        return pose.squeeze(0).cpu().numpy().astype(np.float32)
+
+    def capture_window(
+        self,
+        save_path: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        camera_pose: np.ndarray | torch.Tensor | None = None,
+        eye: Sequence[float] | None = None,
+        target: Sequence[float] | None = None,
+        up: Sequence[float] | None = None,
+        use_window_pose: bool = True,
+    ) -> np.ndarray | None:
+        """Capture a single RGB frame using a hidden render camera.
+
+        When a viewer window is open, the hidden camera follows the current window
+        pose by default. In headless mode, pass ``camera_pose`` or use the
+        ``eye``/``target``/``up`` look-at parameters to render without opening a
+        window.
+
+        Args:
+            save_path: Optional image path. Parent directories are created.
+            width: Capture width. Defaults to the simulation window width.
+            height: Capture height. Defaults to the simulation window height.
+            camera_pose: Optional 4x4 world pose for the hidden camera.
+            eye: Optional look-at camera position used when no window pose exists.
+            target: Optional look-at target used when no window pose exists.
+            up: Optional look-at up vector used when no window pose exists.
+            use_window_pose: Whether to follow the current viewer pose when a
+                window is open and ``camera_pose`` is not provided.
+
+        Returns:
+            Captured RGB frame with shape ``(height, width, 3)``, or ``None`` if
+            rendering did not produce an image.
+        """
+        width = self.sim_config.width if width is None else width
+        height = self.sim_config.height if height is None else height
+        record_camera = self._get_window_capture_camera(width, height)
+        resolved_pose = self._resolve_window_capture_pose(
+            camera_pose=camera_pose,
+            eye=eye,
+            target=target,
+            up=up,
+            use_window_pose=use_window_pose,
+        )
+        frame = self._capture_rgb_from_camera(record_camera, resolved_pose)
+        if frame is None:
+            logger.log_warning("Window capture did not produce an RGB frame.")
+            return None
+
+        if save_path is not None:
+            from PIL import Image
+
+            output_dir = os.path.dirname(save_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            Image.fromarray(frame).save(save_path)
+            logger.log_info(f"Window capture saved to {save_path}")
+
+        return frame
+
     def _step_window_record(self, state: _WindowRecordState) -> int:
         """Capture frames in the render thread without blocking the UI loop."""
         if state.task_status != TASK_RETURN.TASK_LOOP:
@@ -1712,11 +1831,7 @@ class SimulationManager:
         frame: np.ndarray | None = None
         if self._window is not None and state.record_camera is not None:
             pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
-            state.record_camera.set_world_pose(pose)
-            state.record_camera.render()
-            rgb = np.asarray(state.record_camera.get_rgb_map())
-            if rgb.size != 0:
-                frame = np.ascontiguousarray(rgb[..., :3])
+            frame = self._capture_rgb_from_camera(state.record_camera, pose)
         if frame is None:
             return state.task_status
 
