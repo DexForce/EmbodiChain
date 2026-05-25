@@ -70,7 +70,7 @@ def initialize_simulation(args) -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,

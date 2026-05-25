@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     config = SimulationManagerCfg(
         headless=False,
-        sim_device="cpu",
+        device="cpu",
         width=1080,
         height=1080,
     )

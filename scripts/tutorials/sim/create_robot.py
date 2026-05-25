@@ -55,7 +55,7 @@ def main():
     print("Creating simulation...")
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         arena_space=3.0,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),

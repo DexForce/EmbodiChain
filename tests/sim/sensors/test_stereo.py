@@ -25,11 +25,11 @@ NUM_ENVS = 4
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device, renderer="hybrid"):
+    def setup_simulation(self, device, renderer="hybrid"):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=device,
             num_envs=NUM_ENVS,
             render_cfg=RenderCfg(renderer=renderer),
         )

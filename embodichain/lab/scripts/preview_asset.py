@@ -53,6 +53,7 @@ import os
 
 from typing import TYPE_CHECKING
 
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
@@ -73,9 +74,12 @@ def build_sim_cfg(args: argparse.Namespace):
 
     return SimulationManagerCfg(
         headless=args.headless,
-        sim_device=args.sim_device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
+        gpu_id=args.gpu_id,
+        num_envs=args.num_envs,
+        arena_space=args.arena_space,
     )
 
 
@@ -249,6 +253,7 @@ def cli():
     parser = argparse.ArgumentParser(
         description="Preview a USD or mesh asset in the EmbodiChain simulation."
     )
+    add_env_launcher_args_to_parser(parser)
 
     parser.add_argument(
         "--asset_path",
@@ -315,32 +320,6 @@ def cli():
         help="Fix the base of articulations (default: True).",
     )
     parser.add_argument(
-        "--sim_device",
-        type=str,
-        default="cpu",
-        help="Simulation device (default: cpu).",
-    )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Run without rendering window.",
-    )
-    parser.add_argument(
-        "--renderer",
-        type=str,
-        choices=["hybrid", "fast-rt", "rt"],
-        default="hybrid",
-        help="Renderer backend (default: hybrid).",
-    )
-    parser.add_argument(
-        "--physics",
-        type=str,
-        choices=["default", "newton"],
-        default="default",
-        help="Physics backend configuration to use for the simulation.",
-    )
-    parser.add_argument(
         "--env_map",
         type=str,
         default=None,
@@ -349,13 +328,6 @@ def cli():
             "name (e.g. 'Studio') or an absolute file path (.hdr/.png/.exr)."
         ),
     )
-    parser.add_argument(
-        "--preview",
-        action="store_true",
-        default=False,
-        help="Enter interactive embed mode after loading.",
-    )
-
     args = parser.parse_args()
 
     main(args)

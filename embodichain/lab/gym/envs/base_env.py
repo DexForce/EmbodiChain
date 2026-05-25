@@ -135,7 +135,7 @@ class BaseEnv(gym.Env):
             self.sim.open_window()
 
         self._elapsed_steps = torch.zeros(
-            self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
+            self._num_envs, dtype=torch.int32, device=self.sim_cfg.device
         )
 
         # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
@@ -248,7 +248,7 @@ class BaseEnv(gym.Env):
         self.sim_cfg.headless = headless
 
         logger.log_info(
-            f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
+            f"Initializing {self.num_envs} environments on {self.sim_cfg.device}."
         )
 
         self.robot = self._setup_robot(**kwargs)

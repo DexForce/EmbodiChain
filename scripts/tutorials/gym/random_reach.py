@@ -53,7 +53,7 @@ class RandomReachEnv(BaseEnv):
             sim_cfg=SimulationManagerCfg(
                 headless=headless,
                 arena_space=2.0,
-                sim_device=device,
+                device=device,
                 render_cfg=RenderCfg(renderer=renderer),
                 physics_cfg=physics_cfg_for_backend(physics_cfg),
             ),

@@ -23,7 +23,7 @@ sim_config = SimulationManagerCfg(
     num_envs=10,              # Number of parallel environments
     physics_cfg=DefaultPhysicsCfg(
         physics_dt=0.01,      # Physics time step
-        sim_device="cpu",     # Simulation device ("cpu" or "cuda:0", etc.)
+        device="cpu",     # Simulation device ("cpu" or "cuda:0", etc.)
     ),
     arena_space=5.0           # Spacing between environments
 )
@@ -53,7 +53,7 @@ All physics backends inherit these base parameters from {class}`~cfg.PhysicsCfg`
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
-| `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
+| `device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 
 The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend physics simulation parameters.
 
@@ -177,7 +177,7 @@ while True:
 
 In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
 
-> When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
+> When in automatic update mode, user are recommanded to use CPU `device` for simulation.
 
 
 ## Mainly used methods

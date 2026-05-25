@@ -886,7 +886,7 @@ def build_env_cfg_from_args(
 
     cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config["headless"],
-        sim_device=gym_config["device"],
+        device=gym_config["device"],
         render_cfg=RenderCfg(renderer=gym_config["renderer"]),
         physics_cfg=physics_cfg_for_backend(gym_config["physics"]),
         gpu_id=gym_config["gpu_id"],

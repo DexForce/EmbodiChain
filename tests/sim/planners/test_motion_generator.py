@@ -50,7 +50,7 @@ class BaseTestMotionGenerator(object):
         cls = type(self)
         if hasattr(cls, "robot_sim"):
             return
-        cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.config = SimulationManagerCfg(headless=True, device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
         cls.robot_sim.set_manual_update(False)
 

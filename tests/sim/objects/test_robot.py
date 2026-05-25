@@ -50,11 +50,11 @@ CONTROL_PARTS = {
 # Base test class for CPU and CUDA
 class BaseRobotTest:
     @classmethod
-    def setup_simulation(cls, sim_device):
+    def setup_simulation(cls, device):
         if hasattr(cls, "sim"):
             return
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=10)
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=10)
         cls.sim = SimulationManager(config)
 
         cfg = DexforceW1Cfg.from_dict(
@@ -68,7 +68,7 @@ class BaseRobotTest:
         cls.robot: Robot = cls.sim.add_robot(cfg=cfg)
 
         # Initialize GPU physics if needed
-        if sim_device == "cuda" and getattr(cls.sim, "is_use_gpu_physics", False):
+        if device == "cuda" and getattr(cls.sim, "is_use_gpu_physics", False):
             cls.sim.init_gpu_physics()
 
     def test_get_joint_ids(self):

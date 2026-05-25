@@ -80,7 +80,7 @@ class NewtonPhysicsCfg:
     broad_phase: str = "sap"     # allowed: nxn, sap, explicit
     visualizer_enabled: bool = False
 
-    def to_dexsim_cfg(self, physics_dt: float, sim_device: str, gpu_id: int):
+    def to_dexsim_cfg(self, physics_dt: float, device: str, gpu_id: int):
         # Import dexsim.engine.newton_physics lazily so default backend users do not pay import/setup cost.
         ...
 ```
@@ -114,7 +114,7 @@ In `embodichain/lab/sim/sim_manager.py`, route world creation through the backen
 For `physics_backend == "default"`:
 
 - Keep current behavior.
-- Set `world_config.enable_gpu_sim` and `world_config.direct_gpu_api` when `sim_device` is CUDA.
+- Set `world_config.enable_gpu_sim` and `world_config.direct_gpu_api` when `device` is CUDA.
 - Call `dexsim.set_physics_config(**cfg.default_physics_cfg.to_dexsim_args())`.
 - Call `dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory_config.to_dict())`.
 

@@ -43,7 +43,7 @@ class BaseRigidObjectTest:
     def setup_simulation(self, physics_backend: str):
         config = SimulationManagerCfg(
             headless=True,
-            sim_device="cpu",
+            device="cpu",
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics_backend),
             render_cfg=RenderCfg(renderer="hybrid"),

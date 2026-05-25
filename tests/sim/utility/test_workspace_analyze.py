@@ -33,7 +33,7 @@ class BaseWorkspaceAnalyzeTest:
     sim = None  # Define as a class attribute
 
     def setup_simulation(self):
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
         self.sim.set_manual_update(False)
 

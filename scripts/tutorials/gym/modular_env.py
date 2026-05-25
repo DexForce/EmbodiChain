@@ -221,7 +221,7 @@ if __name__ == "__main__":
         sim_cfg=SimulationManagerCfg(
             render_cfg=RenderCfg(renderer=args.renderer),
             headless=args.headless,
-            sim_device=args.device,
+            device=args.device,
             num_envs=args.num_envs,
             physics_cfg=physics_cfg_for_backend(args.physics),
         )

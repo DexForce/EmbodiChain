@@ -40,7 +40,7 @@ from embodichain.data import get_data_path
 def main(args):
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         num_envs=args.num_envs,
         arena_space=2,
         render_cfg=RenderCfg(renderer=args.renderer),

@@ -253,7 +253,7 @@ def main():
         num_envs=args.num_envs,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device="cuda",
+        device="cuda",
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals

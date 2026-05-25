@@ -100,7 +100,7 @@ def initialize_simulation(args):
         width=1920,
         height=1080,
         headless=True,
-        sim_device="cuda",
+        device="cuda",
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         render_cfg=RenderCfg(renderer=args.renderer),

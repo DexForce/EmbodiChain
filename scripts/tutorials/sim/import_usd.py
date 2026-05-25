@@ -56,7 +56,7 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),  # Enable ray tracing for better visuals

@@ -91,7 +91,7 @@ def main():
         headless=True,
         num_envs=args.num_envs,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device="cuda",  # soft simulation only supports cuda device
+        device="cuda",  # soft simulation only supports cuda device
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
     )

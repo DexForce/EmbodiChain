@@ -56,7 +56,7 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(
             renderer=args.renderer,
@@ -109,8 +109,6 @@ def main():
     if not args.headless:
         sim.open_window()
 
-    mgr = sim.newton_manager
-    mgr.start_simulation()
     from IPython import embed
 
     embed()

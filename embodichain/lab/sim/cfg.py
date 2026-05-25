@@ -107,7 +107,7 @@ class PhysicsCfg:
     physics_dt: float = 1.0 / 100.0
     """The time step for the physics simulation."""
 
-    sim_device: str | torch.device = "cpu"
+    device: str | torch.device = "cpu"
     """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
 
 
@@ -207,9 +207,9 @@ class NewtonPhysicsCfg(PhysicsCfg):
         )
 
         torch_device = (
-            torch.device(self.sim_device)
-            if isinstance(self.sim_device, str)
-            else self.sim_device
+            torch.device(self.device)
+            if isinstance(self.device, str)
+            else self.device
         )
         device = (
             f"cuda:{gpu_id}"

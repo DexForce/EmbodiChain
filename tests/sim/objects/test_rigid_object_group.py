@@ -34,9 +34,9 @@ Z_TRANSLATION = 2.0
 class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device):
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+            headless=True, device=device, num_envs=NUM_ARENAS
         )
         self.sim = SimulationManager(config)
 
@@ -66,7 +66,7 @@ class BaseRigidObjectGroupTest:
             cfg=RigidObjectGroupCfg.from_dict(cfg_dict)
         )
 
-        if sim_device == "cuda" and self.sim.is_use_gpu_physics:
+        if device == "cuda" and self.sim.is_use_gpu_physics:
             self.sim.init_gpu_physics()
 
         self.sim.enable_physics(True)

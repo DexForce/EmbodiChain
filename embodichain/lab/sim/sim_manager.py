@@ -120,7 +120,7 @@ class SimulationManagerCfg:
         num_envs: int = 1,
         arena_space: float = 5.0,
         physics_dt: float | None = None,
-        sim_device: str | torch.device | None = None,
+        device: str | torch.device | None = None,
         physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg | None = None,
         window_record: WindowRecordCfg | None = None,
     ) -> None:
@@ -140,8 +140,8 @@ class SimulationManagerCfg:
 
         if physics_dt is not None:
             self.physics_cfg.physics_dt = physics_dt
-        if sim_device is not None:
-            self.physics_cfg.sim_device = sim_device
+        if device is not None:
+            self.physics_cfg.device = device
 
         self.__post_init__()
 
@@ -200,13 +200,13 @@ class SimulationManagerCfg:
         self.physics_cfg.physics_dt = value
 
     @property
-    def sim_device(self) -> str | torch.device:
+    def device(self) -> str | torch.device:
         """The device for the physics simulation."""
-        return self.physics_cfg.sim_device
+        return self.physics_cfg.device
 
-    @sim_device.setter
-    def sim_device(self, value: str | torch.device) -> None:
-        self.physics_cfg.sim_device = value
+    @device.setter
+    def device(self, value: str | torch.device) -> None:
+        self.physics_cfg.device = value
 
 
 @dataclass
@@ -288,7 +288,6 @@ class SimulationManager:
         self.device = torch.device("cpu")
         self._physics_backend = physics_backend_from_cfg(sim_config.physics_cfg)
         self._newton_manager: NewtonManager = None
-        self._newton_scene_signature: tuple | None = None
 
         world_config = self._convert_sim_config(sim_config)
 
@@ -455,16 +454,6 @@ class SimulationManager:
         return self._physics_backend == "newton"
 
     @property
-    def is_default_gpu_backend(self) -> bool:
-        """Whether the DexSim default GPU physics backend is active."""
-        return self.is_default_backend and self.device.type == "cuda"
-
-    @property
-    def is_newton_gpu_backend(self) -> bool:
-        """Whether the DexSim Newton backend is active on a CUDA device."""
-        return self.is_newton_backend and self.device.type == "cuda"
-
-    @property
     def newton_manager(self) -> NewtonManager:
         """Return the DexSim Newton manager for this world, if active."""
         if not self.is_newton_backend:
@@ -523,10 +512,10 @@ class SimulationManager:
             world_config.raytrace_config.spp = sim_config.render_cfg.spp
             world_config.raytrace_config.open_denoise = False
 
-        if type(sim_config.sim_device) is str:
-            self.device = torch.device(sim_config.sim_device)
+        if type(sim_config.device) is str:
+            self.device = torch.device(sim_config.device)
         else:
-            self.device = sim_config.sim_device
+            self.device = sim_config.device
 
         if self.device.type == "cuda":
             if self.device.index is not None and sim_config.gpu_id != self.device.index:
@@ -577,6 +566,11 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable manual update.
         """
+        if self.is_newton_backend:
+            logger.log_warning(
+                "Newton physics backend does not support switching between manual and automatic update. Ignoring set_manual_update call."
+            )
+            return
         self._world.set_manual_update(enable)
 
     def init_gpu_physics(self) -> None:
@@ -634,7 +628,7 @@ class SimulationManager:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
-        if self.is_default_gpu_backend and not self._is_initialized_gpu_physics:
+        if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
             logger.log_warning(
                 f"Using GPU physics, but not initialized yet. Forcing initialization."
             )

@@ -26,34 +26,34 @@ def test_physics_runtime_fields_are_stored_on_physics_cfg() -> None:
     cfg = SimulationManagerCfg(
         headless=True,
         physics_dt=0.02,
-        sim_device=torch.device("cpu"),
+        device=torch.device("cpu"),
     )
 
     assert cfg.physics_dt == 0.02
-    assert cfg.sim_device == torch.device("cpu")
+    assert cfg.device == torch.device("cpu")
     assert cfg.physics_cfg.physics_dt == 0.02
-    assert cfg.physics_cfg.sim_device == torch.device("cpu")
+    assert cfg.physics_cfg.device == torch.device("cpu")
 
     serialized = cfg.to_dict()
     assert "physics_dt" not in serialized
-    assert "sim_device" not in serialized
+    assert "device" not in serialized
     assert serialized["physics_cfg"]["physics_dt"] == 0.02
-    assert serialized["physics_cfg"]["sim_device"] == torch.device("cpu")
+    assert serialized["physics_cfg"]["device"] == torch.device("cpu")
 
 
 def test_simulation_manager_cfg_keeps_legacy_physics_accessors() -> None:
     cfg = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())
 
     cfg.physics_dt = 0.005
-    cfg.sim_device = "cuda:0"
+    cfg.device = "cuda:0"
 
     assert cfg.physics_cfg.physics_dt == 0.005
-    assert cfg.physics_cfg.sim_device == "cuda:0"
+    assert cfg.physics_cfg.device == "cuda:0"
 
 
-def test_newton_physics_cfg_uses_sim_device() -> None:
-    cfg = NewtonPhysicsCfg(sim_device="cuda:1")
+def test_newton_physics_cfg_uses_device() -> None:
+    cfg = NewtonPhysicsCfg(device="cuda:1")
 
     serialized = cfg.to_dict()
-    assert serialized["sim_device"] == "cuda:1"
-    assert "device" not in serialized
+    assert serialized["device"] == "cuda:1"
+    assert serialized["physics_dt"] == 1.0 / 100.0
