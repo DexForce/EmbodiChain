@@ -162,7 +162,6 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
 
     for i, art in enumerate(arts):
         art.set_body_scale(cfg.body_scale)
-        art.set_physical_attr(cfg.attrs.attr())
         link_names = art.get_link_names()
         _apply_link_physics_overrides(art, cfg, link_names)
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
@@ -173,6 +172,8 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
             min_position_iters=cfg.min_position_iters,
             min_velocity_iters=cfg.min_velocity_iters,
         )
+
+        # TODO: We should change this part after improving spawning of articulation.
         for name in link_names:
             physical_body = art.get_physical_body(name)
             inertia = physical_body.get_mass_space_inertia_tensor()
