@@ -74,3 +74,30 @@ class EefType(Enum):
 class ActionMode(Enum):
     ABSOLUTE = ""
     RELATIVE = "delta_"  # This indicates the action is relative change with respect to last state.
+
+
+class LeRobotKey(Enum):
+    """LeRobot standard field keys - official LeRobot dataset format."""
+
+    OBS_STR = "observation"
+    OBS_PREFIX = "observation."
+    OBS_ENV_STATE = "observation.environment_state"
+    OBS_STATE = "observation.state"
+    OBS_QVEL = "observation.qvel"
+    OBS_QF = "observation.qf"
+    OBS_IMAGE = "observation.image"
+    OBS_IMAGES = "observation.images"
+    OBS_LANGUAGE = "observation.language"
+    OBS_LANGUAGE_TOKENS = "observation.language.tokens"
+    OBS_LANGUAGE_ATTENTION_MASK = "observation.language.attention_mask"
+    OBS_LANGUAGE_SUBTASK = "observation.subtask"
+    OBS_LANGUAGE_SUBTASK_TOKENS = "observation.subtask.tokens"
+    OBS_LANGUAGE_SUBTASK_ATTENTION_MASK = "observation.subtask.attention_mask"
+    ACTION = "action"
+    ACTION_PREFIX = "action."
+    ACTION_TOKENS = "action.tokens"
+    ACTION_TOKEN_MASK = "action.token_mask"
+    REWARD = "next.reward"
+    TRUNCATED = "next.truncated"
+    DONE = "next.done"
+    INFO = "info"

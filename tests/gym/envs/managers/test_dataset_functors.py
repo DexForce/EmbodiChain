@@ -29,13 +29,16 @@ try:
         LEROBOT_AVAILABLE,
     )
 
+    from embodichain.data.enum import LeRobotKey
+
     LEROBOT_AVAILABLE = True
 except ImportError:
     LEROBOT_AVAILABLE = False
     LeRobotRecorder = None
-
+    LeRobotKey = None
 
 # Import Camera for mocking (only if available)
+
 try:
     from embodichain.lab.sim.sensors import Camera
 
@@ -228,15 +231,12 @@ class TestLeRobotRecorderFeatures:
         # Access the private method through the instance
         features = recorder._build_features()
 
-        # Check expected features exist
-        assert "observation.qpos" in features
-        assert "observation.qvel" in features
-        assert "observation.qf" in features
-        assert "action" in features
+        assert LeRobotKey.OBS_STATE.value in features
+        assert LeRobotKey.ACTION.value in features
 
         # Check shapes
-        assert features["observation.qpos"]["shape"] == (6,)
-        assert features["action"]["shape"] == (6,)
+        assert features[LeRobotKey.OBS_STATE.value]["shape"] == (6,)
+        assert features[LeRobotKey.ACTION.value]["shape"] == (6,)
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -276,8 +276,8 @@ class TestLeRobotRecorderFeatures:
             recorder = LeRobotRecorder(cfg, env)
             features = recorder._build_features()
 
-        # Check camera feature exists
-        assert "camera.color" in features
+        # Check camera feature exists (use LeRobot standard key format)
+        assert f"{LeRobotKey.OBS_IMAGES.value}.camera" in features
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -328,8 +328,8 @@ class TestLeRobotRecorderFrameConversion:
 
         assert "task" in frame
         assert frame["task"] == "test_task"
-        assert "observation.qpos" in frame
-        assert "action" in frame
+        assert LeRobotKey.OBS_STATE.value in frame
+        assert LeRobotKey.ACTION.value in frame
 
 
 class TestDatasetFunctorCfg:
