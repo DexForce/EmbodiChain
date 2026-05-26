@@ -35,10 +35,8 @@ NUM_ARENAS = 10
 class BaseArticulationTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
-        )
+    def setup_simulation(self, device):
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=NUM_ARENAS)
         self.sim = SimulationManager(config)
 
         art_path = get_data_path(ART_PATH)
@@ -49,7 +47,7 @@ class BaseArticulationTest:
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
+        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
             self.sim.init_gpu_physics()
 
     def test_local_pose_behavior(self):

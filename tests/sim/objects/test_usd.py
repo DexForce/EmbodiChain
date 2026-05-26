@@ -38,15 +38,15 @@ NUM_ARENAS = 1
 class BaseUsdTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device):
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=device,
             num_envs=NUM_ARENAS,
         )
         self.sim = SimulationManager(config)
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
+        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
             self.sim.init_gpu_physics()
 
     def test_import_rigid(self):

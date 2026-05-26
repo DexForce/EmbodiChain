@@ -34,8 +34,7 @@ EmbodiChain configs form a nested hierarchy:
 EmbodiedEnvCfg
 ├── sim_cfg: SimulationManagerCfg
 │   ├── render_cfg: RenderCfg
-│   ├── physics_config: PhysicsCfg
-│   └── gpu_memory_config: GPUMemoryCfg
+│   └── physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg
 │   ├── drive_pros: JointDrivePropertiesCfg
@@ -135,7 +134,9 @@ For RL training and data generation, EmbodiChain uses JSON config files. The JSO
     "env": {
         "num_envs": 4,
         "sim_cfg": {
-            "sim_device": "cuda:0",
+            "physics_cfg": {
+                "device": "cuda:0"
+            },
             "headless": true
         },
         "robot": {

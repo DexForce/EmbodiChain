@@ -76,7 +76,7 @@ def main(interactive=False):
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Initialize simulation
-    sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
+    sim = SimulationManager(SimulationManagerCfg(headless=False, device="cpu"))
     sim.set_manual_update(False)
 
     # Robot configuration

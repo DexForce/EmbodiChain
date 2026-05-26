@@ -44,7 +44,7 @@ from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_cfg)
 
 # 2. Define shared physics attributes
@@ -109,7 +109,7 @@ Use these shapes when collecting vectorized observations for multi-environment t
 - Prefer providing simplified collision meshes or enabling convex decomposition (`max_convex_hull_num` > 1) for complex visual meshes to improve physics stability.
 - `RigidObjectGroup` only supports `dynamic` and `kinematic` body types (not `static`).
 - When teleporting many members, batch pose updates and call `sim.update()` once to avoid synchronization overhead.
-- For GPU physics, set `SimulationManagerCfg.sim_device` to `cuda` and call `sim.init_gpu_physics()` before running simulations.
+- For GPU physics, set `SimulationManagerCfg.device` to `cuda` and call `sim.init_gpu_physics()` before running simulations.
 - Use `clear_dynamics()` to reset velocities without changing poses.
 
 ## Example: Working with Group Poses

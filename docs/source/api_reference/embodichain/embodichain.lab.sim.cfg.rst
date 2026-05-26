@@ -9,9 +9,11 @@
    .. autosummary::
    
       ArticulationCfg
+      DefaultPhysicsCfg
       GPUMemoryCfg
       JointDrivePropertiesCfg
       LightCfg
+      NewtonPhysicsCfg
       ObjectBaseCfg
       PhysicsCfg
       RigidBodyAttributesCfg

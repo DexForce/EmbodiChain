@@ -22,6 +22,7 @@ import sys
 import queue
 import time
 import threading
+import importlib
 import dexsim
 import torch
 import numpy as np
@@ -32,7 +33,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import List, Union, Dict, Union, Sequence
+from typing import List, Union, Dict, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -47,14 +48,13 @@ from dexsim.types import (
     PhysicalAttr,
     ActorType,
     RigidBodyShape,
-    RigidBodyGPUAPIReadType,
-    ArticulationGPUAPIReadType,
 )
 from dexsim.core import TASK_RETURN
-from dexsim.engine import CudaArray, Material
+from dexsim.engine import Material, PhysicsScene
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType, Windows
 from dexsim.engine import GizmoController, ObjectManipulator
+from dexsim.engine.newton_physics import NewtonManager, NewtonPhysicsScene
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -75,9 +75,11 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    PhysicsCfg,
+    DefaultPhysicsCfg,
+    NewtonPhysicsCfg,
+    physics_backend_from_cfg,
+    validate_physics_cfg,
     MarkerCfg,
-    GPUMemoryCfg,
     WindowRecordCfg,
     LightCfg,
     RigidObjectCfg,
@@ -93,6 +95,7 @@ from embodichain.utils import configclass, logger
 __all__ = [
     "SimulationManager",
     "SimulationManagerCfg",
+    "get_physics_scene",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
@@ -103,6 +106,43 @@ __all__ = [
 @configclass
 class SimulationManagerCfg:
     """Global robot simulation configuration."""
+
+    def __init__(
+        self,
+        width: int = 1920,
+        height: int = 1080,
+        headless: bool = False,
+        render_cfg: RenderCfg | None = None,
+        gpu_id: int = 0,
+        thread_mode: ThreadMode = ThreadMode.RENDER_SHARE_ENGINE,
+        cpu_num: int = 1,
+        num_envs: int = 1,
+        arena_space: float = 5.0,
+        physics_dt: float | None = None,
+        device: str | torch.device | None = None,
+        physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg | None = None,
+        window_record: WindowRecordCfg | None = None,
+    ) -> None:
+        self.width = width
+        self.height = height
+        self.headless = headless
+        self.render_cfg = RenderCfg() if render_cfg is None else render_cfg
+        self.gpu_id = gpu_id
+        self.thread_mode = thread_mode
+        self.cpu_num = cpu_num
+        self.num_envs = num_envs
+        self.arena_space = arena_space
+        self.physics_cfg = DefaultPhysicsCfg() if physics_cfg is None else physics_cfg
+        self.window_record = (
+            WindowRecordCfg() if window_record is None else window_record
+        )
+
+        if physics_dt is not None:
+            self.physics_cfg.physics_dt = physics_dt
+        if device is not None:
+            self.physics_cfg.device = device
+
+        self.__post_init__()
 
     width: int = 1920
     """The width of the simulation window."""
@@ -138,19 +178,34 @@ class SimulationManagerCfg:
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
-    physics_dt: float = 1.0 / 100.0
-    """The time step for the physics simulation."""
-
-    sim_device: Union[str, torch.device] = "cpu"
-    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
-
-    physics_config: PhysicsCfg = field(default_factory=PhysicsCfg)
-    """The physics configuration parameters."""
-    gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
-    """The GPU memory configuration parameters."""
+    physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg = field(
+        default_factory=DefaultPhysicsCfg
+    )
+    """Physics backend configuration (type selects default vs Newton backend)."""
 
     window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
     """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
+
+    def __post_init__(self):
+        validate_physics_cfg(self.physics_cfg)
+
+    @property
+    def physics_dt(self) -> float:
+        """The time step for the physics simulation."""
+        return self.physics_cfg.physics_dt
+
+    @physics_dt.setter
+    def physics_dt(self, value: float) -> None:
+        self.physics_cfg.physics_dt = value
+
+    @property
+    def device(self) -> str | torch.device:
+        """The device for the physics simulation."""
+        return self.physics_cfg.device
+
+    @device.setter
+    def device(self, value: str | torch.device) -> None:
+        self.physics_cfg.device = value
 
 
 @dataclass
@@ -230,6 +285,8 @@ class SimulationManager:
 
         self.sim_config = sim_config
         self.device = torch.device("cpu")
+        self._physics_backend = physics_backend_from_cfg(sim_config.physics_cfg)
+        self._newton_manager: NewtonManager = None
 
         world_config = self._convert_sim_config(sim_config)
 
@@ -258,11 +315,19 @@ class SimulationManager:
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
-        dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
-        dexsim.set_physics_gpu_memory_config(**sim_config.gpu_memory_config.to_dict())
+        if self.is_default_backend:
+            default_physics_cfg = sim_config.physics_cfg
+            assert isinstance(default_physics_cfg, DefaultPhysicsCfg)
+            dexsim.set_physics_config(**default_physics_cfg.to_dexsim_args())
+            dexsim.set_physics_gpu_memory_config(
+                **default_physics_cfg.gpu_memory.to_dict()
+            )
+        else:
+            from dexsim.engine.newton_physics import get_newton_manager
+
+            self._newton_manager = get_newton_manager(self._world)
 
         self._is_initialized_gpu_physics = False
-        self._ps = self._world.get_physics_scene()
 
         # activate physics
         self.enable_physics(True)
@@ -368,8 +433,35 @@ class SimulationManager:
 
     @property
     def is_use_gpu_physics(self) -> bool:
-        """Check if the physics simulation is using GPU."""
+        """Whether the active physics backend is running on GPU."""
         return self.device.type == "cuda"
+
+    @property
+    def physics_backend(self) -> str:
+        """Return the active physics backend name."""
+        return self._physics_backend
+
+    @property
+    def is_default_backend(self) -> bool:
+        """Whether the existing DexSim default physics backend is active."""
+        return self._physics_backend == "default"
+
+    @property
+    def is_newton_backend(self) -> bool:
+        """Whether the DexSim Newton physics backend is active."""
+        return self._physics_backend == "newton"
+
+    @property
+    def newton_manager(self) -> NewtonManager:
+        """Return the DexSim Newton manager for this world, if active."""
+        if not self.is_newton_backend:
+            logger.log_warning("Newton backend is not active.")
+            return None
+        if self._newton_manager is None:
+            from dexsim.engine.newton_physics import get_newton_manager
+
+            self._newton_manager = get_newton_manager(self._world)
+        return self._newton_manager
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -409,23 +501,21 @@ class SimulationManager:
         world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
-        world_config.length_tolerance = sim_config.physics_config.length_tolerance
-        world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
+        if isinstance(sim_config.physics_cfg, DefaultPhysicsCfg):
+            world_config.length_tolerance = sim_config.physics_cfg.length_tolerance
+            world_config.speed_tolerance = sim_config.physics_cfg.speed_tolerance
 
         world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
         if sim_config.render_cfg.enable_denoiser is False:
             world_config.raytrace_config.spp = sim_config.render_cfg.spp
             world_config.raytrace_config.open_denoise = False
 
-        if type(sim_config.sim_device) is str:
-            self.device = torch.device(sim_config.sim_device)
+        if type(sim_config.device) is str:
+            self.device = torch.device(sim_config.device)
         else:
-            self.device = sim_config.sim_device
+            self.device = sim_config.device
 
         if self.device.type == "cuda":
-            world_config.enable_gpu_sim = True
-            world_config.direct_gpu_api = True
-
             if self.device.index is not None and sim_config.gpu_id != self.device.index:
                 logger.log_warning(
                     f"Conflict gpu_id {sim_config.gpu_id} and device index {self.device.index}. Using device index."
@@ -433,6 +523,19 @@ class SimulationManager:
                 sim_config.gpu_id = self.device.index
 
                 self.device = torch.device(f"cuda:{sim_config.gpu_id}")
+
+        if self.is_default_backend and self.device.type == "cuda":
+            world_config.enable_gpu_sim = True
+            world_config.direct_gpu_api = True
+
+        if self.is_newton_backend:
+            importlib.import_module("dexsim.engine.newton_physics")
+
+            newton_physics_cfg = sim_config.physics_cfg
+            assert isinstance(newton_physics_cfg, NewtonPhysicsCfg)
+            world_config.newton_cfg = newton_physics_cfg.to_dexsim_cfg(
+                gpu_id=sim_config.gpu_id,
+            )
 
         world_config.gpu_id = sim_config.gpu_id
 
@@ -461,11 +564,19 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable manual update.
         """
+        if self.is_newton_backend:
+            logger.log_warning(
+                "Newton physics backend does not support switching between manual and automatic update. Ignoring set_manual_update call."
+            )
+            return
         self._world.set_manual_update(enable)
 
     def init_gpu_physics(self) -> None:
         """Initialize the GPU physics simulation."""
-        if self.device.type != "cuda":
+        if self.is_newton_backend:
+            return
+
+        if not self.is_use_gpu_physics:
             logger.log_warning(
                 "The simulation device is not cuda, cannot initialize GPU physics."
             )
@@ -486,6 +597,20 @@ class SimulationManager:
             rigid_obj.reset()
 
         self._is_initialized_gpu_physics = True
+
+    def prepare_physics(self) -> None:
+        """Prepare backend-specific runtime data after scene construction."""
+        if self.is_default_gpu_backend:
+            self.init_gpu_physics()
+        elif self.is_newton_backend:
+            self._world.update(0.0)
+
+    def forward_physics(self) -> None:
+        """Refresh backend physics state without advancing time when supported."""
+        if self.is_newton_backend:
+            mgr = self.newton_manager
+            if mgr is not None and getattr(mgr.lifecycle_state, "name", "") == "READY":
+                mgr.forward_kinematics()
 
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
@@ -543,6 +668,15 @@ class SimulationManager:
 
     def get_world(self) -> dexsim.World:
         return self._world
+
+    def get_physics_scene(self) -> PhysicsScene | NewtonPhysicsScene:
+        """Get the physics scene of the simulation."""
+        if self.is_newton_backend:
+            physics_scene = self.newton_manager.scene
+        else:
+            physics_scene = self._world.get_physics_scene()
+
+        return physics_scene
 
     def open_window(self) -> None:
         """Open the simulation window."""
@@ -629,16 +763,8 @@ class SimulationManager:
             0, default_length, repeat_uv_size, repeat_uv_size
         )
         self._default_plane.set_name("default_plane")
-        plane_collision = self._env.create_cube(
-            default_length, default_length, default_length / 10
-        )
-        plane_collision.set_visible(False)
-        plane_collision_pose = np.eye(4, dtype=float)
-        plane_collision_pose[2, 3] = -default_length / 20 - 0.001
-        plane_collision.set_local_pose(plane_collision_pose)
-        plane_collision.add_rigidbody(ActorType.KINEMATIC, RigidBodyShape.CONVEX)
-
-        # TODO: add default physics attributes for the plane.
+        attr = PhysicalAttr(dynamic_friction=0.5, static_friction=0.5)
+        self._default_plane.add_rigidbody(ActorType.STATIC, RigidBodyShape.PLANE, attr)
 
     def set_default_background(self) -> None:
         """Set default background."""
@@ -845,6 +971,12 @@ class SimulationManager:
         Returns:
             SoftObject: The added soft object instance handle.
         """
+        if self.is_newton_backend:
+            logger.log_error(
+                "Soft object support for the Newton backend is not enabled in EmbodiChain yet.",
+                error_type=NotImplementedError,
+            )
+
         if not self.is_use_gpu_physics:
             logger.log_error("Soft object requires GPU physics to be enabled.")
 
@@ -875,6 +1007,12 @@ class SimulationManager:
         Returns:
             ClothObject: The added cloth object instance handle.
         """
+        if self.is_newton_backend:
+            logger.log_error(
+                "Cloth object support for the Newton backend is not enabled in EmbodiChain yet.",
+                error_type=NotImplementedError,
+            )
+
         if not self.is_use_gpu_physics:
             logger.log_error("Cloth object requires GPU physics to be enabled.")
 
@@ -1071,6 +1209,11 @@ class SimulationManager:
         Returns:
             Articulation: The added articulation instance handle.
         """
+        if self.is_newton_backend:
+            logger.log_error(
+                "Newton articulation support is under development in DexSim and is not enabled in EmbodiChain yet.",
+                error_type=NotImplementedError,
+            )
 
         uid = cfg.uid
         if uid is None:
@@ -1151,6 +1294,11 @@ class SimulationManager:
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
         """
+        if self.is_newton_backend:
+            logger.log_error(
+                "Newton robot support depends on DexSim Newton articulation support and is not enabled in EmbodiChain yet.",
+                error_type=NotImplementedError,
+            )
 
         uid = cfg.uid
         if cfg.fpath is None:
@@ -2088,7 +2236,6 @@ class SimulationManager:
         _sever_wrapper_refs("_lights")
 
         # Explicitly clear Python references to trigger C++ object destructors
-        self._ps = None
         self._env = None
         self._world = None
         self._default_plane = None
@@ -2130,3 +2277,12 @@ class SimulationManager:
 
         # At this point, wait for the C++ Scene to return to zero, since the stack is at the top level, there will definitely be no deadlock
         SimulationManager.wait_scene_destruction()
+
+
+def get_physics_scene(instance_id: int = 0):
+    """Return the active physics scene from a SimulationManager instance.
+
+    This is the unified EmbodiChain access point for code that previously
+    reached through ``dexsim.default_world().get_physics_scene()``.
+    """
+    return SimulationManager.get_instance(instance_id).get_physics_scene()

@@ -563,7 +563,9 @@ class Articulation(BatchEntity):
     ) -> None:
         # Initialize world and physics scene
         self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
 
         self.cfg = cfg
         self._entities = entities

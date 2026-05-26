@@ -23,9 +23,14 @@ from typing import List, Sequence, Union
 from functools import cached_property
 
 from dexsim.models import MeshObject
-from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
-from dexsim.engine import CudaArray, PhysicsScene
+from dexsim.engine import PhysicsScene
 from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
+from embodichain.lab.sim.objects.backends import (
+    DefaultRigidBodyView,
+    NewtonRigidBodyView,
+    is_newton_scene,
+)
+from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.lab.sim import (
     VisualMaterial,
     VisualMaterialInst,
@@ -40,8 +45,8 @@ from embodichain.utils import logger
 class RigidBodyData:
     """Data manager for rigid body with body type of dynamic or kinematic.
 
-    Note:
-        1. The pose data managed by dexsim is in the format of (qx, qy, qz, qw, x, y, z), but in SimulationManager, we use (x, y, z, qw, qx, qy, qz) format.
+    All pose/velocity/acceleration data uses EmbodiChain convention:
+    ``(x, y, z, qx, qy, qz, qw)``.
     """
 
     def __init__(
@@ -59,16 +64,18 @@ class RigidBodyData:
         self.num_instances = len(entities)
         self.device = device
 
-        # get gpu indices for the entities.
-        self.gpu_indices = (
-            torch.as_tensor(
-                [entity.get_gpu_index() for entity in self.entities],
-                dtype=torch.int32,
-                device=self.device,
+        # Create the appropriate backend view.
+        if is_newton_scene(ps):
+            self.body_view: RigidBodyViewBase = NewtonRigidBodyView(
+                entities=entities, scene=ps, device=device
             )
-            if self.device.type == "cuda"
-            else None
-        )
+        else:
+            self.body_view = DefaultRigidBodyView(
+                entities=entities, ps=ps, device=device
+            )
+
+        # Kept for backward compatibility with callers that index gpu_indices directly.
+        self.gpu_indices = self.body_view.body_ids_tensor
 
         # Initialize rigid body data.
         self._pose = torch.zeros(
@@ -86,7 +93,7 @@ class RigidBodyData:
         self._ang_acc = torch.zeros(
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
-        # center of mass pose in format (x, y, z, qw, qx, qy, qz)
+        # center of mass pose in format (x, y, z, qx, qy, qz, qw)
         self.default_com_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
         )
@@ -95,68 +102,35 @@ class RigidBodyData:
         )
 
     @property
+    def is_newton_backend(self) -> bool:
+        return isinstance(self.body_view, NewtonRigidBodyView)
+
+    def body_ids_for(self, env_ids: Sequence[int]) -> torch.Tensor:
+        return self.body_view.select_body_ids(env_ids)
+
+    @property
     def pose(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            # Fetch pose from CPU entities
-            xyzs = torch.as_tensor(
-                np.array([entity.get_location() for entity in self.entities]),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            quats = torch.as_tensor(
-                np.array(
-                    [entity.get_rotation_quat() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            quats = convert_quat(quats, to="wxyz")
-            self._pose = torch.cat((xyzs, quats), dim=-1)
-        else:
-            self.ps.gpu_fetch_rigid_body_data(
-                data=self._pose,
-                gpu_indices=self.gpu_indices,
-                data_type=RigidBodyGPUAPIReadType.POSE,
-            )
-            self._pose[:, :4] = convert_quat(self._pose[:, :4], to="wxyz")
-            self._pose = self._pose[:, [4, 5, 6, 0, 1, 2, 3]]
-        return self._pose
+        if self.body_view.is_ready:
+            self.body_view.fetch_pose(self._pose)
+            return self._pose
+
+        logger.log_error(f"RigidBodyData pose requested but body view is not ready.")
 
     @property
     def lin_vel(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            # Fetch linear velocity from CPU entities
-            self._lin_vel = torch.as_tensor(
-                np.array([entity.get_linear_velocity() for entity in self.entities]),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_rigid_body_data(
-                data=self._lin_vel,
-                gpu_indices=self.gpu_indices,
-                data_type=RigidBodyGPUAPIReadType.LINEAR_VELOCITY,
-            )
-        return self._lin_vel
+        if self.body_view.is_ready:
+            self.body_view.fetch_linear_velocity(self._lin_vel)
+            return self._lin_vel
+
+        logger.log_error("RigidBodyData lin_vel requested but body view is not ready.")
 
     @property
     def ang_vel(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            # Fetch angular velocity from CPU entities
-            self._ang_vel = torch.as_tensor(
-                np.array(
-                    [entity.get_angular_velocity() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_rigid_body_data(
-                data=self._ang_vel,
-                gpu_indices=self.gpu_indices,
-                data_type=RigidBodyGPUAPIReadType.ANGULAR_VELOCITY,
-            )
-        return self._ang_vel
+        if self.body_view.is_ready:
+            self.body_view.fetch_angular_velocity(self._ang_vel)
+            return self._ang_vel
+
+        logger.log_error("RigidBodyData ang_vel requested but body view is not ready.")
 
     @property
     def vel(self) -> torch.Tensor:
@@ -169,39 +143,19 @@ class RigidBodyData:
 
     @property
     def lin_acc(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            self._lin_acc = torch.as_tensor(
-                np.array(
-                    [entity.get_linear_acceleration() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_rigid_body_data(
-                data=self._lin_acc,
-                gpu_indices=self.gpu_indices,
-                data_type=RigidBodyGPUAPIReadType.LINEAR_ACCELERATION,
-            )
-        return self._lin_acc
+        if self.body_view.is_ready:
+            self.body_view.fetch_linear_acceleration(self._lin_acc)
+            return self._lin_acc
+
+        logger.log_error("RigidBodyData lin_acc requested but body view is not ready.")
 
     @property
     def ang_acc(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            self._ang_acc = torch.as_tensor(
-                np.array(
-                    [entity.get_angular_acceleration() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_rigid_body_data(
-                data=self._ang_acc,
-                gpu_indices=self.gpu_indices,
-                data_type=RigidBodyGPUAPIReadType.ANGULAR_ACCELERATION,
-            )
-        return self._ang_acc
+        if self.body_view.is_ready:
+            self.body_view.fetch_angular_acceleration(self._ang_acc)
+            return self._ang_acc
+
+        logger.log_error("RigidBodyData ang_acc requested but body view is not ready.")
 
     @property
     def acc(self) -> torch.Tensor:
@@ -219,13 +173,35 @@ class RigidBodyData:
         Returns:
             torch.Tensor: The center of mass pose with shape (N, 7).
         """
+        if self.is_newton_backend:
+            manager = self.body_view.scene.manager
+            for i, entity_handle in enumerate(self.body_view.entity_handles):
+                attr = manager.dexsim_meta.get(entity_handle, {}).get("attr")
+                if attr is None:
+                    pos = np.zeros(3, dtype=np.float32)
+                    quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+                else:
+                    pos = np.asarray(attr.com_position, dtype=np.float32).copy()
+                    quat = np.asarray(attr.com_quaternion, dtype=np.float32).copy()
+                self._com_pose[i, :3] = torch.as_tensor(
+                    pos, dtype=torch.float32, device=self.device
+                )
+                self._com_pose[i, 3:7] = torch.as_tensor(
+                    convert_quat(quat, to="xyzw"),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            return self._com_pose
+
         for i, entity in enumerate(self.entities):
             pos, quat = entity.get_physical_body().get_cmass_local_pose()
             self._com_pose[i, :3] = torch.as_tensor(
                 pos, dtype=torch.float32, device=self.device
             )
             self._com_pose[i, 3:7] = torch.as_tensor(
-                quat, dtype=torch.float32, device=self.device
+                convert_quat(np.asarray(quat, dtype=np.float32), to="xyzw"),
+                dtype=torch.float32,
+                device=self.device,
             )
         return self._com_pose
 
@@ -249,7 +225,9 @@ class RigidObject(BatchEntity):
         self.body_type = cfg.body_type
 
         self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
 
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
@@ -287,8 +265,8 @@ class RigidObject(BatchEntity):
             self.reset()
 
         # update default center of mass pose (only for non-static bodies with body data).
-        if self.body_data is not None:
-            self.body_data.default_com_pose = self.body_data.com_pose.clone()
+        if self._data is not None:
+            self._data.default_com_pose = self._data.com_pose.clone()
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
@@ -337,7 +315,7 @@ class RigidObject(BatchEntity):
         """Get the body state of the rigid object.
 
         The body state of a rigid object is represented as a tensor with the following format:
-        [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]
+        [x, y, z, qx, qy, qz, qw, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]
 
         If the rigid object is static, linear and angular velocities will be zero.
 
@@ -403,9 +381,11 @@ class RigidObject(BatchEntity):
 
         filter_data_np = filter_data.cpu().numpy().astype(np.uint32)
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_collision_filter_data(
-                filter_data_np[i]
-            )
+            entity = self._entities[env_idx]
+            if is_newton_scene(self._ps):
+                entity.set_collision_filter_data(filter_data_np[i])
+            else:
+                entity.get_physical_body().set_collision_filter_data(filter_data_np[i])
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -423,50 +403,47 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match pose length {len(pose)}."
             )
 
-        if self.device.type == "cpu" or self.is_static:
-            pose = pose.cpu()
-            if pose.dim() == 2 and pose.shape[1] == 7:
-                pose_matrix = torch.eye(4).unsqueeze(0).repeat(pose.shape[0], 1, 1)
-                pose_matrix[:, :3, 3] = pose[:, :3]
-                pose_matrix[:, :3, :3] = matrix_from_quat(pose[:, 3:7])
-                for i, env_idx in enumerate(local_env_ids):
-                    self._entities[env_idx].set_local_pose(pose_matrix[i])
-            elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
-                for i, env_idx in enumerate(local_env_ids):
-                    self._entities[env_idx].set_local_pose(pose[i])
-            else:
-                logger.log_error(
-                    f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
-                )
-
-        else:
-            if pose.dim() == 2 and pose.shape[1] == 7:
-                xyz = pose[:, :3]
-                quat = convert_quat(pose[:, 3:7], to="xyzw")
-            elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
-                xyz = pose[:, :3, 3]
-                quat = quat_from_matrix(pose[:, :3, :3])
-                quat = convert_quat(quat, to="xyzw")
-            else:
-                logger.log_error(
-                    f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
-                )
-
-            # we should keep `pose_` life cycle to the end of the function.
-            pose = torch.cat((quat, xyz), dim=-1)
-            indices = self.body_data.gpu_indices[local_env_ids]
-            torch.cuda.synchronize(self.device)
-            self._ps.gpu_apply_rigid_body_data(
-                data=pose.clone(),
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.POSE,
+        # Normalize pose to (N, 7) format in (x, y, z, qx, qy, qz, qw).
+        if pose.dim() == 2 and pose.shape[1] == 7:
+            target_pose = pose.to(device=self.device, dtype=torch.float32)
+        elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
+            xyz = pose[:, :3, 3]
+            quat = convert_quat(quat_from_matrix(pose[:, :3, :3]), to="xyzw")
+            target_pose = torch.cat((xyz, quat), dim=-1).to(
+                device=self.device, dtype=torch.float32
             )
+        else:
+            logger.log_error(
+                f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
+            )
+            return
+
+        # Use backend view if available and ready.
+        if (
+            self._data is not None
+            and self._data.body_view.is_ready
+            and not self.is_static
+        ):
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_pose(target_pose, body_ids)
+            return
+
+        # Static bodies and non-ready backends (notably Newton before finalize)
+        # still accept direct entity pose updates.
+        target_pose = target_pose.cpu()
+        pose_matrix = torch.eye(4).unsqueeze(0).repeat(len(local_env_ids), 1, 1)
+        pose_matrix[:, :3, 3] = target_pose[:, :3]
+        pose_matrix[:, :3, :3] = matrix_from_quat(
+            convert_quat(target_pose[:, 3:7], to="wxyz")
+        )
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].set_local_pose(pose_matrix[i])
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
         """Get local pose of the rigid object.
 
         Args:
-            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
+            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qx, qy, qz, qw). Defaults to False.
 
         Returns:
             torch.Tensor: The local pose of the rigid object with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
@@ -485,7 +462,6 @@ class RigidObject(BatchEntity):
                 quats = torch.as_tensor(
                     [entity.get_rotation_quat() for entity in entities]
                 )
-                quats = convert_quat(quats, to="wxyz")
                 pose = torch.cat((xyzs, quats), dim=-1)
 
             return pose
@@ -496,7 +472,7 @@ class RigidObject(BatchEntity):
         pose = self.body_data.pose
         if to_matrix:
             xyz = pose[:, :3]
-            mat = matrix_from_quat(pose[:, 3:7])
+            mat = matrix_from_quat(convert_quat(pose[:, 3:7], to="wxyz"))
             pose = (
                 torch.eye(4, dtype=torch.float32, device=self.device)
                 .unsqueeze(0)
@@ -551,28 +527,16 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match torque length {len(torque)}."
             )
 
-        if self.device.type == "cpu":
-            for i, env_idx in enumerate(local_env_ids):
-                if force is not None:
-                    self._entities[env_idx].add_force(force[i].cpu().numpy())
-                if torque is not None:
-                    self._entities[env_idx].add_torque(torque[i].cpu().numpy())
-
-        else:
-            indices = self.body_data.gpu_indices[local_env_ids]
-            torch.cuda.synchronize(self.device)
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
             if force is not None:
-                self._ps.gpu_apply_rigid_body_data(
-                    data=force,
-                    gpu_indices=indices,
-                    data_type=RigidBodyGPUAPIWriteType.FORCE,
-                )
+                self._data.body_view.apply_force(force, body_ids)
             if torque is not None:
-                self._ps.gpu_apply_rigid_body_data(
-                    data=torque,
-                    gpu_indices=indices,
-                    data_type=RigidBodyGPUAPIWriteType.TORQUE,
-                )
+                self._data.body_view.apply_torque(torque, body_ids)
+        elif self._data is not None and self._data.is_newton_backend:
+            return
+        else:
+            logger.log_error("Cannot apply force or torque before body view is ready.")
 
     def set_velocity(
         self,
@@ -609,31 +573,16 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match ang_vel length {len(ang_vel)}."
             )
 
-        if self.device.type == "cpu":
-            for i, env_idx in enumerate(local_env_ids):
-                if lin_vel is not None:
-                    self._entities[env_idx].set_linear_velocity(
-                        lin_vel[i].cpu().numpy()
-                    )
-                if ang_vel is not None:
-                    self._entities[env_idx].set_angular_velocity(
-                        ang_vel[i].cpu().numpy()
-                    )
-        else:
-            indices = self.body_data.gpu_indices[local_env_ids]
-            torch.cuda.synchronize(self.device)
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
             if lin_vel is not None:
-                self._ps.gpu_apply_rigid_body_data(
-                    data=lin_vel,
-                    gpu_indices=indices,
-                    data_type=RigidBodyGPUAPIWriteType.LINEAR_VELOCITY,
-                )
+                self._data.body_view.apply_linear_velocity(lin_vel, body_ids)
             if ang_vel is not None:
-                self._ps.gpu_apply_rigid_body_data(
-                    data=ang_vel,
-                    gpu_indices=indices,
-                    data_type=RigidBodyGPUAPIWriteType.ANGULAR_VELOCITY,
-                )
+                self._data.body_view.apply_angular_velocity(ang_vel, body_ids)
+        elif self._data is not None and self._data.is_newton_backend:
+            return
+        else:
+            logger.log_error("Cannot set velocity before body view is ready.")
 
     def set_attrs(
         self,
@@ -942,7 +891,7 @@ class RigidObject(BatchEntity):
     def set_com_pose(
         self, com_pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
-        """Set the center of mass pose of the rigid body. The pose format is (x, y, z, qw, qx, qy, qz).
+        """Set the center of mass pose of the rigid body. The pose format is (x, y, z, qx, qy, qz, qw).
 
         Args:
             com_pose (torch.Tensor): The center of mass pose to set with shape (N, 7).
@@ -964,8 +913,13 @@ class RigidObject(BatchEntity):
         com_pose = com_pose.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             pos = com_pose[i, :3]
-            quat = com_pose[i, 3:7]
-            self._entities[env_idx].get_physical_body().set_cmass_local_pose(pos, quat)
+            quat = convert_quat(com_pose[i, 3:7], to="wxyz")
+            if self._data is not None and self._data.is_newton_backend:
+                self._entities[env_idx].set_cmass_local_pose(pos, quat)
+            else:
+                self._entities[env_idx].get_physical_body().set_cmass_local_pose(
+                    pos, quat
+                )
 
     def set_body_type(self, body_type: str) -> None:
         """Set the body type of the rigid object.
@@ -1082,36 +1036,19 @@ class RigidObject(BatchEntity):
 
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        if self.device.type == "cpu":
-            for env_idx in local_env_ids:
-                self._entities[env_idx].clear_dynamics()
-        else:
-            # Apply zero force and torque to the rigid bodies.
+        if self._data is not None and self._data.body_view.is_ready:
             zeros = torch.zeros(
                 (len(local_env_ids), 3), dtype=torch.float32, device=self.device
             )
-            indices = self.body_data.gpu_indices[local_env_ids]
-            torch.cuda.synchronize(self.device)
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.LINEAR_VELOCITY,
-            )
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.ANGULAR_VELOCITY,
-            )
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.FORCE,
-            )
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.TORQUE,
-            )
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_linear_velocity(zeros, body_ids)
+            self._data.body_view.apply_angular_velocity(zeros, body_ids)
+            self._data.body_view.apply_force(zeros, body_ids)
+            self._data.body_view.apply_torque(zeros, body_ids)
+        elif self._data is not None and self._data.is_newton_backend:
+            return
+        else:
+            logger.log_error("Cannot clear dynamics before body view is ready.")
 
     def set_physical_visible(
         self,
@@ -1191,4 +1128,7 @@ class RigidObject(BatchEntity):
         if len(arenas) == 0:
             arenas = [env]
         for i, entity in enumerate(self._entities):
-            arenas[i].remove_actor(entity)
+            if is_newton_scene(self._ps):
+                arenas[i].remove_actor(entity.get_name())
+            else:
+                arenas[i].remove_actor(entity)
