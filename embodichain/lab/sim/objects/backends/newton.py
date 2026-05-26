@@ -128,7 +128,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         body_ids = self._body_id_list(body_ids)
         out = self._as_warp_array(data)
-        self.scene.gpu_fetch_rigid_body_data(body_ids, self._get_data_type().POSE, out)
+        self.scene.gpu_fetch_rigid_body_data(out, body_ids, self._get_data_type().POSE)
 
     def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().POSE, pose)
@@ -212,7 +212,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         body_ids = self._body_id_list(body_ids)
         out = self._as_warp_array(data)
-        self.scene.gpu_fetch_rigid_body_data(body_ids, data_type, out)
+        self.scene.gpu_fetch_rigid_body_data(out, body_ids, data_type)
 
     def _apply_data(
         self, body_ids: torch.Tensor, data_type, data: torch.Tensor
@@ -223,5 +223,5 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         is_cuda = state is not None and str(state.body_q.device).startswith("cuda")
         payload = data if is_cuda else data.detach().cpu().numpy()
         self.scene.gpu_apply_rigid_body_data(
-            body_ids.detach().cpu().tolist(), data_type, payload
+            payload, body_ids.detach().cpu().tolist(), data_type
         )

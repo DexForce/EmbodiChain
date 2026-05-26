@@ -576,7 +576,7 @@ class SimulationManager:
         if self.is_newton_backend:
             return
 
-        if not self.is_default_gpu_backend:
+        if not self.is_use_gpu_physics:
             logger.log_warning(
                 "The simulation device is not cuda, cannot initialize GPU physics."
             )

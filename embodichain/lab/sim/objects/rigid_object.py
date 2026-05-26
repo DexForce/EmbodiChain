@@ -243,8 +243,6 @@ class RigidObject(BatchEntity):
         # Determine if we should use USD properties or cfg properties.
         if not cfg.use_usd_properties:
             for entity in entities:
-                if is_newton_scene(self._ps):
-                    continue
                 entity.set_body_scale(*cfg.body_scale)
                 entity.set_physical_attr(cfg.attrs.attr())
         else:

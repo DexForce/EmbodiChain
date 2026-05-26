@@ -287,8 +287,7 @@ def load_mesh_objects_from_cfg(
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                if not is_newton_backend:
-                    obj.set_body_scale(*cfg.body_scale)
+
                 sdf_cfg = SDFConfig(resolution=cfg.sdf_resolution)
                 obj.add_physical_body(
                     body_type,
@@ -296,17 +295,12 @@ def load_mesh_objects_from_cfg(
                     config=sdf_cfg,
                     attr=cfg.attrs.attr(),
                 )
-                if is_newton_backend:
-                    _set_body_scale_after_rigidbody(obj, cfg.body_scale)
             else:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                if not is_newton_backend:
-                    obj.set_body_scale(*cfg.body_scale)
                 obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
-                if is_newton_backend:
-                    _set_body_scale_after_rigidbody(obj, cfg.body_scale)
+
             obj.set_name(f"{cfg.uid}_{i}")
             obj_list.append(obj)
 
