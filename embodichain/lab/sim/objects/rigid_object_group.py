@@ -99,15 +99,11 @@ class RigidBodyGroupData:
     def is_newton_backend(self) -> bool:
         return isinstance(self._body_view, NewtonRigidBodyView)
 
-    @property
-    def is_newton_ready(self) -> bool:
-        return self.is_newton_backend and self._body_view.is_ready
-
     def body_ids_for(
         self,
         env_ids: Sequence[int],
         obj_ids: Sequence[int] | None = None,
-    ) -> list[int]:
+    ) -> torch.Tensor:
         local_obj_ids = range(self.num_objects) if obj_ids is None else obj_ids
         flat_indices = []
         for env_idx in env_ids:
@@ -118,55 +114,32 @@ class RigidBodyGroupData:
     @property
     def pose(self) -> torch.Tensor:
         if self._body_view.is_ready:
-            self._pose = self._body_view.fetch_pose().reshape(
-                self.num_instances, self.num_objects, 7
-            )
+            self._body_view.fetch_pose(self._pose.reshape(-1, 7))
             return self._pose
 
-        # Newton not ready — entity API fallback.
-        for i, instance in enumerate(self.entities):
-            for j, entity in enumerate(instance):
-                self._pose[i, j, :3] = torch.as_tensor(
-                    entity.get_location(), dtype=torch.float32, device=self.device
-                )
-                self._pose[i, j, 3:7] = torch.as_tensor(
-                    entity.get_rotation_quat(), dtype=torch.float32, device=self.device
-                )
-        return self._pose
+        logger.log_error(
+            "RigidBodyGroupData pose requested but body view is not ready."
+        )
 
     @property
     def lin_vel(self) -> torch.Tensor:
         if self._body_view.is_ready:
-            self._lin_vel = self._body_view.fetch_linear_velocity().reshape(
-                self.num_instances, self.num_objects, 3
-            )
+            self._body_view.fetch_linear_velocity(self._lin_vel.reshape(-1, 3))
             return self._lin_vel
 
-        for i, instance in enumerate(self.entities):
-            for j, entity in enumerate(instance):
-                self._lin_vel[i, j] = torch.as_tensor(
-                    entity.get_linear_velocity(),
-                    dtype=torch.float32,
-                    device=self.device,
-                )
-        return self._lin_vel
+        logger.log_error(
+            "RigidBodyGroupData lin_vel requested but body view is not ready."
+        )
 
     @property
     def ang_vel(self) -> torch.Tensor:
         if self._body_view.is_ready:
-            self._ang_vel = self._body_view.fetch_angular_velocity().reshape(
-                self.num_instances, self.num_objects, 3
-            )
+            self._body_view.fetch_angular_velocity(self._ang_vel.reshape(-1, 3))
             return self._ang_vel
 
-        for i, instance in enumerate(self.entities):
-            for j, entity in enumerate(instance):
-                self._ang_vel[i, j] = torch.as_tensor(
-                    entity.get_angular_velocity(),
-                    dtype=torch.float32,
-                    device=self.device,
-                )
-        return self._ang_vel
+        logger.log_error(
+            "RigidBodyGroupData ang_vel requested but body view is not ready."
+        )
 
     @property
     def vel(self) -> torch.Tensor:
@@ -190,7 +163,9 @@ class RigidObjectGroup(BatchEntity):
         self.body_type = cfg.body_type
 
         self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
 
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
         self._all_obj_indices = torch.arange(
@@ -433,9 +408,7 @@ class RigidObjectGroup(BatchEntity):
         elif self._data.is_newton_backend:
             return
         else:
-            for env_idx in local_env_ids:
-                for entity in self._entities[env_idx]:
-                    entity.clear_dynamics()
+            logger.log_error("Cannot clear dynamics before body view is ready.")
 
     def set_visual_material(
         self, mat: VisualMaterial, env_ids: Sequence[int] | None = None

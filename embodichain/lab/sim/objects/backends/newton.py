@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from typing import Sequence
+from functools import cached_property
 
 import numpy as np
 import torch
@@ -107,70 +108,69 @@ class NewtonRigidBodyView(RigidBodyViewBase):
 
     # -- RigidBodyViewBase: body IDs -----------------------------------------
 
-    @property
+    @cached_property
     def body_ids(self) -> list[int]:
         return self._body_ids
 
-    @property
+    @cached_property
     def body_ids_tensor(self) -> torch.Tensor:
         return self._body_ids_tensor
 
-    def select_body_ids(self, indices: Sequence[int] | torch.Tensor) -> list[int]:
-        if isinstance(indices, torch.Tensor):
-            indices = indices.detach().cpu().tolist()
-        return [self._body_ids[int(index)] for index in indices]
+    def select_body_ids(self, indices: Sequence[int] | torch.Tensor) -> torch.Tensor:
+        if not isinstance(indices, torch.Tensor):
+            indices = torch.as_tensor(indices, dtype=torch.long, device=self.device)
+        return self._body_ids_tensor[indices.to(device=self.device, dtype=torch.long)]
 
     # -- RigidBodyViewBase: pose ---------------------------------------------
 
-    def fetch_pose(self, body_ids: Sequence[int] | None = None) -> torch.Tensor:
-        body_ids = self._body_ids if body_ids is None else list(body_ids)
-        out = self._warp_array((len(body_ids), 7))
+    def fetch_pose(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        body_ids = self._body_id_list(body_ids)
+        out = self._as_warp_array(data)
         self.scene.gpu_fetch_rigid_body_data(body_ids, self._get_data_type().POSE, out)
-        return self._to_torch(out)
 
-    def apply_pose(self, pose: torch.Tensor, body_ids: Sequence[int]) -> None:
+    def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().POSE, pose)
 
     # -- RigidBodyViewBase: velocity -----------------------------------------
 
     def fetch_linear_velocity(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(self._get_data_type().LINEAR_VELOCITY, body_ids)
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(self._get_data_type().LINEAR_VELOCITY, data, body_ids)
 
     def fetch_angular_velocity(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(self._get_data_type().ANGULAR_VELOCITY, body_ids)
-
-    def apply_linear_velocity(
-        self, data: torch.Tensor, body_ids: Sequence[int]
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
+        self._fetch_vec3(self._get_data_type().ANGULAR_VELOCITY, data, body_ids)
+
+    def apply_linear_velocity(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().LINEAR_VELOCITY, data)
 
     def apply_angular_velocity(
-        self, data: torch.Tensor, body_ids: Sequence[int]
+        self, data: torch.Tensor, body_ids: torch.Tensor
     ) -> None:
         self._apply_data(body_ids, self._get_data_type().ANGULAR_VELOCITY, data)
 
     # -- RigidBodyViewBase: acceleration -------------------------------------
 
     def fetch_linear_acceleration(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(self._get_data_type().LINEAR_ACCELERATION, body_ids)
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(self._get_data_type().LINEAR_ACCELERATION, data, body_ids)
 
     def fetch_angular_acceleration(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(self._get_data_type().ANGULAR_ACCELERATION, body_ids)
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(self._get_data_type().ANGULAR_ACCELERATION, data, body_ids)
 
     # -- RigidBodyViewBase: force & torque -----------------------------------
 
-    def apply_force(self, data: torch.Tensor, body_ids: Sequence[int]) -> None:
+    def apply_force(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().FORCE, data)
 
-    def apply_torque(self, data: torch.Tensor, body_ids: Sequence[int]) -> None:
+    def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().TORQUE, data)
 
     # -- Internal helpers ----------------------------------------------------
@@ -191,33 +191,37 @@ class NewtonRigidBodyView(RigidBodyViewBase):
                 return body_id
         return -1
 
-    def _warp_array(self, shape: tuple[int, int]):
-        """Allocate a Warp float32 array on the simulation device."""
-        manager = self.scene.manager
-        state = getattr(manager, "_state_0", None)
-        warp_device = state.body_q.device if state is not None else manager._device
-        return wp.empty(shape, dtype=wp.float32, device=warp_device)
+    def _body_id_list(self, body_ids: torch.Tensor | None = None) -> list[int]:
+        """Return body IDs as a Python list for the Newton scene API."""
+        if body_ids is None:
+            return self._body_ids
+        body_ids = body_ids.detach().cpu().tolist()
+        return [int(body_id) for body_id in body_ids]
 
-    def _to_torch(self, array) -> torch.Tensor:
-        """Convert a Warp array to a float32 torch tensor on ``self.device``."""
-        if str(array.device).startswith("cuda"):
-            return wp.to_torch(array).to(device=self.device, dtype=torch.float32)
-        return torch.as_tensor(array.numpy(), dtype=torch.float32, device=self.device)
+    def _as_warp_array(self, data: torch.Tensor):
+        """Wrap a caller-owned torch tensor as a Warp float32 array."""
+        if not data.is_contiguous():
+            logger.log_error("Newton rigid body fetch buffers must be contiguous.")
+        return wp.from_torch(data, dtype=wp.float32)
 
     def _fetch_vec3(
-        self, data_type, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        body_ids = self._body_ids if body_ids is None else list(body_ids)
-        out = self._warp_array((len(body_ids), 3))
+        self,
+        data_type,
+        data: torch.Tensor,
+        body_ids: torch.Tensor | None = None,
+    ) -> None:
+        body_ids = self._body_id_list(body_ids)
+        out = self._as_warp_array(data)
         self.scene.gpu_fetch_rigid_body_data(body_ids, data_type, out)
-        return self._to_torch(out)
 
     def _apply_data(
-        self, body_ids: Sequence[int], data_type, data: torch.Tensor
+        self, body_ids: torch.Tensor, data_type, data: torch.Tensor
     ) -> None:
         """Apply data to bodies via the unified Newton GPU API."""
         data = data.to(dtype=torch.float32)
         state = getattr(self.scene.manager, "_state_0", None)
         is_cuda = state is not None and str(state.body_q.device).startswith("cuda")
         payload = data if is_cuda else data.detach().cpu().numpy()
-        self.scene.gpu_apply_rigid_body_data(list(body_ids), data_type, payload)
+        self.scene.gpu_apply_rigid_body_data(
+            body_ids.detach().cpu().tolist(), data_type, payload
+        )

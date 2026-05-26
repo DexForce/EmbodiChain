@@ -21,9 +21,9 @@ sim_config = SimulationManagerCfg(
     width=1920,               # Window width
     height=1080,              # Window height
     num_envs=10,              # Number of parallel environments
+    device="cpu",             # Simulation device ("cpu" or "cuda:0", etc.)
     physics_cfg=DefaultPhysicsCfg(
         physics_dt=0.01,      # Physics time step
-        device="cpu",     # Simulation device ("cpu" or "cuda:0", etc.)
     ),
     arena_space=5.0           # Spacing between environments
 )

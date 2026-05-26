@@ -48,15 +48,13 @@ from dexsim.types import (
     PhysicalAttr,
     ActorType,
     RigidBodyShape,
-    RigidBodyGPUAPIReadType,
-    ArticulationGPUAPIReadType,
 )
 from dexsim.core import TASK_RETURN
-from dexsim.engine import CudaArray, Material
+from dexsim.engine import Material, PhysicsScene
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType, Windows
 from dexsim.engine import GizmoController, ObjectManipulator
-from dexsim.engine.newton_physics import NewtonManager
+from dexsim.engine.newton_physics import NewtonManager, NewtonPhysicsScene
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -97,6 +95,7 @@ from embodichain.utils import configclass, logger
 __all__ = [
     "SimulationManager",
     "SimulationManagerCfg",
+    "get_physics_scene",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
@@ -329,7 +328,6 @@ class SimulationManager:
             self._newton_manager = get_newton_manager(self._world)
 
         self._is_initialized_gpu_physics = False
-        self._ps = self._world.get_physics_scene()
 
         # activate physics
         self.enable_physics(True)
@@ -666,6 +664,15 @@ class SimulationManager:
 
     def get_world(self) -> dexsim.World:
         return self._world
+
+    def get_physics_scene(self) -> PhysicsScene | NewtonPhysicsScene:
+        """Get the physics scene of the simulation."""
+        if self.is_newton_backend:
+            physics_scene = self.newton_manager.scene
+        else:
+            physics_scene = self._world.get_physics_scene()
+
+        return physics_scene
 
     def open_window(self) -> None:
         """Open the simulation window."""
@@ -2225,7 +2232,6 @@ class SimulationManager:
         _sever_wrapper_refs("_lights")
 
         # Explicitly clear Python references to trigger C++ object destructors
-        self._ps = None
         self._env = None
         self._world = None
         self._default_plane = None
@@ -2267,3 +2273,12 @@ class SimulationManager:
 
         # At this point, wait for the C++ Scene to return to zero, since the stack is at the top level, there will definitely be no deadlock
         SimulationManager.wait_scene_destruction()
+
+
+def get_physics_scene(instance_id: int = 0):
+    """Return the active physics scene from a SimulationManager instance.
+
+    This is the unified EmbodiChain access point for code that previously
+    reached through ``dexsim.default_world().get_physics_scene()``.
+    """
+    return SimulationManager.get_instance(instance_id).get_physics_scene()

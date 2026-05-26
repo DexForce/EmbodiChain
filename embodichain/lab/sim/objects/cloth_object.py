@@ -118,7 +118,9 @@ class ClothObject(BatchEntity):
         device: torch.device = torch.device("cpu"),
     ) -> None:
         self._world: dexsim.World = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         self._data = ClothBodyData(entities=entities, ps=self._ps, device=device)

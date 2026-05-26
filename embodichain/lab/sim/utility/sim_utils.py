@@ -45,9 +45,10 @@ import numpy as np
 
 def _is_newton_backend_active() -> bool:
     """Return whether the current default world uses the Newton physics scene."""
+    from embodichain.lab.sim.sim_manager import get_physics_scene
     from embodichain.lab.sim.objects.backends import is_newton_scene
 
-    return is_newton_scene(dexsim.default_world().get_physics_scene())
+    return is_newton_scene(get_physics_scene())
 
 
 def _set_body_scale_after_rigidbody(obj: MeshObject, body_scale: tuple | list) -> None:

@@ -66,16 +66,16 @@ class RigidBodyData:
 
         # Create the appropriate backend view.
         if is_newton_scene(ps):
-            self._body_view: RigidBodyViewBase = NewtonRigidBodyView(
+            self.body_view: RigidBodyViewBase = NewtonRigidBodyView(
                 entities=entities, scene=ps, device=device
             )
         else:
-            self._body_view = DefaultRigidBodyView(
+            self.body_view = DefaultRigidBodyView(
                 entities=entities, ps=ps, device=device
             )
 
         # Kept for backward compatibility with callers that index gpu_indices directly.
-        self.gpu_indices = self._body_view.body_ids_tensor
+        self.gpu_indices = self.body_view.body_ids_tensor
 
         # Initialize rigid body data.
         self._pose = torch.zeros(
@@ -103,56 +103,34 @@ class RigidBodyData:
 
     @property
     def is_newton_backend(self) -> bool:
-        return isinstance(self._body_view, NewtonRigidBodyView)
+        return isinstance(self.body_view, NewtonRigidBodyView)
 
-    @property
-    def is_newton_ready(self) -> bool:
-        return self.is_newton_backend and self._body_view.is_ready
-
-    def body_ids_for(self, env_ids: Sequence[int]) -> list[int]:
-        return self._body_view.select_body_ids(env_ids)
+    def body_ids_for(self, env_ids: Sequence[int]) -> torch.Tensor:
+        return self.body_view.select_body_ids(env_ids)
 
     @property
     def pose(self) -> torch.Tensor:
-        if self._body_view.is_ready:
-            self._pose = self._body_view.fetch_pose()
+        if self.body_view.is_ready:
+            self.body_view.fetch_pose(self._pose)
             return self._pose
 
-        # Newton backend not yet finalized — use entity API fallback.
-        for i, entity in enumerate(self.entities):
-            pos = entity.get_location()
-            quat = entity.get_rotation_quat()
-            self._pose[i, :3] = torch.as_tensor(
-                pos, dtype=torch.float32, device=self.device
-            )
-            self._pose[i, 3:7] = torch.as_tensor(
-                quat, dtype=torch.float32, device=self.device
-            )
-        return self._pose
+        logger.log_error(f"RigidBodyData pose requested but body view is not ready.")
 
     @property
     def lin_vel(self) -> torch.Tensor:
-        if self._body_view.is_ready:
-            self._lin_vel = self._body_view.fetch_linear_velocity()
+        if self.body_view.is_ready:
+            self.body_view.fetch_linear_velocity(self._lin_vel)
             return self._lin_vel
 
-        for i, entity in enumerate(self.entities):
-            self._lin_vel[i] = torch.as_tensor(
-                entity.get_linear_velocity(), dtype=torch.float32, device=self.device
-            )
-        return self._lin_vel
+        logger.log_error("RigidBodyData lin_vel requested but body view is not ready.")
 
     @property
     def ang_vel(self) -> torch.Tensor:
-        if self._body_view.is_ready:
-            self._ang_vel = self._body_view.fetch_angular_velocity()
+        if self.body_view.is_ready:
+            self.body_view.fetch_angular_velocity(self._ang_vel)
             return self._ang_vel
 
-        for i, entity in enumerate(self.entities):
-            self._ang_vel[i] = torch.as_tensor(
-                entity.get_angular_velocity(), dtype=torch.float32, device=self.device
-            )
-        return self._ang_vel
+        logger.log_error("RigidBodyData ang_vel requested but body view is not ready.")
 
     @property
     def vel(self) -> torch.Tensor:
@@ -165,31 +143,19 @@ class RigidBodyData:
 
     @property
     def lin_acc(self) -> torch.Tensor:
-        if self._body_view.is_ready:
-            self._lin_acc = self._body_view.fetch_linear_acceleration()
+        if self.body_view.is_ready:
+            self.body_view.fetch_linear_acceleration(self._lin_acc)
             return self._lin_acc
 
-        for i, entity in enumerate(self.entities):
-            self._lin_acc[i] = torch.as_tensor(
-                entity.get_linear_acceleration(),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        return self._lin_acc
+        logger.log_error("RigidBodyData lin_acc requested but body view is not ready.")
 
     @property
     def ang_acc(self) -> torch.Tensor:
-        if self._body_view.is_ready:
-            self._ang_acc = self._body_view.fetch_angular_acceleration()
+        if self.body_view.is_ready:
+            self.body_view.fetch_angular_acceleration(self._ang_acc)
             return self._ang_acc
 
-        for i, entity in enumerate(self.entities):
-            self._ang_acc[i] = torch.as_tensor(
-                entity.get_angular_acceleration(),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        return self._ang_acc
+        logger.log_error("RigidBodyData ang_acc requested but body view is not ready.")
 
     @property
     def acc(self) -> torch.Tensor:
@@ -208,8 +174,8 @@ class RigidBodyData:
             torch.Tensor: The center of mass pose with shape (N, 7).
         """
         if self.is_newton_backend:
-            manager = self._body_view.scene.manager
-            for i, entity_handle in enumerate(self._body_view.entity_handles):
+            manager = self.body_view.scene.manager
+            for i, entity_handle in enumerate(self.body_view.entity_handles):
                 attr = manager.dexsim_meta.get(entity_handle, {}).get("attr")
                 if attr is None:
                     pos = np.zeros(3, dtype=np.float32)
@@ -259,7 +225,9 @@ class RigidObject(BatchEntity):
         self.body_type = cfg.body_type
 
         self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
 
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
@@ -454,11 +422,11 @@ class RigidObject(BatchEntity):
         # Use backend view if available and ready.
         if (
             self._data is not None
-            and self._data._body_view.is_ready
+            and self._data.body_view.is_ready
             and not self.is_static
         ):
             body_ids = self._data.body_ids_for(local_env_ids)
-            self._data._body_view.apply_pose(target_pose, body_ids)
+            self._data.body_view.apply_pose(target_pose, body_ids)
             return
 
         # Static bodies and non-ready backends (notably Newton before finalize)
@@ -560,20 +528,16 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match torque length {len(torque)}."
             )
 
-        if self._data is not None and self._data._body_view.is_ready:
+        if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
             if force is not None:
-                self._data._body_view.apply_force(force, body_ids)
+                self._data.body_view.apply_force(force, body_ids)
             if torque is not None:
-                self._data._body_view.apply_torque(torque, body_ids)
+                self._data.body_view.apply_torque(torque, body_ids)
         elif self._data is not None and self._data.is_newton_backend:
             return
         else:
-            for i, env_idx in enumerate(local_env_ids):
-                if force is not None:
-                    self._entities[env_idx].add_force(force[i].cpu().numpy())
-                if torque is not None:
-                    self._entities[env_idx].add_torque(torque[i].cpu().numpy())
+            logger.log_error("Cannot apply force or torque before body view is ready.")
 
     def set_velocity(
         self,
@@ -610,24 +574,16 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match ang_vel length {len(ang_vel)}."
             )
 
-        if self._data is not None and self._data._body_view.is_ready:
+        if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
             if lin_vel is not None:
-                self._data._body_view.apply_linear_velocity(lin_vel, body_ids)
+                self._data.body_view.apply_linear_velocity(lin_vel, body_ids)
             if ang_vel is not None:
-                self._data._body_view.apply_angular_velocity(ang_vel, body_ids)
+                self._data.body_view.apply_angular_velocity(ang_vel, body_ids)
         elif self._data is not None and self._data.is_newton_backend:
             return
         else:
-            for i, env_idx in enumerate(local_env_ids):
-                if lin_vel is not None:
-                    self._entities[env_idx].set_linear_velocity(
-                        lin_vel[i].cpu().numpy()
-                    )
-                if ang_vel is not None:
-                    self._entities[env_idx].set_angular_velocity(
-                        ang_vel[i].cpu().numpy()
-                    )
+            logger.log_error("Cannot set velocity before body view is ready.")
 
     def set_attrs(
         self,
@@ -1081,20 +1037,19 @@ class RigidObject(BatchEntity):
 
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        if self._data is not None and self._data._body_view.is_ready:
+        if self._data is not None and self._data.body_view.is_ready:
             zeros = torch.zeros(
                 (len(local_env_ids), 3), dtype=torch.float32, device=self.device
             )
             body_ids = self._data.body_ids_for(local_env_ids)
-            self._data._body_view.apply_linear_velocity(zeros, body_ids)
-            self._data._body_view.apply_angular_velocity(zeros, body_ids)
-            self._data._body_view.apply_force(zeros, body_ids)
-            self._data._body_view.apply_torque(zeros, body_ids)
+            self._data.body_view.apply_linear_velocity(zeros, body_ids)
+            self._data.body_view.apply_angular_velocity(zeros, body_ids)
+            self._data.body_view.apply_force(zeros, body_ids)
+            self._data.body_view.apply_torque(zeros, body_ids)
         elif self._data is not None and self._data.is_newton_backend:
             return
         else:
-            for env_idx in local_env_ids:
-                self._entities[env_idx].clear_dynamics()
+            logger.log_error("Cannot clear dynamics before body view is ready.")
 
     def set_physical_visible(
         self,

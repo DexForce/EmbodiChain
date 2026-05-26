@@ -16,8 +16,8 @@
 from __future__ import annotations
 
 from typing import Sequence
+from functools import cached_property
 
-import numpy as np
 import torch
 
 from dexsim.models import MeshObject
@@ -65,76 +65,63 @@ class DefaultRigidBodyView(RigidBodyViewBase):
 
     # -- RigidBodyViewBase: body IDs -----------------------------------------
 
-    @property
+    @cached_property
     def body_ids(self) -> list[int]:
         if self._is_gpu:
-            return self._gpu_indices.tolist()
+            return self._gpu_indices.cpu().tolist()
         return list(range(len(self.entities)))
 
-    @property
+    @cached_property
     def body_ids_tensor(self) -> torch.Tensor:
         if self._is_gpu:
             return self._gpu_indices
         return torch.arange(len(self.entities), dtype=torch.int32, device=self.device)
 
-    def select_body_ids(self, indices: Sequence[int] | torch.Tensor) -> list[int]:
-        if isinstance(indices, torch.Tensor):
-            indices = indices.detach().cpu().tolist()
-        if self._is_gpu:
-            return self._gpu_indices[list(int(i) for i in indices)].tolist()
-        return [int(i) for i in indices]
+    def select_body_ids(self, indices: Sequence[int] | torch.Tensor) -> torch.Tensor:
+        return self.body_ids_tensor[indices]
 
     # -- RigidBodyViewBase: pose ---------------------------------------------
 
-    def fetch_pose(self, body_ids: Sequence[int] | None = None) -> torch.Tensor:
+    def fetch_pose(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
         if self._is_gpu:
-            indices = self._indices_tensor(body_ids)
-            out = torch.zeros(
-                (len(indices), 7), dtype=torch.float32, device=self.device
-            )
+            indices = self.body_ids_tensor if body_ids is None else body_ids
             self.ps.gpu_fetch_rigid_body_data(
-                data=out,
-                gpu_indices=indices,
+                data=data,
+                gpu_indices=indices.to(device=self.device, dtype=torch.int32),
                 data_type=RigidBodyGPUAPIReadType.POSE,
             )
             # Convert (qx, qy, qz, qw, x, y, z) -> (x, y, z, qx, qy, qz, qw)
-            quat = out[:, :4].clone()
-            xyz = out[:, 4:7].clone()
-            out[:, :3] = xyz
-            out[:, 3:7] = quat
-            return out
+            quat = data[:, :4].clone()
+            xyz = data[:, 4:7].clone()
+            data[:, :3] = xyz
+            data[:, 3:7] = quat
+            return
 
         entities = self._select_entities(body_ids)
-        xyzs = torch.as_tensor(
-            np.array([e.get_location() for e in entities]),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        quats = torch.as_tensor(
-            np.array([e.get_rotation_quat() for e in entities]),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        return torch.cat((xyzs, quats), dim=-1)
+        data_np = data.cpu().numpy()
+        for i, entity in enumerate(entities):
+            data_np[i, :3] = entity.get_location()
+            data_np[i, 3:7] = entity.get_rotation_quat()
 
-    def apply_pose(self, pose: torch.Tensor, body_ids: Sequence[int]) -> None:
+    def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
         pose = pose.to(dtype=torch.float32)
         if self._is_gpu:
             # Convert (x, y, z, qx, qy, qz, qw) -> (qx, qy, qz, qw, x, y, z)
             xyz = pose[:, :3]
             quat = pose[:, 3:7]
             gpu_pose = torch.cat((quat, xyz), dim=-1)
-            indices = self._indices_tensor(body_ids)
             torch.cuda.synchronize(self.device)
             self.ps.gpu_apply_rigid_body_data(
                 data=gpu_pose.clone(),
-                gpu_indices=indices,
+                gpu_indices=body_ids.to(device=self.device, dtype=torch.int32),
                 data_type=RigidBodyGPUAPIWriteType.POSE,
             )
             return
 
         # CPU: convert (x, y, z, qx, qy, qz, qw) -> 4x4 matrix per entity
-        indices = list(body_ids)
+        indices = body_ids.detach().cpu().tolist()
         pose_cpu = pose.cpu()
         mat = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(len(indices), 1, 1)
         mat[:, :3, 3] = pose_cpu[:, :3]
@@ -145,26 +132,26 @@ class DefaultRigidBodyView(RigidBodyViewBase):
     # -- RigidBodyViewBase: velocity -----------------------------------------
 
     def fetch_linear_velocity(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(
             RigidBodyGPUAPIReadType.LINEAR_VELOCITY,
             "get_linear_velocity",
+            data,
             body_ids,
         )
 
     def fetch_angular_velocity(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(
             RigidBodyGPUAPIReadType.ANGULAR_VELOCITY,
             "get_angular_velocity",
+            data,
             body_ids,
         )
 
-    def apply_linear_velocity(
-        self, data: torch.Tensor, body_ids: Sequence[int]
-    ) -> None:
+    def apply_linear_velocity(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_vec3(
             RigidBodyGPUAPIWriteType.LINEAR_VELOCITY,
             "set_linear_velocity",
@@ -173,7 +160,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
         )
 
     def apply_angular_velocity(
-        self, data: torch.Tensor, body_ids: Sequence[int]
+        self, data: torch.Tensor, body_ids: torch.Tensor
     ) -> None:
         self._apply_vec3(
             RigidBodyGPUAPIWriteType.ANGULAR_VELOCITY,
@@ -185,26 +172,28 @@ class DefaultRigidBodyView(RigidBodyViewBase):
     # -- RigidBodyViewBase: acceleration -------------------------------------
 
     def fetch_linear_acceleration(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(
             RigidBodyGPUAPIReadType.LINEAR_ACCELERATION,
             "get_linear_acceleration",
+            data,
             body_ids,
         )
 
     def fetch_angular_acceleration(
-        self, body_ids: Sequence[int] | None = None
-    ) -> torch.Tensor:
-        return self._fetch_vec3(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(
             RigidBodyGPUAPIReadType.ANGULAR_ACCELERATION,
             "get_angular_acceleration",
+            data,
             body_ids,
         )
 
     # -- RigidBodyViewBase: force & torque -----------------------------------
 
-    def apply_force(self, data: torch.Tensor, body_ids: Sequence[int]) -> None:
+    def apply_force(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_vec3(
             RigidBodyGPUAPIWriteType.FORCE,
             "add_force",
@@ -212,7 +201,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
             body_ids,
         )
 
-    def apply_torque(self, data: torch.Tensor, body_ids: Sequence[int]) -> None:
+    def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_vec3(
             RigidBodyGPUAPIWriteType.TORQUE,
             "add_torque",
@@ -222,62 +211,54 @@ class DefaultRigidBodyView(RigidBodyViewBase):
 
     # -- Internal helpers ----------------------------------------------------
 
-    def _indices_tensor(self, body_ids: Sequence[int] | None) -> torch.Tensor:
-        """Return GPU indices as an int32 tensor on device."""
-        if body_ids is None:
-            return self._gpu_indices
-        if isinstance(body_ids, torch.Tensor):
-            return body_ids.to(device=self.device, dtype=torch.int32)
-        return torch.as_tensor(body_ids, dtype=torch.int32, device=self.device)
-
-    def _select_entities(self, body_ids: Sequence[int] | None) -> list[MeshObject]:
+    def _select_entities(self, body_ids: torch.Tensor | None) -> list[MeshObject]:
         """Select entities by body IDs (entity list indices for CPU)."""
         if body_ids is None:
             return self.entities
+        body_ids = body_ids.detach().cpu().tolist()
         return [self.entities[int(i)] for i in body_ids]
 
     def _fetch_vec3(
         self,
         gpu_read_type,
         cpu_method: str,
-        body_ids: Sequence[int] | None,
-    ) -> torch.Tensor:
+        data: torch.Tensor,
+        body_ids: torch.Tensor | None,
+    ) -> None:
         """Fetch a vec3 field from GPU or CPU entities."""
         if self._is_gpu:
-            indices = self._indices_tensor(body_ids)
-            out = torch.zeros(
-                (len(indices), 3), dtype=torch.float32, device=self.device
-            )
+            indices = self.body_ids_tensor if body_ids is None else body_ids
             self.ps.gpu_fetch_rigid_body_data(
-                data=out, gpu_indices=indices, data_type=gpu_read_type
+                data=data,
+                gpu_indices=indices.to(device=self.device, dtype=torch.int32),
+                data_type=gpu_read_type,
             )
-            return out
+            return
 
         entities = self._select_entities(body_ids)
-        return torch.as_tensor(
-            np.array([getattr(e, cpu_method)() for e in entities]),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        data_np = data.cpu().numpy()
+        for i, entity in enumerate(entities):
+            data_np[i] = getattr(entity, cpu_method)()
 
     def _apply_vec3(
         self,
         gpu_write_type,
         cpu_method: str,
         data: torch.Tensor,
-        body_ids: Sequence[int],
+        body_ids: torch.Tensor,
     ) -> None:
         """Apply a vec3 field to GPU or CPU entities."""
         data = data.to(dtype=torch.float32)
         if self._is_gpu:
-            indices = self._indices_tensor(body_ids)
             torch.cuda.synchronize(self.device)
             self.ps.gpu_apply_rigid_body_data(
-                data=data, gpu_indices=indices, data_type=gpu_write_type
+                data=data,
+                gpu_indices=body_ids.to(device=self.device, dtype=torch.int32),
+                data_type=gpu_write_type,
             )
             return
 
-        indices = list(body_ids)
+        indices = body_ids.detach().cpu().tolist()
         data_cpu = data.cpu().numpy()
         for i, idx in enumerate(indices):
             getattr(self.entities[idx], cpu_method)(data_cpu[i])
