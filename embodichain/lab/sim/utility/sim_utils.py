@@ -284,10 +284,16 @@ def load_mesh_objects_from_cfg(
                     max_convex_hull_num=max_convex_hull_num,
                 )
             elif cfg.sdf_resolution > 0:
+                if not is_newton_backend and cfg.body_scale not in [
+                    (1.0, 1.0, 1.0),
+                    [1.0, 1.0, 1.0],
+                ]:
+                    logger.log_error(
+                        f"Non-unit body scale {cfg.body_scale} is not supported for SDF collision yet. Please set body_scale to (1.0, 1.0, 1.0) for SDF collision."
+                    )
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-
                 sdf_cfg = SDFConfig(resolution=cfg.sdf_resolution)
                 obj.add_physical_body(
                     body_type,

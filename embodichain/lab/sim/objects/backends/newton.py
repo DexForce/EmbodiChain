@@ -173,6 +173,31 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().TORQUE, data)
 
+    # -- Newton COM local pose -------------------------------------------------
+
+    @property
+    def supports_com_local_pose(self) -> bool:
+        data_type = self._get_data_type()
+        return hasattr(data_type, "COM_LOCAL_POSE")
+
+    def fetch_com_local_pose(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        if not self.supports_com_local_pose:
+            logger.log_error("Newton backend does not support COM_LOCAL_POSE fetch.")
+            return
+        body_ids = self._body_id_list(body_ids)
+        out = self._as_warp_array(data)
+        self.scene.gpu_fetch_rigid_body_data(
+            out, body_ids, self._get_data_type().COM_LOCAL_POSE
+        )
+
+    def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        if not self.supports_com_local_pose:
+            logger.log_error("Newton backend does not support COM_LOCAL_POSE apply.")
+            return
+        self._apply_data(body_ids, self._get_data_type().COM_LOCAL_POSE, data)
+
     # -- Internal helpers ----------------------------------------------------
 
     def _resolve_body_id(self, entity: MeshObject) -> int:

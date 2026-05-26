@@ -174,6 +174,10 @@ class RigidBodyData:
             torch.Tensor: The center of mass pose with shape (N, 7).
         """
         if self.is_newton_backend:
+            if getattr(self.body_view, "supports_com_local_pose", False):
+                self.body_view.fetch_com_local_pose(self._com_pose)
+                return self._com_pose
+
             manager = self.body_view.scene.manager
             for i, entity_handle in enumerate(self.body_view.entity_handles):
                 attr = manager.dexsim_meta.get(entity_handle, {}).get("attr")
@@ -909,6 +913,15 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match com_pose length {len(com_pose)}."
             )
+
+        if self._data is not None and self._data.is_newton_backend:
+            body_view = self._data.body_view
+            if getattr(body_view, "supports_com_local_pose", False):
+                body_ids = self._data.body_ids_for(local_env_ids)
+                body_view.apply_com_local_pose(
+                    com_pose.to(device=self.device, dtype=torch.float32), body_ids
+                )
+                return
 
         com_pose = com_pose.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
