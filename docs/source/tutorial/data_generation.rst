@@ -5,7 +5,7 @@ Data Generation
 
 .. currentmodule:: embodichain.lab.gym
 
-This tutorial shows how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment rollout and dataset manager. You will learn how to configure LeRobot recording in ``gym_config.json``, how ``run_env.py`` builds an environment from configuration files, and how completed episodes are automatically saved to disk.
+This tutorial shows how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment rollout and dataset manager. You will learn how to configure LeRobot recording in a gym config file (``.json``, ``.yaml``, or ``.yml``), how ``run_env.py`` builds an environment from configuration files, and how completed episodes are automatically saved to disk.
 
 Overview
 ~~~~~~~~
@@ -24,8 +24,8 @@ What This Tutorial Records
 
 This page documents the full path from task configuration to saved dataset:
 
-1. Prepare a task ``gym_config.json``.
-2. Prepare an ``action_config.json`` if the task uses the action bank.
+1. Prepare a task gym config (e.g. ``gym_config.json`` or ``gym_config.yaml``).
+2. Prepare an action config if the task uses the action bank (same supported extensions).
 3. Launch the environment rollout with ``run-env``.
 4. Let the dataset manager automatically save completed episodes.
 
@@ -34,7 +34,7 @@ Example Task
 
 As a concrete example, this tutorial uses a real action-bank task shipped in the repository:
 
-- ``configs/gym/pour_water/gym_config.json`` defines the simulation scene and dataset recording behavior.
+- ``configs/gym/pour_water/gym_config.json`` defines the simulation scene and dataset recording behavior (YAML equivalents such as ``configs/gym/cobotmagic.yaml`` are also supported).
 - ``configs/gym/pour_water/action_config.json`` defines the action-bank graph used to solve the task.
 
 The Code
@@ -58,7 +58,7 @@ The rollout script builds the environment from configuration, generates expert t
 Step 1: Prepare the Task Configuration
 --------------------------------------
 
-The first input to the pipeline is the task ``gym_config.json``. In the example below, the same file contains rollout settings, scene randomization, observations, dataset recording, and robot or sensor definitions.
+The first input to the pipeline is the task gym config file. In the example below, the same file contains rollout settings, scene randomization, observations, dataset recording, and robot or sensor definitions.
 
 The rollout settings include the episode count:
 
@@ -129,7 +129,7 @@ Note: Action bank is not the only way to generate demonstrations. Depending on t
 Step 3: Launch the Environment Rollout
 --------------------------------------
 
-The rollout script parses command-line arguments, loads ``gym_config.json`` and ``action_config.json``, converts them into environment configuration objects, creates the environment instance, and then runs offline rollout for ``max_episodes`` episodes:
+The rollout script parses command-line arguments, loads the gym and action config files, converts them into environment configuration objects, creates the environment instance, and then runs offline rollout for ``max_episodes`` episodes:
 
 .. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
    :language: python
@@ -153,8 +153,8 @@ When ``--preview`` is enabled, the script opens the environment in an interactiv
 
 Useful CLI arguments:
 
-- **--gym_config**: Path to the task JSON configuration.
-- **--action_config**: Path to the action-bank configuration.
+- **--gym_config**: Path to the task config file (``.json``, ``.yaml``, or ``.yml``).
+- **--action_config**: Path to the action-bank config file (``.json``, ``.yaml``, or ``.yml``).
 - **--num_envs**: Number of environments to run in parallel.
 - **--device**: Simulation device, such as ``cpu`` or ``cuda``.
 - **--headless**: Run without GUI for faster generation.
@@ -182,7 +182,7 @@ In a practical workflow, the output of this stage is the synthesized dataset its
 Best Practices
 ~~~~~~~~~~~~~~
 
-- **Keep the config pair together**: Version ``gym_config.json`` and ``action_config.json`` together for action-bank tasks.
+- **Keep the config pair together**: Version gym and action configs together for action-bank tasks (either JSON or YAML).
 - **Use valid scripted policies**: Make sure ``create_demo_action_list()`` returns executable trajectories for the current scene.
 - **Use ``--headless`` for throughput**: Disable the GUI when generating large datasets.
 - **Use ``--preview`` and ``--filter_dataset_saving`` for debugging**: Inspect task logic without writing datasets.

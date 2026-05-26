@@ -5,7 +5,7 @@ Reinforcement Learning Training
 
 .. currentmodule:: embodichain.agents.rl
 
-This tutorial shows you how to train reinforcement learning agents using EmbodiChain's RL framework. You'll learn how to configure training via JSON, set up environments, policies, and algorithms, and launch training sessions.
+This tutorial shows you how to train reinforcement learning agents using EmbodiChain's RL framework. You'll learn how to configure training via JSON or YAML, set up environments, policies, and algorithms, and launch training sessions.
 
 Overview
 ~~~~~~~~
@@ -16,7 +16,7 @@ The RL framework provides a modular, extensible stack for robotics tasks:
 - **Algorithm**: Controls data collection process (interacts with environment, fills buffer, computes advantages/returns) and updates the policy (e.g., PPO)
 - **Policy**: Neural network models implementing a unified interface (get_action/get_value/evaluate_actions)
 - **Buffer**: On-policy rollout storage and minibatch iterator (managed by algorithm)
-- **Env Factory**: Build environments from a JSON config via registry
+- **Env Factory**: Build environments from a JSON or YAML config via registry
 
 Architecture
 ~~~~~~~~~~~~
@@ -27,28 +27,35 @@ The framework follows a clean separation of concerns:
 - **Algorithm**: Controls data collection process (interacts with environment, fills buffer, computes advantages/returns) and updates the policy (e.g., PPO)
 - **Policy**: Neural network models implementing a unified interface
 - **Buffer**: On-policy rollout storage and minibatch iterator (managed by algorithm)
-- **Env Factory**: Build environments from a JSON config via registry
+- **Env Factory**: Build environments from a JSON or YAML config via registry
 
 The core components and their relationships:
 
 - Trainer → Policy, Env, Algorithm (via callbacks for statistics)
 - Algorithm → Policy, RolloutBuffer (algorithm manages its own buffer)
 
-Configuration via JSON
-~~~~~~~~~~~~~~~~~~~~~~
+Configuration via JSON or YAML
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Training is configured via a JSON file that defines runtime settings, environment, policy, and algorithm parameters.
+Training is configured via a JSON or YAML file that defines runtime settings, environment, policy, and algorithm parameters. EmbodiChain loads either format with ``load_config()``; the nested ``trainer.gym_config`` path supports the same extensions.
 
 Example Configuration
 ---------------------   
 
-The configuration file (e.g., ``train_config.json``) is located in ``configs/agents/rl/push_cube``:
+The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is located in ``configs/agents/rl/push_cube`` or ``configs/agents/rl/basic/cart_pole``:
 
 .. dropdown:: Example: train_config.json
    :icon: code
 
    .. literalinclude:: ../../../configs/agents/rl/push_cube/train_config.json
       :language: json
+      :linenos:
+
+.. dropdown:: Example: train_config.yaml (CartPole)
+   :icon: code
+
+   .. literalinclude:: ../../../configs/agents/rl/basic/cart_pole/train_config.yaml
+      :language: yaml
       :linenos:
 
 Configuration Sections
@@ -67,7 +74,7 @@ The ``trainer`` section controls experiment setup:
 - **buffer_size**: Steps collected per rollout (e.g., 1024)
 - **eval_freq**: Frequency of evaluation (in steps)
 - **save_freq**: Frequency of checkpoint saving (in steps)
-- **use_wandb**: Whether to enable Weights & Biases logging (set in JSON config)
+- **use_wandb**: Whether to enable Weights & Biases logging (set in the config file)
 - **wandb_project_name**: Weights & Biases project name
 
 Environment Configuration
@@ -203,7 +210,7 @@ The Script Explained
 
 The training script performs the following steps:
 
-1. **Parse Configuration**: Loads JSON config and extracts runtime/env/policy/algorithm blocks
+1. **Parse Configuration**: Loads the config file (``.json``, ``.yaml``, or ``.yml``) and extracts runtime/env/policy/algorithm blocks
 2. **Setup**: Initializes device, seeds, output directories, TensorBoard, and Weights & Biases
 3. **Build Components**:
    - Environment via ``build_env()`` factory
@@ -219,7 +226,13 @@ To start training, run:
 
 .. code-block:: bash
 
-   python -m embodichain.agents.rl.train --config configs/agents/rl/push_cube/train_config.json
+   python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+
+JSON configs are also supported:
+
+.. code-block:: bash
+
+   python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
 
 Outputs
 -------
@@ -276,7 +289,7 @@ All policies must inherit from the ``Policy`` abstract base class:
 Available Policies
 ------------------
 
-- **ActorCritic**: MLP-based Gaussian policy with learnable log_std. Requires external ``actor`` and ``critic`` modules to be provided (defined in JSON config). Used with PPO.
+- **ActorCritic**: MLP-based Gaussian policy with learnable log_std. Requires external ``actor`` and ``critic`` modules to be provided (defined in the training config file). Used with PPO.
 - **ActorOnly**: Actor-only policy without Critic. Used with GRPO (group-relative advantage estimation).
 - **VLAPlaceholderPolicy**: Placeholder for Vision-Language-Action policies
 
@@ -372,7 +385,7 @@ To add a new RL environment:
            return is_success, is_fail, metrics
 
 
-2. Configure the environment in your JSON config with ``actions`` and ``extensions``:
+2. Configure the environment in your config file with ``actions`` and ``extensions``:
 
 .. code-block:: json
 
@@ -402,7 +415,7 @@ Best Practices
 
 - **Use EmbodiedEnv with Action Manager for RL Tasks**: Inherit from ``EmbodiedEnv`` and configure ``actions`` in your config. The Action Manager handles action preprocessing (delta_qpos, qpos, qvel, qf, eef_pose) in a modular way.
 
-- **Action Configuration**: Use the ``actions`` field in your JSON config. Example: ``"delta_qpos": {"func": "DeltaQposTerm", "params": {"scale": 0.1}}``.
+- **Action Configuration**: Use the ``actions`` field in your config file. Example: ``"delta_qpos": {"func": "DeltaQposTerm", "params": {"scale": 0.1}}``.
 
 - **Device Management**: Device is single-sourced from ``runtime.cuda``. All components (trainer/algorithm/policy/env) share the same device.
 

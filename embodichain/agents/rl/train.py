@@ -22,7 +22,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import wandb
-import json
 from torch.utils.tensorboard import SummaryWriter
 from copy import deepcopy
 
@@ -34,7 +33,7 @@ from embodichain.agents.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.tasks.rl import build_env
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
-from embodichain.utils.utility import load_json
+from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
@@ -44,7 +43,12 @@ from embodichain.lab.gym.envs.managers.cfg import EventCfg
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True, help="Path to JSON config")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to training config file (.json, .yaml, or .yml).",
+    )
     parser.add_argument(
         "--distributed",
         action=argparse.BooleanOptionalAction,
@@ -58,16 +62,15 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     """Run training from a config file path.
 
     Args:
-        config_path: Path to the JSON config file
+        config_path: Path to the training config file (.json, .yaml, or .yml).
         distributed: If True, run multi-GPU distributed training.
             If None, use trainer.distributed from config.
     """
-    with open(config_path, "r") as f:
-        cfg_json = json.load(f)
+    cfg_data = load_config(config_path)
 
-    trainer_cfg = cfg_json["trainer"]
-    policy_block = cfg_json["policy"]
-    algo_block = cfg_json["algorithm"]
+    trainer_cfg = cfg_data["trainer"]
+    policy_block = cfg_data["policy"]
+    algo_block = cfg_data["algorithm"]
 
     # Resolve distributed flag
     if distributed is None:
@@ -180,13 +183,13 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     # Initialize Weights & Biases (optional)
     use_wandb = trainer_cfg.get("use_wandb", False)
     if use_wandb and rank == 0:
-        wandb.init(project=wandb_project_name, name=exp_name, config=cfg_json)
+        wandb.init(project=wandb_project_name, name=exp_name, config=cfg_data)
 
     gym_config_path = Path(trainer_cfg["gym_config"])
     if rank == 0:
         logger.log_info(f"Current working directory: {Path.cwd()}")
 
-    gym_config_data = load_json(str(gym_config_path))
+    gym_config_data = load_config(str(gym_config_path))
     gym_env_cfg = config_to_cfg(
         gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
     )
@@ -208,7 +211,6 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     gym_env_cfg.sim_cfg.headless = headless
     gym_env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
     gym_env_cfg.sim_cfg.gpu_id = gpu_id
-
     logger.log_info(
         f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
     )
@@ -410,11 +412,14 @@ def train_from_config(config_path: str, distributed: bool | None = None):
             logger.log_info("Training finished")
 
 
-def main():
-    """Main entry point for command-line training."""
+def cli() -> None:
+    """Command-line interface for RL training.
+
+    Parses CLI arguments and launches training from a config file.
+    """
     args = parse_args()
     train_from_config(args.config, distributed=args.distributed)
 
 
 if __name__ == "__main__":
-    main()
+    cli()
