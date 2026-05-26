@@ -348,6 +348,18 @@ class RigidObject(BatchEntity):
             "Skipping this call. TODO: wire this API when DexSim Newton exposes runtime physical-attribute mutation."
         )
 
+    def _newton_lifecycle_state(self) -> str:
+        manager = getattr(self._ps, "manager", None)
+        return getattr(getattr(manager, "lifecycle_state", None), "name", "")
+
+    def _can_use_newton_entity_dynamics_fallback(self) -> bool:
+        """Return whether per-entity Newton patches are safe before GPU view is ready.
+
+        DexSim Newton only supports MeshObject force/torque helpers in ``BUILDER``
+        state. Calling them while the model is ``STALE`` can index stale body ids.
+        """
+        return self._newton_lifecycle_state() == "BUILDER"
+
     @property
     def body_state(self) -> torch.Tensor:
         """Get the body state of the rigid object.
@@ -565,14 +577,36 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match torque length {len(torque)}."
             )
 
+        if pos is not None:
+            logger.log_warning(
+                "RigidObject.add_force_torque(pos=...) is not supported yet; "
+                "applying wrench at center of mass."
+            )
+
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
             if force is not None:
                 self._data.body_view.apply_force(force, body_ids)
             if torque is not None:
                 self._data.body_view.apply_torque(torque, body_ids)
+        elif (
+            self._data is not None
+            and self._data.is_newton_backend
+            and self._can_use_newton_entity_dynamics_fallback()
+        ):
+            force_np = force.detach().cpu().numpy() if force is not None else None
+            torque_np = torque.detach().cpu().numpy() if torque is not None else None
+            for i, env_idx in enumerate(local_env_ids):
+                entity = self._entities[env_idx]
+                if force_np is not None:
+                    entity.add_force(force_np[i])
+                if torque_np is not None:
+                    entity.add_torque(torque_np[i])
         elif self._data is not None and self._data.is_newton_backend:
-            return
+            logger.log_warning(
+                "Cannot apply force or torque while Newton model is stale or "
+                "unfinalized; call SimulationManager.prepare_physics() first."
+            )
         else:
             logger.log_error("Cannot apply force or torque before body view is ready.")
 
@@ -617,8 +651,24 @@ class RigidObject(BatchEntity):
                 self._data.body_view.apply_linear_velocity(lin_vel, body_ids)
             if ang_vel is not None:
                 self._data.body_view.apply_angular_velocity(ang_vel, body_ids)
+        elif (
+            self._data is not None
+            and self._data.is_newton_backend
+            and self._can_use_newton_entity_dynamics_fallback()
+        ):
+            lin_vel_np = lin_vel.detach().cpu().numpy() if lin_vel is not None else None
+            ang_vel_np = ang_vel.detach().cpu().numpy() if ang_vel is not None else None
+            for i, env_idx in enumerate(local_env_ids):
+                entity = self._entities[env_idx]
+                if lin_vel_np is not None:
+                    entity.set_linear_velocity(lin_vel_np[i])
+                if ang_vel_np is not None:
+                    entity.set_angular_velocity(ang_vel_np[i])
         elif self._data is not None and self._data.is_newton_backend:
-            return
+            logger.log_warning(
+                "Cannot set velocity while Newton model is stale or unfinalized; "
+                "call SimulationManager.prepare_physics() first."
+            )
         else:
             logger.log_error("Cannot set velocity before body view is ready.")
 
@@ -1130,8 +1180,18 @@ class RigidObject(BatchEntity):
             self._data.body_view.apply_angular_velocity(zeros, body_ids)
             self._data.body_view.apply_force(zeros, body_ids)
             self._data.body_view.apply_torque(zeros, body_ids)
+        elif (
+            self._data is not None
+            and self._data.is_newton_backend
+            and self._can_use_newton_entity_dynamics_fallback()
+        ):
+            for env_idx in local_env_ids:
+                self._entities[env_idx].clear_dynamics()
         elif self._data is not None and self._data.is_newton_backend:
-            return
+            logger.log_warning(
+                "Cannot clear dynamics while Newton model is stale or unfinalized; "
+                "call SimulationManager.prepare_physics() first."
+            )
         else:
             logger.log_error("Cannot clear dynamics before body view is ready.")
 
@@ -1183,7 +1243,8 @@ class RigidObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
 
-        self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
+        if not is_newton_scene(self._ps):
+            self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
