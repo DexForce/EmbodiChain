@@ -270,7 +270,7 @@ class DeltaQposTerm(ActionTerm):
         return action * self._scale + self._env.robot.get_qpos()
 ```
 
-Register it in JSON config:
+Register it in your gym config file (JSON or YAML):
 
 ```json
 "actions": {

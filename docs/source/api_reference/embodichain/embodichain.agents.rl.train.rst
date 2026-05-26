@@ -13,7 +13,7 @@ Training entry points and command-line helpers for launching RL experiments.
 
    .. autosummary::
    
-      main
+      cli
       parse_args
       train_from_config
 

@@ -34,7 +34,7 @@ from embodichain.agents.engine.data import OnlineDataEngine, OnlineDataEngineCfg
 cfg = OnlineDataEngineCfg(
     buffer_size=2,           # number of trajectories kept in the ring buffer
     state_dim=6,             # example state dimension
-    gym_config=your_gym_cfg, # parsed JSON config for the task
+    gym_config=your_gym_cfg, # parsed gym config for the task (JSON or YAML)
 )
 engine = OnlineDataEngine(cfg)
 engine.start()

@@ -5,7 +5,7 @@ This module provides the RL training entry script, responsible for parsing confi
 ## Main Structure and Flow
 
 ### train.py
-- Main training script, supports command-line arguments (such as --config), automatically loads JSON config.
+- Main training script, supports command-line arguments (such as --config), automatically loads JSON or YAML config.
 - Initializes device, random seed, output directory, and logging (TensorBoard/WandB).
 - Loads environment config, supports multi-environment parallelism and evaluation environments.
 - Builds policy (e.g., actor-critic), algorithm (e.g., PPO), and Trainer.
@@ -14,7 +14,7 @@ This module provides the RL training entry script, responsible for parsing confi
 
 ## Argument Parsing
 - Supports command-line arguments:
-    - `--config`: Specify the path to the config file (JSON only).
+    - `--config`: Specify the path to the config file (``.json``, ``.yaml``, or ``.yml``).
     - `--distributed`: Enable multi-GPU distributed training.
 - The config file includes parameters for trainer, policy, algorithm, events, and other modules.
 - See [Multi-GPU Training](multi_gpu.md) for distributed training.
@@ -26,7 +26,7 @@ This module provides the RL training entry script, responsible for parsing confi
 - Supports TensorBoard/WandB logging, automatically records the training process.
 
 ## Training Flow
-1. Load the JSON config file and parse parameters for each module.
+1. Load the config file and parse parameters for each module.
 2. Initialize environment, policy, algorithm, and Trainer.
 3. Enter the main training loop: collect data, update policy, record logs.
 4. Periodically evaluate and save the model.
@@ -34,7 +34,7 @@ This module provides the RL training entry script, responsible for parsing confi
 
 ## Usage Example
 ```bash
-python train.py --config configs/agents/rl/push_cube/train_config.json
+python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
 ```
 
 ## Extension and Customization
@@ -43,7 +43,7 @@ python train.py --config configs/agents/rl/push_cube/train_config.json
 - Config-driven management for batch experiments and parameter tuning.
 
 ## Practical Tips
-- It is recommended to manage all experiment parameters via JSON config files for reproducibility and tuning.
+- It is recommended to manage all experiment parameters via JSON or YAML config files for reproducibility and tuning.
 - Supports multi-environment and event extension to improve training flexibility.
 - Logging and checkpoint management help with experiment tracking and recovery.
 
