@@ -115,28 +115,28 @@ Launch a Gymnasium environment for data generation or interactive preview.
 
 ```bash
 # Run an environment with a gym config file
-python -m embodichain run-env --gym_config path/to/config.json
+python -m embodichain run-env --gym_config path/to/config.yaml
 
 # Run with multiple environments on GPU
 python -m embodichain run-env \
-    --gym_config config.json \
+    --gym_config config.yaml \
     --num_envs 4 \
     --device cuda \
     --gpu_id 0
 
 # Preview mode for interactive development
-python -m embodichain run-env --gym_config config.json --preview
+python -m embodichain run-env --gym_config config.yaml --preview
 
 # Headless execution
-python -m embodichain run-env --gym_config config.json --headless
+python -m embodichain run-env --gym_config config.yaml --headless
 ```
 
 ### Arguments
 
 | Argument | Default | Description |
 |---|---|---|
-| ``--gym_config`` | *(required)* | Path to gym config file |
-| ``--action_config`` | ``None`` | Path to action config file |
+| ``--gym_config`` | *(required)* | Path to gym config file (``.json``, ``.yaml``, or ``.yml``) |
+| ``--action_config`` | ``None`` | Path to action config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--num_envs`` | ``1`` | Number of parallel environments |
 | ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
 | ``--headless`` | ``False`` | Run in headless mode |
@@ -153,3 +153,37 @@ When ``--preview`` is enabled, an interactive REPL is available:
 
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
+
+---
+
+## Train RL
+
+Launch reinforcement learning training from a JSON or YAML config file.
+
+```bash
+# Train with a config file (JSON or YAML)
+python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+
+# JSON configs remain supported
+python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
+
+# Multi-GPU distributed training
+torchrun --nproc_per_node=2 -m embodichain train-rl \
+    --config configs/agents/rl/push_cube/train_config.yaml \
+    --distributed
+```
+
+The direct module entry point remains available:
+
+```bash
+python -m embodichain.agents.rl.train --config configs/agents/rl/basic/cart_pole/train_config.yaml
+```
+
+### Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| ``--config`` | *(required)* | Path to the RL training config file (``.json``, ``.yaml``, or ``.yml``) |
+| ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
+
+Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.

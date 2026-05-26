@@ -36,7 +36,7 @@ from embodichain.lab.gym.envs.tasks.rl import build_env
 from embodichain.lab.gym.utils.gym_utils import DEFAULT_MANAGER_MODULES, config_to_cfg
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.utils.module_utils import find_function_from_modules
-from embodichain.utils.utility import load_json
+from embodichain.utils.utility import load_config
 
 EVENT_MODULES = [
     "embodichain.lab.gym.envs.managers.randomization",
@@ -95,7 +95,7 @@ def _build_env_cfg(
     device: torch.device,
     gpu_id: int,
 ):
-    gym_config_data = load_json(gym_config_path)
+    gym_config_data = load_config(gym_config_path)
     gym_env_cfg = config_to_cfg(
         gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
     )

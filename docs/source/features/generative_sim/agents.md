@@ -76,14 +76,14 @@ Run the agent system with the following command:
 ```bash
 python embodichain/lab/scripts/run_agent.py \
     --task_name YourTask \
-    --gym_config configs/gym/your_task/gym_config.json \
+    --gym_config configs/gym/your_task/gym_config.yaml \
     --agent_config configs/gym/agent/your_agent/agent_config.json \
     --regenerate False
 ```
 
 **Parameters:**
 - `--task_name`: Name identifier for the task
-- `--gym_config`: Path to the gym environment configuration file
+- `--gym_config`: Path to the gym environment configuration file (``.json``, ``.yaml``, or ``.yml``)
 - `--agent_config`: Path to the agent configuration file (defines prompts and agent behavior)
 - `--regenerate`: If `True`, forces regeneration of plans/code even if cached
 

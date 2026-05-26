@@ -19,7 +19,7 @@ import numpy as np
 import argparse
 import torch
 
-from embodichain.utils.utility import load_json
+from embodichain.utils.utility import load_config
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     # Load configurations
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
-    agent_config = load_json(args.agent_config)
+    agent_config = load_config(args.agent_config)
 
     # Create environment
     env = gymnasium.make(

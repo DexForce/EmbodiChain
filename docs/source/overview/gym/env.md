@@ -215,7 +215,7 @@ actions = MyRLActionCfg()
 extensions = {"success_threshold": 0.1}  # Task-specific parameters
 ```
 
-In JSON config, use the ``actions`` section:
+In a gym config file, use the ``actions`` section:
 
 ```json
 "actions": {

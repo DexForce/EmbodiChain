@@ -27,7 +27,8 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from functools import wraps
-from typing import Dict, List, Tuple, Callable, Any
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Callable
 
 from embodichain.utils.string import callable_to_string
 
@@ -358,6 +359,74 @@ def load_json(path: str) -> Dict:
     with open(path) as f:
         config = json.load(f)
     return config
+
+
+def _config_format_from_path(path: str | Path) -> str:
+    """Return the config format inferred from a file suffix."""
+    suffix = Path(path).suffix.lower()
+    if suffix == ".json":
+        return "json"
+    if suffix in {".yaml", ".yml"}:
+        return "yaml"
+    raise ValueError(
+        f"Unsupported config file format for '{path}'. "
+        "Supported extensions: .json, .yaml, .yml"
+    )
+
+
+def load_config(path: str | Path) -> Dict[str, Any]:
+    """Load a gym or agent config file into a dictionary.
+
+    Supports JSON (``.json``) and YAML (``.yaml`` / ``.yml``) formats.
+
+    Args:
+        path: Path to the config file.
+
+    Returns:
+        The parsed config dictionary.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+        TypeError: If the parsed YAML root is not a mapping.
+    """
+    path = Path(path)
+    config_format = _config_format_from_path(path)
+
+    if config_format == "json":
+        return load_json(str(path))
+
+    import yaml
+
+    with path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file) or {}
+
+    if not isinstance(config, dict):
+        raise TypeError(
+            f"Expected mapping in config file '{path}', got {type(config)!r}."
+        )
+    return config
+
+
+def save_config(path: str | Path, data: Dict[str, Any]) -> None:
+    """Save a config dictionary to a JSON or YAML file.
+
+    The output format is inferred from the file extension.
+
+    Args:
+        path: Destination file path.
+        data: Config dictionary to serialize.
+    """
+    path = Path(path)
+    config_format = _config_format_from_path(path)
+
+    if config_format == "json":
+        save_json(str(path), data)
+        return
+
+    import yaml
+
+    with path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(data, file, sort_keys=False, default_flow_style=False)
 
 
 def load_txt(path: str) -> str:

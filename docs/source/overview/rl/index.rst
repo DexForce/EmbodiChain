@@ -52,7 +52,7 @@ Extension and Customization
 
 Common Issues and Best Practices
 -------------------------------
-- Config files are recommended to use JSON for easy management and reproducibility.
+- Config files may use JSON or YAML for easy management and reproducibility.
 - Parallel environment sampling can significantly improve training efficiency.
 - The event-driven mechanism allows flexible insertion of custom logic (such as evaluation, saving, callbacks).
 - It is recommended to use WandB/TensorBoard for training process visualization.
@@ -62,7 +62,7 @@ Example
 
 .. code-block:: bash
 
-    python train.py --config configs/agents/rl/push_cube/train_config.json
+    python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
 
 For more details, please refer to the source code and API documentation of each submodule.
 

@@ -15,13 +15,13 @@ EmbodiChain supports distributed RL training across multiple GPUs using PyTorch 
 Use `torchrun` with `--nproc_per_node` equal to the number of GPUs, and add `--distributed`:
 
 ```bash
-torchrun --nproc_per_node=2 -m embodichain.agents.rl.train --config <config_path> --distributed
+torchrun --nproc_per_node=2 -m embodichain train-rl --config <config_path> --distributed
 ```
 
 Example:
 
 ```bash
-torchrun --nproc_per_node=2 -m embodichain.agents.rl.train --config configs/agents/rl/push_cube/train_config.json --distributed
+torchrun --nproc_per_node=2 -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.yaml --distributed
 ```
 
 No config file changes needed; `device` and `gpu_id` are overridden automatically per rank.
@@ -32,7 +32,7 @@ Use `CUDA_VISIBLE_DEVICES` to select which GPUs to use. The processes will see o
 
 ```bash
 # Use GPU 0 and 1
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 -m embodichain.agents.rl.train --config <config_path> --distributed
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 -m embodichain train-rl --config <config_path> --distributed
 ```
 
 `--nproc_per_node` must equal the number of GPUs in `CUDA_VISIBLE_DEVICES`.
