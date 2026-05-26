@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+from __future__ import annotations
 
 import os
 
@@ -25,7 +26,7 @@ from embodichain.lab.sim import (
     VisualMaterialCfg,
 )
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, physics_cfg_for_backend
+from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
@@ -37,19 +38,58 @@ NUM_ARENAS = 2
 Z_TRANSLATION = 2.0
 
 
-class BaseRigidObjectTest:
-    """Shared rigid object test logic across physics backends."""
+def _make_test_com_pose(device: torch.device) -> torch.Tensor:
+    """Create per-env COM poses using EmbodiChain xyzw quaternion convention."""
+    com_pose = torch.zeros((NUM_ARENAS, 7), device=device, dtype=torch.float32)
+    com_pose[:, 3:] = torch.tensor(
+        [
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.70710677, 0.70710677],
+        ],
+        device=device,
+        dtype=torch.float32,
+    )
+    com_pose[:, :3] = torch.tensor(
+        [[0.04, -0.02, 0.03], [-0.01, 0.05, 0.02]],
+        device=device,
+        dtype=torch.float32,
+    )
+    return com_pose
 
-    def setup_simulation(self, physics_backend: str):
+
+def _read_set_com_pose_result(
+    sim_device: str, physics: str = "default"
+) -> torch.Tensor:
+    test = BaseRigidObjectTest()
+    test.setup_simulation(sim_device, physics=physics)
+    try:
+        assert test.duck.body_data is not None
+        com_pose = _make_test_com_pose(test.sim.device)
+
+        test.duck.set_com_pose(com_pose)
+        test.sim.forward_physics()
+
+        return test.duck.body_data.com_pose.detach().cpu().clone()
+    finally:
+        test.teardown_method()
+        if physics == "newton":
+            from dexsim.engine.newton_physics import teardown_newton_physics
+
+            teardown_newton_physics()
+
+
+class BaseRigidObjectTest:
+    """Shared test logic for CPU and CUDA."""
+
+    def setup_simulation(self, sim_device: str, physics: str = "default"):
         config = SimulationManagerCfg(
             headless=True,
-            device="cpu",
+            device=sim_device,
             num_envs=NUM_ARENAS,
-            physics_cfg=physics_cfg_for_backend(physics_backend),
-            render_cfg=RenderCfg(renderer="hybrid"),
+            physics_cfg=physics_cfg_for_backend(physics),
         )
         self.sim = SimulationManager(config)
-        self.physics_backend = physics_backend
+        self.physics = physics
         self.sim.enable_physics(False)
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -84,8 +124,16 @@ class BaseRigidObjectTest:
             ),
         )
 
+        if (
+            physics == "default"
+            and sim_device == "cuda"
+            and getattr(self.sim, "is_use_gpu_physics", False)
+        ):
+            self.sim.init_gpu_physics()
+
         self.sim.enable_physics(True)
-        self.sim.prepare_physics()
+        if physics == "newton":
+            self.sim.prepare_physics()
 
     def test_is_static(self):
         """Test the is_static() method of duck, table, and chair objects."""
@@ -160,10 +208,9 @@ class BaseRigidObjectTest:
         assert all(
             abs(x) < 1e-5 for x in table_xyz_after
         ), f"FAIL: Table moved unexpectedly: {table_xyz_after}"
-        if self.physics_backend == "default":
-            assert torch.allclose(
-                chair_xyz_after, expected_chair_pos, atol=1e-5
-            ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
+        assert torch.allclose(
+            chair_xyz_after, expected_chair_pos, atol=1e-5
+        ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
 
     def test_add_force_torque(self):
         """Test that add_force applies force correctly to the duck object."""
@@ -407,7 +454,50 @@ class BaseRigidObjectTest:
         assert self.table.is_non_dynamic, "Static table should be is_non_dynamic"
         assert self.chair.is_non_dynamic, "Kinematic chair should be is_non_dynamic"
 
-        if self.physics_backend == "newton":
+        if self.physics == "newton":
+            expected_mass = torch.ones(NUM_ARENAS, device=self.sim.device)
+            expected_friction = torch.full(
+                (NUM_ARENAS,),
+                self.duck.cfg.attrs.dynamic_friction,
+                device=self.sim.device,
+            )
+            expected_damping = torch.tensor(
+                [
+                    self.duck.cfg.attrs.linear_damping,
+                    self.duck.cfg.attrs.angular_damping,
+                ],
+                device=self.sim.device,
+            ).repeat(NUM_ARENAS, 1)
+            expected_inertia = torch.zeros(
+                (NUM_ARENAS, 3), dtype=torch.float32, device=self.sim.device
+            )
+
+            assert torch.allclose(self.duck.get_mass(), expected_mass)
+            assert torch.allclose(self.duck.get_friction(), expected_friction)
+            assert torch.allclose(self.duck.get_damping(), expected_damping)
+            assert torch.allclose(self.duck.get_inertia(), expected_inertia)
+
+            # TODO: DexSim Newton does not expose runtime mutation for these
+            # attributes yet. The EmbodiChain API should skip them without
+            # falling through to the default physical-body path.
+            self.duck.set_attrs(RigidBodyAttributesCfg(mass=2.5))
+            self.duck.set_mass(torch.full((NUM_ARENAS,), 2.5, device=self.sim.device))
+            self.duck.set_friction(
+                torch.full((NUM_ARENAS,), 0.7, device=self.sim.device)
+            )
+            self.duck.set_damping(
+                torch.full((NUM_ARENAS, 2), 0.2, device=self.sim.device)
+            )
+            self.duck.set_inertia(
+                torch.full((NUM_ARENAS, 3), 0.3, device=self.sim.device)
+            )
+            self.duck.set_body_type("kinematic")
+            assert self.duck.body_type == "dynamic"
+
+            self.table.get_mass()
+            self.table.get_friction()
+            self.table.get_damping()
+            self.table.get_inertia()
             return
 
         # 3. body_type
@@ -596,14 +686,37 @@ class BaseRigidObjectTest:
         gc.collect()
 
 
-class TestRigidObjectDefaultBackend(BaseRigidObjectTest):
+class TestRigidObjectCPU(BaseRigidObjectTest):
     def setup_method(self):
-        self.setup_simulation("default")
+        self.setup_simulation("cpu")
 
 
-class TestRigidObjectNewtonBackend(BaseRigidObjectTest):
+class TestRigidObjectCUDA(BaseRigidObjectTest):
     def setup_method(self):
-        self.setup_simulation("newton")
+        self.setup_simulation("cuda")
+
+
+def test_set_com_pose_matches_default_backend():
+    """Test set_com_pose for both physics backends using default as ground truth."""
+    default_com_pose = _read_set_com_pose_result("cuda", physics="default")
+    newton_com_pose = _read_set_com_pose_result("cuda", physics="newton")
+
+    expected_com_pose = _make_test_com_pose(default_com_pose.device)
+    assert torch.allclose(default_com_pose, expected_com_pose, atol=1e-5)
+    assert torch.allclose(newton_com_pose, default_com_pose, atol=1e-5)
+
+
+def test_newton_physical_attribute_getters_and_unsupported_setters():
+    """Test Newton physical attribute APIs do not use default physical-body calls."""
+    test = BaseRigidObjectTest()
+    test.setup_simulation("cuda", physics="newton")
+    try:
+        test.test_physical_attributes()
+    finally:
+        test.teardown_method()
+        from dexsim.engine.newton_physics import teardown_newton_physics
+
+        teardown_newton_physics()
 
 
 if __name__ == "__main__":

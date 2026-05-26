@@ -34,7 +34,7 @@ EmbodiChain backend names:
 - `"default"`: the existing DexSim backend and current behavior.
 - `"newton"`: DexSim Newton backend.
 
-Do not introduce older backend-specific names into user-facing EmbodiChain config, docs, or conditionals. If a local variable must refer to a low-level DexSim GPU API, use a narrow name such as `is_default_gpu_backend`.
+Do not introduce older backend-specific names into user-facing EmbodiChain config, docs, or conditionals.
 
 ## Configuration Design
 
@@ -137,12 +137,6 @@ def is_default_backend(self) -> bool: ...
 def is_newton_backend(self) -> bool: ...
 
 @property
-def is_default_gpu_backend(self) -> bool: ...
-
-@property
-def is_newton_gpu_backend(self) -> bool: ...
-
-@property
 def newton_manager(self): ...
 
 @property
@@ -153,7 +147,7 @@ Replace direct calls to `init_gpu_physics()` in higher-level code with a backend
 
 ```python
 def prepare_physics(self):
-    if self.is_default_gpu_backend:
+    if self.is_use_gpu_physics:
         self.init_gpu_physics()
     elif self.is_newton_backend:
         self._world.update(0.0)  # forces lazy Newton model finalization if needed
@@ -161,7 +155,7 @@ def prepare_physics(self):
 
 `SimulationManager.update(...)` should:
 
-- Call `init_gpu_physics()` only for `is_default_gpu_backend`.
+- Call `init_gpu_physics()` only for `is_use_gpu_physics`.
 - For Newton, simply call `self._world.update(physics_dt)` for each step; DexSim Newton handles lazy finalize, rebuild, stepping, and render synchronization.
 
 Destroy/cleanup:

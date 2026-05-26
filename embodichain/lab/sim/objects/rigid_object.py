@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -39,6 +41,8 @@ from embodichain.lab.sim import (
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
+
+_UINT64_MAX = (1 << 64) - 1
 
 
 @dataclass
@@ -248,6 +252,11 @@ class RigidObject(BatchEntity):
         if not cfg.use_usd_properties:
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
+                if is_newton_scene(self._ps):
+                    # TODO: DexSim Newton consumes the initial physical
+                    # attributes during add_rigidbody(); MeshObject
+                    # set_physical_attr() is still default-backend only.
+                    continue
                 entity.set_physical_attr(cfg.attrs.attr())
         else:
             # Read current properties from USD-loaded entities and write back to cfg
@@ -266,7 +275,7 @@ class RigidObject(BatchEntity):
 
         if device.type == "cuda":
             self._world.update(0.001)
-            self.reset()
+        self.reset()
 
         # update default center of mass pose (only for non-static bodies with body data).
         if self._data is not None:
@@ -313,6 +322,31 @@ class RigidObject(BatchEntity):
             return None
 
         return self._data
+
+    def _get_newton_attr(self, env_idx: int):
+        """Return DexSim Newton metadata physical attributes for an entity."""
+        entity = self._entities[env_idx]
+        entity_handle = int(entity.get_native_handle())
+        if entity_handle < 0:
+            entity_handle &= _UINT64_MAX
+
+        manager = getattr(self._ps, "manager", None)
+        attr = None
+        if manager is not None:
+            attr = (
+                getattr(manager, "dexsim_meta", {}).get(entity_handle, {}).get("attr")
+            )
+        if attr is None:
+            logger.log_error(
+                f"Newton physical attributes for rigid object '{self.uid}' env {env_idx} are unavailable."
+            )
+        return attr
+
+    def _warn_newton_unsupported(self, api_name: str) -> None:
+        logger.log_warning(
+            f"Newton backend does not support RigidObject.{api_name} runtime updates yet. "
+            "Skipping this call. TODO: wire this API when DexSim Newton exposes runtime physical-attribute mutation."
+        )
 
     @property
     def body_state(self) -> torch.Tensor:
@@ -473,7 +507,7 @@ class RigidObject(BatchEntity):
         if self.is_static:
             return get_local_pose_cpu(self._entities, to_matrix).to(self.device)
 
-        pose = self.body_data.pose
+        pose = self.body_data.pose.clone()
         if to_matrix:
             xyz = pose[:, :3]
             mat = matrix_from_quat(convert_quat(pose[:, 3:7], to="wxyz"))
@@ -606,6 +640,10 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match attrs length {len(attrs)}."
             )
 
+        if is_newton_scene(self._ps):
+            self._warn_newton_unsupported("set_attrs")
+            return
+
         # TODO: maybe need to improve the physical attributes setter efficiency.
         if isinstance(attrs, RigidBodyAttributesCfg):
             for i, env_idx in enumerate(local_env_ids):
@@ -630,6 +668,10 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
             )
 
+        if is_newton_scene(self._ps):
+            self._warn_newton_unsupported("set_mass")
+            return
+
         mass = mass.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             self._entities[env_idx].get_physical_body().set_mass(mass[i])
@@ -647,7 +689,10 @@ class RigidObject(BatchEntity):
 
         masses = []
         for _, env_idx in enumerate(local_env_ids):
-            mass = self._entities[env_idx].get_physical_body().get_mass()
+            if is_newton_scene(self._ps):
+                mass = self._get_newton_attr(env_idx).mass
+            else:
+                mass = self._entities[env_idx].get_physical_body().get_mass()
             masses.append(mass)
 
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
@@ -667,6 +712,10 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match friction length {len(friction)}."
             )
+
+        if is_newton_scene(self._ps):
+            self._warn_newton_unsupported("set_friction")
+            return
 
         friction = friction.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
@@ -688,9 +737,12 @@ class RigidObject(BatchEntity):
 
         frictions = []
         for _, env_idx in enumerate(local_env_ids):
-            friction = (
-                self._entities[env_idx].get_physical_body().get_dynamic_friction()
-            )
+            if is_newton_scene(self._ps):
+                friction = self._get_newton_attr(env_idx).dynamic_friction
+            else:
+                friction = (
+                    self._entities[env_idx].get_physical_body().get_dynamic_friction()
+                )
             frictions.append(friction)
 
         return torch.as_tensor(frictions, dtype=torch.float32, device=self.device)
@@ -710,6 +762,10 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match damping length {len(damping)}."
             )
+
+        if is_newton_scene(self._ps):
+            self._warn_newton_unsupported("set_damping")
+            return
 
         damping = damping.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
@@ -733,12 +789,17 @@ class RigidObject(BatchEntity):
 
         dampings = []
         for _, env_idx in enumerate(local_env_ids):
-            linear_damping = (
-                self._entities[env_idx].get_physical_body().get_linear_damping()
-            )
-            angular_damping = (
-                self._entities[env_idx].get_physical_body().get_angular_damping()
-            )
+            if is_newton_scene(self._ps):
+                attr = self._get_newton_attr(env_idx)
+                linear_damping = attr.linear_damping
+                angular_damping = attr.angular_damping
+            else:
+                linear_damping = (
+                    self._entities[env_idx].get_physical_body().get_linear_damping()
+                )
+                angular_damping = (
+                    self._entities[env_idx].get_physical_body().get_angular_damping()
+                )
             dampings.append([linear_damping, angular_damping])
 
         return torch.as_tensor(dampings, dtype=torch.float32, device=self.device)
@@ -759,6 +820,10 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match inertia length {len(inertia)}."
             )
 
+        if is_newton_scene(self._ps):
+            self._warn_newton_unsupported("set_inertia")
+            return
+
         inertia = inertia.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             self._entities[env_idx].get_physical_body().set_mass_space_inertia_tensor(
@@ -778,11 +843,14 @@ class RigidObject(BatchEntity):
 
         inertias = []
         for _, env_idx in enumerate(local_env_ids):
-            inertia = (
-                self._entities[env_idx]
-                .get_physical_body()
-                .get_mass_space_inertia_tensor()
-            )
+            if is_newton_scene(self._ps):
+                inertia = self._get_newton_attr(env_idx).inertia
+            else:
+                inertia = (
+                    self._entities[env_idx]
+                    .get_physical_body()
+                    .get_mass_space_inertia_tensor()
+                )
             inertias.append(inertia)
 
         return torch.as_tensor(inertias, dtype=torch.float32, device=self.device)
@@ -944,6 +1012,10 @@ class RigidObject(BatchEntity):
             body_type (str): The body type to set. Must be one of 'dynamic', or 'kinematic'.
         """
         from dexsim.types import ActorType
+
+        if is_newton_scene(self._ps):
+            self._warn_newton_unsupported("set_body_type")
+            return
 
         if body_type not in ("dynamic", "kinematic"):
             logger.log_error(

@@ -244,9 +244,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         """Apply data to bodies via the unified Newton GPU API."""
         data = data.to(dtype=torch.float32)
-        state = getattr(self.scene.manager, "_state_0", None)
-        is_cuda = state is not None and str(state.body_q.device).startswith("cuda")
-        payload = data if is_cuda else data.detach().cpu().numpy()
+        payload = data.detach().cpu().numpy()
         self.scene.gpu_apply_rigid_body_data(
             payload, body_ids.detach().cpu().tolist(), data_type
         )

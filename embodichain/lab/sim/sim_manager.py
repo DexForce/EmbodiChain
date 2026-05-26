@@ -600,7 +600,7 @@ class SimulationManager:
 
     def prepare_physics(self) -> None:
         """Prepare backend-specific runtime data after scene construction."""
-        if self.is_default_gpu_backend:
+        if self.is_default_backend and self.is_use_gpu_physics:
             self.init_gpu_physics()
         elif self.is_newton_backend:
             self._world.update(0.0)

@@ -59,6 +59,9 @@ class _NewtonDataType:
     ANGULAR_VELOCITY = "angular_velocity"
     LINEAR_ACCELERATION = "linear_acceleration"
     ANGULAR_ACCELERATION = "angular_acceleration"
+    FORCE = "force"
+    TORQUE = "torque"
+    COM_LOCAL_POSE = "com_local_pose"
 
 
 class _NewtonScene:
@@ -68,7 +71,7 @@ class _NewtonScene:
             dexsim2newton_body={10: 100, 11: 101},
         )
 
-    def gpu_fetch_rigid_body_data(self, body_ids, data_type, out) -> None:
+    def gpu_fetch_rigid_body_data(self, out, body_ids, data_type) -> None:
         data = wp.to_torch(out)
         if data_type == _NewtonDataType.POSE:
             width = 7
@@ -79,7 +82,7 @@ class _NewtonScene:
         ).reshape(len(body_ids), width)
         data.copy_(values)
 
-    def gpu_apply_rigid_body_data(self, body_ids, data_type, payload) -> None:
+    def gpu_apply_rigid_body_data(self, payload, body_ids, data_type) -> None:
         pass
 
 
