@@ -162,6 +162,7 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
 
     for i, art in enumerate(arts):
         art.set_body_scale(cfg.body_scale)
+        art.set_physical_attr(cfg.attrs.attr())
         link_names = art.get_link_names()
         _apply_link_physics_overrides(art, cfg, link_names)
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)

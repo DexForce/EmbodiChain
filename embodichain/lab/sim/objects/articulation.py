@@ -1476,9 +1476,14 @@ class Articulation(BatchEntity):
             device=self.device,
         )
         for i, env_idx in enumerate(local_env_ids):
-            stiffness_i, damping_i, max_effort_i, max_velocity_i, friction_i, _ = (
-                self._entities[env_idx].get_drive()
-            )
+            (
+                stiffness_i,
+                damping_i,
+                max_effort_i,
+                max_velocity_i,
+                friction_i,
+                *_,
+            ) = self._entities[env_idx].get_drive()
             stiffness[i] = torch.as_tensor(
                 stiffness_i, dtype=torch.float32, device=self.device
             )[local_joint_ids_tensor]
