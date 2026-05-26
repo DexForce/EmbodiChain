@@ -34,10 +34,12 @@ from dexsim.models import MeshObject
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    LinkPhysicsOverrideCfg,
     RigidObjectCfg,
     SoftObjectCfg,
     ClothObjectCfg,
 )
+from embodichain.utils.string import resolve_matching_names
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
@@ -91,6 +93,48 @@ def get_dexsim_drive_type(drive_type: str) -> DriveType:
         logger.error(f"Invalid dexsim drive type: {drive_type}")
 
 
+def _resolve_link_physics_groups(
+    link_names: list[str], link_attrs: dict[str, LinkPhysicsOverrideCfg]
+) -> dict[str, LinkPhysicsOverrideCfg]:
+    """Map each link name to exactly one override group.
+
+    Raises:
+        ValueError: If a link matches zero groups (not required) or multiple groups.
+    """
+    link_to_group: dict[str, LinkPhysicsOverrideCfg] = {}
+    for group_cfg in link_attrs.values():
+        _, matched_names = resolve_matching_names(
+            keys=group_cfg.link_names_expr, list_of_strings=link_names
+        )
+        for name in matched_names:
+            if name in link_to_group:
+                raise ValueError(
+                    f"Link '{name}' matched multiple link_attrs groups. Each link must "
+                    "match at most one group."
+                )
+            link_to_group[name] = group_cfg
+    return link_to_group
+
+
+def _apply_link_physics_overrides(
+    art: Articulation, cfg: ArticulationCfg, link_names: list[str]
+) -> None:
+    """Apply per-link physics overrides on top of global articulation attrs."""
+    if not cfg.link_attrs:
+        return
+
+    link_to_group = _resolve_link_physics_groups(link_names, cfg.link_attrs)
+    for name in link_names:
+        group_cfg = link_to_group.get(name)
+        if group_cfg is None:
+            continue
+        physical_attr = group_cfg.attrs.merge_with(cfg.attrs)
+        replace_inertial = group_cfg.replace_inertial or (
+            group_cfg.attrs.mass is not None
+        )
+        art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
+
+
 def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) -> None:
     """Set articulation configuration for a list of dexsim articulations.
 
@@ -119,6 +163,8 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
     for i, art in enumerate(arts):
         art.set_body_scale(cfg.body_scale)
         art.set_physical_attr(cfg.attrs.attr())
+        link_names = art.get_link_names()
+        _apply_link_physics_overrides(art, cfg, link_names)
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
         art.set_articulation_flag(
             ArticulationFlag.DISABLE_SELF_COLLISION, cfg.disable_self_collision
@@ -127,7 +173,8 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
             min_position_iters=cfg.min_position_iters,
             min_velocity_iters=cfg.min_velocity_iters,
         )
-        link_names = art.get_link_names()
+
+        # TODO: We should change this part after improving spawning of articulation.
         for name in link_names:
             physical_body = art.get_physical_body(name)
             inertia = physical_body.get_mass_space_inertia_tensor()
