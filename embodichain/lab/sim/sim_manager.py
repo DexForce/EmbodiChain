@@ -590,7 +590,11 @@ class SimulationManager:
         for robot in self._robots.values():
             robot.reallocate_body_data()
 
-        # We do not perform reallocate body data for robot.
+        # Re-establish rigid object positions after articulation resets, ensuring
+        # no articulation kinematics step has inadvertently corrupted the broadphase
+        # state for rigid bodies.
+        for rigid_obj in self._rigid_objects.values():
+            rigid_obj.reset()
 
         self._is_initialized_gpu_physics = True
 

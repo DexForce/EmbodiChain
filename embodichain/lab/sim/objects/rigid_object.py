@@ -257,13 +257,14 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        if device.type == "cuda" and not is_newton_scene(self._ps):
-            self._world.update(0.001)
-
         super().__init__(cfg, entities, device)
 
         # set default collision filter
         self._set_default_collision_filter()
+
+        if device.type == "cuda":
+            self._world.update(0.001)
+            self.reset()
 
         # update default center of mass pose (only for non-static bodies with body data).
         if self._data is not None:

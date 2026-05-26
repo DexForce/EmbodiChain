@@ -73,12 +73,10 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 
 The LeRobotRecorder saves the following data for each frame:
 
-- ``observation.qpos``: Joint positions
-- ``observation.qvel``: Joint velocities
-- ``observation.qf``: Joint forces/torques
+- ``observation.state``: Joint positions (proprioceptive state)
 - ``action``: Applied action
-- ``{sensor_name}.color``: Camera images (if sensors present)
-- ``{sensor_name}.color_right``: Right camera images (for stereo cameras)
+- ``observation.images.{sensor_name}``: Camera images (if sensors present)
+- ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
 
 ## Usage Example
 
