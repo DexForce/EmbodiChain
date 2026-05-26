@@ -253,6 +253,20 @@ class RigidObject(BatchEntity):
 
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
+        # Set _entities early so _set_default_collision_filter() can access it.
+        # BatchEntity.__init__() (called via super()) will assign it again with the
+        # same value, which is harmless.
+        self._entities = entities
+
+        # Set the per-arena collision filter BEFORE the first reset() is triggered by
+        # super().__init__().  The 2x warmup simulates inside DX_GpuApplyRigidBodyData
+        # run during that first reset, and they must see the correct filter so that
+        # GPU broadphase contact pairs are established with the right filter from the
+        # start.  Changing the filter *after* contact pairs have already been built
+        # causes PhysX to invalidate those pairs mid-initialization, which leads to
+        # non-deterministic contact detection across arenas.
+        self._set_default_collision_filter()
+
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data: RigidBodyData | None = None
         if self.is_static is False:
@@ -277,13 +291,23 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        if device.type == "cuda":
-            self._world.update(0.001)
-
         super().__init__(cfg, entities, device)
 
-        # set default collision filter
-        self._set_default_collision_filter()
+        if device.type == "cuda":
+            # The GPU warmup must happen AFTER reset() has written the correct initial
+            # positions via setRigidDynamicData(). During PhysicalFrameBefore(), the
+            # engine detects _gpu_actors_resized > 0 and runs 2x DX_Simulate. Because
+            # the bodies are now at their correct initial poses, the GPU broadphase is
+            # built with valid cup-table overlap — fixing contact detection for all
+            # subsequent steps.
+            #
+            # After the warmup, ApplyGpuPhysicalTransform() consumes the
+            # _que_rigid_transforms entries inserted by OnAttach() (which stored the
+            # bodies' correct world-space init positions), re-applying those positions.
+            # A second reset() call normalises positions to the Python-side init_pose
+            # and zeroes all velocities so the object is ready for simulation.
+            self._world.update(0.001)
+            self.reset()
 
         # update default center of mass pose (only for non-static bodies with body data).
         if self.body_data is not None:
