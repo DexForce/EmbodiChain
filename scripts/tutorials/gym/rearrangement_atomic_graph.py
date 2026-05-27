@@ -51,6 +51,19 @@ DEFAULT_DATABASE_ARTIFACT_ROOT = (
     ROOT_DIR / "embodichain/database/agent_generated_content/Rearrangement"
 )
 TASK_NAME = "Rearrangement"
+DEMO_GRASP_OBJECTS = {"fork", "spoon"}
+DEMO_NOMINAL_GRASP_RUNTIME_PATCH: dict[str, Any] = {
+    "public_grasp_strategy": "legacy_guided",
+    "public_grasp_candidate_num": 96,
+    "public_grasp_pre_grasp_distance": 0.025,
+    "public_grasp_lift_height": 0.06,
+    "public_grasp_filter_ground_collision": False,
+    "public_grasp_rank_by_legacy_pose": True,
+    "public_grasp_use_legacy_orientation": True,
+    "validate_public_grasp_after_action": True,
+    "public_grasp_validation_min_object_lift": 0.03,
+    "public_grasp_validation_max_object_xy_displacement": 0.16,
+}
 FORCED_ERROR_PRESETS: dict[str, dict[str, Any]] = {
     "hold_lost_move_regrasp": {
         "edge_index": 3,
@@ -239,6 +252,61 @@ def _copy_database_artifacts(artifact_dir: Path, _regenerate: bool) -> None:
         f"to {artifact_dir}.",
         color="cyan",
     )
+
+
+def _patch_cached_task_graph_for_demo(
+    artifact_dir: Path, args: argparse.Namespace
+) -> None:
+    if args.preserve_cached_grasp_runtime:
+        return
+
+    task_graph_path = artifact_dir / "agent_task_graph.json"
+    if not task_graph_path.exists():
+        return
+
+    task_graph = json.loads(task_graph_path.read_text(encoding="utf-8"))
+    changed = 0
+    for action in _iter_atomic_actions(task_graph):
+        if action.get("name") != "pick_up":
+            continue
+        target = action.get("target")
+        if (
+            not isinstance(target, dict)
+            or target.get("obj_name") not in DEMO_GRASP_OBJECTS
+        ):
+            continue
+        runtime_kwargs = dict(action.get("runtime_kwargs") or {})
+        runtime_kwargs.update(DEMO_NOMINAL_GRASP_RUNTIME_PATCH)
+        action["runtime_kwargs"] = runtime_kwargs
+        changed += 1
+
+    if changed == 0:
+        logger.log_warning(
+            f"No nominal pick_up actions for {sorted(DEMO_GRASP_OBJECTS)} were "
+            f"patched in {task_graph_path}."
+        )
+        return
+
+    task_graph_path.write_text(
+        json.dumps(task_graph, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    logger.log_info(
+        f"Patched {changed} nominal pick_up action(s) in {task_graph_path} "
+        "with demo-local public grasp defaults.",
+        color="cyan",
+    )
+
+
+def _iter_atomic_actions(value: Any):
+    if isinstance(value, dict):
+        if value.get("kind") == "atomic_action":
+            yield value
+        for child in value.values():
+            yield from _iter_atomic_actions(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_atomic_actions(child)
 
 
 def _build_forced_error_config(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -581,6 +649,15 @@ def build_parser() -> argparse.Namespace:
         help="Fail if an atomic graph action cannot execute through AtomicActionEngine.",
     )
     parser.add_argument(
+        "--preserve_cached_grasp_runtime",
+        action="store_true",
+        default=False,
+        help=(
+            "Use cached nominal pick_up runtime kwargs without the demo-local "
+            "public grasp robustness patch."
+        ),
+    )
+    parser.add_argument(
         "--disable_public_grasp_candidate_generation",
         action="store_true",
         default=False,
@@ -808,6 +885,7 @@ def main() -> None:
     artifact_dir = case_dir / "artifacts"
     case_dir.mkdir(parents=True, exist_ok=True)
     _copy_database_artifacts(artifact_dir, args.regenerate)
+    _patch_cached_task_graph_for_demo(artifact_dir, args)
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
     if not args.record_video:
