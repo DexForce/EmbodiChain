@@ -21,22 +21,35 @@ from langchain_openai import AzureChatOpenAI, ChatOpenAI
 # Environment configuration
 # ------------------------------------------------------------------------------
 
-os.environ["ALL_PROXY"] = ""
-os.environ["all_proxy"] = ""
-os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
-os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
-os.environ["LLM_URL"] = "https://api.shubiaobiao.cn/v1/"
+DEFAULT_LLM_MODEL = "mimo-v2.5"
+DEFAULT_ANTHROPIC_MAX_TOKENS = 8192
+DEFAULT_PRECOMPILE_RECOVERY_ACTIONS = False
+DEFAULT_PRECOMPILE_RECOVERY_MONITORS = False
+DEFAULT_API_KEY = "tp-cigd9h4eh33v79adk5wz77y9o9rngsvcrw527wxiic5jdeqq"
+DEFAULT_LLM_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+DEFAULT_HTTPS_PROXY = "http://127.0.0.1:7897"
+DEFAULT_HTTP_PROXY = "http://127.0.0.1:7897"
 # ------------------------------------------------------------------------------
 # LLM factory
 # ------------------------------------------------------------------------------
 
+for proxy_var in ("ALL_PROXY", "all_proxy"):
+    os.environ[proxy_var] = ""
 
-def create_llm(*, temperature=0.0, model="gpt-4o"):
+for proxy_var, proxy_value in (
+    ("HTTP_PROXY", DEFAULT_HTTP_PROXY),
+    ("HTTPS_PROXY", DEFAULT_HTTPS_PROXY),
+    ("http_proxy", DEFAULT_HTTP_PROXY),
+    ("https_proxy", DEFAULT_HTTPS_PROXY),
+):
+    os.environ[proxy_var] = proxy_value
+
+def create_llm(*, temperature=0.0, model=None):
     return ChatOpenAI(
         temperature=temperature,
-        model=model,
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("LLM_URL"),
+        model=DEFAULT_LLM_MODEL,
+        api_key=DEFAULT_API_KEY,
+        base_url=DEFAULT_LLM_URL,
     )
 
 
