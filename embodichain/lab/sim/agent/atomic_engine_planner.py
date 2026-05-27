@@ -26,19 +26,30 @@ import torch
 from embodichain.lab.sim.agent.action_plan import ActionPlan
 from embodichain.lab.sim.agent.atomic_action_adapter import (
     _as_pose_tensor,
+    _build_legacy_grasp_pose,
     _build_pickup_cfg,
     _build_public_grasp_semantics,
+    _object_geometry_bounds,
     _public_grasp_approach_direction,
     _public_grasp_approach_direction_candidates,
+    _public_grasp_legacy_reference_required,
+    _public_grasp_lift_height,
+    _public_grasp_roll_offsets,
+    _record_public_grasp_attempt,
+    _register_public_grasp_physical_validation,
     _select_arm,
     _state_to_hand_qpos,
+    _store_public_grasp_relation,
     _with_public_grasp_strategy_defaults,
-    plan_public_semantic_grasp_action,
 )
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     MoveActionCfg,
     PlaceActionCfg,
+)
+from embodichain.lab.sim.atomic_actions.semantic_grasp import (
+    format_semantic_candidate_message,
+    semantic_candidate_record_label,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.utils.logger import log_warning
@@ -68,14 +79,6 @@ class AtomicEnginePlanner:
                 "Atomic graph action execution currently supports one arm per edge."
             )
         robot_name = robot_names[0]
-
-        if len(action_specs) == 1 and action_specs[0].get("name") == "pick_up":
-            return _run_single_pick_up(
-                action_specs[0],
-                env=env,
-                robot_name=robot_name,
-                kwargs=_action_runtime_kwargs(action_specs[0], kwargs),
-            )
 
         if len(action_specs) == 1:
             orientation_plan = _single_eef_orientation_move_plan(
@@ -113,6 +116,13 @@ class AtomicEnginePlanner:
         is_success, trajectory = engine.execute_static(target_list=target_list)
         if not is_success or trajectory.numel() == 0:
             raise RuntimeError("AtomicActionEngine failed to produce a trajectory.")
+        _register_pick_up_metadata(
+            env=env,
+            robot_name=robot_name,
+            action_specs=action_specs,
+            action_kwargs_list=action_kwargs_list,
+            engine=engine,
+        )
 
         joint_ids = _controlled_joint_ids(env, action_specs, robot_name)
         return ActionPlan(
@@ -235,16 +245,28 @@ def _build_action_cfg(
         obj_name = _target_object_name(action.get("target", {}))
         if obj_name is None:
             raise RuntimeError("pick_up target requires obj_name.")
-        graph_kwargs = _with_public_grasp_strategy_defaults(kwargs)
+        graph_kwargs = _prepare_pick_up_rank_kwargs(
+            action=action,
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            kwargs=kwargs,
+            device=device,
+        )
+        cfg_payload = dict(action.get("cfg", {}))
         approach_direction = cfg_payload.get("approach_direction")
         if approach_direction is None:
-            approach_direction = _public_grasp_approach_direction(
-                env,
-                robot_name,
-                obj_name,
-                graph_kwargs,
-                device=device,
-            )
+            directions = graph_kwargs.get("_public_grasp_approach_directions") or []
+            if directions:
+                approach_direction = directions[0][1]
+            else:
+                approach_direction = _public_grasp_approach_direction(
+                    env,
+                    robot_name,
+                    obj_name,
+                    graph_kwargs,
+                    device=device,
+                )
         else:
             approach_direction = torch.as_tensor(
                 approach_direction,
@@ -321,33 +343,25 @@ def _build_action_cfg(
     raise RuntimeError(f"Unsupported atomic graph action '{action_name}'.")
 
 
-def _run_single_pick_up(
+def _prepare_pick_up_rank_kwargs(
     action: Mapping[str, Any],
     *,
     env,
     robot_name: str,
+    obj_name: str,
     kwargs: dict[str, Any],
-) -> ActionPlan:
-    obj_name = _target_object_name(action.get("target", {}))
-    if obj_name is None:
-        raise RuntimeError("pick_up target requires obj_name.")
-
-    target = _resolve_action_target(
-        action,
-        env=env,
-        robot_name=robot_name,
-        kwargs=kwargs,
-    )
-    cfg_payload = dict(action.get("cfg", {}))
-    pre_grasp_distance = _float_option(
-        cfg_payload.get("pre_grasp_distance", cfg_payload.get("pre_grasp_dis")),
-        default=0.1,
-    )
+    device,
+) -> dict[str, Any]:
     graph_kwargs = _with_public_grasp_strategy_defaults(kwargs)
-    device = getattr(env.robot, "device", None)
+    graph_kwargs = dict(graph_kwargs)
+    graph_kwargs["obj_name"] = obj_name
+    cfg_payload = dict(action.get("cfg", {}))
+    for key in ("sample_interval", "hand_interp_steps", "lift_height"):
+        if cfg_payload.get(key) is not None:
+            graph_kwargs[key] = cfg_payload[key]
     configured_direction = cfg_payload.get("approach_direction")
     if configured_direction is not None:
-        direction_candidates = [
+        approach_directions = [
             (
                 "configured",
                 torch.as_tensor(
@@ -356,29 +370,46 @@ def _run_single_pick_up(
             )
         ]
     else:
-        direction_candidates = _public_grasp_approach_direction_candidates(
+        approach_directions = _public_grasp_approach_direction_candidates(
             env,
             robot_name,
             obj_name,
             graph_kwargs,
             device=device,
         )
+    if not approach_directions:
+        approach_directions = [
+            (
+                "default",
+                _public_grasp_approach_direction(
+                    env,
+                    robot_name,
+                    obj_name,
+                    graph_kwargs,
+                    device=device,
+                ),
+            )
+        ]
 
-    semantic_plan = plan_public_semantic_grasp_action(
-        env=env,
-        robot_name=robot_name,
-        obj_name=obj_name,
-        pre_grasp_dis=pre_grasp_distance,
-        kwargs=graph_kwargs,
-        target=target,
-        directions=direction_candidates,
+    graph_kwargs["_public_grasp_approach_directions"] = approach_directions
+    graph_kwargs["_public_grasp_geometry_bounds"] = _object_geometry_bounds(
+        env,
+        obj_name,
+        device=device,
     )
-    return ActionPlan(
-        is_success=True,
-        trajectory=semantic_plan.trajectory,
-        joint_ids=semantic_plan.joint_ids,
-        action_name="pick_up",
+    graph_kwargs["_public_grasp_roll_offsets"] = _public_grasp_roll_offsets(
+        env,
+        graph_kwargs,
     )
+    if _public_grasp_legacy_reference_required(graph_kwargs):
+        reference_pose = _build_legacy_grasp_pose(env, robot_name, obj_name)
+        if reference_pose is None:
+            raise RuntimeError(
+                "Public semantic grasp candidate selection requires legacy "
+                f"grasp_pose_obj reference for '{obj_name}'."
+            )
+        graph_kwargs["_public_grasp_reference_pose"] = reference_pose
+    return graph_kwargs
 
 
 def _resolve_action_target(
@@ -481,6 +512,62 @@ def _controls_any_hand(action_specs: list[Mapping[str, Any]]) -> bool:
         if control_part.endswith("_eef") or target_kind == "gripper_state":
             return True
     return False
+
+
+def _register_pick_up_metadata(
+    *,
+    env,
+    robot_name: str,
+    action_specs: list[Mapping[str, Any]],
+    action_kwargs_list: list[dict[str, Any]],
+    engine: AtomicActionEngine,
+) -> None:
+    action_sequence = getattr(engine, "_action_sequence", [])
+    for index, (action, kwargs) in enumerate(zip(action_specs, action_kwargs_list)):
+        if action.get("name") != "pick_up":
+            continue
+        if index >= len(action_sequence):
+            continue
+        _action_name, atom_action = action_sequence[index]
+        selected = getattr(atom_action, "last_selected_grasp", None)
+        if selected is None:
+            continue
+        obj_name = _target_object_name(action.get("target", {}))
+        if obj_name is None:
+            continue
+        label = semantic_candidate_record_label(selected)
+        _store_public_grasp_relation(
+            env=env,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            grasp_pose=selected.grasp_pose,
+            source=f"semantic:{label}",
+        )
+        _record_public_grasp_attempt(
+            env=env,
+            kwargs=kwargs,
+            obj_name=obj_name,
+            label=label,
+            direction=selected.direction,
+            status="selected",
+            message=format_semantic_candidate_message(selected),
+        )
+        reference_pose = None
+        cfg_options = getattr(
+            getattr(atom_action, "cfg", None), "grasp_rank_options", {}
+        )
+        if isinstance(cfg_options, Mapping):
+            reference_pose = cfg_options.get("reference_grasp_pose")
+        _register_public_grasp_physical_validation(
+            env=env,
+            kwargs=kwargs,
+            robot_name=robot_name,
+            obj_name=obj_name,
+            label=label,
+            direction=selected.direction,
+            lift_height=_public_grasp_lift_height(kwargs),
+            legacy_reference_pose=reference_pose,
+        )
 
 
 def _single_eef_orientation_move_plan(

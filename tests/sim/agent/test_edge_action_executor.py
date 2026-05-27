@@ -370,17 +370,29 @@ def test_executor_passes_recovery_flag_to_atomic_graph_action(monkeypatch) -> No
         lambda *args, **kwargs: [("ranked", torch.tensor([0.0, 0.0, -1.0]))],
     )
 
-    def _plan_public_semantic_grasp_action(**kwargs):
-        captured["kwargs"] = kwargs["kwargs"]
-        return SimpleNamespace(
-            trajectory=torch.zeros(1, 1, 4),
-            joint_ids=env.right_arm_joints + env.right_eef_joints,
-        )
+    def _capture_engine(env, cfg_list):
+        cfg = cfg_list[0]
+        captured["kwargs"] = cfg.grasp_rank_options
 
+        class _Engine:
+            _action_sequence = [("pick_up", SimpleNamespace())]
+
+            def execute_static(self, target_list):
+                return True, torch.zeros(1, 1, env.robot.dof)
+
+        return _Engine()
+
+    monkeypatch.setattr(graph_executor, "_create_engine", _capture_engine)
+    monkeypatch.setattr(
+        graph_executor, "_object_geometry_bounds", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        graph_executor, "_public_grasp_roll_offsets", lambda *args, **kwargs: [0.0]
+    )
     monkeypatch.setattr(
         graph_executor,
-        "plan_public_semantic_grasp_action",
-        _plan_public_semantic_grasp_action,
+        "_build_legacy_grasp_pose",
+        lambda *args, **kwargs: torch.eye(4),
     )
     _disable_post_action_validators(monkeypatch)
     edge = _Edge()

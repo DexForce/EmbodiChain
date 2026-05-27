@@ -24,7 +24,11 @@ import torch
 from embodichain.lab.sim.agent import atomic_engine_planner as executor
 from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 from embodichain.lab.sim.agent.edge_action_executor import ActionPlan
-from embodichain.lab.sim.atomic_actions import MoveActionCfg, PlaceActionCfg
+from embodichain.lab.sim.atomic_actions import (
+    MoveActionCfg,
+    PickUpActionCfg,
+    PlaceActionCfg,
+)
 
 
 class _Object:
@@ -135,6 +139,13 @@ def _fake_engine_factory(env: _Env):
                         if str(cfg.control_part).startswith("left")
                         else env.right_arm_joints
                     )
+            elif isinstance(cfg, PickUpActionCfg):
+                is_left = str(cfg.control_part).startswith("left")
+                joint_ids = (
+                    env.left_arm_joints + env.left_eef_joints
+                    if is_left
+                    else env.right_arm_joints + env.right_eef_joints
+                )
             else:
                 raise AssertionError(f"Unexpected cfg type: {type(cfg)!r}")
             values = torch.arange(steps * len(joint_ids), dtype=torch.float32).reshape(
@@ -198,7 +209,7 @@ def _fake_qpos_move_engine_factory(env: _Env, captured: dict | None = None):
             },
             "pick_up",
             "right_full",
-            (1, 2, 4),
+            (1, 75, 4),
         ),
         (
             {
@@ -267,20 +278,7 @@ def test_single_atomic_graph_action_plan_smoke(
             "_public_grasp_approach_direction_candidates",
             lambda *args, **kwargs: [("ranked", torch.tensor([0.0, 0.0, -1.0]))],
         )
-
-        def _plan_public_semantic_grasp_action(**kwargs):
-            return SimpleNamespace(
-                trajectory=torch.arange(8, dtype=torch.float32).reshape(1, 2, 4),
-                joint_ids=env.right_arm_joints + env.right_eef_joints,
-            )
-
-        monkeypatch.setattr(
-            executor,
-            "plan_public_semantic_grasp_action",
-            _plan_public_semantic_grasp_action,
-        )
-    else:
-        monkeypatch.setattr(executor, "_create_engine", _fake_engine_factory(env))
+    monkeypatch.setattr(executor, "_create_engine", _fake_engine_factory(env))
 
     plan = AtomicGraphAction(spec=spec).plan(env=env, require_atomic_action_graph=True)
 
@@ -312,18 +310,12 @@ def test_recovery_public_grasp_candidate_override_caps_strategy_default(
         lambda *args, **kwargs: [("ranked", torch.tensor([0.0, 0.0, -1.0]))],
     )
 
-    def _plan_public_semantic_grasp_action(**kwargs):
-        captured_kwargs.update(kwargs["kwargs"])
-        return SimpleNamespace(
-            trajectory=torch.zeros(1, 2, 4),
-            joint_ids=env.right_arm_joints + env.right_eef_joints,
-        )
+    def _capture_engine(env, cfg_list):
+        cfg = cfg_list[0]
+        captured_kwargs.update(cfg.grasp_rank_options)
+        return _fake_engine_factory(env)(env, cfg_list)
 
-    monkeypatch.setattr(
-        executor,
-        "plan_public_semantic_grasp_action",
-        _plan_public_semantic_grasp_action,
-    )
+    monkeypatch.setattr(executor, "_create_engine", _capture_engine)
 
     AtomicGraphAction(spec=spec).plan(
         env=env,
@@ -601,17 +593,18 @@ def test_pick_up_plan_uses_ranked_semantic_plan(monkeypatch) -> None:
         lambda *args, **kwargs: [("ranked", torch.tensor([0.0, 0.0, -1.0]))],
     )
 
-    def _plan_public_semantic_grasp_action(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(
-            trajectory=trajectory[:, :, env.right_arm_joints + env.right_eef_joints],
-            joint_ids=env.right_arm_joints + env.right_eef_joints,
-        )
+    class _Engine:
+        def __init__(self, cfg_list):
+            self._action_sequence = [("pick_up", SimpleNamespace())]
+            self.cfg_list = cfg_list
+
+        def execute_static(self, target_list):
+            captured["cfg"] = self.cfg_list[0]
+            captured["target"] = target_list[0]
+            return True, trajectory
 
     monkeypatch.setattr(
-        executor,
-        "plan_public_semantic_grasp_action",
-        _plan_public_semantic_grasp_action,
+        executor, "_create_engine", lambda env, cfg_list: _Engine(cfg_list)
     )
     action = AtomicGraphAction(
         spec={
@@ -626,7 +619,8 @@ def test_pick_up_plan_uses_ranked_semantic_plan(monkeypatch) -> None:
 
     assert plan.joint_ids == env.right_arm_joints + env.right_eef_joints
     assert captured["target"] is target
-    assert captured["directions"][0][0] == "ranked"
+    assert captured["cfg"].ranked_grasp_selection is True
+    assert captured["cfg"].grasp_approach_directions[0][0] == "ranked"
     torch.testing.assert_close(plan.trajectory, trajectory[:, :, [4, 5, 6, 7]])
 
 

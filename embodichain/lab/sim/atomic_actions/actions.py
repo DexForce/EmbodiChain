@@ -23,6 +23,7 @@ from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
 from .core import AtomicAction, ObjectSemantics, AntipodalAffordance, ActionCfg
+from .semantic_grasp import SemanticGraspCandidatePlan, select_ranked_semantic_grasp
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
@@ -350,6 +351,15 @@ class PickUpActionCfg(GraspActionCfg):
     grasp_pose_offset_along_approach: float = 0.0
     """Optional scalar offset along approach_direction before planning."""
 
+    ranked_grasp_selection: bool = False
+    """Whether to rank planned semantic grasp candidates before selecting one."""
+
+    grasp_approach_directions: list[tuple[str, torch.Tensor]] | None = None
+    """Optional labeled approach directions used by ranked semantic grasp selection."""
+
+    grasp_rank_options: dict[str, Any] = {}
+    """Additional ranked semantic grasp selection options."""
+
 
 class PickUpAction(MoveAction):
     def __init__(
@@ -379,6 +389,8 @@ class PickUpAction(MoveAction):
         self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
         self.arm_dof = len(self.arm_joint_ids)
         self.dof = len(self.joint_ids)
+        self.last_selected_grasp: SemanticGraspCandidatePlan | None = None
+        self.last_grasp_failures: list[str] = []
 
     def execute(
         self,
@@ -398,6 +410,32 @@ class PickUpAction(MoveAction):
             trajectory of shape (n_envs, n_waypoints, dof),
             joint_ids corresponding to trajectory
         """
+
+        self.last_selected_grasp = None
+        self.last_grasp_failures = []
+
+        if isinstance(target, ObjectSemantics) and self.cfg.ranked_grasp_selection:
+            start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
+            options = dict(self.cfg.grasp_rank_options or {})
+            if self.cfg.grasp_approach_directions:
+                options.setdefault(
+                    "approach_directions",
+                    self.cfg.grasp_approach_directions,
+                )
+            selection = select_ranked_semantic_grasp(
+                action=self,
+                target=target,
+                start_qpos=start_qpos,
+                options=options,
+            )
+            self.last_selected_grasp = selection.candidate
+            self.last_grasp_failures = list(selection.failures)
+            if selection.is_success:
+                return True, selection.trajectory, selection.joint_ids
+            logger.log_warning(
+                "Failed to plan pickup with ranked semantic grasp candidates."
+            )
+            return False, selection.trajectory, self.joint_ids
 
         # Resolve grasp pose
         if isinstance(target, ObjectSemantics):

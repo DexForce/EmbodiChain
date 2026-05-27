@@ -28,8 +28,10 @@ from embodichain.lab.sim.agent.atomic_action_adapter import (
     _public_grasp_effective_antipodal_min_open_length,
     _public_grasp_effective_open_check_margin,
     _public_grasp_lift_height,
-    _rank_public_semantic_grasp_candidates,
     _with_effective_thin_object_public_grasp_kwargs,
+)
+from embodichain.lab.sim.atomic_actions.semantic_grasp import (
+    rank_semantic_grasp_candidates,
 )
 
 
@@ -150,7 +152,7 @@ def test_thin_object_ranking_prefers_top_down_direction():
         candidate_idx=1,
     )
 
-    ranked = _rank_public_semantic_grasp_candidates(
+    ranked = rank_semantic_grasp_candidates(
         [lateral, top_down],
         {
             "public_grasp_is_thin_object": True,

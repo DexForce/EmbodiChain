@@ -72,6 +72,9 @@ def pick_up(
     pre_grasp_distance: float = 0.15,
     lift_height: float = 0.1,
     approach_direction: torch.Tensor | None = None,
+    ranked_grasp_selection: bool = False,
+    grasp_approach_directions: list[tuple[str, torch.Tensor]] | None = None,
+    grasp_rank_options: dict[str, Any] | None = None,
     sample_interval: int = 80,
     hand_interp_steps: int = 5,
     cfg: PickUpActionCfg | None = None,
@@ -90,6 +93,9 @@ def pick_up(
             if approach_direction is not None
             else torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32)
         ),
+        ranked_grasp_selection=ranked_grasp_selection,
+        grasp_approach_directions=grasp_approach_directions,
+        grasp_rank_options=grasp_rank_options or {},
         sample_interval=sample_interval,
         hand_interp_steps=hand_interp_steps,
         **cfg_kwargs,

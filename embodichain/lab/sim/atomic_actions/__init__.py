@@ -50,6 +50,11 @@ from .engine import (
     unregister_action,
     get_registered_actions,
 )
+from .semantic_grasp import (
+    SemanticGraspCandidatePlan,
+    SemanticGraspSelection,
+    rank_semantic_grasp_candidates,
+)
 
 __all__ = [
     # Core classes
@@ -66,6 +71,9 @@ __all__ = [
     "MoveActionCfg",
     "PickUpActionCfg",
     "PlaceActionCfg",
+    "SemanticGraspCandidatePlan",
+    "SemanticGraspSelection",
+    "rank_semantic_grasp_candidates",
     # Functional public API
     "move",
     "pick_up",
