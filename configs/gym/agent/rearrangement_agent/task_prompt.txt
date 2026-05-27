@@ -1,8 +1,14 @@
 Task:
-Use both arms to rearrange a fork and a spoon on opposite sides of a plate. Perform the following steps **simultaneously**.
+Use both arms to rearrange a fork and a spoon on opposite sides of a plate. Perform matching left-arm and right-arm steps simultaneously when both arms are active.
 
 1. Grasp the fork with the left arm and the spoon with the right arm.
 
-2. Reorient both end-effectors to a downward-facing pose.
+2. Reorient both end-effectors to a downward-facing pose while holding the utensils.
 
-3. Place the fork at y = +0.16 and the spoon at y = −0.16 relative to the plate’s center.
+3. Move the held utensils to target end-effector poses relative to the plate's center. Use `move` actions with `object_relative_pose` targets for this step; do not use `place` actions with `table_pose` targets for these plate-relative offsets.
+   - Left arm holding the fork: target `obj_name` = `plate`, `x_offset` = 0.0, `y_offset` = 0.16, `z_offset` = 0.0.
+   - Right arm holding the spoon: target `obj_name` = `plate`, `x_offset` = 0.0, `y_offset` = -0.16, `z_offset` = 0.0.
+
+4. Open both grippers to release the fork and spoon at those plate-relative target positions.
+
+5. Return both arms to their initial poses.
