@@ -248,9 +248,7 @@ class BaseAgentEnv:
             ]
         for key in (
             "use_public_atomic_actions",
-            "use_atomic_action_graph",
             "require_atomic_action_graph",
-            "allow_legacy_atomic_action_fallback",
             "use_public_grasp_action",
             "require_public_grasp_action",
             "use_public_grasp_semantics",

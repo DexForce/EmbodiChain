@@ -29,7 +29,6 @@ from embodichain.lab.gym.utils.misc import get_rotation_replaced_pose
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
-    GripperActionCfg,
     MoveActionCfg,
     ObjectSemantics,
     PickUpActionCfg,
@@ -1453,8 +1452,8 @@ def try_public_gripper_action(
     try:
         engine = _create_engine(
             env,
-            GripperActionCfg(
-                name=log_name,
+            MoveActionCfg(
+                name="move",
                 control_part=_select_arm(robot_name)[2],
                 sample_interval=sample_num,
             ),
@@ -1473,7 +1472,7 @@ def try_public_gripper_action(
             device=engine.device,
         )
 
-        atom_action = engine._actions[log_name]
+        atom_action = engine._actions["move"]
         is_success, trajectory, joint_ids = atom_action.execute(
             target=target_qpos,
             start_qpos=start_qpos,

@@ -590,16 +590,6 @@ def build_parser() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--action_runtime",
-        choices=["atomic_engine", "legacy_agent", "legacy"],
-        default=None,
-        help=(
-            "Compatibility alias for selecting the recovery action executor. "
-            "'atomic_engine' enables compiled atomic graph actions; 'legacy_agent' "
-            "or 'legacy' disables them."
-        ),
-    )
-    parser.add_argument(
         "--open_window",
         action="store_true",
         default=False,
@@ -1145,36 +1135,12 @@ def build_parser() -> argparse.Namespace:
         help="Maximum final xy error accepted by public place validation.",
     )
     parser.add_argument(
-        "--return_to_initial_clearance_height",
-        type=float,
-        default=0.12,
-        help=(
-            "Vertical clearance used before atomic_engine back_to_initial_pose "
-            "joint interpolation."
-        ),
-    )
-    parser.add_argument(
-        "--disable_public_gripper_action",
-        action="store_true",
-        default=False,
-        help="Disable public GripperActionCfg for Agent open/close gripper.",
-    )
-    parser.add_argument(
         "--require_public_non_grasp_actions",
         action="store_true",
         default=False,
         help=(
             "Fail if non-grasp Agent skills cannot use public atomic actions "
             "instead of falling back to legacy planning."
-        ),
-    )
-    parser.add_argument(
-        "--disable_atomic_action_graph",
-        action="store_true",
-        default=False,
-        help=(
-            "Disable compiled atomic_action/atomic_sequence graph execution and "
-            "use legacy Agent callable fallbacks."
         ),
     )
     parser.add_argument(
@@ -1716,7 +1682,6 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
         f"public_grasp_strategy={args.public_grasp_strategy}, "
         f"recovery_public_grasp_strategy={args.recovery_public_grasp_strategy}, "
         f"use_public_place={not args.disable_public_place_action}, "
-        f"use_public_gripper={not args.disable_public_gripper_action}, "
         f"strict_public_non_grasp={args.require_public_non_grasp_actions}, "
         f"generate_public_grasp_candidates={args.generate_public_grasp_candidates}, "
         f"auto_public_grasp_approach={args.public_grasp_auto_approach_direction}, "
@@ -1902,16 +1867,11 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
                     public_place_validation_max_xy_error=(
                         args.public_place_validation_max_xy_error
                     ),
-                    return_to_initial_clearance_height=(
-                        args.return_to_initial_clearance_height
-                    ),
                     validate_place_preconditions=True,
                     validate_public_place_after_action=True,
-                    use_public_gripper_action=not args.disable_public_gripper_action,
                     require_public_non_grasp_actions=(
                         args.require_public_non_grasp_actions
                     ),
-                    use_atomic_action_graph=not args.disable_atomic_action_graph,
                     require_atomic_action_graph=args.require_atomic_action_graph,
                     validate_upright_object_after_action=(
                         not args.disable_upright_object_validation
@@ -2056,10 +2016,6 @@ def run_case(case: CaseSpec, args: argparse.Namespace, output_root: Path) -> Non
 
 def main() -> None:
     args = build_parser()
-    if args.action_runtime in {"legacy_agent", "legacy"}:
-        args.disable_atomic_action_graph = True
-    elif args.action_runtime == "atomic_engine":
-        args.disable_atomic_action_graph = False
     if args.open_window:
         args.headless = False
     output_root = (

@@ -685,10 +685,6 @@ def _action_target_objects(action: Mapping[str, Any]) -> list[str]:
         for target in action.get("target_list", []):
             objects.extend(_target_objects(target))
 
-    fallback = _atomic_action_fallback(action)
-    if fallback is not None:
-        objects.extend(_action_target_objects(fallback))
-
     obj_name = dict(action.get("kwargs", {})).get("obj_name")
     if obj_name is not None:
         objects.append(str(obj_name))
@@ -701,7 +697,10 @@ def _action_robot_objects(action: Mapping[str, Any]) -> dict[str, str]:
         return robot_objects
 
     if _is_atomic_action_spec(action):
-        robot_name = dict(action.get("cfg", {})).get("control_part")
+        cfg = dict(action.get("cfg", {}))
+        robot_name = cfg.get("arm_control_part", cfg.get("control_part"))
+        if isinstance(robot_name, str) and robot_name.endswith("_eef"):
+            robot_name = _arm_control_part(robot_name)
         obj_name = _first_target_object(action.get("target"))
         if robot_name is not None and obj_name is not None:
             robot_objects[str(robot_name)] = str(obj_name)
@@ -709,10 +708,6 @@ def _action_robot_objects(action: Mapping[str, Any]) -> dict[str, str]:
         for nested_action in action.get("actions", []):
             if isinstance(nested_action, Mapping):
                 robot_objects.update(_action_robot_objects(nested_action))
-
-    fallback = _atomic_action_fallback(action)
-    if fallback is not None:
-        robot_objects.update(_action_robot_objects(fallback))
 
     kwargs = dict(action.get("kwargs", {}))
     robot_name = kwargs.get("robot_name")
@@ -821,17 +816,16 @@ def _action_robots(action: Mapping[str, Any]) -> list[str]:
         return robots
 
     if _is_atomic_action_spec(action):
-        robot_name = dict(action.get("cfg", {})).get("control_part")
+        cfg = dict(action.get("cfg", {}))
+        robot_name = cfg.get("arm_control_part", cfg.get("control_part"))
+        if isinstance(robot_name, str) and robot_name.endswith("_eef"):
+            robot_name = _arm_control_part(robot_name)
         if robot_name is not None:
             robots.append(str(robot_name))
     elif _is_atomic_sequence_spec(action):
         for nested_action in action.get("actions", []):
             if isinstance(nested_action, Mapping):
                 robots.extend(_action_robots(nested_action))
-
-    fallback = _atomic_action_fallback(action)
-    if fallback is not None:
-        robots.extend(_action_robots(fallback))
 
     kwargs = dict(action.get("kwargs", {}))
     robot_name = kwargs.get("robot_name")
@@ -1190,8 +1184,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
             robot_name=robot_name,
             state=state,
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "move_relative_to_object":
@@ -1208,8 +1200,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
                 "z_offset": kwargs.get("z_offset", 0.0),
             },
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "move_to_absolute_position":
@@ -1222,8 +1212,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
                 "z": kwargs.get("z"),
             },
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "move_by_relative_offset":
@@ -1237,8 +1225,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
                 "mode": kwargs.get("mode", "extrinsic"),
             },
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "back_to_initial_pose":
@@ -1246,8 +1232,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
             robot_name=robot_name,
             target={"kind": "initial_pose"},
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "orient_eef":
@@ -1258,8 +1242,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
                 "direction": kwargs.get("direction", "front"),
             },
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "rotate_eef":
@@ -1271,8 +1253,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
                 "joint_index": kwargs.get("joint_index", 5),
             },
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     if fn_name == "move":
@@ -1283,8 +1263,6 @@ def _legacy_action_to_atomic(action: Mapping[str, Any]) -> dict[str, Any]:
             robot_name=robot_name,
             target=target,
             sample_interval=kwargs.get("sample_num"),
-            fallback_fn=fn_name,
-            fallback_kwargs=kwargs,
         )
 
     raise ValueError(
@@ -1337,8 +1315,6 @@ def _move_to_safe_pose_actions(arms: list[str]) -> dict[str, Any]:
         action = _atomic_move_action(
             robot_name=robot_name,
             target={"kind": "initial_pose"},
-            fallback_fn="back_to_initial_pose",
-            fallback_kwargs={"robot_name": robot_name},
         )
         if "left" in robot_name:
             actions["left_arm_action"] = action
@@ -1354,12 +1330,6 @@ def _atomic_pick_up_action(
     pre_grasp_dis: float,
     force_valid: bool,
 ) -> dict[str, Any]:
-    legacy_kwargs = {
-        "robot_name": robot_name,
-        "obj_name": obj_name,
-        "pre_grasp_dis": pre_grasp_dis,
-        "force_valid": force_valid,
-    }
     runtime_kwargs = {
         "force_valid": force_valid,
         "public_grasp_strategy": "legacy_guided",
@@ -1383,7 +1353,6 @@ def _atomic_pick_up_action(
         },
         "target": {"kind": "object_semantics", "obj_name": obj_name},
         "runtime_kwargs": runtime_kwargs,
-        "fallback": {"fn": "grasp", "kwargs": legacy_kwargs},
     }
 
 
@@ -1396,18 +1365,10 @@ def _atomic_place_action(
     x: Any = None,
     y: Any = None,
 ) -> dict[str, Any]:
-    legacy_kwargs = {
-        "robot_name": robot_name,
-        "obj_name": obj_name,
-        "pre_place_dis": pre_place_dis,
-        "force_valid": force_valid,
-    }
     target = {"kind": "table_pose", "obj_name": obj_name}
     if x is not None:
-        legacy_kwargs["x"] = x
         target["x"] = x
     if y is not None:
-        legacy_kwargs["y"] = y
         target["y"] = y
     return {
         "kind": "atomic_action",
@@ -1420,7 +1381,6 @@ def _atomic_place_action(
         },
         "target": target,
         "runtime_kwargs": {"force_valid": force_valid},
-        "fallback": {"fn": "place_on_table", "kwargs": legacy_kwargs},
     }
 
 
@@ -1429,13 +1389,11 @@ def _atomic_move_action(
     robot_name: str,
     target: Any,
     sample_interval: Any = None,
-    fallback_fn: str | None = None,
-    fallback_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {"control_part": _arm_control_part(robot_name)}
     if sample_interval is not None:
         cfg["sample_interval"] = int(sample_interval)
-    action = {
+    return {
         "kind": "atomic_action",
         "name": "move",
         "cfg_class": "MoveActionCfg",
@@ -1443,12 +1401,6 @@ def _atomic_move_action(
         "target": deepcopy(target),
         "runtime_kwargs": {},
     }
-    if fallback_fn is not None:
-        action["fallback"] = {
-            "fn": fallback_fn,
-            "kwargs": dict(fallback_kwargs or {}),
-        }
-    return action
 
 
 def _atomic_gripper_action(
@@ -1456,10 +1408,7 @@ def _atomic_gripper_action(
     robot_name: str,
     state: str,
     sample_interval: Any = None,
-    fallback_fn: str | None = None,
-    fallback_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    action_name = "gripper_open" if state == "open" else "gripper_close"
     cfg: dict[str, Any] = {
         "control_part": _hand_control_part(robot_name),
         "arm_control_part": _arm_control_part(robot_name),
@@ -1468,17 +1417,12 @@ def _atomic_gripper_action(
         cfg["sample_interval"] = int(sample_interval)
     action = {
         "kind": "atomic_action",
-        "name": action_name,
-        "cfg_class": "GripperActionCfg",
+        "name": "move",
+        "cfg_class": "MoveActionCfg",
         "cfg": cfg,
         "target": {"kind": "gripper_state", "state": state},
         "runtime_kwargs": {},
     }
-    if fallback_fn is not None:
-        action["fallback"] = {
-            "fn": fallback_fn,
-            "kwargs": dict(fallback_kwargs or {}),
-        }
     return action
 
 
@@ -1503,9 +1447,6 @@ def _set_force_valid(action: dict[str, Any] | None, value: bool) -> None:
         return
     if _is_atomic_action_spec(action) or _is_atomic_sequence_spec(action):
         action.setdefault("runtime_kwargs", {})["force_valid"] = value
-        fallback = _atomic_action_fallback(action)
-        if fallback is not None:
-            _set_force_valid(fallback, value)
         for nested_action in action.get("actions", []):
             if isinstance(nested_action, dict):
                 _set_force_valid(nested_action, value)
@@ -1519,61 +1460,6 @@ def _is_atomic_action_spec(action: Mapping[str, Any]) -> bool:
 
 def _is_atomic_sequence_spec(action: Mapping[str, Any]) -> bool:
     return action.get("kind") == "atomic_sequence"
-
-
-def _atomic_action_fallback(action: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    fallback = action.get("fallback", action.get("legacy_call"))
-    if isinstance(fallback, Mapping):
-        return fallback
-    if _is_atomic_action_spec(action):
-        return _derived_atomic_action_fallback(action)
-    return None
-
-
-def _derived_atomic_action_fallback(
-    action: Mapping[str, Any],
-) -> Mapping[str, Any] | None:
-    action_name = action.get("name")
-    cfg = dict(action.get("cfg", {}))
-    target = action.get("target")
-    runtime_kwargs = dict(action.get("runtime_kwargs", {}))
-    robot_name = cfg.get("control_part")
-    obj_name = _first_target_object(target)
-    if robot_name is None or obj_name is None:
-        return None
-
-    if action_name == "pick_up":
-        return {
-            "fn": "grasp",
-            "kwargs": {
-                "robot_name": robot_name,
-                "obj_name": obj_name,
-                "pre_grasp_dis": cfg.get(
-                    "pre_grasp_distance",
-                    cfg.get("pre_grasp_dis", 0.1),
-                ),
-                "force_valid": bool(runtime_kwargs.get("force_valid", False)),
-            },
-        }
-
-    if action_name == "place":
-        kwargs = {
-            "robot_name": robot_name,
-            "obj_name": obj_name,
-            "pre_place_dis": cfg.get(
-                "pre_place_distance",
-                cfg.get("lift_height", cfg.get("pre_place_dis", 0.08)),
-            ),
-            "force_valid": bool(runtime_kwargs.get("force_valid", False)),
-        }
-        if isinstance(target, Mapping):
-            if target.get("x") is not None:
-                kwargs["x"] = target["x"]
-            if target.get("y") is not None:
-                kwargs["y"] = target["y"]
-        return {"fn": "place_on_table", "kwargs": kwargs}
-
-    return None
 
 
 def _first_hold_lost_monitor(binding: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -1765,9 +1651,7 @@ def _resolve_runtime(
             "AgentTaskGraph",
         )
     if action_module is None:
-        action_module = importlib.import_module(
-            "embodichain.lab.sim.agent.atom_actions"
-        )
+        action_module = {}
     if monitor_module is None:
         monitor_module = importlib.import_module(
             "embodichain.lab.sim.agent.monitor_functions"
@@ -2037,12 +1921,7 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
     ):
         from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 
-        fallback = _atomic_action_fallback(spec)
-        fallback_action = _compile_optional_call(fallback, action_module)
-        return AtomicGraphAction(
-            spec=_normalize_nominal_atomic_action(spec),
-            fallback_action=fallback_action,
-        )
+        return AtomicGraphAction(spec=_normalize_nominal_atomic_action(spec))
     return _compile_call(spec, action_module)
 
 

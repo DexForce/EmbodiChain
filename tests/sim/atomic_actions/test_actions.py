@@ -28,8 +28,6 @@ from embodichain.lab.sim.atomic_actions.core import (
     ObjectSemantics,
 )
 from embodichain.lab.sim.atomic_actions.actions import (
-    GripperAction,
-    GripperActionCfg,
     MoveAction,
     MoveActionCfg,
     PickUpAction,
@@ -190,26 +188,26 @@ class TestMoveActionHelpers:
 
 
 # ---------------------------------------------------------------------------
-# GripperAction
+# MoveAction gripper qpos interpolation
 # ---------------------------------------------------------------------------
 
 
-class TestGripperAction:
-    """Tests for gripper-only action interpolation."""
+class TestMoveActionHandQpos:
+    """Tests for gripper-only interpolation through MoveAction."""
 
     def setup_method(self):
         self.robot = _make_mock_robot()
         self.mg = _make_mock_motion_generator(self.robot)
 
     def test_init_sets_hand_joint_ids(self):
-        cfg = GripperActionCfg(control_part="hand", sample_interval=4)
-        action = GripperAction(self.mg, cfg=cfg)
-        assert action.hand_joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
+        cfg = MoveActionCfg(control_part="hand", sample_interval=4)
+        action = MoveAction(self.mg, cfg=cfg)
+        assert action.arm_joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
         assert action.dof == HAND_DOF
 
     def test_execute_interpolates_to_target(self):
-        cfg = GripperActionCfg(control_part="hand", sample_interval=4)
-        action = GripperAction(self.mg, cfg=cfg)
+        cfg = MoveActionCfg(control_part="hand", sample_interval=4)
+        action = MoveAction(self.mg, cfg=cfg)
         target = torch.tensor([0.025, 0.025])
 
         is_success, trajectory, joint_ids = action.execute(target=target)
@@ -220,19 +218,17 @@ class TestGripperAction:
         torch.testing.assert_close(trajectory[:, 0], torch.zeros(NUM_ENVS, HAND_DOF))
         torch.testing.assert_close(trajectory[:, -1], target.repeat(NUM_ENVS, 1))
 
-    def test_execute_uses_cfg_target_qpos(self):
-        target = torch.tensor([0.01, 0.02])
-        cfg = GripperActionCfg(
-            control_part="hand",
-            target_qpos=target,
-            sample_interval=3,
-        )
-        action = GripperAction(self.mg, cfg=cfg)
+    def test_execute_accepts_batched_target_qpos(self):
+        target = torch.tensor([[0.01, 0.02], [0.03, 0.04]])
+        start = torch.full((NUM_ENVS, HAND_DOF), 0.005)
+        cfg = MoveActionCfg(control_part="hand", sample_interval=3)
+        action = MoveAction(self.mg, cfg=cfg)
 
-        is_success, trajectory, _ = action.execute()
+        is_success, trajectory, _ = action.execute(target=target, start_qpos=start)
 
         assert is_success is True
-        torch.testing.assert_close(trajectory[:, -1], target.repeat(NUM_ENVS, 1))
+        torch.testing.assert_close(trajectory[:, 0], start)
+        torch.testing.assert_close(trajectory[:, -1], target)
 
 
 # ---------------------------------------------------------------------------

@@ -31,11 +31,9 @@ from .core import (
 )
 from .actions import (
     MoveAction,
-    GripperAction,
     PickUpAction,
     PlaceAction,
     MoveActionCfg,
-    GripperActionCfg,
     PickUpActionCfg,
     PlaceActionCfg,
 )
@@ -63,11 +61,9 @@ __all__ = [
     "AtomicAction",
     # Action implementations
     "MoveAction",
-    "GripperAction",
     "PickUpAction",
     "PlaceAction",
     "MoveActionCfg",
-    "GripperActionCfg",
     "PickUpActionCfg",
     "PlaceActionCfg",
     # Functional public API

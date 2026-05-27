@@ -21,7 +21,7 @@ from unittest.mock import Mock
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    GripperActionCfg,
+    MoveActionCfg,
     gripper_close,
     gripper_open,
     move,
@@ -29,7 +29,6 @@ from embodichain.lab.sim.atomic_actions import (
     place,
 )
 from embodichain.lab.sim.atomic_actions import functional
-
 
 NUM_ENVS = 2
 ARM_DOF = 6
@@ -212,18 +211,18 @@ def test_gripper_open_close_real_targets_and_joint_ids():
     torch.testing.assert_close(close_traj[:, -1], close_qpos.repeat(NUM_ENVS, 1))
 
 
-def test_gripper_can_use_cfg_target_qpos():
+def test_gripper_can_use_move_cfg():
     motion_generator = _make_motion_generator()
     start_qpos = torch.tensor([0.02, 0.02])
     target_qpos = torch.tensor([0.01, 0.015])
-    cfg = GripperActionCfg(
+    cfg = MoveActionCfg(
         control_part="hand",
-        target_qpos=target_qpos,
         sample_interval=3,
     )
 
     is_success, trajectory, joint_ids = gripper_open(
         motion_generator=motion_generator,
+        open_qpos=target_qpos,
         cfg=cfg,
         start_qpos=start_qpos,
     )

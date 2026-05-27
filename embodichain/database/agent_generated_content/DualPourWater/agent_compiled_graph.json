@@ -47,19 +47,55 @@
         "source": "v0_start",
         "target": "v1_grasped",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": false,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": false,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       },
@@ -68,14 +104,20 @@
         "source": "v1_grasped",
         "target": "v2_cup_lifted",
         "left_arm_action": {
-          "fn": "move_by_relative_offset",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "relative_offset",
             "dx": 0.0,
             "dy": 0.0,
             "dz": 0.1,
             "mode": "extrinsic"
-          }
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -84,13 +126,19 @@
         "source": "v2_cup_lifted",
         "target": "v3_cup_at_pour_position",
         "left_arm_action": {
-          "fn": "move_to_absolute_position",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "absolute_position",
             "x": 0.55,
             "y": 0.05,
             "z": null
-          }
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -100,14 +148,20 @@
         "target": "v4_bottle_at_pour_start",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "move_relative_to_object",
-          "kwargs": {
-            "robot_name": "right_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "object_relative_pose",
             "obj_name": "cup",
             "x_offset": 0.05,
             "y_offset": -0.1,
             "z_offset": 0.125
-          }
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -116,11 +170,18 @@
         "target": "v5_pouring",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "rotate_eef",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "degree": -70.0
-          }
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "eef_rotation_delta",
+            "degree": -70.0,
+            "joint_index": 5
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -129,11 +190,18 @@
         "target": "v6_pour_complete",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "rotate_eef",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "degree": 70.0
-          }
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "eef_rotation_delta",
+            "degree": 70.0,
+            "joint_index": 5
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -141,23 +209,41 @@
         "source": "v6_pour_complete",
         "target": "v7_placed",
         "left_arm_action": {
-          "fn": "place_on_table",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "place",
+          "cfg_class": "PlaceActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "lift_height": 0.08
+          },
+          "target": {
+            "kind": "table_pose",
             "obj_name": "cup",
             "x": 0.6,
-            "y": 0.1,
-            "pre_place_dis": 0.08
+            "y": 0.1
+          },
+          "runtime_kwargs": {
+            "force_valid": false
           }
         },
         "right_arm_action": {
-          "fn": "place_on_table",
-          "kwargs": {
-            "robot_name": "right_arm",
+          "kind": "atomic_action",
+          "name": "place",
+          "cfg_class": "PlaceActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "lift_height": 0.08
+          },
+          "target": {
+            "kind": "table_pose",
             "obj_name": "bottle",
             "x": 0.75,
-            "y": -0.16,
-            "pre_place_dis": 0.08
+            "y": -0.16
+          },
+          "runtime_kwargs": {
+            "force_valid": false
           }
         }
       },
@@ -166,16 +252,28 @@
         "source": "v7_placed",
         "target": "v8_done",
         "left_arm_action": {
-          "fn": "back_to_initial_pose",
-          "kwargs": {
-            "robot_name": "left_arm"
-          }
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "initial_pose"
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": {
-          "fn": "back_to_initial_pose",
-          "kwargs": {
-            "robot_name": "right_arm"
-          }
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "initial_pose"
+          },
+          "runtime_kwargs": {}
         }
       }
     ]
@@ -414,21 +512,55 @@
         "source": "v0_start",
         "target": "v1_grasped",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       },
@@ -437,12 +569,29 @@
         "source": "v1_grasped",
         "target": "rn_e02_lift_cup_1_regrasp_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -452,15 +601,20 @@
         "source": "rn_e02_lift_cup_1_regrasp_cup",
         "target": "v2_cup_lifted",
         "left_arm_action": {
-          "fn": "move_by_relative_offset",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "relative_offset",
             "dx": 0.0,
             "dy": 0.0,
             "dz": 0.1,
-            "mode": "extrinsic",
-            "force_valid": true
-          }
+            "mode": "extrinsic"
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -469,12 +623,29 @@
         "source": "rn_e02_lift_cup_1_regrasp_cup",
         "target": "rn_e02_lift_cup_1_regrasp_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -484,12 +655,29 @@
         "source": "v2_cup_lifted",
         "target": "rn_e03_move_cup_to_position_1_regrasp_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -499,15 +687,20 @@
         "source": "rn_e03_move_cup_to_position_1_regrasp_cup",
         "target": "rn_e03_move_cup_to_position_2_replay_e02_lift_cup",
         "left_arm_action": {
-          "fn": "move_by_relative_offset",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "relative_offset",
             "dx": 0.0,
             "dy": 0.0,
             "dz": 0.1,
-            "mode": "extrinsic",
-            "force_valid": true
-          }
+            "mode": "extrinsic"
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -516,14 +709,19 @@
         "source": "rn_e03_move_cup_to_position_2_replay_e02_lift_cup",
         "target": "v3_cup_at_pour_position",
         "left_arm_action": {
-          "fn": "move_to_absolute_position",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "absolute_position",
             "x": 0.55,
             "y": 0.05,
-            "z": null,
-            "force_valid": true
-          }
+            "z": null
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -532,12 +730,29 @@
         "source": "rn_e03_move_cup_to_position_1_regrasp_cup",
         "target": "rn_e03_move_cup_to_position_1_regrasp_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -547,12 +762,29 @@
         "source": "rn_e03_move_cup_to_position_2_replay_e02_lift_cup",
         "target": "rn_e03_move_cup_to_position_2_replay_e02_lift_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -563,12 +795,29 @@
         "target": "rn_e04_position_bottle_for_pour_1_regrasp_bottle",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       },
@@ -578,15 +827,20 @@
         "target": "v4_bottle_at_pour_start",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "move_relative_to_object",
-          "kwargs": {
-            "robot_name": "right_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "object_relative_pose",
             "obj_name": "cup",
             "x_offset": 0.05,
             "y_offset": -0.1,
-            "z_offset": 0.125,
-            "force_valid": true
-          }
+            "z_offset": 0.125
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -595,12 +849,29 @@
         "target": "rn_e04_position_bottle_for_pour_1_regrasp_bottle",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       },
@@ -609,12 +880,29 @@
         "source": "v3_cup_at_pour_position",
         "target": "rn_e04_position_bottle_for_pour_1_regrasp_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -624,15 +912,20 @@
         "source": "rn_e04_position_bottle_for_pour_1_regrasp_cup",
         "target": "rn_e04_position_bottle_for_pour_2_replay_e02_lift_cup",
         "left_arm_action": {
-          "fn": "move_by_relative_offset",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "relative_offset",
             "dx": 0.0,
             "dy": 0.0,
             "dz": 0.1,
-            "mode": "extrinsic",
-            "force_valid": true
-          }
+            "mode": "extrinsic"
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -641,14 +934,19 @@
         "source": "rn_e04_position_bottle_for_pour_2_replay_e02_lift_cup",
         "target": "rn_e04_position_bottle_for_pour_3_replay_e03_move_cup_to_position",
         "left_arm_action": {
-          "fn": "move_to_absolute_position",
-          "kwargs": {
-            "robot_name": "left_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "left_arm"
+          },
+          "target": {
+            "kind": "absolute_position",
             "x": 0.55,
             "y": 0.05,
-            "z": null,
-            "force_valid": true
-          }
+            "z": null
+          },
+          "runtime_kwargs": {}
         },
         "right_arm_action": null
       },
@@ -658,15 +956,20 @@
         "target": "v4_bottle_at_pour_start",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "move_relative_to_object",
-          "kwargs": {
-            "robot_name": "right_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "object_relative_pose",
             "obj_name": "cup",
             "x_offset": 0.05,
             "y_offset": -0.1,
-            "z_offset": 0.125,
-            "force_valid": true
-          }
+            "z_offset": 0.125
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -674,12 +977,29 @@
         "source": "rn_e04_position_bottle_for_pour_1_regrasp_cup",
         "target": "rn_e04_position_bottle_for_pour_1_regrasp_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -689,12 +1009,29 @@
         "source": "rn_e04_position_bottle_for_pour_2_replay_e02_lift_cup",
         "target": "rn_e04_position_bottle_for_pour_2_replay_e02_lift_cup",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -704,12 +1041,29 @@
         "source": "rn_e04_position_bottle_for_pour_3_replay_e03_move_cup_to_position",
         "target": "rn_e04_position_bottle_for_pour_3_replay_e03_move_cup_to_position",
         "left_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "left_arm",
-            "obj_name": "cup",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "left_arm",
+            "hand_control_part": "left_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "cup"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         },
         "right_arm_action": null
@@ -720,12 +1074,29 @@
         "target": "rn_e05_tilt_bottle_1_regrasp_bottle",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       },
@@ -735,15 +1106,20 @@
         "target": "rn_e05_tilt_bottle_2_replay_e04_position_bottle_for_pour",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "move_relative_to_object",
-          "kwargs": {
-            "robot_name": "right_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "object_relative_pose",
             "obj_name": "cup",
             "x_offset": 0.05,
             "y_offset": -0.1,
-            "z_offset": 0.125,
-            "force_valid": true
-          }
+            "z_offset": 0.125
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -752,12 +1128,18 @@
         "target": "v5_pouring",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "rotate_eef",
-          "kwargs": {
-            "robot_name": "right_arm",
+          "kind": "atomic_action",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
+          "cfg": {
+            "control_part": "right_arm"
+          },
+          "target": {
+            "kind": "eef_rotation_delta",
             "degree": -70.0,
-            "force_valid": true
-          }
+            "joint_index": 5
+          },
+          "runtime_kwargs": {}
         }
       },
       {
@@ -766,12 +1148,29 @@
         "target": "rn_e05_tilt_bottle_1_regrasp_bottle",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       },
@@ -781,12 +1180,29 @@
         "target": "rn_e05_tilt_bottle_2_replay_e04_position_bottle_for_pour",
         "left_arm_action": null,
         "right_arm_action": {
-          "fn": "grasp",
-          "kwargs": {
-            "robot_name": "right_arm",
-            "obj_name": "bottle",
-            "pre_grasp_dis": 0.1,
-            "force_valid": true
+          "kind": "atomic_action",
+          "name": "pick_up",
+          "cfg_class": "PickUpActionCfg",
+          "cfg": {
+            "control_part": "right_arm",
+            "hand_control_part": "right_eef",
+            "pre_grasp_distance": 0.1
+          },
+          "target": {
+            "kind": "object_semantics",
+            "obj_name": "bottle"
+          },
+          "runtime_kwargs": {
+            "force_valid": true,
+            "public_grasp_strategy": "legacy_guided",
+            "public_grasp_candidate_num": 32,
+            "public_grasp_pre_grasp_distance": 0.05,
+            "public_grasp_lift_height": 0.15,
+            "public_grasp_rank_by_legacy_pose": true,
+            "public_grasp_use_legacy_orientation": true,
+            "validate_public_grasp_after_action": true,
+            "public_grasp_validation_min_object_lift": 0.03,
+            "public_grasp_validation_max_object_xy_displacement": 0.16
           }
         }
       }

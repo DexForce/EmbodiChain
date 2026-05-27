@@ -28,8 +28,6 @@ from typing import Any
 import torch
 
 from .actions import (
-    GripperAction,
-    GripperActionCfg,
     MoveAction,
     MoveActionCfg,
     PickUpAction,
@@ -141,18 +139,17 @@ def gripper_open(
     start_qpos: torch.Tensor | None = None,
     control_part: str = "hand",
     sample_interval: int = 15,
-    cfg: GripperActionCfg | None = None,
+    cfg: MoveActionCfg | None = None,
     **cfg_kwargs: Any,
 ) -> tuple[bool, torch.Tensor, list[int]]:
-    """Open a gripper by interpolating hand joints to the target open qpos."""
-    target_qpos = open_qpos if open_qpos is not None else getattr(cfg, "target_qpos", None)
-    action_cfg = cfg or GripperActionCfg(
+    """Open a gripper through MoveAction joint interpolation."""
+    target_qpos = open_qpos
+    action_cfg = cfg or MoveActionCfg(
         control_part=control_part,
-        target_qpos=target_qpos,
         sample_interval=sample_interval,
         **cfg_kwargs,
     )
-    return GripperAction(motion_generator, cfg=action_cfg).execute(
+    return MoveAction(motion_generator, cfg=action_cfg).execute(
         target=target_qpos,
         start_qpos=start_qpos,
     )
@@ -165,20 +162,17 @@ def gripper_close(
     start_qpos: torch.Tensor | None = None,
     control_part: str = "hand",
     sample_interval: int = 15,
-    cfg: GripperActionCfg | None = None,
+    cfg: MoveActionCfg | None = None,
     **cfg_kwargs: Any,
 ) -> tuple[bool, torch.Tensor, list[int]]:
-    """Close a gripper by interpolating hand joints to the target close qpos."""
-    target_qpos = (
-        close_qpos if close_qpos is not None else getattr(cfg, "target_qpos", None)
-    )
-    action_cfg = cfg or GripperActionCfg(
+    """Close a gripper through MoveAction joint interpolation."""
+    target_qpos = close_qpos
+    action_cfg = cfg or MoveActionCfg(
         control_part=control_part,
-        target_qpos=target_qpos,
         sample_interval=sample_interval,
         **cfg_kwargs,
     )
-    return GripperAction(motion_generator, cfg=action_cfg).execute(
+    return MoveAction(motion_generator, cfg=action_cfg).execute(
         target=target_qpos,
         start_qpos=start_qpos,
     )

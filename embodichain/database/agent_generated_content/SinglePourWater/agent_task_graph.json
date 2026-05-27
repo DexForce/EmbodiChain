@@ -144,8 +144,8 @@
         "target": {
           "kind": "table_pose",
           "obj_name": "bottle",
-          "x": 0.75,
-          "y": -0.16
+          "x": 0.7,
+          "y": -0.1
         },
         "runtime_kwargs": {
           "force_valid": false

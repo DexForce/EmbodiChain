@@ -454,7 +454,7 @@ def parse_args() -> argparse.Namespace:
         "--disable_public_gripper_action",
         action="store_true",
         default=False,
-        help="Disable public GripperActionCfg for Agent open/close gripper.",
+        help="Disable MoveAction-backed Agent open/close gripper execution.",
     )
     parser.add_argument(
         "--require_public_non_grasp_actions",

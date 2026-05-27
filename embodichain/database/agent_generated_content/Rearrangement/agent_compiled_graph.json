@@ -161,8 +161,8 @@
         "target": "v4_placed",
         "left_arm_action": {
           "kind": "atomic_action",
-          "name": "gripper_open",
-          "cfg_class": "GripperActionCfg",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
           "cfg": {
             "control_part": "left_eef",
             "arm_control_part": "left_arm"
@@ -175,8 +175,8 @@
         },
         "right_arm_action": {
           "kind": "atomic_action",
-          "name": "gripper_open",
-          "cfg_class": "GripperActionCfg",
+          "name": "move",
+          "cfg_class": "MoveActionCfg",
           "cfg": {
             "control_part": "right_eef",
             "arm_control_part": "right_arm"

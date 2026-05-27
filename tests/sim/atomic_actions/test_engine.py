@@ -34,7 +34,7 @@ from embodichain.lab.sim.atomic_actions.engine import (
     register_action,
     unregister_action,
 )
-from embodichain.lab.sim.atomic_actions.actions import GripperActionCfg
+from embodichain.lab.sim.atomic_actions.actions import MoveActionCfg
 
 # ---------------------------------------------------------------------------
 # Global Action Registry
@@ -192,15 +192,15 @@ class TestResolveTarget:
 
 
 class TestBuiltinActions:
-    """Tests for built-in action aliases registered by AtomicActionEngine."""
+    """Tests for built-in actions registered by AtomicActionEngine."""
 
-    def test_execute_static_supports_gripper_alias(self):
+    def test_execute_static_supports_move_hand_qpos(self):
         robot = Mock()
         robot.device = torch.device("cpu")
         robot.dof = 8
         robot.get_qpos.return_value = torch.zeros(1, 8)
-        robot.get_joint_ids.side_effect = (
-            lambda name=None: [6, 7] if name == "hand" else list(range(8))
+        robot.get_joint_ids.side_effect = lambda name=None: (
+            [6, 7] if name == "hand" else list(range(8))
         )
 
         mg = Mock()
@@ -210,7 +210,7 @@ class TestBuiltinActions:
         engine = AtomicActionEngine(
             mg,
             actions_cfg_list=[
-                GripperActionCfg(name="open_gripper", control_part="hand"),
+                MoveActionCfg(name="move", control_part="hand", sample_interval=15),
             ],
         )
         is_success, trajectory = engine.execute_static(

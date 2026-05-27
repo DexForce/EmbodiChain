@@ -37,7 +37,6 @@ from embodichain.lab.sim.agent.atomic_action_adapter import (
 )
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
-    GripperActionCfg,
     MoveActionCfg,
     PlaceActionCfg,
 )
@@ -79,14 +78,6 @@ class AtomicEnginePlanner:
             )
 
         if len(action_specs) == 1:
-            direct_plan = _direct_move_plan(
-                action_specs[0],
-                env=env,
-                robot_name=robot_name,
-                kwargs=_action_runtime_kwargs(action_specs[0], kwargs),
-            )
-            if direct_plan is not None:
-                return direct_plan
             orientation_plan = _single_eef_orientation_move_plan(
                 action_specs[0],
                 env=env,
@@ -221,11 +212,6 @@ def _robot_name_from_action_spec(action: Mapping[str, Any]) -> str | None:
         if robot_name.endswith("_eef"):
             return "right_arm" if "right" in robot_name else "left_arm"
         return robot_name
-    fallback = action.get("fallback", action.get("legacy_call"))
-    if isinstance(fallback, Mapping):
-        kwargs = dict(fallback.get("kwargs", {}))
-        if kwargs.get("robot_name") is not None:
-            return str(kwargs["robot_name"])
     return None
 
 
@@ -332,19 +318,6 @@ def _build_action_cfg(
             ),
         )
 
-    if action_name in {"gripper_open", "gripper_close"}:
-        return GripperActionCfg(
-            name=str(action_name),
-            control_part=str(cfg_payload.get("control_part", hand_part)),
-            sample_interval=_int_option(
-                cfg_payload.get(
-                    "sample_interval",
-                    kwargs.get("sample_interval", kwargs.get("sample_num")),
-                ),
-                default=15,
-            ),
-        )
-
     raise RuntimeError(f"Unsupported atomic graph action '{action_name}'.")
 
 
@@ -442,15 +415,13 @@ def _resolve_action_target(
         )
 
     if action_name == "move":
+        if isinstance(target, Mapping) and target.get("kind") == "gripper_state":
+            return _resolve_gripper_target(
+                target,
+                env=env,
+                robot_name=robot_name,
+            )
         return _resolve_pose_target(target, env=env, robot_name=robot_name)
-
-    if action_name in {"gripper_open", "gripper_close"}:
-        return _resolve_gripper_target(
-            target,
-            env=env,
-            robot_name=robot_name,
-            action_name=str(action_name),
-        )
 
     raise RuntimeError(f"Unsupported atomic graph action '{action_name}'.")
 
@@ -479,149 +450,37 @@ def _controlled_joint_ids(
     arm_ids = env.left_arm_joints if is_left else env.right_arm_joints
     hand_ids = env.left_eef_joints if is_left else env.right_eef_joints
     names = {str(action.get("name")) for action in action_specs}
-    if names <= {"move"}:
-        return list(arm_ids)
-    if names <= {"gripper_open", "gripper_close"}:
+    if _controls_only_hand(action_specs):
         return list(hand_ids)
+    if names <= {"move"}:
+        if _controls_any_hand(action_specs):
+            return list(dict.fromkeys(list(arm_ids) + list(hand_ids)))
+        return list(arm_ids)
     return list(dict.fromkeys(list(arm_ids) + list(hand_ids)))
 
 
-def _direct_move_plan(
-    action: Mapping[str, Any],
-    *,
-    env,
-    robot_name: str,
-    kwargs: dict[str, Any],
-) -> ActionPlan | None:
-    if action.get("name") != "move":
-        return None
-    target = action.get("target", {})
-    if not isinstance(target, Mapping):
-        return None
-    target_kind = target.get("kind")
-    if target_kind not in {"joint_delta", "eef_rotation_delta", "initial_pose"}:
-        return None
-
-    is_left, arm_part, _ = _select_arm(robot_name)
-    cfg_payload = dict(action.get("cfg", {}))
-    sample_interval = _int_option(
-        cfg_payload.get(
-            "sample_interval",
-            kwargs.get("sample_interval", kwargs.get("sample_num")),
-        ),
-        default=30 if target_kind == "initial_pose" else 20,
-    )
-    start_qpos = env.robot.get_qpos(name=arm_part)
-    if start_qpos.ndim == 1:
-        start_qpos = start_qpos.unsqueeze(0)
-    target_qpos = start_qpos.clone()
-    if target_kind == "initial_pose":
-        init_qpos = env.left_arm_init_qpos if is_left else env.right_arm_init_qpos
-        target_qpos = torch.as_tensor(
-            init_qpos,
-            dtype=start_qpos.dtype,
-            device=start_qpos.device,
-        )
-        if target_qpos.ndim == 1:
-            target_qpos = target_qpos.unsqueeze(0)
-        clearance_trajectory = _return_to_initial_clearance_trajectory(
-            env=env,
-            is_left=is_left,
-            start_qpos=start_qpos,
-            target_qpos=target_qpos,
-            n_waypoints=sample_interval,
-            clearance_height=float(
-                kwargs.get("return_to_initial_clearance_height", 0.18)
-            ),
-        )
-        if clearance_trajectory is not None:
-            return ActionPlan(
-                is_success=True,
-                trajectory=clearance_trajectory,
-                joint_ids=list(
-                    env.left_arm_joints if is_left else env.right_arm_joints
-                ),
-                action_name="move",
-            )
-    else:
-        joint_index = int(target.get("joint_index", target.get("joint", 5)))
-        degree = _float_option(target.get("degree", target.get("degrees")), default=0.0)
-        radian = target.get("radian", target.get("radians"))
-        delta = float(radian) if radian is not None else math.radians(degree)
-        target_qpos[:, joint_index] += delta
-
-    trajectory = _interpolate_qpos(
-        start_qpos,
-        target_qpos,
-        n_waypoints=sample_interval,
-    )
-    return ActionPlan(
-        is_success=True,
-        trajectory=trajectory,
-        joint_ids=list(env.left_arm_joints if is_left else env.right_arm_joints),
-        action_name="move",
-    )
+def _controls_only_hand(action_specs: list[Mapping[str, Any]]) -> bool:
+    if not action_specs:
+        return False
+    for action in action_specs:
+        cfg = dict(action.get("cfg", {}))
+        control_part = str(cfg.get("control_part", ""))
+        target = action.get("target", {})
+        target_kind = target.get("kind") if isinstance(target, Mapping) else None
+        if not control_part.endswith("_eef") and target_kind != "gripper_state":
+            return False
+    return True
 
 
-def _return_to_initial_clearance_trajectory(
-    *,
-    env,
-    is_left: bool,
-    start_qpos: torch.Tensor,
-    target_qpos: torch.Tensor,
-    n_waypoints: int,
-    clearance_height: float,
-) -> torch.Tensor | None:
-    if clearance_height <= 0.0 or n_waypoints < 4:
-        return None
-
-    current_pose = _as_pose_tensor(
-        env.left_arm_current_xpos if is_left else env.right_arm_current_xpos,
-        device=start_qpos.device,
-    )
-    clearance_pose = current_pose.clone()
-    clearance_pose[2, 3] = clearance_pose[2, 3] + clearance_height
-
-    try:
-        success, clearance_qpos = env.get_arm_ik(
-            clearance_pose,
-            is_left=is_left,
-            qpos_seed=start_qpos,
-        )
-    except Exception as exc:
-        log_warning(
-            "Atomic graph return-to-initial clearance IK failed; falling back "
-            f"to direct joint interpolation. ({exc})"
-        )
-        return None
-    if not success:
-        log_warning(
-            "Atomic graph return-to-initial clearance IK failed; falling back "
-            "to direct joint interpolation."
-        )
-        return None
-
-    clearance_qpos = torch.as_tensor(
-        clearance_qpos,
-        dtype=start_qpos.dtype,
-        device=start_qpos.device,
-    )
-    if clearance_qpos.ndim == 1:
-        clearance_qpos = clearance_qpos.unsqueeze(0)
-
-    first_count = max(2, n_waypoints // 2)
-    second_count = max(2, n_waypoints - first_count + 1)
-    first_segment = _interpolate_qpos(
-        start_qpos,
-        clearance_qpos,
-        n_waypoints=first_count,
-    )
-    second_segment = _interpolate_qpos(
-        clearance_qpos,
-        target_qpos,
-        n_waypoints=second_count,
-    )
-    return torch.cat([first_segment, second_segment[:, 1:, :]], dim=1)
+def _controls_any_hand(action_specs: list[Mapping[str, Any]]) -> bool:
+    for action in action_specs:
+        cfg = dict(action.get("cfg", {}))
+        control_part = str(cfg.get("control_part", ""))
+        target = action.get("target", {})
+        target_kind = target.get("kind") if isinstance(target, Mapping) else None
+        if control_part.endswith("_eef") or target_kind == "gripper_state":
+            return True
+    return False
 
 
 def _single_eef_orientation_move_plan(
@@ -959,8 +818,22 @@ def _resolve_pose_target(
         if target_kind == "current_pose":
             return _as_pose_tensor(current_pose, device=device)
         if target_kind == "initial_pose":
-            pose = env.left_arm_init_xpos if is_left else env.right_arm_init_xpos
-            return _as_pose_tensor(pose, device=device)
+            init_qpos = env.left_arm_init_qpos if is_left else env.right_arm_init_qpos
+            return torch.as_tensor(init_qpos, dtype=torch.float32, device=device)
+        if target_kind in {"joint_delta", "eef_rotation_delta"}:
+            arm_part = "left_arm" if is_left else "right_arm"
+            target_qpos = env.robot.get_qpos(name=arm_part)
+            if target_qpos.ndim == 1:
+                target_qpos = target_qpos.unsqueeze(0)
+            joint_index = int(target.get("joint_index", target.get("joint", 5)))
+            degree = _float_option(
+                target.get("degree", target.get("degrees")),
+                default=0.0,
+            )
+            radian = target.get("radian", target.get("radians"))
+            delta = float(radian) if radian is not None else math.radians(degree)
+            target_qpos[:, joint_index] += delta
+            return target_qpos
         if target_kind == "object_relative_pose":
             pose = current_pose.clone()
             obj_name = _target_object_name(target)
@@ -1009,7 +882,6 @@ def _resolve_gripper_target(
     *,
     env,
     robot_name: str,
-    action_name: str,
 ) -> torch.Tensor:
     is_left, _, _ = _select_arm(robot_name)
     hand_dof = len(env.left_eef_joints if is_left else env.right_eef_joints)
@@ -1022,7 +894,7 @@ def _resolve_gripper_target(
     else:
         state = ""
     if not state:
-        state = "open" if action_name == "gripper_open" else "close"
+        raise RuntimeError("gripper_state target requires state 'open' or 'close'.")
     if state in {"open", "opened"}:
         return _state_to_hand_qpos(env.open_state, hand_dof, device=device)
     if state in {"close", "closed"}:

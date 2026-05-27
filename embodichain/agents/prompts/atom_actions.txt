@@ -6,20 +6,18 @@ to the standard atomic IO:
 
 `(is_success, trajectory, joint_ids)`
 
-The first version supports only these top-level action names:
+The supported top-level action names are:
 
 - `move`
 - `pick_up`
 - `place`
-- `gripper_open`
-- `gripper_close`
 
 Common action schema:
 
 ```json
 {
   "kind": "atomic_action",
-  "name": "<move|pick_up|place|gripper_open|gripper_close>",
+  "name": "<move|pick_up|place>",
   "cfg": {
     "control_part": "<left_arm|right_arm|left_eef|right_eef>"
   },
@@ -88,9 +86,10 @@ to release it on the table.
 
 ## `move`
 
-Purpose: move the arm end-effector or arm joints without directly controlling
-the gripper. All nominal relative movement, absolute movement, return-home,
-orientation, and pouring wrist rotation should be represented by `move`.
+Purpose: move an arm end-effector, interpolate arm joints, or interpolate
+gripper joints. All nominal relative movement, absolute movement, return-home,
+orientation, pouring wrist rotation, and gripper-only open/close motion should
+be represented by `move`.
 
 Required arm cfg:
 
@@ -115,6 +114,8 @@ Supported target kinds:
 - `joint_delta` or `eef_rotation_delta`: fields `joint_index` and `degree` (or
   `radian`). Use this for pouring or tilting, for example
   `{"kind": "eef_rotation_delta", "joint_index": 5, "degree": -90}`.
+- `gripper_state`: field `state`, either `open` or `close`; use an EEF
+  `control_part` such as `right_eef` and include `arm_control_part`.
 
 Examples:
 
@@ -158,16 +159,17 @@ Examples:
 }
 ```
 
-## `gripper_close` / `gripper_open`
+## Gripper State Via `move`
 
-Purpose: execute a gripper-only trajectory.
+Purpose: execute a gripper-only trajectory while still using canonical
+`MoveActionCfg` / `MoveAction`.
 
 Schema:
 
 ```json
 {
   "kind": "atomic_action",
-  "name": "gripper_close",
+  "name": "move",
   "cfg": {
     "control_part": "right_eef",
     "arm_control_part": "right_arm"
@@ -183,7 +185,7 @@ Schema:
 ```json
 {
   "kind": "atomic_action",
-  "name": "gripper_open",
+  "name": "move",
   "cfg": {
     "control_part": "right_eef",
     "arm_control_part": "right_arm"

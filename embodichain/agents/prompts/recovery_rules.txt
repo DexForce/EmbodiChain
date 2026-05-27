@@ -31,8 +31,8 @@ Binding rules:
     configured initial pose
   - `action`: optional `left_arm_action`, optional `right_arm_action`
 - `action` steps must use structured atomic graph action specs, not `{"fn": ...}`.
-  Allowed action names are `move`, `pick_up`, `place`, `gripper_open`, and
-  `gripper_close`.
+  Allowed action names are `move`, `pick_up`, and `place`. Express gripper-only
+  open/close as `move` with target kind `gripper_state`.
 - Use `action` only when the named templates are not enough. Put the action
   under the matching `left_arm_action` or `right_arm_action` field and set the
   idle arm to null.

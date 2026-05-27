@@ -117,6 +117,39 @@ def _disable_post_action_validators(monkeypatch) -> None:
     )
 
 
+def _fake_move_engine_factory(env: _Env):
+    class _Engine:
+        def __init__(self, cfg_list) -> None:
+            self.cfg_list = cfg_list if isinstance(cfg_list, list) else [cfg_list]
+
+        def execute_static(self, target_list):
+            cfg = self.cfg_list[0]
+            steps = int(getattr(cfg, "sample_interval", 2))
+            control_part = str(cfg.control_part)
+            if control_part.startswith("left"):
+                joint_ids = (
+                    env.left_eef_joints
+                    if control_part.endswith("_eef")
+                    else env.left_arm_joints
+                )
+            else:
+                joint_ids = (
+                    env.right_eef_joints
+                    if control_part.endswith("_eef")
+                    else env.right_arm_joints
+                )
+            target_qpos = target_list[0]
+            if target_qpos.ndim == 1:
+                target_qpos = target_qpos.unsqueeze(0)
+            trajectory = torch.zeros(1, steps, env.robot.dof)
+            weights = torch.linspace(0, 1, steps=steps)
+            for index, weight in enumerate(weights):
+                trajectory[:, index, joint_ids] = target_qpos * weight
+            return True, trajectory
+
+    return lambda env, cfg_list: _Engine(cfg_list)
+
+
 def test_executor_composes_single_arm_plan(monkeypatch) -> None:
     env = _Env()
     edge = _Edge()
@@ -228,6 +261,11 @@ def test_executor_executes_atomic_graph_action_wrapper(monkeypatch) -> None:
         }
     )
     _disable_post_action_validators(monkeypatch)
+    monkeypatch.setattr(
+        graph_executor,
+        "_create_engine",
+        _fake_move_engine_factory(env),
+    )
 
     result = EdgeActionExecutor().execute(edge=edge, env=env)
 
@@ -259,6 +297,11 @@ def test_executor_pads_dual_atomic_graph_action_wrappers(monkeypatch) -> None:
         }
     )
     _disable_post_action_validators(monkeypatch)
+    monkeypatch.setattr(
+        graph_executor,
+        "_create_engine",
+        _fake_move_engine_factory(env),
+    )
 
     EdgeActionExecutor().execute(edge=edge, env=env)
 
@@ -297,7 +340,7 @@ def test_executor_executes_gripper_atomic_graph_action_wrapper(monkeypatch) -> N
     edge.left_arm_action = AtomicGraphAction(
         spec={
             "kind": "atomic_action",
-            "name": "gripper_open",
+            "name": "move",
             "cfg": {
                 "control_part": "left_eef",
                 "arm_control_part": "left_arm",

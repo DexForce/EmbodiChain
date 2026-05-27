@@ -65,21 +65,6 @@ class GraspActionCfg(MoveActionCfg):
     """Number of waypoints for the gripper open/close interpolation phase."""
 
 
-@configclass
-class GripperActionCfg(ActionCfg):
-    name: str = "gripper"
-    """Name of the action, used for identification and logging."""
-
-    control_part: str = "hand"
-    """Name of the robot part that controls the hand joints."""
-
-    target_qpos: torch.Tensor | None = None
-    """Optional target hand joint positions. If omitted, execute() target is used."""
-
-    sample_interval: int = 15
-    """Number of waypoints for the hand interpolation trajectory."""
-
-
 class MoveAction(AtomicAction):
     def __init__(
         self,
@@ -129,6 +114,24 @@ class MoveAction(AtomicAction):
                 ValueError,
             )
         return True, target
+
+    def _resolve_qpos_target(
+        self,
+        target: torch.Tensor,
+        *,
+        name: str,
+    ) -> torch.Tensor:
+        """Resolve a joint-space target into batched control-part qpos."""
+        target = torch.as_tensor(target, dtype=torch.float32, device=self.device)
+        if target.shape == (self.dof,):
+            target = target.unsqueeze(0).repeat(self.n_envs, 1)
+        if target.shape != (self.n_envs, self.dof):
+            logger.log_error(
+                f"{name} must have shape ({self.dof},) or "
+                f"({self.n_envs}, {self.dof}), but got {target.shape}",
+                ValueError,
+            )
+        return target
 
     def _resolve_start_qpos(
         self,
@@ -252,24 +255,51 @@ class MoveAction(AtomicAction):
         ]
         return torch.stack(hand_qpos_list, dim=0)
 
+    def _interpolate_qpos(
+        self,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate any control-part qpos target."""
+        if n_waypoints < 1:
+            logger.log_error("sample_interval must be >= 1.", ValueError)
+        weights = torch.linspace(0, 1, steps=n_waypoints, device=self.device)
+        return torch.stack(
+            [torch.lerp(start_qpos, target_qpos, weight) for weight in weights],
+            dim=1,
+        )
+
     def execute(
         self,
         target: Union[ObjectSemantics, torch.Tensor],
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[bool, torch.Tensor, list[float]]:
-        """execute pick up action
+        """Execute an end-effector pose move or control-part qpos interpolation.
 
         Args:
             target (ObjectSemantics): object semantics containing grasp affordance and entity information
             start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.
 
         Returns:
-            tuple[bool, torch.Tensor, list[float]]:
-            is_success,
-            trajectory of shape (n_envs, n_waypoints, dof),
-            joint_ids corresponding to trajectory
+            tuple[bool, torch.Tensor, list[float]]: Success flag, trajectory of
+            shape ``(n_envs, n_waypoints, dof)``, and joint ids corresponding
+            to the trajectory columns.
         """
+        if isinstance(target, torch.Tensor) and target.shape in {
+            (self.dof,),
+            (self.n_envs, self.dof),
+        }:
+            start_qpos = self._resolve_start_qpos(start_qpos)
+            target_qpos = self._resolve_qpos_target(target, name="target_qpos")
+            trajectory = self._interpolate_qpos(
+                start_qpos,
+                target_qpos,
+                int(self.cfg.sample_interval),
+            )
+            return True, trajectory, self.arm_joint_ids
+
         is_success, move_xpos = self._resolve_pose_target(
             target, action_name=self.__class__.__name__
         )
@@ -298,95 +328,6 @@ class MoveAction(AtomicAction):
         return True
 
 
-class GripperAction(AtomicAction):
-    def __init__(
-        self,
-        motion_generator: MotionGenerator,
-        cfg: GripperActionCfg | None = None,
-    ):
-        """
-        Initialize the gripper-only action.
-        Args:
-            motion_generator: The motion generator instance to use for robot access.
-            cfg: Configuration for the action.
-        """
-        super().__init__(
-            motion_generator, cfg=cfg if cfg is not None else GripperActionCfg()
-        )
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.dof = len(self.hand_joint_ids)
-
-    def _resolve_hand_qpos(
-        self,
-        qpos: torch.Tensor | None,
-        *,
-        name: str,
-    ) -> torch.Tensor:
-        if qpos is None:
-            logger.log_error(f"{name} must be provided.", ValueError)
-
-        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
-        if qpos.shape == (self.dof,):
-            qpos = qpos.unsqueeze(0).repeat(self.n_envs, 1)
-        if qpos.shape != (self.n_envs, self.dof):
-            logger.log_error(
-                f"{name} must have shape ({self.dof},) or "
-                f"({self.n_envs}, {self.dof}), but got {qpos.shape}",
-                ValueError,
-            )
-        return qpos
-
-    def execute(
-        self,
-        target: torch.Tensor | None = None,
-        start_qpos: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> tuple[bool, torch.Tensor, list[float]]:
-        """Execute a gripper-only interpolation action.
-
-        Args:
-            target: Target hand qpos with shape ``(hand_dof,)`` or
-                ``(n_envs, hand_dof)``. If omitted, ``cfg.target_qpos`` is used.
-            start_qpos: Optional start hand qpos. Defaults to current robot hand qpos.
-
-        Returns:
-            tuple[bool, torch.Tensor, list[float]]:
-            success flag, trajectory ``(n_envs, n_waypoints, hand_dof)``, and hand
-            joint ids corresponding to the trajectory columns.
-        """
-        target_qpos = self._resolve_hand_qpos(
-            target if target is not None else self.cfg.target_qpos,
-            name="target_qpos",
-        )
-        if start_qpos is None:
-            start_qpos = self.robot.get_qpos(name=self.cfg.control_part)
-        start_qpos = self._resolve_hand_qpos(start_qpos, name="start_qpos")
-
-        n_waypoints = int(self.cfg.sample_interval)
-        if n_waypoints < 1:
-            logger.log_error("sample_interval must be >= 1.", ValueError)
-
-        weights = torch.linspace(0, 1, steps=n_waypoints, device=self.device)
-        trajectory = torch.stack(
-            [torch.lerp(start_qpos, target_qpos, weight) for weight in weights],
-            dim=1,
-        )
-        return True, trajectory, self.hand_joint_ids
-
-    def validate(self, target=None, start_qpos=None, **kwargs):
-        try:
-            self._resolve_hand_qpos(
-                target if target is not None else self.cfg.target_qpos,
-                name="target_qpos",
-            )
-            if start_qpos is not None:
-                self._resolve_hand_qpos(start_qpos, name="start_qpos")
-        except Exception:
-            return False
-        return True
-
-
 @configclass
 class PickUpActionCfg(GraspActionCfg):
     name: str = "pick_up"
@@ -403,9 +344,7 @@ class PickUpActionCfg(GraspActionCfg):
     grasp_candidate_num: int = 8
     """Number of semantic grasp candidates to retry before reporting failure."""
 
-    grasp_pose_offset_world: torch.Tensor = torch.tensor(
-        [0, 0, 0], dtype=torch.float32
-    )
+    grasp_pose_offset_world: torch.Tensor = torch.tensor([0, 0, 0], dtype=torch.float32)
     """Optional world-frame xyz offset applied to resolved grasp poses before planning."""
 
     grasp_pose_offset_along_approach: float = 0.0
@@ -434,9 +373,7 @@ class PickUpAction(MoveAction):
             logger.log_error("hand_close_qpos must be specified in PickUpActionCfg")
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
-        self.grasp_pose_offset_world = self.cfg.grasp_pose_offset_world.to(
-            self.device
-        )
+        self.grasp_pose_offset_world = self.cfg.grasp_pose_offset_world.to(self.device)
 
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
@@ -638,9 +575,8 @@ class PickUpAction(MoveAction):
             approach_direction = approach_direction / torch.linalg.norm(
                 approach_direction
             ).clamp_min(1e-6)
-            offset = (
-                offset
-                + approach_direction * float(self.cfg.grasp_pose_offset_along_approach)
+            offset = offset + approach_direction * float(
+                self.cfg.grasp_pose_offset_along_approach
             )
         if torch.linalg.norm(offset).item() == 0.0:
             return grasp_xpos

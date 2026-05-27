@@ -24,7 +24,7 @@ import torch
 from embodichain.lab.sim.agent import atomic_engine_planner as executor
 from embodichain.lab.sim.agent.atomic_graph_executor import AtomicGraphAction
 from embodichain.lab.sim.agent.edge_action_executor import ActionPlan
-from embodichain.lab.sim.atomic_actions import GripperActionCfg, PlaceActionCfg
+from embodichain.lab.sim.atomic_actions import MoveActionCfg, PlaceActionCfg
 
 
 class _Object:
@@ -122,18 +122,50 @@ def _fake_engine_factory(env: _Env):
                     if is_left
                     else env.right_arm_joints + env.right_eef_joints
                 )
-            elif isinstance(cfg, GripperActionCfg):
-                joint_ids = (
-                    env.left_eef_joints
-                    if str(cfg.control_part).startswith("left")
-                    else env.right_eef_joints
-                )
+            elif isinstance(cfg, MoveActionCfg):
+                if str(cfg.control_part).endswith("_eef"):
+                    joint_ids = (
+                        env.left_eef_joints
+                        if str(cfg.control_part).startswith("left")
+                        else env.right_eef_joints
+                    )
+                else:
+                    joint_ids = (
+                        env.left_arm_joints
+                        if str(cfg.control_part).startswith("left")
+                        else env.right_arm_joints
+                    )
             else:
                 raise AssertionError(f"Unexpected cfg type: {type(cfg)!r}")
             values = torch.arange(steps * len(joint_ids), dtype=torch.float32).reshape(
                 1, steps, len(joint_ids)
             )
             trajectory[:, :, joint_ids] = values
+            return True, trajectory
+
+    return lambda env, cfg_list: _Engine(cfg_list)
+
+
+def _fake_qpos_move_engine_factory(env: _Env, captured: dict | None = None):
+    class _Engine:
+        def __init__(self, cfg_list) -> None:
+            self.cfg_list = cfg_list if isinstance(cfg_list, list) else [cfg_list]
+
+        def execute_static(self, target_list):
+            if captured is not None:
+                captured["target_list"] = target_list
+                captured["cfg_list"] = self.cfg_list
+            cfg = self.cfg_list[0]
+            steps = int(getattr(cfg, "sample_interval", 2))
+            is_left = str(cfg.control_part).startswith("left")
+            joint_ids = env.left_arm_joints if is_left else env.right_arm_joints
+            target_qpos = target_list[0]
+            if target_qpos.ndim == 1:
+                target_qpos = target_qpos.unsqueeze(0)
+            trajectory = torch.zeros(1, steps, env.robot.dof)
+            weights = torch.linspace(0, 1, steps=steps)
+            for index, weight in enumerate(weights):
+                trajectory[:, index, joint_ids] = target_qpos * weight
             return True, trajectory
 
     return lambda env, cfg_list: _Engine(cfg_list)
@@ -186,7 +218,7 @@ def _fake_engine_factory(env: _Env):
         (
             {
                 "kind": "atomic_action",
-                "name": "gripper_open",
+                "name": "move",
                 "cfg": {
                     "control_part": "left_eef",
                     "arm_control_part": "left_arm",
@@ -194,14 +226,14 @@ def _fake_engine_factory(env: _Env):
                 },
                 "target": {"kind": "gripper_state", "state": "open"},
             },
-            "gripper_open",
+            "move",
             "left_eef",
             (1, 5, 2),
         ),
         (
             {
                 "kind": "atomic_action",
-                "name": "gripper_close",
+                "name": "move",
                 "cfg": {
                     "control_part": "right_eef",
                     "arm_control_part": "right_arm",
@@ -209,7 +241,7 @@ def _fake_engine_factory(env: _Env):
                 },
                 "target": {"kind": "gripper_state", "state": "close"},
             },
-            "gripper_close",
+            "move",
             "right_eef",
             (1, 6, 2),
         ),
@@ -247,7 +279,7 @@ def test_single_atomic_graph_action_plan_smoke(
             "plan_public_semantic_grasp_action",
             _plan_public_semantic_grasp_action,
         )
-    elif expected_action_name in {"place", "gripper_open", "gripper_close"}:
+    else:
         monkeypatch.setattr(executor, "_create_engine", _fake_engine_factory(env))
 
     plan = AtomicGraphAction(spec=spec).plan(env=env, require_atomic_action_graph=True)
@@ -305,8 +337,13 @@ def test_recovery_public_grasp_candidate_override_caps_strategy_default(
     assert captured_kwargs["public_grasp_candidate_num"] == 16
 
 
-def test_plan_returns_action_plan_for_joint_delta_move() -> None:
+def test_plan_returns_action_plan_for_joint_delta_move(monkeypatch) -> None:
     env = _Env()
+    monkeypatch.setattr(
+        executor,
+        "_create_engine",
+        _fake_qpos_move_engine_factory(env),
+    )
     action = AtomicGraphAction(
         spec={
             "kind": "atomic_action",
@@ -327,8 +364,16 @@ def test_plan_returns_action_plan_for_joint_delta_move() -> None:
     )
 
 
-def test_atomic_engine_planner_plans_joint_delta_move_directly() -> None:
+def test_atomic_engine_planner_plans_joint_delta_move_through_engine(
+    monkeypatch,
+) -> None:
     env = _Env()
+    captured = {}
+    monkeypatch.setattr(
+        executor,
+        "_create_engine",
+        _fake_qpos_move_engine_factory(env, captured),
+    )
     spec = {
         "kind": "atomic_action",
         "name": "move",
@@ -340,6 +385,10 @@ def test_atomic_engine_planner_plans_joint_delta_move_directly() -> None:
 
     assert isinstance(plan, ActionPlan)
     assert plan.joint_ids == env.right_arm_joints
+    torch.testing.assert_close(
+        captured["target_list"][0],
+        torch.tensor([[0.0, torch.pi / 2]], dtype=torch.float32),
+    )
     torch.testing.assert_close(
         plan.trajectory[0, -1],
         torch.tensor([0.0, torch.pi / 2], dtype=torch.float32),
@@ -498,7 +547,7 @@ def test_resolve_object_relative_pose_prefers_cached_obj_info_pose() -> None:
     )
 
 
-def test_gripper_open_uses_gripper_action_cfg(monkeypatch) -> None:
+def test_gripper_open_uses_move_action_cfg(monkeypatch) -> None:
     env = _Env()
     captured = {}
 
@@ -520,7 +569,7 @@ def test_gripper_open_uses_gripper_action_cfg(monkeypatch) -> None:
     action = AtomicGraphAction(
         spec={
             "kind": "atomic_action",
-            "name": "gripper_open",
+            "name": "move",
             "cfg": {"control_part": "left_eef", "arm_control_part": "left_arm"},
             "target": {"kind": "gripper_state", "state": "open"},
         }
@@ -528,8 +577,9 @@ def test_gripper_open_uses_gripper_action_cfg(monkeypatch) -> None:
 
     plan = action.plan(env=env)
 
-    assert isinstance(captured["cfg_list"][0], GripperActionCfg)
-    assert captured["cfg_list"][0].name == "gripper_open"
+    assert isinstance(captured["cfg_list"][0], MoveActionCfg)
+    assert captured["cfg_list"][0].name == "move"
+    assert captured["cfg_list"][0].control_part == "left_eef"
     assert plan.joint_ids == env.left_eef_joints
     torch.testing.assert_close(captured["target_list"][0], torch.tensor([0.05, 0.05]))
 
@@ -580,7 +630,7 @@ def test_pick_up_plan_uses_ranked_semantic_plan(monkeypatch) -> None:
     torch.testing.assert_close(plan.trajectory, trajectory[:, :, [4, 5, 6, 7]])
 
 
-def test_atomic_graph_failure_needs_explicit_legacy_fallback(monkeypatch) -> None:
+def test_atomic_graph_failure_propagates_without_legacy_fallback(monkeypatch) -> None:
     env = _Env()
     action = AtomicGraphAction(
         spec={
@@ -588,8 +638,7 @@ def test_atomic_graph_failure_needs_explicit_legacy_fallback(monkeypatch) -> Non
             "name": "move",
             "cfg": {"control_part": "left_arm"},
             "target": {"kind": "current_pose"},
-        },
-        fallback_action=lambda **kwargs: torch.ones(2, 2),
+        }
     )
 
     def _raise_atomic_graph(*args, **kwargs):
@@ -599,11 +648,6 @@ def test_atomic_graph_failure_needs_explicit_legacy_fallback(monkeypatch) -> Non
 
     with pytest.raises(RuntimeError, match="planner failed"):
         action.plan(env=env)
-
-    plan = action.plan(env=env, allow_legacy_atomic_action_fallback=True)
-
-    assert plan.joint_ids == env.left_arm_joints
-    torch.testing.assert_close(plan.trajectory, torch.ones(1, 2, 2))
 
 
 def test_recovery_public_grasp_overrides_only_apply_to_recovery_edges() -> None:

@@ -164,15 +164,6 @@ def _expected_pick_up_action(
         },
         "target": {"kind": "object_semantics", "obj_name": obj_name},
         "runtime_kwargs": runtime_kwargs,
-        "fallback": {
-            "fn": "grasp",
-            "kwargs": {
-                "robot_name": robot_name,
-                "obj_name": obj_name,
-                "pre_grasp_dis": pre_grasp_dis,
-                "force_valid": force_valid,
-            },
-        },
     }
 
 
@@ -198,15 +189,6 @@ def _expected_place_action(
         },
         "target": target,
         "runtime_kwargs": {"force_valid": force_valid},
-        "fallback": {
-            "fn": "place_on_table",
-            "kwargs": {
-                "robot_name": robot_name,
-                "obj_name": obj_name,
-                "pre_place_dis": pre_place_dis,
-                "force_valid": force_valid,
-            },
-        },
     }
 
 
@@ -218,10 +200,6 @@ def _expected_safe_pose_action(robot_name: str = "left_arm") -> dict[str, Any]:
         "cfg": {"control_part": robot_name},
         "target": {"kind": "initial_pose"},
         "runtime_kwargs": {},
-        "fallback": {
-            "fn": "back_to_initial_pose",
-            "kwargs": {"robot_name": robot_name},
-        },
     }
 
 
@@ -669,12 +647,15 @@ def test_compile_agent_graph_spec_adds_explicit_recovery_branch() -> None:
     assert recovery_edge.source == "v0_start"
     assert recovery_edge.target == "v1_grasped"
     assert recovery_edge.left_arm_action.action_name == "pick_up"
-    assert recovery_edge.left_arm_action.func is grasp
+    assert recovery_edge.left_arm_action.spec["target"] == {
+        "kind": "object_semantics",
+        "obj_name": "cup",
+    }
     assert recovery_edge.is_recovery is True
     assert graph.recovery_branches[("e01_grasp", 0)] == ["r_e01_regrasp"]
 
 
-def test_compile_agent_graph_spec_compiles_atomic_action_fallback() -> None:
+def test_compile_agent_graph_spec_compiles_atomic_action_recovery_edge() -> None:
     env = object()
 
     def grasp(**kwargs):
@@ -687,7 +668,6 @@ def test_compile_agent_graph_spec_compiles_atomic_action_fallback() -> None:
         return kwargs
 
     atomic_action = _expected_pick_up_action(force_valid=True)
-    atomic_action.pop("fallback")
     recovery_graph = {
         "task": "grasp cup",
         "recovery_nodes": [],
@@ -725,14 +705,13 @@ def test_compile_agent_graph_spec_compiles_atomic_action_fallback() -> None:
     )
 
     recovery_action = graph.edges["r_e01_regrasp"].left_arm_action
-    assert recovery_action.func is grasp
-    assert recovery_action.fallback_action(env=env) == {
-        "env": env,
-        "robot_name": "left_arm",
+    assert recovery_action.action_name == "pick_up"
+    assert recovery_action.spec["kind"] == "atomic_action"
+    assert recovery_action.spec["target"] == {
+        "kind": "object_semantics",
         "obj_name": "cup",
-        "pre_grasp_dis": 0.1,
-        "force_valid": True,
     }
+    assert recovery_action.spec["runtime_kwargs"]["force_valid"] is True
 
 
 def test_compile_agent_graph_spec_normalizes_llm_pick_up_runtime_kwargs() -> None:
@@ -833,13 +812,13 @@ def test_compile_agent_graph_spec_normalizes_llm_pick_up_runtime_kwargs() -> Non
         (
             "open_gripper",
             {"robot_name": "left_arm"},
-            "gripper_open",
+            "move",
             "gripper_state",
         ),
         (
             "close_gripper",
             {"robot_name": "left_arm"},
-            "gripper_close",
+            "move",
             "gripper_state",
         ),
         (

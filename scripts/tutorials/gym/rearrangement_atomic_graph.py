@@ -575,16 +575,10 @@ def build_parser() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--disable_atomic_action_graph",
-        action="store_true",
-        default=False,
-        help="Disable atomic_action/atomic_sequence graph execution.",
-    )
-    parser.add_argument(
         "--require_atomic_action_graph",
         action="store_true",
         default=False,
-        help="Fail instead of falling back if an atomic graph action cannot execute.",
+        help="Fail if an atomic graph action cannot execute through AtomicActionEngine.",
     )
     parser.add_argument(
         "--disable_public_grasp_candidate_generation",
@@ -863,7 +857,6 @@ def main() -> None:
             ),
             "runtime_recovery_max_total_attempts": (args.recovery_max_total_attempts),
             "forced_recovery_injection": forced_error_config,
-            "use_atomic_action_graph": not args.disable_atomic_action_graph,
             "require_atomic_action_graph": args.require_atomic_action_graph,
             "generate_public_grasp_candidates": (
                 not args.disable_public_grasp_candidate_generation
