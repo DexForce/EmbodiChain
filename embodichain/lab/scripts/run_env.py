@@ -117,18 +117,31 @@ def main(args, env, gym_config):
     # TODO: Support multiple trajectories per episode generation.
     num_traj = 1
     for i in range(gym_config.get("max_episodes", 1)):
+        runtime_kwargs = {
+            "save_path": getattr(args, "save_path", ""),
+            "save_video": getattr(args, "save_video", False),
+            "debug_mode": getattr(args, "debug_mode", False),
+            "regenerate": getattr(args, "regenerate", False),
+            "recovery": getattr(args, "recovery", False),
+            "interactive_error_injection": getattr(
+                args, "interactive_error_injection", False
+            ),
+        }
+        for public_flag in (
+            "use_public_atomic_actions",
+            "use_public_grasp_semantics",
+            "use_public_grasp_action",
+            "use_public_place_action",
+            "allow_public_grasp_annotation",
+        ):
+            if hasattr(args, public_flag):
+                runtime_kwargs[public_flag] = getattr(args, public_flag)
+
         generate_function(
             env,
             num_traj,
             i,
-            save_path=getattr(args, "save_path", ""),
-            save_video=getattr(args, "save_video", False),
-            debug_mode=getattr(args, "debug_mode", False),
-            regenerate=getattr(args, "regenerate", False),
-            recovery=getattr(args, "recovery", False),
-            interactive_error_injection=getattr(
-                args, "interactive_error_injection", False
-            ),
+            **runtime_kwargs,
         )
 
     # Final reset.

@@ -63,6 +63,36 @@ if __name__ == "__main__":
         help="Whether to enable terminal-triggered interactive error injection during drive execution.",
         default=False,
     )
+    parser.add_argument(
+        "--use_public_atomic_actions",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use public AtomicActionEngine-backed atom actions.",
+        default=True,
+    )
+    parser.add_argument(
+        "--use_public_grasp_semantics",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use mesh semantics and AntipodalAffordance for grasp.",
+        default=True,
+    )
+    parser.add_argument(
+        "--use_public_grasp_action",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use public PickUpAction with legacy grasp_pose_obj targets.",
+        default=False,
+    )
+    parser.add_argument(
+        "--use_public_place_action",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use public PlaceAction for place_on_table.",
+        default=True,
+    )
+    parser.add_argument(
+        "--allow_public_grasp_annotation",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to allow public grasp annotation when cache is missing.",
+        default=True,
+    )
 
     args = parser.parse_args()
 

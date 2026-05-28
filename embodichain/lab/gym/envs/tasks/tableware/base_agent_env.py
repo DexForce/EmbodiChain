@@ -224,6 +224,17 @@ class BaseAgentEnv:
         graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
             regenerate=regenerate, recovery=recovery
         )
+        public_atomic_kwargs = {
+            "use_public_atomic_actions": True,
+            "use_public_grasp_semantics": True,
+            "use_public_grasp_action": False,
+            "use_public_place_action": True,
+            "allow_public_grasp_annotation": True,
+        }
+        for key in public_atomic_kwargs:
+            if key in kwargs:
+                public_atomic_kwargs[key] = kwargs[key]
+        compile_kwargs.update(public_atomic_kwargs)
         compile_kwargs["interactive_error_injection"] = kwargs.get(
             "interactive_error_injection", False
         )

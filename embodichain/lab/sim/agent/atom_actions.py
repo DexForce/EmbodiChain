@@ -692,6 +692,21 @@ def grasp(
         log_error(f"No matched object {obj_uids}.")
     target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
 
+    semantic_public_actions = _try_public_semantic_grasp_action(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        pre_grasp_dis=pre_grasp_dis,
+        kwargs=kwargs,
+    )
+    if semantic_public_actions is not None:
+        log_info(
+            "Total generated trajectory number for public semantic grasp: "
+            f"{len(semantic_public_actions)}.",
+            color="green",
+        )
+        return semantic_public_actions
+
     if not _semantic_public_grasp_enabled(kwargs):
         public_actions = _try_public_pickup_action(
             env,
@@ -762,26 +777,6 @@ def grasp(
             if actions is not None
             else back_actions
         )
-
-    semantic_public_actions = _try_public_semantic_grasp_action(
-        env=env,
-        robot_name=robot_name,
-        obj_name=obj_name,
-        pre_grasp_dis=pre_grasp_dis,
-        kwargs=kwargs,
-    )
-    if semantic_public_actions is not None:
-        actions = (
-            semantic_public_actions
-            if actions is None
-            else np.concatenate([actions, semantic_public_actions], axis=0)
-        )
-        log_info(
-            "Total generated trajectory number for public semantic grasp: "
-            f"{len(actions)}.",
-            color="green",
-        )
-        return actions
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
