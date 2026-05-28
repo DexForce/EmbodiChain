@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import numpy as np
 from embodichain.utils.logger import log_info, log_warning, log_error
 from copy import deepcopy
@@ -31,11 +33,21 @@ from embodichain.utils.utility import encode_image
 from functools import partial
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
+    AntipodalAffordance,
     MoveActionCfg,
+    ObjectSemantics,
     PickUpActionCfg,
     PlaceActionCfg,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalSamplerCfg,
+    GraspGeneratorCfg,
+    GripperCollisionCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    GRASP_ANNOTATOR_CACHE_DIR,
+)
 
 # Import utility functions for atom actions
 from embodichain.lab.sim.agent.atom_action_utils import (
@@ -205,6 +217,193 @@ def _sync_agent_state_from_public_action(env, robot_name, action_np):
         ),
         is_left=is_left,
     )
+
+
+def _semantic_public_grasp_enabled(kwargs):
+    return (
+        kwargs.get("use_public_grasp_semantics", False) is True
+        or kwargs.get("public_grasp_strategy", None) == "semantic"
+    )
+
+
+def _cfg_supported_kwargs(cfg_cls, values):
+    supported = set()
+    for cls in reversed(cfg_cls.__mro__):
+        supported.update(getattr(cls, "__annotations__", {}).keys())
+    return {key: value for key, value in values.items() if key in supported}
+
+
+def _public_grasp_cache_path(mesh_vertices, mesh_triangles):
+    vert_bytes = mesh_vertices.to("cpu").numpy().tobytes()
+    face_bytes = mesh_triangles.to("cpu").numpy().tobytes()
+    md5_hash = hashlib.md5(vert_bytes + face_bytes).hexdigest()
+    return os.path.join(GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{md5_hash}.npy")
+
+
+def _build_public_grasp_semantics(env, obj_name: str, kwargs: dict):
+    """Build ObjectSemantics for tutorial-style AntipodalAffordance grasp."""
+    target_obj = env.sim.get_rigid_object(obj_name)
+    if target_obj is None:
+        raise ValueError(f"No rigid object found for {obj_name}.")
+
+    mesh_vertices = target_obj.get_vertices(env_ids=[0], scale=True)[0]
+    mesh_triangles = target_obj.get_triangles(env_ids=[0])[0]
+    mesh_vertices = torch.as_tensor(mesh_vertices, dtype=torch.float32)
+    mesh_triangles = torch.as_tensor(mesh_triangles, dtype=torch.int64)
+    if (
+        mesh_vertices.numel() == 0
+        or mesh_triangles.numel() == 0
+        or mesh_vertices.shape[-1] != 3
+        or mesh_triangles.shape[-1] != 3
+    ):
+        raise ValueError(f"Object {obj_name} has empty or invalid mesh geometry.")
+
+    allow_annotation = bool(kwargs.get("allow_public_grasp_annotation", False))
+    force_reannotate = bool(kwargs.get("force_public_grasp_reannotate", False))
+    if force_reannotate and not allow_annotation:
+        log_warning(
+            "Public semantic grasp requested force re-annotation without "
+            "allow_public_grasp_annotation=True; fallback to legacy grasp."
+        )
+        return None
+
+    cache_path = _public_grasp_cache_path(mesh_vertices, mesh_triangles)
+    if not os.path.exists(cache_path) and not allow_annotation:
+        log_warning(
+            "Public semantic grasp cache is missing and annotation is disabled; "
+            "fallback to legacy grasp."
+        )
+        return None
+
+    antipodal_sampler_cfg = AntipodalSamplerCfg(
+        **_cfg_supported_kwargs(
+            AntipodalSamplerCfg,
+            {
+                "n_sample": int(kwargs.get("grasp_antipodal_n_sample", 20000)),
+                "max_angle": kwargs.get("grasp_antipodal_max_angle", np.pi / 12),
+                "max_length": kwargs.get("grasp_max_open_length", 0.088),
+                "min_length": kwargs.get("grasp_min_open_length", 0.003),
+            },
+        )
+    )
+    generator_cfg = GraspGeneratorCfg(
+        **_cfg_supported_kwargs(
+            GraspGeneratorCfg,
+            {
+                "viser_port": int(kwargs.get("public_grasp_viser_port", 11801)),
+                "antipodal_sampler_cfg": antipodal_sampler_cfg,
+                "max_deviation_angle": kwargs.get(
+                    "grasp_max_deviation_angle", np.pi / 6
+                ),
+            },
+        )
+    )
+    gripper_collision_cfg = GripperCollisionCfg(
+        **_cfg_supported_kwargs(
+            GripperCollisionCfg,
+            {
+                "max_open_length": kwargs.get("grasp_max_open_length", 0.088),
+                "finger_length": kwargs.get("grasp_finger_length", 0.078),
+                "point_sample_dense": kwargs.get("grasp_point_sample_dense", 0.012),
+            },
+        )
+    )
+
+    affordance = AntipodalAffordance(
+        object_label=obj_name,
+        force_reannotate=force_reannotate,
+        custom_config={
+            "gripper_collision_cfg": gripper_collision_cfg,
+            "generator_cfg": generator_cfg,
+        },
+    )
+    return ObjectSemantics(
+        label=obj_name,
+        geometry={
+            "mesh_vertices": mesh_vertices,
+            "mesh_triangles": mesh_triangles,
+        },
+        affordance=affordance,
+        entity=target_obj,
+    )
+
+
+def _try_public_semantic_grasp_action(
+    *,
+    env,
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_dis: float,
+    kwargs: dict,
+):
+    def _fail(message, exc=None):
+        suffix = f" ({exc})" if exc is not None else ""
+        log_warning(f"{message}; fallback to legacy grasp.{suffix}")
+        if kwargs.get("require_public_grasp_action", False) is True:
+            raise RuntimeError(message) from exc
+        return None
+
+    if env is None:
+        return _fail("Public semantic grasp requires env")
+    if not _use_public_atomic_actions(kwargs):
+        return None
+    if not _semantic_public_grasp_enabled(kwargs):
+        return None
+
+    try:
+        target = _build_public_grasp_semantics(env, obj_name, kwargs)
+        if target is None:
+            return None
+
+        is_left, arm_part, hand_part, arm_joints, _ = _select_arm_parts(env, robot_name)
+        device = env.robot.device
+        hand_dof = len(env.left_eef_joints if is_left else env.right_eef_joints)
+        approach_direction = torch.as_tensor(
+            kwargs.get("public_grasp_approach_direction", [0, 0, -1]),
+            dtype=torch.float32,
+            device=device,
+        )
+        cfg = PickUpActionCfg(
+            control_part=arm_part,
+            hand_control_part=hand_part,
+            hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device),
+            hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device),
+            pre_grasp_distance=pre_grasp_dis,
+            lift_height=kwargs.get(
+                "public_grasp_lift_height", kwargs.get("lift_height", 0.1)
+            ),
+            approach_direction=approach_direction,
+            sample_interval=int(
+                kwargs.get("sample_interval", kwargs.get("sample_num", 80))
+            ),
+            hand_interp_steps=int(kwargs.get("hand_interp_steps", 5)),
+        )
+        engine = _make_atomic_engine(env, cfg)
+        action = engine._actions[cfg.name]
+        start_qpos = (
+            env.left_arm_current_qpos if is_left else env.right_arm_current_qpos
+        )
+        start_qpos = torch.as_tensor(
+            start_qpos, dtype=torch.float32, device=device
+        ).reshape(1, len(arm_joints))
+
+        is_success, trajectory, joint_ids = action.execute(
+            target=target,
+            start_qpos=start_qpos,
+        )
+        if not is_success:
+            return _fail("Public semantic grasp action failed")
+
+        action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _sync_agent_state_from_public_action(env, robot_name, action_np)
+        log_info(
+            "Using public semantic grasp action with "
+            f"{len(action_np)} trajectory steps.",
+            color="green",
+        )
+        return action_np
+    except Exception as e:
+        return _fail("Public semantic grasp action failed", e)
 
 
 def _try_public_move_action(
@@ -493,20 +692,21 @@ def grasp(
         log_error(f"No matched object {obj_uids}.")
     target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
 
-    public_actions = _try_public_pickup_action(
-        env,
-        robot_name,
-        obj_name,
-        target_obj_pose,
-        pre_grasp_dis,
-        **kwargs,
-    )
-    if public_actions is not None:
-        log_info(
-            f"Total generated trajectory number for grasp: {len(public_actions)}.",
-            color="green",
+    if not _semantic_public_grasp_enabled(kwargs):
+        public_actions = _try_public_pickup_action(
+            env,
+            robot_name,
+            obj_name,
+            target_obj_pose,
+            pre_grasp_dis,
+            **kwargs,
         )
-        return public_actions
+        if public_actions is not None:
+            log_info(
+                f"Total generated trajectory number for grasp: {len(public_actions)}.",
+                color="green",
+            )
+            return public_actions
 
     # Open the gripper if currently closed
     actions = None
@@ -562,6 +762,26 @@ def grasp(
             if actions is not None
             else back_actions
         )
+
+    semantic_public_actions = _try_public_semantic_grasp_action(
+        env=env,
+        robot_name=robot_name,
+        obj_name=obj_name,
+        pre_grasp_dis=pre_grasp_dis,
+        kwargs=kwargs,
+    )
+    if semantic_public_actions is not None:
+        actions = (
+            semantic_public_actions
+            if actions is None
+            else np.concatenate([actions, semantic_public_actions], axis=0)
+        )
+        log_info(
+            "Total generated trajectory number for public semantic grasp: "
+            f"{len(actions)}.",
+            color="green",
+        )
+        return actions
 
     # ---------------------------------------- Prepare ----------------------------------------
     select_qpos_traj = []
