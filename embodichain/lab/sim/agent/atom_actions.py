@@ -318,7 +318,7 @@ def pick_up(
         approach_direction=_approach_direction(robot_name, approach_direction),
         lift_height=lift_height,
         sample_interval=kwargs.get("sample_num", 80),
-        hand_interp_steps=kwargs.get("hand_interp_steps", 5),
+        hand_interp_steps=kwargs.get("hand_interp_steps", 30),
     )
     target = _object_semantics(
         env,

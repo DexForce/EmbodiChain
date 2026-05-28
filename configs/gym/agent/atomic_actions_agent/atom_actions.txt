@@ -69,7 +69,7 @@ left_arm_action and set right_arm_action to null. Always use robot_name="arm".
               lift_height: float = 0.15,
               direction: str | None = None,
               sample_num: int = 100,
-              hand_interp_steps: int = 8,
+              hand_interp_steps: int = 30,
               **kwargs) -> list[np.ndarray]
 
     Uses AtomicActionEngine + PlaceAction. The target is an end-effector pose,

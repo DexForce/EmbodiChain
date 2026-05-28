@@ -1,23 +1,23 @@
 {
-  "task": "mug_pick_and_place",
+  "task": "pick and place mug",
   "start": "v0_start",
   "goal": "v3_done",
   "nodes": [
     {
       "id": "v0_start",
-      "semantic": "initial state"
+      "semantic": "Initial state with mug on table and arm at rest."
     },
     {
       "id": "v1_grasped",
-      "semantic": "mug grasped by arm"
+      "semantic": "Mug grasped by the arm."
     },
     {
       "id": "v2_placed",
-      "semantic": "mug placed at target pose"
+      "semantic": "Mug placed at target location."
     },
     {
       "id": "v3_done",
-      "semantic": "arm at safe rest pose"
+      "semantic": "Arm moved to safe rest pose."
     }
   ],
   "edges": [
@@ -55,7 +55,7 @@
       "right_arm_action": null
     },
     {
-      "id": "e12_place",
+      "id": "e02_place",
       "source": "v1_grasped",
       "target": "v2_placed",
       "left_arm_action": {
@@ -97,7 +97,7 @@
       "right_arm_action": null
     },
     {
-      "id": "e23_move",
+      "id": "e03_move",
       "source": "v2_placed",
       "target": "v3_done",
       "left_arm_action": {

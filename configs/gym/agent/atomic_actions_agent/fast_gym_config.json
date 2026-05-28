@@ -187,7 +187,7 @@
             "uid": "mug",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "CoffeeCup/cup.ply",
+                "fpath": "/home/dex/下载/raw_mesh+simready/simready_apple/assets/asset_simready/asset_simready.obj",
                 "compute_uv": true
             },
             "attrs": {
@@ -196,9 +196,9 @@
                 "static_friction": 0.99
             },
             "max_convex_hull_num": 16,
-            "init_pos": [0.55, 0.0, 0.01],
+            "init_pos": [0.65, 0.0, 0.01],
             "init_rot": [0.0, 0.0, -90.0],
-            "body_scale": [4.0, 4.0, 4.0]
+            "body_scale": [0.7, 0.7, 0.7]
         }
     ]
 }

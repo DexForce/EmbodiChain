@@ -1,24 +1,24 @@
 {
   "task_graph": {
-    "task": "mug_pick_and_place",
+    "task": "pick and place mug",
     "start": "v0_start",
     "goal": "v3_done",
     "nodes": [
       {
         "id": "v0_start",
-        "semantic": "initial state"
+        "semantic": "Initial state with mug on table and arm at rest."
       },
       {
         "id": "v1_grasped",
-        "semantic": "mug grasped by arm"
+        "semantic": "Mug grasped by the arm."
       },
       {
         "id": "v2_placed",
-        "semantic": "mug placed at target pose"
+        "semantic": "Mug placed at target location."
       },
       {
         "id": "v3_done",
-        "semantic": "arm at safe rest pose"
+        "semantic": "Arm moved to safe rest pose."
       }
     ],
     "edges": [
@@ -56,7 +56,7 @@
         "right_arm_action": null
       },
       {
-        "id": "e12_place",
+        "id": "e02_place",
         "source": "v1_grasped",
         "target": "v2_placed",
         "left_arm_action": {
@@ -98,7 +98,7 @@
         "right_arm_action": null
       },
       {
-        "id": "e23_move",
+        "id": "e03_move",
         "source": "v2_placed",
         "target": "v3_done",
         "left_arm_action": {
@@ -139,11 +139,11 @@
     ]
   },
   "recovery_spec": {
-    "task": "mug_pick_and_place",
+    "task": "pick and place mug",
     "recovery_bindings": []
   },
   "recovery_graph": {
-    "task": "mug_pick_and_place",
+    "task": "pick and place mug",
     "recovery_nodes": [],
     "recovery_edges": [],
     "recovery_branches": []
@@ -151,8 +151,8 @@
   "metadata": {
     "recovery_enabled": false,
     "schema_version": "recovery_bindings_v1",
-    "task_graph_hash": "fe9c2a659e29902f922707501adfb7359211611be39a9b9681f73ffdd73cce70",
-    "raw_recovery_spec_hash": "02cbc282f48c014f311c728c081ef71827166342d9b74cd14a3ef82142caab48",
-    "recovery_spec_hash": "02cbc282f48c014f311c728c081ef71827166342d9b74cd14a3ef82142caab48"
+    "task_graph_hash": "33f88c0f694f4fa0133fff93fae7ca845e79f6fb5a3b85ab7ec27eaf63f584a7",
+    "raw_recovery_spec_hash": "1f2c425c0837b795359fb731500e714e3b76242df98384621657a4cd41c97be7",
+    "recovery_spec_hash": "1f2c425c0837b795359fb731500e714e3b76242df98384621657a4cd41c97be7"
   }
 }
