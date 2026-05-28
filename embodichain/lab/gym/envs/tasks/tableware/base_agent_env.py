@@ -59,20 +59,49 @@ class BaseAgentEnv:
         # store robot states in each env.reset
         self.init_qpos = self.robot.get_qpos().squeeze(0)
 
-        self.left_arm_joints = self.robot.get_joint_ids(name="left_arm")
-        self.right_arm_joints = self.robot.get_joint_ids(name="right_arm")
-        self.left_eef_joints = self.robot.get_joint_ids(name="left_eef")
-        self.right_eef_joints = self.robot.get_joint_ids(name="right_eef")
+        control_parts = self.robot.control_parts or {}
+        if "arm" in control_parts and "hand" in control_parts:
+            self.left_arm_joints = self.robot.get_joint_ids(name="arm")
+            self.right_arm_joints = []
+            self.left_eef_joints = self.robot.get_joint_ids(name="hand")
+            self.right_eef_joints = []
 
-        self.left_arm_init_qpos = self.init_qpos[self.left_arm_joints]
-        self.right_arm_init_qpos = self.init_qpos[self.right_arm_joints]
+            self.left_arm_init_qpos = self.init_qpos[self.left_arm_joints]
+            self.right_arm_init_qpos = torch.empty(
+                0, dtype=self.init_qpos.dtype, device=self.init_qpos.device
+            )
 
-        self.left_arm_init_xpos = self.robot.compute_fk(
-            self.left_arm_init_qpos, name="left_arm", to_matrix=True
-        ).squeeze(0)
-        self.right_arm_init_xpos = self.robot.compute_fk(
-            self.right_arm_init_qpos, name="right_arm", to_matrix=True
-        ).squeeze(0)
+            self.left_arm_init_xpos = self.robot.compute_fk(
+                self.left_arm_init_qpos, name="arm", to_matrix=True
+            ).squeeze(0)
+            self.right_arm_init_xpos = self.left_arm_init_xpos.clone()
+
+            self.left_arm_base_pose = self.robot.get_control_part_base_pose(
+                "arm", to_matrix=True
+            ).squeeze(0)
+            self.right_arm_base_pose = self.left_arm_base_pose.clone()
+        else:
+            self.left_arm_joints = self.robot.get_joint_ids(name="left_arm")
+            self.right_arm_joints = self.robot.get_joint_ids(name="right_arm")
+            self.left_eef_joints = self.robot.get_joint_ids(name="left_eef")
+            self.right_eef_joints = self.robot.get_joint_ids(name="right_eef")
+
+            self.left_arm_init_qpos = self.init_qpos[self.left_arm_joints]
+            self.right_arm_init_qpos = self.init_qpos[self.right_arm_joints]
+
+            self.left_arm_init_xpos = self.robot.compute_fk(
+                self.left_arm_init_qpos, name="left_arm", to_matrix=True
+            ).squeeze(0)
+            self.right_arm_init_xpos = self.robot.compute_fk(
+                self.right_arm_init_qpos, name="right_arm", to_matrix=True
+            ).squeeze(0)
+
+            self.left_arm_base_pose = self.robot.get_control_part_base_pose(
+                "left_arm", to_matrix=True
+            ).squeeze(0)
+            self.right_arm_base_pose = self.robot.get_control_part_base_pose(
+                "right_arm", to_matrix=True
+            ).squeeze(0)
 
         self.left_arm_current_qpos = self.left_arm_init_qpos
         self.right_arm_current_qpos = self.right_arm_init_qpos
@@ -80,15 +109,12 @@ class BaseAgentEnv:
         self.left_arm_current_xpos = self.left_arm_init_xpos
         self.right_arm_current_xpos = self.right_arm_init_xpos
 
-        self.left_arm_base_pose = self.robot.get_control_part_base_pose(
-            "left_arm", to_matrix=True
-        ).squeeze(0)
-        self.right_arm_base_pose = self.robot.get_control_part_base_pose(
-            "right_arm", to_matrix=True
-        ).squeeze(0)
-
-        self.open_state = torch.tensor([0.05])
-        self.close_state = torch.tensor([0.0])
+        self.open_state = torch.as_tensor(
+            getattr(self, "agent_open_state", [0.05]), dtype=torch.float32
+        )
+        self.close_state = torch.as_tensor(
+            getattr(self, "agent_close_state", [0.0]), dtype=torch.float32
+        )
         self.left_arm_current_gripper_state = self.open_state
         self.right_arm_current_gripper_state = self.open_state
 

@@ -82,6 +82,8 @@ def _is_left_arm(robot_name: str) -> bool:
 
 
 def _control_parts(robot_name: str) -> tuple[bool, str, str]:
+    if robot_name in {"arm", "single_arm", "ur10"}:
+        return True, "arm", "hand"
     is_left = _is_left_arm(robot_name)
     arm_control_part = "left_arm" if is_left else "right_arm"
     hand_control_part = "left_eef" if is_left else "right_eef"
@@ -109,7 +111,35 @@ def _hand_qpos(env, hand_control_part: str, state: torch.Tensor) -> torch.Tensor
 def _approach_direction(robot_name: str, approach_direction=None) -> torch.Tensor:
     if approach_direction is None or approach_direction == "top":
         direction = [0.0, 0.0, -1.0]
-    return direction
+    elif isinstance(approach_direction, str):
+        log_error("approach_direction must be 'top', None, or a 3D vector.")
+    else:
+        direction = approach_direction
+    return torch.as_tensor(direction, dtype=torch.float32)
+
+
+def _coerce_affordance_config(config: dict | None) -> dict:
+    if config is None:
+        return {}
+    config = dict(config)
+
+    gripper_collision_cfg = config.get("gripper_collision_cfg")
+    if isinstance(gripper_collision_cfg, dict):
+        config["gripper_collision_cfg"] = GripperCollisionCfg(
+            **gripper_collision_cfg
+        )
+
+    generator_cfg = config.get("generator_cfg")
+    if isinstance(generator_cfg, dict):
+        generator_cfg = dict(generator_cfg)
+        antipodal_sampler_cfg = generator_cfg.get("antipodal_sampler_cfg")
+        if isinstance(antipodal_sampler_cfg, dict):
+            generator_cfg["antipodal_sampler_cfg"] = AntipodalSamplerCfg(
+                **antipodal_sampler_cfg
+            )
+        config["generator_cfg"] = GraspGeneratorCfg(**generator_cfg)
+
+    return config
 
 
 def _object_pose(env, obj_name: str) -> torch.Tensor:
@@ -149,7 +179,9 @@ def _object_semantics(
         object_label=obj_name,
         force_reannotate=force_reannotate,
         is_draw_grasp_xpos=is_draw_grasp_xpos,
-        custom_config=_default_affordance_config(**(custom_config or {})),
+        custom_config=_default_affordance_config(
+            **_coerce_affordance_config(custom_config)
+        ),
     )
     return ObjectSemantics(
         label=obj_name,
@@ -1265,36 +1297,40 @@ def drive(
     elif left_arm_action is None and right_arm_action is not None:
         left_arm_index = env.left_arm_joints + env.left_eef_joints
         right_arm_index = env.right_arm_joints + env.right_eef_joints
-        left_arm_action = finalize_actions(
-            env.left_arm_current_qpos, env.left_arm_current_gripper_state
-        )
-        left_arm_action = np.repeat(
-            left_arm_action[None, :], len(right_arm_action), axis=0
-        )
 
         actions = np.zeros(
             (len(right_arm_action), len(env.robot.get_qpos().squeeze(0))),
             dtype=np.float32,
         )
-        actions[:, left_arm_index] = left_arm_action
-        actions[:, right_arm_index] = right_arm_action
+        if right_arm_index:
+            left_arm_action = finalize_actions(
+                env.left_arm_current_qpos, env.left_arm_current_gripper_state
+            )
+            left_arm_action = np.repeat(
+                left_arm_action[None, :], len(right_arm_action), axis=0
+            )
+            actions[:, left_arm_index] = left_arm_action
+            actions[:, right_arm_index] = right_arm_action
+        else:
+            actions[:, left_arm_index] = right_arm_action
 
     elif right_arm_action is None and left_arm_action is not None:
         left_arm_index = env.left_arm_joints + env.left_eef_joints
         right_arm_index = env.right_arm_joints + env.right_eef_joints
-        right_arm_action = finalize_actions(
-            env.right_arm_current_qpos, env.right_arm_current_gripper_state
-        )
-        right_arm_action = np.repeat(
-            right_arm_action[None, :], len(left_arm_action), axis=0
-        )
 
         actions = np.zeros(
             (len(left_arm_action), len(env.robot.get_qpos().squeeze(0))),
             dtype=np.float32,
         )
         actions[:, left_arm_index] = left_arm_action
-        actions[:, right_arm_index] = right_arm_action
+        if right_arm_index:
+            right_arm_action = finalize_actions(
+                env.right_arm_current_qpos, env.right_arm_current_gripper_state
+            )
+            right_arm_action = np.repeat(
+                right_arm_action[None, :], len(left_arm_action), axis=0
+            )
+            actions[:, right_arm_index] = right_arm_action
 
     else:
         log_error("At least one arm action should be provided.")

@@ -1,0 +1,204 @@
+{
+    "id": "AtomicActionsAgent-v3",
+    "max_episodes": 5,
+    "max_episode_steps": 300,
+    "env": {
+        "extensions": {
+            "agent_open_state": [0.0],
+            "agent_close_state": [0.025],
+            "agent_success_position": [0.2489, 0.3970, 0.2400],
+            "agent_success_tolerance": 0.05
+        },
+        "events": {
+            "record_camera": {
+                "func": "record_camera_data",
+                "mode": "interval",
+                "interval_step": 1,
+                "params": {
+                    "name": "cam1",
+                    "resolution": [320, 240],
+                    "eye": [1.2, -0.8, 0.9],
+                    "target": [0.45, 0.15, 0.18]
+                }
+            },
+            "validation_cameras": {
+                "func": "validation_cameras",
+                "mode": "trigger",
+                "params": {
+                    "cameras": [
+                        {
+                            "uid": "valid_cam_1",
+                            "width": 1280,
+                            "height": 960,
+                            "enable_mask": false,
+                            "intrinsics": [1400, 1400, 640, 480],
+                            "extrinsics": {
+                                "eye": [1.2, -0.8, 0.9],
+                                "target": [0.45, 0.15, 0.18]
+                            }
+                        },
+                        {
+                            "uid": "valid_cam_2",
+                            "width": 1280,
+                            "height": 960,
+                            "enable_mask": false,
+                            "intrinsics": [1400, 1400, 640, 480],
+                            "extrinsics": {
+                                "eye": [1.0, 0.7, 0.8],
+                                "target": [0.4, 0.2, 0.18]
+                            }
+                        }
+                    ]
+                }
+            },
+            "register_info_to_env": {
+                "func": "register_info_to_env",
+                "mode": "reset",
+                "params": {
+                    "registry": [
+                        {
+                            "entity_cfg": {
+                                "uid": "mug"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "UR10",
+                                "control_parts": ["arm"]
+                            },
+                            "attrs": ["left_arm_base_pose"],
+                            "pose_register_params": {
+                                "compute_relative": "mug",
+                                "compute_pose_object_to_arena": false,
+                                "to_matrix": true
+                            },
+                            "prefix": false
+                        }
+                    ],
+                    "registration": "affordance_datas",
+                    "sim_update": true
+                }
+            }
+        },
+        "dataset": {
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "UR10",
+                        "control_freq": 25
+                    },
+                    "instruction": {
+                        "lang": "Pick up the mug, place it at the target pose, then move to rest."
+                    },
+                    "extra": {
+                        "scene_type": "Tutorial",
+                        "task_description": "Atomic actions mug pick and place",
+                        "data_type": "sim"
+                    },
+                    "use_videos": true
+                }
+            }
+        }
+    },
+    "robot": {
+        "uid": "UR10",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": "DH_PGC_140_50_M/DH_PGC_140_50_M.urdf"
+                }
+            ]
+        },
+        "drive_pros": {
+            "stiffness": {
+                "JOINT[0-9]": 10000.0,
+                "FINGER[1-2]": 100.0
+            },
+            "damping": {
+                "JOINT[0-9]": 1000.0,
+                "FINGER[1-2]": 10.0
+            },
+            "max_effort": {
+                "JOINT[0-9]": 100000.0,
+                "FINGER[1-2]": 1000.0
+            },
+            "drive_type": "force"
+        },
+        "control_parts": {
+            "arm": ["JOINT[0-9]"],
+            "hand": ["FINGER[1-2]"]
+        },
+        "solver_cfg": {
+            "arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [0.0, 1.0, 0.0, 0.0],
+                    [-1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.12],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "init_qpos": [0.0, -1.5707963268, -1.5707963268, 1.5707963268, -1.5707963268, 0.0, 0.0, 0.0],
+        "init_pos": [0.0, 0.0, 0.0]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 960,
+            "height": 540,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 480, 270],
+            "extrinsics": {
+                "eye": [1.2, -0.8, 0.9],
+                "target": [0.45, 0.15, 0.18],
+                "up": [0.0, 0.0, 1.0]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "main_light",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [0.0, 0.0, 2.0],
+                "radius": 10.0
+            }
+        ]
+    },
+    "rigid_object": [
+        {
+            "uid": "mug",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "CoffeeCup/cup.ply",
+                "compute_uv": true
+            },
+            "attrs": {
+                "mass": 0.01,
+                "dynamic_friction": 0.97,
+                "static_friction": 0.99
+            },
+            "max_convex_hull_num": 16,
+            "init_pos": [0.55, 0.0, 0.01],
+            "init_rot": [0.0, 0.0, -90.0],
+            "body_scale": [4.0, 4.0, 4.0]
+        }
+    ]
+}

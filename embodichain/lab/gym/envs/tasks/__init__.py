@@ -42,6 +42,9 @@ from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
     RearrangementEnv,
     RearrangementAgentEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.atomic_actions import (
+    AtomicActionsAgentEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
@@ -62,6 +65,7 @@ __all__ = [
     "MatchObjectContainerEnv",
     "RearrangementEnv",
     "RearrangementAgentEnv",
+    "AtomicActionsAgentEnv",
     "PushCubeEnv",
     "CartPoleEnv",
     "SimpleTaskEnv",

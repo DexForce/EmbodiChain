@@ -1,0 +1,53 @@
+Task:
+Use the single UR10 arm to pick up the mug, place it at the target pose, and
+then move the arm to the safe rest pose.
+
+Generate a nominal graph with exactly three semantic edges. This is a single-arm
+task: put every action in left_arm_action with robot_name="arm" and set
+right_arm_action to null on every edge. Use only these atomic actions: pick_up,
+place, and move.
+
+1. Pick up the mug:
+   - left_arm_action: pick_up(robot_name="arm", obj_name="mug",
+     pre_grasp_distance=0.15, lift_height=0.15, sample_num=100,
+     hand_interp_steps=8, force_reannotate=false, affordance_config={
+       "gripper_collision_cfg": {
+         "max_open_length": 0.088,
+         "finger_length": 0.078,
+         "point_sample_dense": 0.012
+       },
+       "generator_cfg": {
+         "viser_port": 11801,
+         "antipodal_sampler_cfg": {
+           "n_sample": 20000,
+           "max_length": 0.088,
+           "min_length": 0.003
+         }
+       }
+     })
+   - right_arm_action: null
+
+2. Place the mug at this exact end-effector pose:
+   - target_pose:
+     [
+       [-0.0539, -0.9985, -0.0022, 0.2489],
+       [-0.9977, 0.0540, -0.0401, 0.3970],
+       [0.0401, 0.0000, -0.9992, 0.2400],
+       [0.0000, 0.0000, 0.0000, 1.0000]
+     ]
+   - left_arm_action: place(robot_name="arm", obj_name="mug",
+     target_pose=<target_pose>, lift_height=0.15, sample_num=100,
+     hand_interp_steps=8)
+   - right_arm_action: null
+
+3. Move the arm to this exact safe rest end-effector pose:
+   - target_pose:
+     [
+       [-0.0539, -0.9985, -0.0022, 0.5000],
+       [-0.9977, 0.0540, -0.0401, 0.0000],
+       [0.0401, 0.0000, -0.9992, 0.5000],
+       [0.0000, 0.0000, 0.0000, 1.0000]
+     ]
+   - left_arm_action: move(robot_name="arm", target_pose=<target_pose>,
+     sample_num=80)
+   - right_arm_action: null

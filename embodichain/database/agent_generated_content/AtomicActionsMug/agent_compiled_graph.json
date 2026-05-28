@@ -1,0 +1,158 @@
+{
+  "task_graph": {
+    "task": "mug_pick_and_place",
+    "start": "v0_start",
+    "goal": "v3_done",
+    "nodes": [
+      {
+        "id": "v0_start",
+        "semantic": "initial state"
+      },
+      {
+        "id": "v1_grasped",
+        "semantic": "mug grasped by arm"
+      },
+      {
+        "id": "v2_placed",
+        "semantic": "mug placed at target pose"
+      },
+      {
+        "id": "v3_done",
+        "semantic": "arm at safe rest pose"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e01_pick_up",
+        "source": "v0_start",
+        "target": "v1_grasped",
+        "left_arm_action": {
+          "fn": "pick_up",
+          "kwargs": {
+            "robot_name": "arm",
+            "obj_name": "mug",
+            "pre_grasp_distance": 0.15,
+            "lift_height": 0.15,
+            "sample_num": 100,
+            "hand_interp_steps": 8,
+            "force_reannotate": false,
+            "affordance_config": {
+              "gripper_collision_cfg": {
+                "max_open_length": 0.088,
+                "finger_length": 0.078,
+                "point_sample_dense": 0.012
+              },
+              "generator_cfg": {
+                "viser_port": 11801,
+                "antipodal_sampler_cfg": {
+                  "n_sample": 20000,
+                  "max_length": 0.088,
+                  "min_length": 0.003
+                }
+              }
+            }
+          }
+        },
+        "right_arm_action": null
+      },
+      {
+        "id": "e12_place",
+        "source": "v1_grasped",
+        "target": "v2_placed",
+        "left_arm_action": {
+          "fn": "place",
+          "kwargs": {
+            "robot_name": "arm",
+            "obj_name": "mug",
+            "target_pose": [
+              [
+                -0.0539,
+                -0.9985,
+                -0.0022,
+                0.2489
+              ],
+              [
+                -0.9977,
+                0.054,
+                -0.0401,
+                0.397
+              ],
+              [
+                0.0401,
+                0.0,
+                -0.9992,
+                0.24
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "lift_height": 0.15,
+            "sample_num": 100,
+            "hand_interp_steps": 8
+          }
+        },
+        "right_arm_action": null
+      },
+      {
+        "id": "e23_move",
+        "source": "v2_placed",
+        "target": "v3_done",
+        "left_arm_action": {
+          "fn": "move",
+          "kwargs": {
+            "robot_name": "arm",
+            "target_pose": [
+              [
+                -0.0539,
+                -0.9985,
+                -0.0022,
+                0.5
+              ],
+              [
+                -0.9977,
+                0.054,
+                -0.0401,
+                0.0
+              ],
+              [
+                0.0401,
+                0.0,
+                -0.9992,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "sample_num": 80
+          }
+        },
+        "right_arm_action": null
+      }
+    ]
+  },
+  "recovery_spec": {
+    "task": "mug_pick_and_place",
+    "recovery_bindings": []
+  },
+  "recovery_graph": {
+    "task": "mug_pick_and_place",
+    "recovery_nodes": [],
+    "recovery_edges": [],
+    "recovery_branches": []
+  },
+  "metadata": {
+    "recovery_enabled": false,
+    "schema_version": "recovery_bindings_v1",
+    "task_graph_hash": "fe9c2a659e29902f922707501adfb7359211611be39a9b9681f73ffdd73cce70",
+    "raw_recovery_spec_hash": "02cbc282f48c014f311c728c081ef71827166342d9b74cd14a3ef82142caab48",
+    "recovery_spec_hash": "02cbc282f48c014f311c728c081ef71827166342d9b74cd14a3ef82142caab48"
+  }
+}
