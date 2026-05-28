@@ -61,6 +61,7 @@ from embodichain.lab.sim.agent.atom_action_utils import (
     extract_drive_calls,
     apply_offset_to_pose,
     resolve_action,
+    resolve_arm_side,
     sync_agent_state_from_robot,
 )
 from embodichain.lab.sim.agent.error_functions import (
@@ -83,7 +84,7 @@ def _use_public_atomic_actions(kwargs):
 
 
 def _select_arm_parts(env, robot_name):
-    is_left = "right" not in robot_name
+    is_left = resolve_arm_side(env, robot_name) == "left"
     arm_part = "left_arm" if is_left else "right_arm"
     hand_part = "left_eef" if is_left else "right_eef"
     arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
@@ -120,6 +121,38 @@ def _state_to_hand_qpos(state, hand_dof, device):
 
     repeat_num = int(np.ceil(hand_dof / state.numel()))
     return state.repeat(repeat_num)[:hand_dof]
+
+
+def _is_current_gripper_open(env, current_state, threshold):
+    current_state = torch.as_tensor(
+        current_state,
+        dtype=env.open_state.dtype,
+        device=env.open_state.device,
+    ).flatten()
+    if current_state.numel() == 0:
+        return True
+
+    open_state = _state_to_hand_qpos(
+        env.open_state,
+        max(current_state.numel(), int(env.open_state.numel())),
+        env.open_state.device,
+    )[: current_state.numel()]
+    return torch.all(torch.abs(current_state - open_state) <= threshold).item()
+
+
+def _as_2d_action(action, action_name):
+    if action is None:
+        return None
+    if isinstance(action, torch.Tensor):
+        action = action.detach().cpu().numpy()
+    action = np.asarray(action, dtype=np.float32)
+    if action.ndim == 1:
+        action = action[None, :]
+    if action.ndim != 2 or len(action) == 0:
+        log_error(
+            f"{action_name} must have shape (T, D) with T > 0, got {action.shape}."
+        )
+    return action
 
 
 def _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids):
@@ -730,7 +763,11 @@ def grasp(
         if "left" in robot_name
         else env.right_arm_current_gripper_state
     )
-    if select_arm_current_gripper_state <= env.open_state - 0.01:
+    if not _is_current_gripper_open(
+        env,
+        select_arm_current_gripper_state,
+        kwargs.get("open_threshold", 0.01),
+    ):
         actions = open_gripper(robot_name, env, **kwargs)
 
     # Retract the end-effector to avoid collision
@@ -1518,14 +1555,11 @@ def open_gripper(robot_name: str, env=None, **kwargs):
         select_arm_current_gripper_state,
     ) = get_arm_states(env, robot_name)
 
-    current_gripper_state = torch.as_tensor(
+    if _is_current_gripper_open(
+        env,
         select_arm_current_gripper_state,
-        dtype=env.open_state.dtype,
-        device=env.open_state.device,
-    )
-    if torch.all(
-        current_gripper_state >= (env.open_state - kwargs.get("open_threshold", 0.01))
-    ).item():
+        kwargs.get("open_threshold", 0.01),
+    ):
         actions = finalize_actions(
             [select_arm_current_qpos],
             [select_arm_current_gripper_state],
@@ -1573,61 +1607,45 @@ def drive(
     left_arm_action = resolve_action(left_arm_action, env, kwargs)
     right_arm_action = resolve_action(right_arm_action, env, kwargs)
 
-    if left_arm_action is not None and right_arm_action is not None:
-        len_left = len(left_arm_action)
-        len_right = len(right_arm_action)
+    left_arm_action = _as_2d_action(left_arm_action, "left_arm_action")
+    right_arm_action = _as_2d_action(right_arm_action, "right_arm_action")
+    arm_actions = {"left": left_arm_action, "right": right_arm_action}
 
-        if len_left < len_right:
-            diff = len_right - len_left
-            padding = np.repeat(left_arm_action[-1:], diff, axis=0)
-            left_arm_action = np.concatenate([left_arm_action, padding], axis=0)
-        elif len_right < len_left:
-            diff = len_left - len_right
-            padding = np.repeat(right_arm_action[-1:], diff, axis=0)
-            right_arm_action = np.concatenate([right_arm_action, padding], axis=0)
-
-        left_arm_index = env.left_arm_joints + env.left_eef_joints
-        right_arm_index = env.right_arm_joints + env.right_eef_joints
-        actions = np.zeros((len(right_arm_action), len(env.init_qpos)))
-        actions[:, left_arm_index] = left_arm_action
-        actions[:, right_arm_index] = right_arm_action
-
-    elif left_arm_action is None and right_arm_action is not None:
-        left_arm_index = env.left_arm_joints + env.left_eef_joints
-        right_arm_index = env.right_arm_joints + env.right_eef_joints
-        left_arm_action = finalize_actions(
-            env.left_arm_current_qpos, env.left_arm_current_gripper_state
-        )
-        left_arm_action = np.repeat(
-            left_arm_action[None, :], len(right_arm_action), axis=0
-        )
-
-        actions = np.zeros(
-            (len(right_arm_action), len(env.robot.get_qpos().squeeze(0))),
-            dtype=np.float32,
-        )
-        actions[:, left_arm_index] = left_arm_action
-        actions[:, right_arm_index] = right_arm_action
-
-    elif right_arm_action is None and left_arm_action is not None:
-        left_arm_index = env.left_arm_joints + env.left_eef_joints
-        right_arm_index = env.right_arm_joints + env.right_eef_joints
-        right_arm_action = finalize_actions(
-            env.right_arm_current_qpos, env.right_arm_current_gripper_state
-        )
-        right_arm_action = np.repeat(
-            right_arm_action[None, :], len(left_arm_action), axis=0
-        )
-
-        actions = np.zeros(
-            (len(left_arm_action), len(env.robot.get_qpos().squeeze(0))),
-            dtype=np.float32,
-        )
-        actions[:, left_arm_index] = left_arm_action
-        actions[:, right_arm_index] = right_arm_action
-
-    else:
+    if all(action is None for action in arm_actions.values()):
         log_error("At least one arm action should be provided.")
+
+    action_len = max(
+        len(action) for action in arm_actions.values() if action is not None
+    )
+    for side, action in arm_actions.items():
+        if action is not None and len(action) < action_len:
+            diff = action_len - len(action)
+            padding = np.repeat(action[-1:], diff, axis=0)
+            arm_actions[side] = np.concatenate([action, padding], axis=0)
+
+    current_qpos = (
+        env.robot.get_qpos().squeeze(0).detach().cpu().numpy().astype(np.float32)
+    )
+    actions = np.repeat(current_qpos[None, :], action_len, axis=0)
+
+    for side, action in arm_actions.items():
+        if action is None:
+            continue
+
+        arm_index = list(getattr(env, f"{side}_arm_joints", [])) + list(
+            getattr(env, f"{side}_eef_joints", [])
+        )
+        if not arm_index:
+            log_error(
+                f"{side}_arm_action was provided, but {side}_arm is not configured "
+                f"on robot control parts {getattr(env.robot, 'control_parts', None)}."
+            )
+        if action.shape[-1] != len(arm_index):
+            log_error(
+                f"{side}_arm_action width {action.shape[-1]} does not match "
+                f"{side}_arm joints plus eef joints ({len(arm_index)})."
+            )
+        actions[:, arm_index] = action
 
     actions = torch.from_numpy(actions).to(dtype=torch.float32).unsqueeze(1)
     actions = list(actions.unbind(dim=0))

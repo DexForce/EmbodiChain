@@ -34,6 +34,34 @@ from embodichain.lab.sim.planners import (
 )
 
 
+def _available_arm_sides(env) -> list[str]:
+    sides = []
+    for side in ("left", "right"):
+        if len(getattr(env, f"{side}_arm_joints", []) or []) > 0:
+            sides.append(side)
+    return sides
+
+
+def resolve_arm_side(env, robot_name: str) -> str:
+    """Resolve robot_name to an available left/right graph slot."""
+    name = robot_name or ""
+    if "right" in name:
+        side = "right"
+    elif "left" in name:
+        side = "left"
+    else:
+        sides = _available_arm_sides(env)
+        side = "right" if sides == ["right"] else "left"
+
+    if side not in _available_arm_sides(env):
+        log_error(
+            f"Requested {side}_arm for robot_name='{robot_name}', but available "
+            f"control parts are {getattr(env.robot, 'control_parts', None)}.",
+            error_type=ValueError,
+        )
+    return side
+
+
 def draw_axis(env, pose):
     """Draw an axis marker in the simulation for debugging/visualization.
 
@@ -76,7 +104,7 @@ def get_arm_states(env, robot_name):
         env.get_current_gripper_state_agent()
     )
 
-    side = "right" if "right" in robot_name else "left"
+    side = resolve_arm_side(env, robot_name)
     is_left = True if side == "left" else False
     select_arm = "left_arm" if is_left else "right_arm"
 
@@ -328,21 +356,23 @@ def resolve_action(action, env, kwargs):
         return action(env=env, **kwargs)
     return action
 
+
 def sync_agent_state_from_robot(env) -> None:
     """Synchronize cached agent arm states from the physical robot state."""
     action = env.robot.get_qpos().squeeze(0)
-    env.left_arm_current_qpos = action[env.left_arm_joints]
-    env.left_arm_current_xpos = env.robot.compute_fk(
-        qpos=env.left_arm_current_qpos,
-        name="left_arm",
-        to_matrix=True,
-    ).squeeze(0)
-    env.left_arm_current_gripper_state = action[env.left_eef_joints][0].unsqueeze(0)
-
-    env.right_arm_current_qpos = action[env.right_arm_joints]
-    env.right_arm_current_xpos = env.robot.compute_fk(
-        qpos=env.right_arm_current_qpos,
-        name="right_arm",
-        to_matrix=True,
-    ).squeeze(0)
-    env.right_arm_current_gripper_state = action[env.right_eef_joints][0].unsqueeze(0)
+    for side in ("left", "right"):
+        is_left = side == "left"
+        arm_joints = getattr(env, f"{side}_arm_joints", [])
+        eef_joints = getattr(env, f"{side}_eef_joints", [])
+        if arm_joints:
+            arm_qpos = action[arm_joints]
+            env.set_current_qpos_agent(arm_qpos, is_left=is_left)
+            env.set_current_xpos_agent(
+                env.get_arm_fk(qpos=arm_qpos, is_left=is_left),
+                is_left=is_left,
+            )
+        if eef_joints:
+            env.set_current_gripper_state_agent(
+                action[eef_joints][0].unsqueeze(0),
+                is_left=is_left,
+            )

@@ -42,6 +42,10 @@ from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
     RearrangementEnv,
     RearrangementAgentEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.ur10_cup_transfer import (
+    UR10CupTransferEnv,
+    UR10CupTransferAgentEnv,
+)
 
 # Reinforcement learning environments
 from embodichain.lab.gym.envs.tasks.rl.push_cube import PushCubeEnv
@@ -62,6 +66,8 @@ __all__ = [
     "MatchObjectContainerEnv",
     "RearrangementEnv",
     "RearrangementAgentEnv",
+    "UR10CupTransferEnv",
+    "UR10CupTransferAgentEnv",
     "PushCubeEnv",
     "CartPoleEnv",
     "SimpleTaskEnv",

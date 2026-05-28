@@ -1,0 +1,4 @@
+Task:
+Use the UR10 right arm to pick up the cup from the positive-y side of the table and place it at [0.75, -0.18] on the negative-y side of the table.
+Only the right_arm is available. Keep every left_arm_action as null/None.
+After placing the cup at the target location, return the right_arm to its initial pose.
