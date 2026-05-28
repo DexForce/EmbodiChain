@@ -15,28 +15,36 @@
 # ----------------------------------------------------------------------------
 
 import os
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from langchain_openai import ChatOpenAI
 
 # ------------------------------------------------------------------------------
 # Environment configuration
 # ------------------------------------------------------------------------------
 
-os.environ["ALL_PROXY"] = ""
-os.environ["all_proxy"] = ""
-os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
-os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
-os.environ["LLM_URL"] = "https://api.shubiaobiao.cn/v1/"
+DEBUG_LLM_MODEL = "mimo-v2.5"
+DEBUG_LLM_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+DEBUG_OPENAI_API_KEY = "tp-cigd9h4eh33v79adk5wz77y9o9rngsvcrw527wxiic5jdeqq"
+
+DEBUG_PROXY_URL = "http://127.0.0.1:7897"
+
+for proxy_var in ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+    os.environ.pop(proxy_var, None)
+
+if DEBUG_PROXY_URL:
+    os.environ["HTTP_PROXY"] = DEBUG_PROXY_URL
+    os.environ["HTTPS_PROXY"] = DEBUG_PROXY_URL
+
 # ------------------------------------------------------------------------------
 # LLM factory
 # ------------------------------------------------------------------------------
 
 
-def create_llm(*, temperature=0.0, model="gpt-4o"):
+def create_llm(*, temperature=0.0, model=None):
     return ChatOpenAI(
         temperature=temperature,
-        model=model,
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("LLM_URL"),
+        model=model or DEBUG_LLM_MODEL,
+        api_key=DEBUG_OPENAI_API_KEY,
+        base_url=DEBUG_LLM_URL,
     )
 
 
@@ -46,22 +54,22 @@ def create_llm(*, temperature=0.0, model="gpt-4o"):
 
 
 # Initialize LLM instances, but handle errors gracefully for documentation builds
-def _create_llm_safe(*, temperature=0.0, model="gpt-4o"):
+def _create_llm_safe(*, temperature=0.0, model=None):
     try:
         return create_llm(temperature=temperature, model=model)
     except Exception:
         return None
 
 
-task_llm = _create_llm_safe(temperature=0.0, model="gpt-5")
-recovery_llm = _create_llm_safe(temperature=0.0, model="gpt-5")
-compile_llm = _create_llm_safe(temperature=0.0, model="gpt-5")
+task_llm = _create_llm_safe(temperature=0.0)
+recovery_llm = _create_llm_safe(temperature=0.0)
+compile_llm = _create_llm_safe(temperature=0.0)
 
 if __name__ == "__main__":
-    def call_llm(prompt, temperature=0.0, model="gpt-4o"):
+    def call_llm(prompt, temperature=0.0, model=None):
         llm = create_llm(temperature=temperature, model=model)
         response = llm.invoke(prompt)
         return response.content
 
-    response = call_llm(prompt="Which model you are?", temperature=0.0, model="gpt-5")
+    response = call_llm(prompt="Which model you are?", temperature=0.0)
     print(response)
