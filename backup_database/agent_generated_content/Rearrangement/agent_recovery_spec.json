@@ -1,0 +1,117 @@
+{
+  "task": "rearrange_fork_spoon_opposite_sides_plate",
+  "recovery_bindings": [
+    {
+      "edge_id": "e01_grasp_objects",
+      "failure_name": "object_shifted_during_grasp",
+      "monitors": [
+        {
+          "type": "object_moved",
+          "objects": [
+            "fork",
+            "spoon"
+          ],
+          "threshold": 0.02
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp_both",
+          "arms": {
+            "left_arm": "fork",
+            "right_arm": "spoon"
+          },
+          "pre_grasp_dis": 0.1
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e02_orient_down",
+      "failure_name": "hold_lost_during_orient",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "fork"
+        },
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "spoon"
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp_both",
+          "arms": {
+            "left_arm": "fork",
+            "right_arm": "spoon"
+          },
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e03_move_to_plate_offsets",
+      "failure_name": "hold_lost_during_move",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "fork"
+        },
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "spoon"
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp_both",
+          "arms": {
+            "left_arm": "fork",
+            "right_arm": "spoon"
+          },
+          "pre_grasp_dis": 0.1
+        },
+        {
+          "type": "replay_edge",
+          "edge_id": "e02_orient_down"
+        },
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e03_move_to_plate_offsets",
+      "failure_name": "plate_moved",
+      "monitors": [
+        {
+          "type": "object_moved",
+          "objects": [
+            "plate"
+          ],
+          "threshold": 0.02
+        }
+      ],
+      "recovery": [
+        {
+          "type": "retry_failed_edge"
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    }
+  ]
+}

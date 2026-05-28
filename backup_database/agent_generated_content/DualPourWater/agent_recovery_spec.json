@@ -1,0 +1,188 @@
+{
+  "task": "pour_water_into_cup",
+  "recovery_bindings": [
+    {
+      "edge_id": "e01_grasp_objects",
+      "failure_name": "objects_shifted",
+      "monitors": [
+        {
+          "type": "object_moved",
+          "objects": [
+            "bottle",
+            "cup"
+          ],
+          "threshold": 0.02
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp_both",
+          "arms": {
+            "left_arm": "cup",
+            "right_arm": "bottle"
+          },
+          "pre_grasp_dis": 0.1,
+          "force_valid": true
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e02_lift_cup",
+      "failure_name": "cup_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "pre_grasp_dis": 0.1,
+          "force_valid": true
+        },
+        {
+          "type": "replay_edge",
+          "edge_id": "e02_lift_cup",
+          "force_valid": true
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e03_move_cup_to_position",
+      "failure_name": "cup_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "pre_grasp_dis": 0.1,
+          "force_valid": true
+        },
+        {
+          "type": "replay_edge",
+          "edge_id": "e02_lift_cup",
+          "force_valid": true
+        },
+        {
+          "type": "retry_failed_edge",
+          "force_valid": true
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e04_position_bottle_for_pour",
+      "failure_name": "bottle_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "pre_grasp_dis": 0.1,
+          "force_valid": true
+        },
+        {
+          "type": "retry_failed_edge",
+          "force_valid": true
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e04_position_bottle_for_pour",
+      "failure_name": "cup_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "left_arm",
+          "obj_name": "cup",
+          "pre_grasp_dis": 0.1,
+          "force_valid": true
+        },
+        {
+          "type": "replay_edge",
+          "edge_id": "e02_lift_cup",
+          "force_valid": true
+        },
+        {
+          "type": "replay_edge",
+          "edge_id": "e03_move_cup_to_position",
+          "force_valid": true
+        },
+        {
+          "type": "retry_failed_edge",
+          "force_valid": true
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    },
+    {
+      "edge_id": "e05_tilt_bottle",
+      "failure_name": "bottle_hold_lost",
+      "monitors": [
+        {
+          "type": "hold_lost",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "threshold": 0.05
+        }
+      ],
+      "recovery": [
+        {
+          "type": "regrasp",
+          "robot_name": "right_arm",
+          "obj_name": "bottle",
+          "pre_grasp_dis": 0.1,
+          "force_valid": true
+        },
+        {
+          "type": "replay_edge",
+          "edge_id": "e04_position_bottle_for_pour",
+          "force_valid": true
+        },
+        {
+          "type": "retry_failed_edge",
+          "force_valid": true
+        }
+      ],
+      "merge": "target",
+      "repeat_until_success": true
+    }
+  ]
+}

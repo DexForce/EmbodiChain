@@ -1,36 +1,36 @@
 {
   "task_graph": {
-    "task": "pour_water_into_cup",
+    "task": "Pour from bottle into cup and place bottle",
     "start": "v0_start",
     "goal": "v6_done",
     "nodes": [
       {
         "id": "v0_start",
-        "semantic": "Initial state: both arms open, bottle and cup on table."
+        "semantic": "Both arms at initial poses; bottle and cup on table."
       },
       {
         "id": "v1_bottle_grasped",
-        "semantic": "Right arm grasping the bottle."
+        "semantic": "Right arm grasps the bottle."
       },
       {
-        "id": "v2_bottle_at_pour_position",
-        "semantic": "Bottle positioned at offset relative to cup for pouring."
+        "id": "v2_bottle_at_pour_offset",
+        "semantic": "Bottle held by right arm positioned at [0.05, -0.10, 0.125] offset relative to the cup for pouring."
       },
       {
         "id": "v3_pouring",
-        "semantic": "Bottle tilted to pour."
+        "semantic": "Bottle tilted to pour into the cup."
       },
       {
-        "id": "v4_pour_done",
-        "semantic": "Bottle upright after pouring."
+        "id": "v4_bottle_upright",
+        "semantic": "Bottle returned upright after pouring."
       },
       {
-        "id": "v5_bottle_placed",
-        "semantic": "Bottle placed at target location on table."
+        "id": "v5_bottle_placed_target",
+        "semantic": "Bottle placed on table at [0.7, -0.1]; gripper opened."
       },
       {
         "id": "v6_done",
-        "semantic": "Both arms returned to initial poses."
+        "semantic": "Both arms at initial poses; task complete."
       }
     ],
     "edges": [
@@ -49,9 +49,9 @@
         }
       },
       {
-        "id": "e12_move_to_pour_position",
+        "id": "e02_move_to_pour_offset",
         "source": "v1_bottle_grasped",
-        "target": "v2_bottle_at_pour_position",
+        "target": "v2_bottle_at_pour_offset",
         "left_arm_action": null,
         "right_arm_action": {
           "fn": "move_relative_to_object",
@@ -65,8 +65,8 @@
         }
       },
       {
-        "id": "e23_pour",
-        "source": "v2_bottle_at_pour_position",
+        "id": "e03_tilt_to_pour",
+        "source": "v2_bottle_at_pour_offset",
         "target": "v3_pouring",
         "left_arm_action": null,
         "right_arm_action": {
@@ -78,9 +78,9 @@
         }
       },
       {
-        "id": "e34_rotate_back",
+        "id": "e04_return_upright",
         "source": "v3_pouring",
-        "target": "v4_pour_done",
+        "target": "v4_bottle_upright",
         "left_arm_action": null,
         "right_arm_action": {
           "fn": "rotate_eef",
@@ -91,9 +91,9 @@
         }
       },
       {
-        "id": "e45_place_bottle",
-        "source": "v4_pour_done",
-        "target": "v5_bottle_placed",
+        "id": "e05_place_bottle_target",
+        "source": "v4_bottle_upright",
+        "target": "v5_bottle_placed_target",
         "left_arm_action": null,
         "right_arm_action": {
           "fn": "place_on_table",
@@ -107,8 +107,8 @@
         }
       },
       {
-        "id": "e56_return_to_initial",
-        "source": "v5_bottle_placed",
+        "id": "e06_return_to_initial",
+        "source": "v5_bottle_placed_target",
         "target": "v6_done",
         "left_arm_action": {
           "fn": "back_to_initial_pose",
@@ -126,11 +126,11 @@
     ]
   },
   "recovery_spec": {
-    "task": "pour_water_into_cup",
+    "task": "Pour from bottle into cup and place bottle",
     "recovery_bindings": []
   },
   "recovery_graph": {
-    "task": "pour_water_into_cup",
+    "task": "Pour from bottle into cup and place bottle",
     "recovery_nodes": [],
     "recovery_edges": [],
     "recovery_branches": []
@@ -138,8 +138,8 @@
   "metadata": {
     "recovery_enabled": false,
     "schema_version": "recovery_bindings_v1",
-    "task_graph_hash": "60aa455ceaf052399aa0eaf9ad87bed7814d3521b2dd68f3acc42d2bd3d015cc",
-    "raw_recovery_spec_hash": "16d36fe71200dba34427db10355ffe50210c8b7c4cc7aa0b06904dbffb966f21",
-    "recovery_spec_hash": "16d36fe71200dba34427db10355ffe50210c8b7c4cc7aa0b06904dbffb966f21"
+    "task_graph_hash": "7d79d1ddc4f6826d3343adb68fb8c3ec876e77d20838b9fb39ac015c048b8069",
+    "raw_recovery_spec_hash": "8af24c95e3bc7da9ed8aa98b431ecc9c52b51f3d8160a40ea2125b056b34e8d7",
+    "recovery_spec_hash": "8af24c95e3bc7da9ed8aa98b431ecc9c52b51f3d8160a40ea2125b056b34e8d7"
   }
 }
