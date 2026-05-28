@@ -30,3 +30,18 @@ from .reward_manager import RewardManager
 from .action_manager import *
 from .actions import *
 from .dataset_manager import DatasetManager
+from .language import (
+    LanguageCfg,
+    LanguageCurriculumCfg,
+    LanguageAugmentationCfg,
+    LanguageManager,
+    LanguageData,
+    HierarchicalLanguageData,
+)
+from .language_provider import (
+    LanguageProvider,
+    FileBasedLanguageProvider,
+    LLMBasedLanguageProvider,
+    EnvBasedLanguageProvider,
+    TemplateBasedLanguageProvider,
+)

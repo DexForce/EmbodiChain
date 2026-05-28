@@ -206,6 +206,30 @@ class EmbodiedEnvCfg(EnvCfg):
     If filter_dataset_saving is False and a dataset manager is configured, the rollout buffer will be initialized by default
     """
 
+    language: Union[Dict[str, Any], None] = None
+    """Language settings for VLA training.
+
+    When configured, enables hierarchical language data collection for
+    Vision-Language-Action model training. Supports:
+
+    - mode: Storage mode ('tokens', 'embeddings', 'hybrid')
+    - hierarchy_levels: List of levels ('task', 'subtask', 'primitive')
+    - max_tokens: Maximum sequence length per instruction
+    - tokenizer: Tokenizer identifier
+    - language_source: Source of language ('env', 'file', 'llm', 'template')
+    - language_config_path: Path to language descriptions (if source='file')
+
+    Example:
+        language = {
+            "mode": "tokens",
+            "hierarchy_levels": ["task", "subtask", "primitive"],
+            "max_tokens": 512,
+            "tokenizer": "gpt2",
+            "language_source": "file",
+            "language_config_path": "config/language/tasks.yaml",
+        }
+    """
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -268,6 +292,7 @@ class EmbodiedEnv(BaseEnv):
         self.reward_manager: RewardManager | None = None
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
+        self.language_manager = None
 
         super().__init__(cfg, **kwargs)
 
@@ -275,12 +300,65 @@ class EmbodiedEnv(BaseEnv):
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
             self.cfg.init_rollout_buffer = True
 
+        # Initialize LanguageManager for VLA training
+        if self.cfg.language:
+            from embodichain.lab.gym.envs.managers import (
+                LanguageCfg,
+                LanguageManager,
+                LanguageProvider,
+                FileBasedLanguageProvider,
+                LLMBasedLanguageProvider,
+                EnvBasedLanguageProvider,
+                TemplateBasedLanguageProvider,
+            )
+
+            # Create language config
+            language_cfg = LanguageCfg(**self.cfg.language)
+
+            # Initialize language provider based on source
+            language_source = self.cfg.language.get("language_source", "env")
+            if language_source == "file":
+                language_config_path = self.cfg.language.get("language_config_path")
+                if language_config_path is None:
+                    log_error(
+                        "language_config_path must be provided when language_source='file'",
+                        error_type=ValueError,
+                    )
+                self.language_provider = FileBasedLanguageProvider(
+                    language_cfg, language_config_path
+                )
+            elif language_source == "llm":
+                model = self.cfg.language.get("model", "gpt-4")
+                api_key = self.cfg.language.get("api_key")
+                self.language_provider = LLMBasedLanguageProvider(
+                    language_cfg, model, api_key
+                )
+            elif language_source == "template":
+                templates = self.cfg.language.get("templates", {})
+                variables = self.cfg.language.get("variables", {})
+                self.language_provider = TemplateBasedLanguageProvider(
+                    language_cfg, templates, variables
+                )
+            else:  # env or default
+                self.language_provider = EnvBasedLanguageProvider(language_cfg, self)
+
+            # Initialize language manager
+            self.language_manager = LanguageManager(language_cfg, self)
+            log_info(
+                f"[EmbodiedEnv] LanguageManager initialized with source={language_source}, "
+                f"mode={language_cfg.mode}, hierarchy={language_cfg.hierarchy_levels}"
+            )
+        else:
+            self.language_manager = None
+            self.language_provider = None
+
         # Rollout buffer for episode data collection.
         # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
         # The default key in the buffer are:
         # - obs: the observation returned by the environment.
         # - action: the action applied to the environment.
         # - reward: the reward returned by the environment.
+        # - language: Hierarchical language data for VLA training (if language_manager is set)
         # TODO: we may add more keys and make the buffer extensible in the future.
         # This buffer should also be support initialized from outside of the environment.
         # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
@@ -288,6 +366,8 @@ class EmbodiedEnv(BaseEnv):
         self._max_rollout_steps = 0
         self._rollout_buffer_mode: str | None = None
         if self.cfg.init_rollout_buffer:
+            # Determine if we need to initialize language fields
+            language_cfg = self.cfg.language if self.cfg.language else None
             self.rollout_buffer = init_rollout_buffer_from_gym_space(
                 obs_space=self.observation_space,
                 action_space=self.action_space,
@@ -552,6 +632,19 @@ class EmbodiedEnv(BaseEnv):
 
         self.episode_success_status[env_ids_to_process] = False
 
+        # Initialize language data for the new episode
+        if self.language_manager is not None:
+            # Get task ID for language lookup
+            task_id = getattr(self, "task_name", "default")
+
+            # Get language data from provider
+            if self.language_provider is not None:
+                language_data = self.language_provider.get_language(
+                    task_id, context={"env_ids": env_ids}
+                )
+                # Write language data to rollout buffer
+                self._write_language_data(language_data, env_ids_to_process)
+
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
@@ -612,6 +705,97 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )
+
+    def _write_language_data(
+        self,
+        language_data: "HierarchicalLanguageData",
+        env_ids: Optional[torch.Tensor] = None,
+    ) -> None:
+        """Write hierarchical language data to the rollout buffer.
+
+        This method writes language data at multiple hierarchy levels to the
+        rollout buffer. The data is broadcast across all timesteps of the
+        current episode.
+
+        Args:
+            language_data: HierarchicalLanguageData containing task descriptions.
+            env_ids: Optional tensor of environment IDs to write to.
+                If None, writes to all environments.
+        """
+        if self.rollout_buffer is None or "language" not in self.rollout_buffer:
+            return
+
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+
+        buffer_device = self.rollout_buffer.device
+
+        # Get language config for max values
+        cfg = self.language_manager.cfg
+        max_instructions = cfg.max_instructions_per_level
+        max_tokens = cfg.max_tokens
+
+        # Convert language data to buffer format
+        buffer_format = language_data.to_buffer_format(cfg)
+
+        # Write data for each hierarchy level
+        for level in cfg.hierarchy_levels:
+            level_key = f"{level}_level"
+
+            # Get tokens and mask
+            tokens_key = f"{level_key}_tokens"
+            mask_key = f"{level_key}_attention_mask"
+            count_key = f"{level_key}_count"
+
+            if tokens_key not in buffer_format:
+                continue
+
+            tokens = buffer_format[tokens_key]  # [max_instructions, max_tokens]
+            mask = buffer_format[mask_key]
+
+            # Create the full tensor for all environments and timesteps
+            # Shape: [num_envs, max_episode_steps, max_instructions, max_tokens]
+            full_tokens = (
+                tokens.unsqueeze(0)
+                .unsqueeze(0)
+                .expand(len(env_ids), self._max_rollout_steps, -1, -1)
+            )
+            full_mask = (
+                mask.unsqueeze(0)
+                .unsqueeze(0)
+                .expand(len(env_ids), self._max_rollout_steps, -1, -1)
+            )
+
+            # Write to buffer
+            self.rollout_buffer["language"][tokens_key][env_ids, ...] = full_tokens.to(
+                buffer_device, non_blocking=True
+            )
+            self.rollout_buffer["language"][mask_key][env_ids, ...] = full_mask.to(
+                buffer_device, non_blocking=True
+            )
+
+            # Write instruction count
+            count = buffer_format.get(f"{level_key}_count", torch.tensor([0]))
+            level_idx = {"task": 0, "subtask": 1, "primitive": 2}[level]
+            self.rollout_buffer["language"]["instruction_counts"][
+                env_ids, :, level_idx
+            ] = count.item()
+
+        # Write change points
+        if "change_points" in buffer_format:
+            change_points = buffer_format["change_points"]
+            full_change_points = (
+                change_points.unsqueeze(0)
+                .unsqueeze(0)
+                .expand(len(env_ids), self._max_rollout_steps, -1)
+            )
+            self.rollout_buffer["language"]["change_points"][env_ids, ...] = (
+                full_change_points.to(buffer_device, non_blocking=True)
+            )
+
+        # Write hierarchy depth
+        hierarchy_depth = language_data.hierarchy_depth
+        self.rollout_buffer["language"]["hierarchy_depth"][env_ids, :] = hierarchy_depth
 
     def _write_rl_rollout_step(
         self,

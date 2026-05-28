@@ -61,6 +61,31 @@ class OnlineDataEngineCfg:
     amortising the cost of environment simulation over many training steps.
     """
 
+    language_cfg: Union[dict, None] = None
+    """Language configuration for VLA training.
+
+    If provided, the shared buffer will include hierarchical language data fields
+    and the simulation subprocess will collect language descriptions during rollouts.
+
+    The configuration should include:
+    - mode: Storage mode ('tokens', 'embeddings', 'hybrid')
+    - hierarchy_levels: List of hierarchy levels ('task', 'subtask', 'primitive')
+    - max_tokens: Maximum sequence length per instruction
+    - tokenizer: Tokenizer identifier
+    - language_source: Source of language ('env', 'file', 'llm', 'template')
+    - language_config_path: Path to language descriptions (if source='file')
+
+    Example:
+        language_cfg = {
+            "mode": "tokens",
+            "hierarchy_levels": ["task", "subtask", "primitive"],
+            "max_tokens": 512,
+            "tokenizer": "gpt2",
+            "language_source": "file",
+            "language_config_path": "config/language/tasks.yaml",
+        }
+    """
+
 
 # ---------------------------------------------------------------------------
 # Subprocess entry point (module-level so it can be pickled by multiprocessing)
@@ -110,6 +135,15 @@ def _sim_worker_fn(
     env_cfg = config_to_cfg(gym_config, manager_modules=DEFAULT_MANAGER_MODULES)
     env_cfg.filter_dataset_saving = True
     env_cfg.init_rollout_buffer = False
+
+    # Add language configuration if provided
+    if cfg.language_cfg is not None:
+        env_cfg.language = cfg.language_cfg
+        log_info(
+            f"[Simulation Process] Language configuration added: {cfg.language_cfg.get('mode', 'tokens')}, "
+            f"hierarchy={cfg.language_cfg.get('hierarchy_levels', ['task', 'subtask', 'primitive'])}"
+        )
+
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config.get("headless", True),
         sim_device=gym_config.get("device", "cpu"),
@@ -364,6 +398,9 @@ class OnlineDataEngine:
         placed in CPU shared memory so it can be safely accessed from both the
         main process and the simulation subprocess.
 
+        If language configuration is provided, the buffer will also include
+        hierarchical language data fields for VLA training.
+
         Returns:
             TensorDict in shared memory.
         """
@@ -380,6 +417,7 @@ class OnlineDataEngine:
             batch_size=self.cfg.buffer_size,
             max_episode_steps=max_episode_steps,
             state_dim=self.cfg.state_dim,
+            language_cfg=self.cfg.language_cfg,
         )
 
         if shared_td.device.type == "cpu":

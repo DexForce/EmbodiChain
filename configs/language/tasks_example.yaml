@@ -1,0 +1,108 @@
+# Example language configuration file for VLA training
+# This file demonstrates the hierarchical language structure for task descriptions
+
+pick_and_place:
+  task:
+    - "Pick up the red block and place it in the blue basket."
+
+  subtask:
+    - "Move the gripper to the red block."
+    - "Grasp the red block."
+    - "Lift the block and move to the blue basket."
+    - "Release the block into the basket."
+
+  primitive:
+    - "Close gripper."
+    - "Move up."
+    - "Move right."
+    - "Open gripper."
+
+  change_points: [0, 10, 20, 30]
+
+stack_blocks:
+  task:
+    - "Stack the red block on top of the green block."
+
+  subtask:
+    - "Locate the red block and green block."
+    - "Move the gripper to the red block."
+    - "Grasp the red block."
+    - "Lift the red block."
+    - "Position the red block above the green block."
+    - "Lower the red block onto the green block."
+    - "Release the red block."
+
+  primitive:
+    - "Close gripper."
+    - "Move up."
+    - "Move forward."
+    - "Move left."
+    - "Open gripper."
+
+  change_points: [0, 5, 10, 15, 20, 25, 30]
+
+pour_liquid:
+  task:
+    - "Pour water from the cup into the bowl."
+
+  subtask:
+    - "Approach the cup with the gripper."
+    - "Grasp the cup securely."
+    - "Lift the cup."
+    - "Tilt the cup over the bowl."
+    - "Wait for liquid to pour."
+    - "Return the cup to upright position."
+
+  primitive:
+    - "Close gripper."
+    - "Move up."
+    - "Rotate wrist."
+    - "Wait."
+    - "Rotate wrist back."
+
+  change_points: [0, 5, 10, 15, 25, 30]
+
+button_press:
+  task:
+    - "Press the red button to activate the mechanism."
+
+  subtask:
+    - "Locate the red button."
+    - "Move the end-effector to the button."
+    - "Apply downward force to press the button."
+    - "Release and retract."
+
+  primitive:
+    - "Move forward."
+    - "Move down."
+    - "Apply force."
+    - "Move up."
+    - "Move backward."
+
+  change_points: [0, 5, 10, 15, 20]
+
+door_open:
+  task:
+    - "Open the cabinet door and place the object inside."
+
+  subtask:
+    - "Approach the cabinet handle."
+    - "Grasp the cabinet handle."
+    - "Pull the door open."
+    - "Pick up the object."
+    - "Move the object into the cabinet."
+    - "Release the object."
+    - "Close the cabinet door."
+
+  primitive:
+    - "Move forward."
+    - "Close gripper."
+    - "Move backward."
+    - "Move down."
+    - "Close gripper."
+    - "Move forward."
+    - "Open gripper."
+    - "Move backward."
+    - "Push forward."
+
+  change_points: [0, 5, 10, 15, 20, 25, 30, 35]
