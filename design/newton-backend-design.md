@@ -143,20 +143,19 @@ def newton_manager(self): ...
 def newton_scene(self): ...
 ```
 
-Replace direct calls to `init_gpu_physics()` in higher-level code with a backend-neutral method:
+Track Newton scene finalization separately from default-backend GPU physics initialization:
 
 ```python
-def prepare_physics(self):
-    if self.is_use_gpu_physics:
-        self.init_gpu_physics()
-    elif self.is_newton_backend:
-        self._world.update(0.0)  # forces lazy Newton model finalization if needed
+def finalize_newton_physics(self):
+    if not self._is_finalized_newton_physics:
+        self.newton_manager.start_simulation()
+        self._is_finalized_newton_physics = True
 ```
 
 `SimulationManager.update(...)` should:
 
-- Call `init_gpu_physics()` only for `is_use_gpu_physics`.
-- For Newton, simply call `self._world.update(physics_dt)` for each step; DexSim Newton handles lazy finalize, rebuild, stepping, and render synchronization.
+- Call `init_gpu_physics()` only for default-backend GPU physics.
+- For Newton, call `finalize_newton_physics()` before stepping; DexSim Newton handles stepping and render synchronization after the model is ready.
 
 Destroy/cleanup:
 
@@ -217,7 +216,7 @@ Pose format conversion:
 
 Runtime behavior:
 
-- Before Newton model finalization, either use DexSim object setters or call `sim.prepare_physics()` before data access.
+- Before Newton model finalization, either use DexSim object setters or call `sim.finalize_newton_physics()` before data access.
 - After finalization, prefer direct `newton_scene` reads/writes to avoid default-backend GPU APIs.
 - Runtime changes to shape, mass, COM, or collision settings may mark the Newton model stale and trigger a rebuild on the next update. Prefer doing these changes before finalization or during reset.
 
@@ -238,10 +237,13 @@ if self.device.type == "cuda":
 with:
 
 ```python
-self.sim.prepare_physics()
+if self.sim.is_default_backend and self.sim.is_use_gpu_physics:
+    self.sim.init_gpu_physics()
+elif self.sim.is_newton_backend:
+    self.sim.finalize_newton_physics()
 ```
 
-This lets `SimulationManager` decide whether to initialize default-backend GPU buffers or finalize Newton.
+This keeps default-backend GPU buffer initialization separate from Newton scene finalization.
 
 In `BaseEnv.step(...)`, keep the current high-level flow, but leave room for a backend-neutral write hook:
 
@@ -292,7 +294,7 @@ Apply these IsaacLab ideas in EmbodiChain:
 
 - Add a small backend manager abstraction instead of scattering backend checks everywhere.
 - Use lifecycle events or hooks such as `MODEL_INIT`, `PHYSICS_READY`, and `STOP`.
-- Replace object-constructor warmup calls like `world.update(0.001)` with a single `sim.prepare_physics()` after scene construction.
+- Replace object-constructor warmup calls like `world.update(0.001)` with backend-specific initialization after scene construction.
 - Add backend-specific object data adapters.
 - Add task/backend presets later, because Newton often needs different `physics_dt`, substeps, solver, and contact settings from the default backend.
 - Add mask/index write APIs for vectorized envs and CUDA graph safety.
@@ -302,7 +304,7 @@ Apply these IsaacLab ideas in EmbodiChain:
 
 1. Add `physics_backend`, `DefaultPhysicsCfg`, and `NewtonPhysicsCfg`.
 2. Update `SimulationManager` world creation and backend properties.
-3. Add `prepare_physics()` and update gym env initialization to use it.
+3. Add Newton scene finalization and update gym env initialization to use it.
 4. Add Newton rigid object adapter.
 5. Add Newton rigid object group adapter.
 6. Add clear fail-fast errors for Newton articulation/robot creation.
@@ -322,7 +324,7 @@ Configuration:
 Simulation:
 
 - Newton world can be created and stepped headlessly.
-- `prepare_physics()` finalizes Newton without calling default-backend GPU APIs.
+- `finalize_newton_physics()` finalizes Newton without calling default-backend GPU APIs.
 - Destroying a Newton simulation does not break subsequent default-backend simulation creation.
 
 Rigid object:

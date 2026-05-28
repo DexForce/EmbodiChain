@@ -178,6 +178,10 @@ class RigidBodyData:
             torch.Tensor: The center of mass pose with shape (N, 7).
         """
         if self.is_newton_backend:
+            if self.body_view.is_ready:
+                self.body_view.fetch_com_local_pose(self._com_pose)
+                return self._com_pose
+
             manager = self.body_view.scene.manager
             for i, entity_handle in enumerate(self.body_view.entity_handles):
                 attr = manager.dexsim_meta.get(entity_handle, {}).get("attr")
@@ -225,6 +229,7 @@ class RigidObject(BatchEntity):
         cfg: RigidObjectCfg,
         entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
+        auto_reset: bool = True,
     ) -> None:
         self.body_type = cfg.body_type
 
@@ -264,14 +269,15 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        super().__init__(cfg, entities, device)
+        super().__init__(cfg, entities, device, auto_reset=auto_reset)
 
         # set default collision filter
         self._set_default_collision_filter()
 
-        if device.type == "cuda":
+        if auto_reset and device.type == "cuda":
             self._world.update(0.001)
-        self.reset()
+        if auto_reset:
+            self.reset()
 
         # update default center of mass pose (only for non-static bodies with body data).
         if self._data is not None:
@@ -601,7 +607,7 @@ class RigidObject(BatchEntity):
         elif self._data is not None and self._data.is_newton_backend:
             logger.log_warning(
                 "Cannot apply force or torque while Newton model is stale or "
-                "unfinalized; call SimulationManager.prepare_physics() first."
+                "unfinalized; call SimulationManager.finalize_newton_physics() first."
             )
         else:
             logger.log_error("Cannot apply force or torque before body view is ready.")
@@ -663,7 +669,7 @@ class RigidObject(BatchEntity):
         elif self._data is not None and self._data.is_newton_backend:
             logger.log_warning(
                 "Cannot set velocity while Newton model is stale or unfinalized; "
-                "call SimulationManager.prepare_physics() first."
+                "call SimulationManager.finalize_newton_physics() first."
             )
         else:
             logger.log_error("Cannot set velocity before body view is ready.")
@@ -1029,12 +1035,11 @@ class RigidObject(BatchEntity):
             )
 
         if self._data is not None and self._data.is_newton_backend:
-            com_pose = com_pose.cpu().numpy()
-            for i, env_idx in enumerate(local_env_ids):
-                pos = com_pose[i, :3]
-                quat = convert_quat(com_pose[i, 3:7], to="wxyz")
-                self._entities[env_idx].set_cmass_local_pose(pos, quat)
-            return
+            target_com_pose = com_pose.to(device=self.device, dtype=torch.float32)
+            if self._data.body_view.is_ready:
+                body_ids = self._data.body_ids_for(local_env_ids)
+                self._data.body_view.apply_com_local_pose(target_com_pose, body_ids)
+                return
 
         com_pose = com_pose.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
@@ -1180,7 +1185,7 @@ class RigidObject(BatchEntity):
         elif self._data is not None and self._data.is_newton_backend:
             logger.log_warning(
                 "Cannot clear dynamics while Newton model is stale or unfinalized; "
-                "call SimulationManager.prepare_physics() first."
+                "call SimulationManager.finalize_newton_physics() first."
             )
         else:
             logger.log_error("Cannot clear dynamics before body view is ready.")

@@ -129,7 +129,10 @@ class BaseEnv(gym.Env):
 
         self._setup_scene(**kwargs)
 
-        self.sim.prepare_physics()
+        if self.sim.is_default_backend and self.sim.is_use_gpu_physics:
+            self.sim.init_gpu_physics()
+        elif self.sim.is_newton_backend:
+            self.sim.finalize_newton_physics()
 
         if not self.sim_cfg.headless:
             self.sim.open_window()

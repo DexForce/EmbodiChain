@@ -111,7 +111,7 @@ class BaseRigidObjectTest:
 
         self.sim.enable_physics(True)
         if physics == "newton":
-            self.sim.prepare_physics()
+            self.sim.finalize_newton_physics()
 
     def test_is_static(self):
         """Test the is_static() method of duck, table, and chair objects."""

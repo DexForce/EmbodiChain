@@ -312,7 +312,7 @@ class SimulationManager:
         self._window_record_input_control: ObjectManipulator | None = None
         self._window_record_save_threads: list[threading.Thread] = []
 
-        self._world.set_delta_time(sim_config.physics_dt)
+        self._world.set_delta_time(sim_config.physics_cfg.physics_dt)
         self._world.show_coordinate_axis(False)
 
         if self.is_default_backend:
@@ -328,6 +328,8 @@ class SimulationManager:
             self._newton_manager = get_newton_manager(self._world)
 
         self._is_initialized_gpu_physics = False
+        self._is_finalized_newton_physics = False
+        self._has_reset_newton_entities_after_finalize = False
 
         # activate physics
         self.enable_physics(True)
@@ -547,6 +549,24 @@ class SimulationManager:
 
         self._default_resources = SimResources()
 
+    def _invalidate_newton_physics(self) -> None:
+        """Mark the Newton scene as needing finalization after scene mutation."""
+        if self.is_newton_backend:
+            self._is_finalized_newton_physics = False
+            self._has_reset_newton_entities_after_finalize = False
+
+    def _reset_newton_entities_after_finalize(self) -> None:
+        """Apply deferred initial resets once Newton runtime data is ready."""
+        if not self.is_newton_backend or self._has_reset_newton_entities_after_finalize:
+            return
+
+        for rigid_obj in self._rigid_objects.values():
+            rigid_obj.reset()
+        for rigid_obj_group in self._rigid_object_groups.values():
+            rigid_obj_group.reset()
+
+        self._has_reset_newton_entities_after_finalize = True
+
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
 
@@ -564,7 +584,7 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable manual update.
         """
-        if self.is_newton_backend:
+        if self.is_newton_backend and enable is False:
             logger.log_warning(
                 "Newton physics backend does not support switching between manual and automatic update. Ignoring set_manual_update call."
             )
@@ -574,7 +594,7 @@ class SimulationManager:
     def init_gpu_physics(self) -> None:
         """Initialize the GPU physics simulation."""
         if self.is_newton_backend:
-            self._is_initialized_gpu_physics = True
+            self.finalize_newton_physics()
             return
 
         if not self.is_use_gpu_physics:
@@ -599,16 +619,42 @@ class SimulationManager:
 
         self._is_initialized_gpu_physics = True
 
-    def prepare_physics(self) -> None:
-        """Prepare backend-specific runtime data after scene construction."""
-        if self.is_default_backend and self.is_use_gpu_physics:
-            self.init_gpu_physics()
-        elif self.is_newton_backend:
-            self._world.update(0.0)
+    def finalize_newton_physics(self) -> None:
+        """Finalize the Newton scene if it has not been finalized yet."""
+        if not self.is_newton_backend:
+            logger.log_warning(
+                "Newton backend is not active, cannot finalize Newton physics."
+            )
+            return
+
+        mgr = self.newton_manager
+
+        lifecycle_state = getattr(getattr(mgr, "lifecycle_state", None), "name", "")
+        if (
+            self._is_finalized_newton_physics
+            and lifecycle_state == "READY"
+            and self._has_reset_newton_entities_after_finalize
+        ):
+            return
+
+        if lifecycle_state != "READY":
+            mgr.start_simulation()
+
+        lifecycle_state = getattr(getattr(mgr, "lifecycle_state", None), "name", "")
+        if lifecycle_state != "READY":
+            logger.log_error(
+                "Failed to finalize Newton physics: lifecycle state is "
+                f"{lifecycle_state!r} after start_simulation()."
+            )
+
+        self._is_finalized_newton_physics = True
+        self._is_initialized_gpu_physics = True
+        self._reset_newton_entities_after_finalize()
 
     def forward_physics(self) -> None:
         """Refresh backend physics state without advancing time when supported."""
         if self.is_newton_backend:
+            self.finalize_newton_physics()
             mgr = self.newton_manager
             if mgr is not None and getattr(mgr.lifecycle_state, "name", "") == "READY":
                 mgr.forward_kinematics()
@@ -631,7 +677,9 @@ class SimulationManager:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
-        if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
+        if self.is_newton_backend:
+            self.finalize_newton_physics()
+        elif self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
             logger.log_warning(
                 f"Using GPU physics, but not initialized yet. Forcing initialization."
             )
@@ -766,6 +814,7 @@ class SimulationManager:
         self._default_plane.set_name("default_plane")
         attr = PhysicalAttr(dynamic_friction=0.5, static_friction=0.5)
         self._default_plane.add_rigidbody(ActorType.STATIC, RigidBodyShape.PLANE, attr)
+        self._invalidate_newton_physics()
 
     def set_default_background(self) -> None:
         """Set default background."""
@@ -953,13 +1002,19 @@ class SimulationManager:
             cache_dir=self._convex_decomp_dir,
         )
 
-        rigid_obj = RigidObject(cfg=cfg, entities=obj_list, device=self.device)
+        rigid_obj = RigidObject(
+            cfg=cfg,
+            entities=obj_list,
+            device=self.device,
+            auto_reset=not self.is_newton_backend,
+        )
 
         if cfg.shape.visual_material:
             mat = self.create_visual_material(cfg.shape.visual_material)
             rigid_obj.set_visual_material(mat)
 
         self._rigid_objects[uid] = rigid_obj
+        self._invalidate_newton_physics()
 
         return rigid_obj
 
@@ -1136,10 +1191,14 @@ class SimulationManager:
         # Convert [a1, a2, ...], [b1, b2, ...] to [(a1, b1, ...), (a2, b2, ...), ...]
         obj_group_list = list(zip(*obj_group_list))
         rigid_obj_group = RigidObjectGroup(
-            cfg=cfg, entities=obj_group_list, device=self.device
+            cfg=cfg,
+            entities=obj_group_list,
+            device=self.device,
+            auto_reset=not self.is_newton_backend,
         )
 
         self._rigid_object_groups[uid] = rigid_obj_group
+        self._invalidate_newton_physics()
 
         return rigid_obj_group
 

@@ -159,6 +159,7 @@ class RigidObjectGroup(BatchEntity):
         cfg: RigidObjectGroupCfg,
         entities: List[List[MeshObject]] = None,
         device: torch.device = torch.device("cpu"),
+        auto_reset: bool = True,
     ) -> None:
         self.body_type = cfg.body_type
 
@@ -186,7 +187,7 @@ class RigidObjectGroup(BatchEntity):
         if device.type == "cuda" and not is_newton_scene(self._ps):
             self._world.update(0.001)
 
-        super().__init__(cfg, entities, device)
+        super().__init__(cfg, entities, device, auto_reset=auto_reset)
 
         # set default collision filter
         self._set_default_collision_filter()
